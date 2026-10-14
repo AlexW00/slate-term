@@ -58,6 +58,20 @@ public struct Workspace: Equatable, Sendable {
         nextGroup = 2
     }
 
+    /// A pane's live owning tab takes precedence over current focus. Explicit pairs must agree.
+    public func resolvedTab(pane: PaneID? = nil, tab: TabID? = nil) throws -> Tab {
+        if let pane {
+            guard let owner = tabs.first(where: { $0.layout.paneIDs.contains(pane) }) else { throw WorkspaceError.paneNotFound(pane) }
+            guard tab == nil || tab == owner.id else { throw WorkspaceError.invalidLayout("Pane does not belong to the requested tab") }
+            return owner
+        }
+        guard let result = tabs.first(where: { $0.id == (tab ?? keyTabID) }) else {
+            if let tab { throw WorkspaceError.tabNotFound(tab) }
+            throw RPCFailure(code: -32004, message: "There is no key tab")
+        }
+        return result
+    }
+
     @discardableResult
     public mutating func split(_ target: PaneID, direction: Direction, type: PaneType = .terminal) throws -> PaneID {
         let index = try tabIndex(containing: target)

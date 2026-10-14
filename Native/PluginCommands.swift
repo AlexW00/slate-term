@@ -65,7 +65,8 @@ final class PluginCommands {
         environment["SLATE_TERM_CLI"] = connection.cliPath
         environment["SLATE_TERM_INSTANCE_ID"] = connection.appInstanceID
         environment["SLATE_TERM_PLUGIN_ID"] = plugin.id
-        environment["SLATE_TERM_PLUGIN_INSTANCE"] = run.id
+        environment["SLATE_TERM_PLUGIN_INSTANCE"] = run.id // Compatibility alias; not a panel-service identity.
+        environment["SLATE_TERM_INVOCATION_ID"] = run.id
         environment["SLATE_TERM_COMMAND_ID"] = commandID
         environment["SLATE_TERM_COMMAND_PARAMS"] = String(decoding: encodedParams, as: UTF8.self)
         environment["SLATE_TERM_PLUGIN_SETTINGS"] = String(decoding: try JSONEncoder().encode(settings), as: UTF8.self)

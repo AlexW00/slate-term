@@ -9,7 +9,7 @@ extension Layout {
         }
     }
 
-    func neighbor(of pane: PaneID, direction: Direction) -> PaneID? {
+    public func neighbor(of pane: PaneID, direction: Direction) -> PaneID? {
         let frames = frames(in: Frame(x: 0, y: 0, width: 1, height: 1))
         guard let origin = frames.first(where: { $0.0 == pane })?.1 else { return nil }
         let horizontal = direction.axis == .horizontal

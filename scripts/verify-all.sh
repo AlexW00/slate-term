@@ -38,6 +38,8 @@ run menu-ui python3 scripts/verify-menu-ui.py
 run shell python3 scripts/verify-shell.py
 run browser python3 scripts/verify-browser.py
 run context python3 scripts/verify-context.py
+run api-context python3 scripts/verify-api-context.py
+run api-settings python3 scripts/verify-api-settings.py
 run pane-titles python3 scripts/verify-pane-titles.py
 run pane-movement python3 scripts/verify-pane-movement.py
 run plugins python3 scripts/verify-plugins.py

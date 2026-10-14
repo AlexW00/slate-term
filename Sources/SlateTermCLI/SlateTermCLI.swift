@@ -7,12 +7,32 @@ import SlateTermSettings
 @main
 struct SlateTermCLI: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "slate-term", abstract: "Control a running Slate Terminal workspace.",
-        subcommands: [Tabs.self, Panes.self, TerminalCommand.self, BrowserCommand.self, Plugins.self, Events.self, ContextCommand.self, ShellCommand.self, LayoutCommand.self, Commands.self, ConfigCommand.self, RPC.self, Version.self, PluginWorker.self])
+        subcommands: [Tabs.self, Panes.self, TerminalCommand.self, BrowserCommand.self, Plugins.self, Events.self, ContextCommand.self, ShellCommand.self, LayoutCommand.self, Commands.self, ConfigCommand.self, WorkspaceCLI.self, APICLI.self, AppearanceCLI.self, PaletteCLI.self, RPC.self, Version.self, PluginWorker.self])
+
+    static func main() {
+        do {
+            var command = try parseAsRoot()
+            try command.run()
+        } catch {
+            if CommandLine.arguments.contains("--json"), exitCode(for: error) != .success {
+                let failure = error as? RPCFailure
+                let object: JSONValue = .object(["error": .object([
+                    "code": .integer(failure?.code ?? -32602), "message": .string(failure?.message ?? message(for: error)),
+                    "data": failure?.data ?? .null,
+                    "outcome": .string(failure.map { [-32600, -32601, -32602, APIError.conflict, APIError.forbidden, APIError.incompatible].contains($0.code) ? "rejected" : "unknown" } ?? (error is SocketError ? "unknown" : "rejected"))
+                ])])
+                if let data = try? JSONEncoder().encode(object) { FileHandle.standardError.write(data + Data([10])) }
+                Foundation.exit(1)
+            }
+            exit(withError: error)
+        }
+    }
 }
 
 struct Connection: ParsableArguments {
     @Option(help: "Unix socket path; defaults to SLATE_TERM_SOCKET.") var socket: String?
-    @Flag(help: "Emit JSON (currently also the default output format).") var json = false
+    @Flag(help: "Emit JSON results and machine-readable JSON errors.") var json = false
+    @Option(help: "Require this app instance; rejects a restarted/replaced host.") var expectedInstanceId: String?
 
     func call(_ method: String, params: [String: JSONValue] = [:], timeoutSeconds: Int = 30) throws {
         try printJSON(request(method, params: params, timeoutSeconds: timeoutSeconds))
@@ -22,10 +42,25 @@ struct Connection: ParsableArguments {
         guard let path = socket ?? ProcessInfo.processInfo.environment["SLATE_TERM_SOCKET"] else {
             throw ValidationError("Set SLATE_TERM_SOCKET or pass --socket. Run inside Slate Terminal for automatic discovery.")
         }
-        let value: JSONValue
-        do { value = try UnixClient(path: path, timeoutSeconds: timeoutSeconds).call(method, params: params) }
-        catch let error as RPCFailure { throw ValidationError("\(error.message) (\(error.code))") }
-        return value
+        var guarded = params
+        let environment = ProcessInfo.processInfo.environment
+        if method != "api.describe", !method.hasPrefix("shell."), guarded["expectedInstanceId"] == nil,
+           socket == nil || socket == environment["SLATE_TERM_SOCKET"], let inherited = environment["SLATE_TERM_INSTANCE_ID"] {
+            guarded["expectedInstanceId"] = .string(inherited)
+        }
+        if let expectedInstanceId { guarded["expectedInstanceId"] = .string(expectedInstanceId) }
+        let client = UnixClient(path: path, timeoutSeconds: timeoutSeconds)
+        if guarded.keys.contains(where: { $0.hasPrefix("expected") }) {
+            let capabilities: JSONValue
+            do { capabilities = try client.call("api.describe", params: [:]) }
+            catch let failure as RPCFailure where failure.code == -32601 {
+                throw RPCFailure(code: APIError.incompatible, message: "Host cannot enforce identity/revision guards; upgrade the host")
+            }
+            guard capabilities.object?["identityGuards"] == .bool(true) else {
+                throw RPCFailure(code: APIError.incompatible, message: "Host cannot enforce identity guards")
+            }
+        }
+        return try client.call(method, params: guarded)
     }
 }
 
@@ -33,12 +68,16 @@ struct Target: ParsableArguments {
     @Option(help: "Explicit pane ID, e.g. p1.") var pane: String?
     @Option(help: "Explicit tab ID, e.g. t1.") var tab: String?
     @Flag(help: "Allow termination of foreground processes when closing.") var force = false
-    var params: [String: JSONValue] {
-        let environment = ProcessInfo.processInfo.environment
-        var result: [String: JSONValue] = [:]
+    @Flag(help: "Intentionally target current focus, ignoring inherited pane/tab/session.") var active = false
+    @Option var expectedWorkspaceRevision: String?
+    @Option var expectedLayoutRevision: String?
+    func params(connection: Connection, scope: String? = nil, inheritingTarget: Bool = true) throws -> [String: JSONValue] {
+        let unanchored = !inheritingTarget && pane == nil && tab == nil
+        var result = try APITarget.resolve(pane: pane, tab: tab, active: active || unanchored, socket: connection.socket,
+                                          instance: connection.expectedInstanceId, scope: scope, environment: ProcessInfo.processInfo.environment)
         if force { result["force"] = .bool(true) }
-        if let pane = pane ?? (tab == nil ? environment["SLATE_TERM_PANE_ID"] : nil) { result["pane"] = .string(pane) }
-        if let tab = tab ?? (pane == nil ? environment["SLATE_TERM_TAB_ID"] : nil) { result["tab"] = .string(tab) }
+        if let expectedWorkspaceRevision { result["expectedWorkspaceRevision"] = .string(expectedWorkspaceRevision) }
+        if let expectedLayoutRevision { result["expectedLayoutRevision"] = .string(expectedLayoutRevision) }
         return result
     }
 }
@@ -51,13 +90,13 @@ struct Tabs: ParsableCommand {
     @OptionGroup var target: Target
     func run() throws {
         try connection.call(action == .list ? "tabs.list" : "command.run",
-                            params: action == .list ? target.params : target.params.merging(["id": .string("tab.\(action.rawValue)")]) { _, new in new })
+                            params: action == .list ? target.params(connection: connection) : target.params(connection: connection).merging(["id": .string("tab.\(action.rawValue)")]) { _, new in new })
     }
 }
 
 struct Panes: ParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Inspect or modify terminal panes.")
-    enum Action: String, ExpressibleByArgument { case list, split, close, focus, send, capture, type }
+    enum Action: String, ExpressibleByArgument { case list, inspect, split, close, focus, send, capture, type }
     @Argument var action: Action
     @OptionGroup var connection: Connection
     @OptionGroup var target: Target
@@ -69,12 +108,14 @@ struct Panes: ParsableCommand {
     @Option(help: "New panel type for type: terminal, browser, or a registered type.") var type: String?
     @Option(help: "Require this terminal session for send/capture; rejects a replaced shell.") var sessionId: String?
     func run() throws {
-        var params = target.params
+        var params = try target.params(connection: connection)
         if let sessionId {
             guard action == .send || action == .capture else { throw ValidationError("session-id is only valid for send/capture") }
             params["sessionId"] = .string(sessionId)
+            params.removeValue(forKey: "expectedAnchorSessionId")
         }
         switch action {
+        case .inspect: try connection.call("pane.inspect", params: params)
         case .type:
             guard let type else { throw ValidationError("type requires --type") }
             params["id"] = .string("pane.type")
@@ -114,12 +155,8 @@ struct TerminalCommand: ParsableCommand {
     @Option(help: "Run/wait deadline in milliseconds, 1...295000; default 30000. Expiry does not stop the process.") var timeoutMilliseconds: Int?
 
     func run() throws {
-        var params = target.params
-        if let scope {
-            params["scope"] = .string(scope.rawValue)
-            if target.pane == nil, scope != .pane { params.removeValue(forKey: "pane") }
-        }
-        if let sessionId { params["sessionId"] = .string(sessionId) }
+        var params = try target.params(connection: connection, scope: scope?.rawValue)
+        if let sessionId { params["sessionId"] = .string(sessionId); params.removeValue(forKey: "expectedAnchorSessionId") }
         if let text { params["text"] = .string(text) }
         if let command { params["command"] = .string(command) }
         if let key { params["key"] = .string(key) }
@@ -226,16 +263,18 @@ struct Events: ParsableCommand {
 
 struct ContextCommand: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "context", abstract: "Read focus and active-terminal context.")
-    enum Action: String, ExpressibleByArgument { case get }
+    enum Action: String, ExpressibleByArgument { case get, inspect }
     enum Scope: String, ExpressibleByArgument { case pane, tab, global }
     @Argument var action: Action = .get
     @Option var scope: Scope = .tab
+    @Flag(name: .customLong("self"), help: "Require the inherited or explicitly supplied caller pane.") var ownContext = false
     @OptionGroup var target: Target
     @OptionGroup var connection: Connection
     func run() throws {
-        var params = target.params
+        var params = try target.params(connection: connection)
+        if ownContext && params["pane"] == nil { throw ValidationError("--self requires a pane identity; services without one must select a view") }
         params["scope"] = .string(scope.rawValue)
-        try connection.call("context.get", params: params)
+        try connection.call("context.\(action.rawValue)", params: params)
     }
 }
 
@@ -294,7 +333,7 @@ struct BrowserCommand: ParsableCommand {
     @Option(help: "Wait state: attached, detached, visible, or hidden.") var state: String?
     @Option var timeoutMilliseconds: Int?
     func run() throws {
-        var params = target.params
+        var params = try target.params(connection: connection)
         if let url { params["url"] = .string(url) }
         if let script { params["script"] = .string(script) }
         if let path { params["path"] = .string(path) }
@@ -317,7 +356,7 @@ struct LayoutCommand: ParsableCommand {
     @Argument var action: Action
     @OptionGroup var connection: Connection
     @OptionGroup var target: Target
-    func run() throws { try connection.call("layout.get", params: target.params) }
+    func run() throws { try connection.call("layout.get", params: target.params(connection: connection)) }
 }
 
 struct Commands: ParsableCommand {
@@ -325,10 +364,16 @@ struct Commands: ParsableCommand {
     enum Action: String, ExpressibleByArgument { case list, run }
     @Argument var action: Action
     @Argument var id: String?
+    @Option(help: "JSON object of action arguments; routing uses --pane/--tab and revision flags.") var params: String = "{}"
     @OptionGroup var connection: Connection
     @OptionGroup var target: Target
     func run() throws {
-        var params = target.params
+        let value = try JSONDecoder().decode(JSONValue.self, from: Data(self.params.utf8))
+        guard let arguments = value.object, Set(arguments.keys).isDisjoint(with: ["id", "pane", "tab", "force", "contextPane", "expectedInstanceId", "expectedAnchorSessionId", "expectedWorkspaceRevision", "expectedLayoutRevision"]) else {
+            throw ValidationError("--params must be an object of action arguments; use routing flags for pane/tab/guards")
+        }
+        var params = try target.params(connection: connection, inheritingTarget: id.map { !CommandContract.forCommand($0).workspaceIndependent } ?? true)
+        params.merge(arguments) { _, new in new }
         if action == .run {
             guard let id else { throw ValidationError("command run requires an ID") }
             params["id"] = .string(id)
@@ -339,17 +384,40 @@ struct Commands: ParsableCommand {
 
 struct ConfigCommand: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "config", abstract: "Inspect, reload, or validate TOML configuration.")
-    enum Action: String, ExpressibleByArgument { case get, reload, validate }
+    enum Action: String, ExpressibleByArgument { case get, reload, validate, set, patch }
     @Argument var action: Action
+    @Option var key: String?
+    @Option(help: "JSON value for set, or an object of dotted application keys for patch.") var value: String?
+    @Option var expectedSourceRevision: String?
     @Option(help: "File for offline validation; defaults to SLATE_TERM_CONFIG_FILE or ~/.config/slate-term/config.toml.") var file: String?
     @OptionGroup var connection: Connection
     func run() throws {
-        if action != .validate {
-            guard file == nil else { throw ValidationError("--file applies only to config validate") }
-            try connection.call(action == .reload ? "command.run" : "config.get",
-                                params: action == .reload ? ["id": .string("config.reload")] : [:])
+        if action == .set || action == .patch {
+            guard file == nil, let value, let expectedSourceRevision else { throw ValidationError("config set/patch requires --value and --expected-source-revision; --file is offline-only") }
+            let decoded = try JSONDecoder().decode(JSONValue.self, from: Data(value.utf8))
+            let values: [String: JSONValue]
+            if action == .set {
+                guard let key else { throw ValidationError("config set requires --key") }
+                values = [key: decoded]
+            } else {
+                guard key == nil, let object = decoded.object else { throw ValidationError("config patch requires an object value, not --key") }
+                values = object
+            }
+            try connection.call("config.patch", params: ["values": .object(values), "expectedSourceRevision": .string(expectedSourceRevision)])
             return
         }
+        guard key == nil, value == nil else { throw ValidationError("--key/--value apply only to config set/patch") }
+        if action != .validate {
+            guard file == nil else { throw ValidationError("--file applies only to config validate") }
+            var params: [String: JSONValue] = action == .reload ? ["id": .string("config.reload")] : [:]
+            if let expectedSourceRevision {
+                guard action == .reload else { throw ValidationError("--expected-source-revision is not supported for config get") }
+                params["expectedSourceRevision"] = .string(expectedSourceRevision)
+            }
+            try connection.call(action == .reload ? "command.run" : "config.get", params: params)
+            return
+        }
+        guard expectedSourceRevision == nil else { throw ValidationError("Offline config validate does not accept a source revision") }
         guard connection.socket == nil else { throw ValidationError("config validate is offline; do not pass --socket") }
         let url = (file ?? ProcessInfo.processInfo.environment["SLATE_TERM_CONFIG_FILE"]).map { URL(fileURLWithPath: $0) }
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config/slate-term/config.toml")

@@ -6,36 +6,41 @@ import SlateTermSettings
 
 @MainActor
 final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuItemValidation {
-    private var workspace = Workspace()
-    private let instanceID: String
-    private let events: EventControl
+    // Internal access is limited to the typed WorkspaceHost API adapters in this module.
+    var workspace = Workspace()
+    let instanceID: String
+    let events: EventControl
+    lazy var revisions = WorkspaceRevisions(epoch: instanceID, workspace: workspace)
     private var publishedWorkspace: Workspace?
-    private var shellSessions: [PaneID: ShellSession] = [:]
+    var shellSessions: [PaneID: ShellSession] = [:]
     private var pluginCatalog: PluginCatalog
     private let pluginInstances: PluginInstances
     private let pluginCommands = PluginCommands()
     private var headerActionRevisions: [String: UUID] = [:]
     private let runtime: GhosttyRuntime
     private var server: UnixServer?
-    private var windows: [TabID: WorkspaceWindow] = [:]
-    private var leaves: [PaneID: NSViewController] = [:]
-    private var containers: [PaneID: PaneContainer] = [:]
+    var windows: [TabID: WorkspaceWindow] = [:]
+    var leaves: [PaneID: NSViewController] = [:]
+    var containers: [PaneID: PaneContainer] = [:]
     private let processTitles = TerminalProcessTitles()
     private var titleTimer: DispatchSourceTimer?
     private var processNames: [PaneID: String] = [:]
     private var shellNames: [PaneID: String] = [:]
-    private var terminals: [PaneID: TerminalView] = [:]
+    var terminals: [PaneID: TerminalView] = [:]
     private lazy var terminalControl = TerminalControl { [weak self] pane in
         guard let self, let view = self.terminals[pane], let session = self.shellSessions[pane] else { return nil }
         return TerminalControl.Target(paneID: pane, sessionID: session.instanceID, runKey: session.runKey, view: view, report: session.report)
     }
-    private var rendered: [TabID: Layout] = [:]
-    private var renderedZoom: [TabID: PaneID] = [:]
+    var rendered: [TabID: Layout] = [:]
+    var renderedZoom: [TabID: PaneID] = [:]
     private var reconciling = false
     private let integration: Bool
     private var integrationKeyboardMonitor: Any?
     private var dispatchingTestKey = false
-    private let settings: ApplicationSettings
+    let settings: ApplicationSettings
+    var configurationRevisionSource: String?
+    var configurationSourceRevision = UUID().uuidString
+    var appliedConfigurationRevision = UUID().uuidString
     private var configurationWatcher: ConfigurationWatcher?
     private var appearanceObservation: NSKeyValueObservation?
     private var settingsWindow: SettingsWindowController?
@@ -71,8 +76,17 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         pluginCatalog = catalog
         pluginInstances = PluginInstances(directory: settings.base.appendingPathComponent("state/plugin-data"))
         self.workspace = settings.restore(or: workspace, registeredTypes: Set(catalog.registrations.filter(\.hasPanel).map(\.id)))
+        // An app launched from another Slate pane must not pass that app's routing,
+        // command settings or shell credentials to its new surfaces. Ghostty inherits
+        // the process environment before applying explicit per-surface overrides.
+        let inheritedIdentity = Set(["SLATE_TERM_CLI", "SLATE_TERM_SOCKET", "SLATE_TERM_INSTANCE_ID", "SLATE_TERM_PANE_ID", "SLATE_TERM_TAB_ID",
+                                     "SLATE_TERM_SESSION_ID", "SLATE_TERM_CONTEXT_TOKEN", "SLATE_TERM_RUN_KEY", "SLATE_TERM_SHELL_PID", "SLATE_TERM_INVOCATION_ID"])
+        for key in environment.keys where inheritedIdentity.contains(key) || key.hasPrefix("SLATE_TERM_PLUGIN_") || key.hasPrefix("SLATE_TERM_COMMAND_") {
+            unsetenv(key)
+        }
         runtime = try GhosttyRuntime(configurationURL: settings.engineURL)
         super.init()
+        _ = revisions // Seed before the first mutation, including native/legacy paths.
         pluginCommands.onChange = { [weak self] in self?.refreshSettings(); self?.refreshCommandPicker(); self?.refreshHeaderActions() }
         pluginInstances.onEvent = { [weak self] instance, name, value in
             guard let self else { return }
@@ -179,7 +193,15 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
 
     private func reloadConfiguration(prepared: ApplicationSettings.PreparedConfiguration? = nil) throws -> JSONValue {
         defer { buildMenus(); refreshSettings() }
+        let previous = settings.current
         let result = try settings.reload(prepared: prepared) { try runtime.reload(from: $0) }
+        if !settings.current.changedKeys(from: previous).isEmpty {
+            appliedConfigurationRevision = UUID().uuidString
+            events.publishHost("host.settings.changed", payload: .object(["appliedRevision": .string(appliedConfigurationRevision)]))
+            for instance in pluginInstances.all where previous.plugins[instance.registration.id] != settings.current.plugins[instance.registration.id] {
+                events.publishHost("host.plugin.settings.changed", payload: .object(["pluginId": .string(instance.registration.id)]), targetInstanceId: instance.id)
+            }
+        }
         applyAppearance()
         for browser in leaves.values.compactMap({ $0 as? BrowserPane }) { browser.browserConfiguration = settings.current.browser }
         persistWorkspace()
@@ -201,6 +223,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     private func persistWorkspace() {
+        publishWorkspaceChanges()
         settings.save(workspace)
         updateStatusMenu()
         if let paneTypeMenu { menuNeedsUpdate(paneTypeMenu) }
@@ -213,7 +236,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }
     }
 
-    private func updateStatusMenu() {
+    func updateStatusMenu() {
         statusMenuItem?.title = settings.error != nil || settings.workspaceError != nil || settings.preferenceError != nil || settings.typeWarningError != nil
             ? "Configuration or Workspace Error…" : "Configuration & Workspace Status…"
     }
@@ -231,7 +254,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         !terminals.values.contains(where: \.needsConfirmClose) || confirm("Quit and terminate running processes?")
     }
 
-    private var availableCommands: [WorkspaceCommand] {
+    var availableCommands: [WorkspaceCommand] {
         CommandRegistry.commands + pluginCatalog.registrations.flatMap(\.workspaceCommands)
     }
     private var unavailableCommands: [String] {
@@ -277,16 +300,26 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     private func callAsync(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
+        var params = params
+        if let reference = params.removeValue(forKey: "contextPane") {
+            guard params["pane"] == nil, params["tab"] == nil else { throw RPCFailure(code: -32602, message: "Context anchor cannot be combined with a target") }
+            let pane = try targetPaneID(["pane": reference])
+            params["tab"] = .string(workspace.tabs.first { $0.layout.paneIDs.contains(pane) }!.id.description)
+        }
+        try validateAPIGuards(params, method: method)
         if method == "command.run", let id = params["id"]?.string, id.hasPrefix("plugin.") {
             let operation = try preparePluginCommand(id, params: params)
             return try await operation()
         }
         if method.hasPrefix("terminal.") {
             let pane = try terminalPane(params)
-            return try await terminalControl.call(String(method.dropFirst("terminal.".count)), pane: pane, params: params)
+            var input = withoutAPIGuards(params)
+            if input["sessionId"] == nil { input["sessionId"] = params["expectedAnchorSessionId"] }
+            return try await terminalControl.call(String(method.dropFirst("terminal.".count)), pane: pane, params: input)
         }
         if method.hasPrefix("events.") {
             try synchronizeNativeGroups()
+            params = withoutAPIGuards(params)
             switch method {
             case "events.head":
                 guard params.isEmpty else { throw RPCFailure(code: -32602, message: "events.head takes no parameters") }
@@ -310,27 +343,44 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             return try await pane.evaluateForTesting(source)
         }
         guard method.hasPrefix("browser.") else { return try call(method, params: params) }
-        guard let browser = leaves[try targetPaneID(params)] as? BrowserPane else { throw RPCFailure(code: -32602, message: "Target pane is not a browser") }
+        let pane = try targetPaneID(params)
+        guard let browser = leaves[pane] as? BrowserPane else { throw RPCFailure(code: -32602, message: "Target pane is not a browser") }
+        params["pane"] = .string(pane.description)
+        params["tab"] = .string(try targetTab(params).id.description)
+        let captured = params
+        let precondition: @MainActor () throws -> Void = { [weak self, weak browser] in
+            guard let self, let browser, self.leaves[pane] === browser else { throw RPCFailure(code: -32022, message: "Browser pane was replaced") }
+            try self.validateAPIGuards(captured, method: method)
+        }
+        params = withoutAPIGuards(params)
         switch method {
         case "browser.get": return browser.info
         case "browser.snapshot", "browser.click", "browser.fill", "browser.select", "browser.scroll", "browser.wait":
-            return try await browser.automate(BrowserAction(kind: String(method.dropFirst("browser.".count)), params: params))
+            return try await browser.automate(BrowserAction(kind: String(method.dropFirst("browser.".count)), params: params), beforeSubmission: precondition)
         case "browser.navigate":
             guard let url = params["url"]?.string else { throw RPCFailure(code: -32602, message: "url is required") }
-            return try await browser.navigate(url)
+            return try await browser.navigate(url, beforeSubmission: precondition)
         case "browser.eval":
             guard let script = params["script"]?.string else { throw RPCFailure(code: -32602, message: "script is required") }
-            return try await browser.evaluate(script)
+            return try await browser.evaluate(script, beforeSubmission: precondition)
         case "browser.screenshot":
             guard let path = params["path"]?.string else { throw RPCFailure(code: -32602, message: "path is required") }
-            return try await browser.screenshot(to: path)
+            return try await browser.screenshot(to: path, beforeSubmission: precondition)
         default: throw RPCFailure(code: -32601, message: "Unknown browser method: \(method)")
         }
     }
 
     private func call(_ method: String, params: [String: JSONValue]) throws -> JSONValue {
         try synchronizeNativeGroups()
+        try validateAPIGuards(params, method: method)
         switch method {
+        case "api.describe": return try describeAPI()
+        case "workspace.snapshot": return try workspaceSnapshot(params)
+        case "context.inspect": return try inspectContext(params)
+        case "pane.inspect": return try inspectPane(targetPaneID(params))
+        case "config.patch": return try patchConfiguration(params)
+        case "palette.list": return try listPalettes()
+        case "palette.import": return try importPalette(params)
         case "version": return .object(["cliVersion": .string("0.1.0-dev"), "appVersion": .string("0.1.0-dev"), "protocolVersion": .integer(1)])
         case "tabs.list": return try .encoding(workspace.tabs)
         case "panes.list": return try .encoding(workspace.panes)
@@ -402,11 +452,13 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         case "config.get":
             var status = try settings.status().object!
             status["unavailableCommands"] = .array(unavailableCommands.map(JSONValue.string))
+            status.merge(configurationRevisionInfo()) { _, new in new }
             return .object(status)
         case "config.validate": return .object(["valid": .bool(true), "configuration": try .encoding(settings.validate())])
         case "config.reload": return try reloadConfiguration()
         case "command.run":
             guard let id = params["id"]?.string else { throw RPCFailure(code: -32602, message: "Command id is required") }
+            if let result = try runSettingsCommand(id, params: params) { return result }
             if id == "config.reload" { return try reloadConfiguration() }
             if id == "settings.open" { showSettings(); return .object([:]) }
             if id == "command.picker" { try toggleCommandPicker(params); return .object([:]) }
@@ -726,28 +778,48 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
 
     private func callFromPlugin(_ method: String, params: [String: JSONValue], pane: PaneID, view: PluginPane) async throws -> JSONValue {
         guard leaves[pane] === view, let tab = workspace.tabs.first(where: { $0.layout.paneIDs.contains(pane) }) else { throw RPCFailure(code: -32022, message: "Plugin instance was replaced") }
+        guard apiMethods(plugin: true).contains(method) else { throw RPCFailure(code: -32601, message: "Method is not exposed to plugins: \(method)") }
+        if method == "command.run" {
+            guard let id = params["id"]?.string, CommandContract.forCommand(id).pluginAccessible else {
+                throw RPCFailure(code: APIError.forbidden, message: "This administrative command is not exposed to plugin pages")
+            }
+        }
         var scoped = params
         if scoped["pane"] == nil && scoped["tab"] == nil {
             scoped["pane"] = .string(pane.description)
             scoped["tab"] = .string(tab.id.description)
         }
         if scoped["scope"] == nil { scoped["scope"] = .string(view.instance.registration.scope.rawValue) }
+        try synchronizeNativeGroups()
+        if ["pane.title", "settings.get", "storage.get", "storage.set", "storage.delete"].contains(method) {
+            guard params["pane"] == nil || params["pane"] == .string(pane.description),
+                  params["tab"] == nil || params["tab"] == .string(tab.id.description) else {
+                throw RPCFailure(code: -32602, message: "This operation is bound to the calling plugin view/namespace")
+            }
+        }
+        try validateAPIGuards(scoped, method: method)
+        let payload = withoutAPIGuards(params)
         switch method {
         case "context.get": return try context(scoped)
+        case "api.describe": return try describeAPI(plugin: true)
+        case "workspace.snapshot": return try workspaceSnapshot(scoped)
+        case "context.inspect": return try inspectContext(scoped, caller: pane, view: view)
+        case "pane.inspect": return try call(method, params: scoped)
         case "events.head":
-            guard params.isEmpty else { throw RPCFailure(code: -32602, message: "events.head takes no parameters") }
+            guard payload.isEmpty else { throw RPCFailure(code: -32602, message: "events.head takes no parameters") }
             return events.head
         case "events.poll":
             // Logical pane/tab instances follow their owning tab's active-terminal
             // context. Global instances observe every tab; callers may narrow filters.
-            return try await events.poll(params, boundTab: view.instance.tab, recipientInstanceId: view.instance.id)
+            return try await events.poll(payload, boundTab: view.instance.tab, recipientInstanceId: view.instance.id)
         case "events.emit":
-            return try events.emit(params, source: .plugin(type: view.instance.registration.id, instanceId: view.instance.id),
+            return try events.emit(payload, source: .plugin(type: view.instance.registration.id, instanceId: view.instance.id),
                 sourceTab: tab.id, sourcePane: pane, knownInstances: Set(pluginInstances.all.map(\.id)))
         case "terminal.send", "terminal.key", "terminal.capture", "terminal.run", "terminal.wait":
             return try await callAsync(method, params: scoped)
         case "command.run": return try await callAsync(method, params: scoped)
-        case "command.list", "workspace.get", "layout.get", "panes.list", "tabs.list": return try call(method, params: scoped)
+        case "command.list": return try .encoding(availableCommands.filter { $0.contract.pluginAccessible })
+        case "workspace.get", "layout.get", "panes.list", "tabs.list": return try call(method, params: scoped)
         case "settings.get": return .object(settings.current.plugins[view.instance.registration.id] ?? [:])
         case "pane.title":
             guard let title = params["title"], title == .null || title.string != nil else { throw RPCFailure(code: -32602, message: "title must be a string or null") }
@@ -802,18 +874,16 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                         "terminal": terminal])
     }
 
-    private func targetTab(_ params: [String: JSONValue]) throws -> Tab {
-        let id = try params["tab"].map { value -> TabID in
-            guard let string = value.string else { throw RPCFailure(code: -32602, message: "tab must be a string") }
-            return try TabID(parsing: string)
-        } ?? workspace.keyTabID
-        guard let tab = workspace.tabs.first(where: { $0.id == id }) else {
-            throw RPCFailure(code: -32004, message: "Tab not found")
+    func targetTab(_ params: [String: JSONValue]) throws -> Tab {
+        func text(_ key: String) throws -> String? {
+            guard let value = params[key] else { return nil }
+            guard let text = value.string else { throw RPCFailure(code: -32602, message: "\(key) must be a string") }
+            return text
         }
-        return tab
+        return try workspace.resolvedTab(pane: text("pane").map { try PaneID(parsing: $0) }, tab: text("tab").map { try TabID(parsing: $0) })
     }
 
-    private func targetPaneID(_ params: [String: JSONValue]) throws -> PaneID {
+    func targetPaneID(_ params: [String: JSONValue]) throws -> PaneID {
         let id: PaneID
         if let value = params["pane"] {
             guard let string = value.string else { throw RPCFailure(code: -32602, message: "pane must be a string") }
@@ -872,6 +942,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                     "SLATE_TERM_SOCKET": server!.path,
                     "SLATE_TERM_PANE_ID": pane.id.description,
                     "SLATE_TERM_TAB_ID": tab.id.description,
+                    "SLATE_TERM_INSTANCE_ID": instanceID,
+                    "SLATE_TERM_SESSION_ID": session.instanceID,
                     "GHOSTTY_BIN_DIR": helpers,
                     "PATH": helpers + ":" + (ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"),
                 ]
@@ -1256,7 +1328,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         } catch { NSLog("Native tab update rejected: %@", String(describing: error)) }
     }
 
-    private func synchronizeNativeGroups() throws {
+    func synchronizeNativeGroups() throws {
         guard !reconciling else { return }
         let previous = workspace
         try workspace.adoptTabGroups(nativeTabGroups())
@@ -1368,6 +1440,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             ("Split Pane", ["split.left", "split.right", "split.up", "split.down"]),
             ("Focus Pane", ["focus.left", "focus.right", "focus.up", "focus.down"]),
             ("Layout", ["pane.zoom", "layout.equalize"]),
+            ("Appearance", ["appearance.auto", "appearance.light", "appearance.dark"]),
+            ("Application Font Size", ["terminal.font.increase", "terminal.font.decrease", "terminal.font.reset"]),
         ] {
             let group = workspaceMenu.addItem(withTitle: title, action: nil, keyEquivalent: "")
             let submenu = NSMenu(title: title)
@@ -1440,12 +1514,12 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     @objc private func resetPaneTypeWarnings() {
-        do { try settings.setSuppressTypeWarning(false); updateStatusMenu() }
+        do { _ = try runSettingsCommand("warnings.type.reset", params: [:]) }
         catch { present(error) }
     }
 
     @objc private func resetCloseWarnings() {
-        do { try settings.setSuppressCloseWarning(false); updateStatusMenu() }
+        do { _ = try runSettingsCommand("warnings.close.reset", params: [:]) }
         catch { present(error) }
     }
 
@@ -1464,7 +1538,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             let picker = CommandPicker()
             picker.onExecute = { [weak self] id in
                 guard let self, self.pickerEntries.contains(where: { $0.item.id == id && $0.unavailable == nil }) else { NSSound.beep(); return }
-                let independent = ["window.new", "settings.open", "config.reload"].contains(id)
+                let independent = CommandContract.forCommand(id).workspaceIndependent
                 // An empty captured context is intentional, not permission to
                 // retarget a window created by another client while searching.
                 let resolvedID = id == "tab.new" && self.pickerTarget.isEmpty ? "window.new" : id
@@ -1522,7 +1596,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         let contributions = Dictionary(uniqueKeysWithValues: pluginCatalog.registrations.flatMap { registration in
             registration.commands.map { ($0.namespacedID(plugin: registration.id), (title: $0.title, plugin: registration.title)) }
         })
-        return availableCommands.filter { !["command.picker", "pane.type", "pane.focus", "tab.focus"].contains($0.id) }.map { command in
+        return availableCommands.filter { $0.id != "command.picker" && !$0.contract.requiresArguments }.map { command in
             var title = command.title
             var detail = "Workspace"
             var symbol = "square.grid.2x2"
@@ -1555,7 +1629,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                     else if command.id.hasPrefix("focus.") { detail = "Layout"; symbol = "scope"; keywords = "pane navigate" }
                     else if command.id.hasPrefix("tab.") { detail = "Tabs"; symbol = "square.on.square"; keywords = "navigate" }
                 }
-                if !["window.new", "settings.open", "config.reload"].contains(command.id) {
+                if !command.contract.workspaceIndependent {
                     if missingTarget { unavailable = "The original workspace target was closed" }
                     else if tab == nil && command.id != "tab.new" { unavailable = "Open a workspace to use this command" }
                     else if command.id.hasPrefix("browser."), pane?.type != .browser { unavailable = "Focus a browser pane to use this command" }
@@ -1587,12 +1661,12 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         settingsWindow?.window?.makeKeyAndOrderFront(nil)
     }
 
-    private func configurationSource() throws -> String {
+    func configurationSource() throws -> String {
         do { return try String(contentsOf: settings.configURL, encoding: .utf8) }
         catch let error as CocoaError where error.code == .fileReadNoSuchFile { return "" }
     }
 
-    private func refreshSettings(force: Bool = false) {
+    func refreshSettings(force: Bool = false) {
         guard let model = settingsModel else { return }
         do {
             let source = try configurationSource()
@@ -1612,7 +1686,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }
     }
 
-    private func saveSettings(source: String, changes: [String: String]) throws {
+    func saveSettings(source: String, changes: [String: String], refreshEditor: Bool = true) throws {
         guard try configurationSource() == source else {
             throw ConfigurationError.invalid("The config file changed outside Settings. Choose Revert to load it before editing again.")
         }
@@ -1632,7 +1706,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             try source.write(to: settings.configURL, atomically: true, encoding: .utf8)
             throw error
         }
-        refreshSettings(force: true)
+        refreshSettings(force: refreshEditor)
     }
 
     @objc private func registerPlugin() {
@@ -1716,7 +1790,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         guard menuItem.action == #selector(runMenuCommand(_:)) else { return true }
         let id = menuItem.representedObject as? String
-        if id == "window.new" || id == "tab.new" || id == "config.reload" || id == "command.picker" || id == "settings.open" || id?.hasPrefix("plugin.") == true { return true }
+        if id.map({ CommandContract.forCommand($0).workspaceIndependent }) == true || id == "tab.new" || id?.hasPrefix("plugin.") == true { return true }
         guard NSApp.keyWindow is WorkspaceWindow else { return false }
         if id?.hasPrefix("browser.") == true { return focusedBrowser != nil }
         return true
@@ -1750,6 +1824,13 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 if id == "tab.close", params["tab"] == nil {
                     params["tab"] = .string(try targetTab(params).id.description)
                 }
+                let tab: TabID
+                if id == "pane.close" {
+                    let pane = try targetPaneID(params)
+                    guard let owner = workspace.tabs.first(where: { $0.layout.paneIDs.contains(pane) }) else { throw WorkspaceError.paneNotFound(pane) }
+                    tab = owner.id
+                } else { tab = try targetTab(params).id }
+                params["expectedLayoutRevision"] = revisions.layoutRevision(tab).map(JSONValue.string)
             }
             _ = try call("command.run", params: params)
         } catch let error as RPCFailure where error.code == -32010 {

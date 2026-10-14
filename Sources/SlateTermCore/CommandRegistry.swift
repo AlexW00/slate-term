@@ -6,6 +6,7 @@ public struct WorkspaceCommand: Sendable, Codable {
     public let key: String
     public let shift: Bool
     public let alt: Bool
+    public let contract: CommandContract
 
     public init(id: String, title: String, key: String, shift: Bool, alt: Bool = false) {
         self.id = id
@@ -13,6 +14,7 @@ public struct WorkspaceCommand: Sendable, Codable {
         self.key = key
         self.shift = shift
         self.alt = alt
+        self.contract = .forCommand(id)
     }
 }
 
@@ -54,6 +56,17 @@ public enum CommandRegistry {
         .init(id: "browser.focusAddress", title: "Focus Address Bar", key: "l", shift: false),
         .init(id: "browser.reload", title: "Reload Page", key: "r", shift: false),
         .init(id: "config.reload", title: "Reload Configuration", key: "r", shift: true),
+        .init(id: "appearance.set", title: "Set Appearance", key: "", shift: false),
+        .init(id: "appearance.light", title: "Use Light Appearance", key: "", shift: false),
+        .init(id: "appearance.dark", title: "Use Dark Appearance", key: "", shift: false),
+        .init(id: "appearance.auto", title: "Follow System Appearance", key: "", shift: false),
+        .init(id: "terminal.palette.set", title: "Set Terminal Palette", key: "", shift: false),
+        .init(id: "terminal.font.set", title: "Set Application Terminal Font Size", key: "", shift: false),
+        .init(id: "terminal.font.increase", title: "Increase Application Terminal Font Size", key: "", shift: false),
+        .init(id: "terminal.font.decrease", title: "Decrease Application Terminal Font Size", key: "", shift: false),
+        .init(id: "terminal.font.reset", title: "Reset Application Terminal Font Size", key: "", shift: false),
+        .init(id: "warnings.close.reset", title: "Re-enable Close Warnings", key: "", shift: false),
+        .init(id: "warnings.type.reset", title: "Re-enable Pane Type Warnings", key: "", shift: false),
     ]
 
     public static func execute(_ id: String, params: [String: JSONValue], workspace: inout Workspace) throws -> JSONValue {
@@ -75,9 +88,9 @@ public enum CommandRegistry {
             return pane
         }
         func tab() throws -> TabID {
-            if let value = params["tab"] { return try TabID(parsing: requireString(value, name: "tab")) }
-            guard let tab = workspace.keyTabID else { throw RPCFailure(code: -32004, message: "There is no key tab") }
-            return tab
+            try workspace.resolvedTab(
+                pane: params["pane"].map { try PaneID(parsing: requireString($0, name: "pane")) },
+                tab: params["tab"].map { try TabID(parsing: requireString($0, name: "tab")) }).id
         }
         switch id {
         case "split.left", "split.right", "split.up", "split.down":

@@ -278,6 +278,8 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate {
         }
     }
 
+    var effectiveTitle: String { latestTitle }
+
     var info: JSONValue {
         view.layoutSubtreeIfNeeded()
         // Constraints use alignment rects; NSTextField's frame has two-point side outsets.

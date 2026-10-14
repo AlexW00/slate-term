@@ -192,10 +192,17 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
                     guard !self.closed, self.instance.isReady, self.generation == expectedGeneration, self.activeDocumentID == documentID, !Task.isCancelled else { throw CancellationError() }
                     let bytes = try JSONEncoder().encode(result)
                     guard bytes.count <= 1_048_576 else { throw RPCFailure(code: -32025, message: "Bridge response exceeds 1 MiB") }
-                    replyHandler(try JSONSerialization.jsonObject(with: bytes, options: [.fragmentsAllowed]), nil)
-                } catch { replyHandler(nil, String(describing: error)) }
+                    replyHandler(["ok": true, "value": try JSONSerialization.jsonObject(with: bytes, options: [.fragmentsAllowed])], nil)
+                } catch { replyHandler(Self.bridgeFailure(error), nil) }
             }
-        } catch { replyHandler(nil, String(describing: error)) }
+        } catch { replyHandler(Self.bridgeFailure(error), nil) }
+    }
+
+    private static func bridgeFailure(_ error: any Error) -> [String: Any] {
+        let failure = error as? RPCFailure ?? RPCFailure(code: error is CancellationError ? -32022 : -32602, message: String(describing: error))
+        var details: [String: Any] = ["code": failure.code, "message": failure.message]
+        if let data = failure.data, let bytes = try? JSONEncoder().encode(data), let value = try? JSONSerialization.jsonObject(with: bytes, options: [.fragmentsAllowed]) { details["data"] = value }
+        return ["ok": false, "error": details]
     }
 
     /// Integration-only caller in WorkspaceHost; never part of the page bridge.
@@ -247,7 +254,7 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
               const cancel=data.channel==='slate-cancel',requestDocumentId=documentId;
               try {
                 const value=await window.webkit.messageHandlers.slate.postMessage({token,documentId:requestDocumentId,requestId:data.id,cancel,method:data.method??'',params:data.params??{}});
-                if(!cancel)send({channel:'slate-response',documentId:requestDocumentId,id:data.id,value},'*');
+                if(!cancel)send({channel:'slate-response',documentId:requestDocumentId,id:data.id,...(value.ok?{value:value.value}:{error:value.error})},'*');
               } catch(error) {if(!cancel)send({channel:'slate-response',documentId:requestDocumentId,id:data.id,error:String(error)},'*');}
             });
             })();
@@ -270,7 +277,8 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
         window.addEventListener('message',event=>{
           const data=event.data;if(event.source!==window||!data||data.channel!=='slate-response')return;
           const request=pending.get(data.id);if(!request||request.documentId!==data.documentId)return;request.cleanup();
-          data.error?request.reject(new Error(data.error)):request.resolve(data.value);
+          if(data.error){const error=new Error(typeof data.error==='object'?data.error.message:String(data.error));if(Number.isInteger(data.error.code))error.code=data.error.code;if(data.error.data!==undefined)error.data=data.error.data;request.reject(error);}
+          else request.resolve(data.value);
         });
         const call=(method,params={}, {signal}={})=>new Promise((resolve,reject)=>{
           if(signal?.aborted){reject(new DOMException('Workspace request aborted','AbortError'));return;}
@@ -292,6 +300,10 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
           plugin,call,
           setTitle:title=>call('pane.title',{title}),
           context:(params={})=>call('context.get',params),
+          self:()=>call('context.inspect'),
+          inspect:(params={})=>call('workspace.snapshot',params),
+          api:()=>call('api.describe'),
+          panes:Object.freeze({inspect:(params={})=>call('pane.inspect',params)}),
           command:(id,params={},options={})=>call('command.run',{...params,id},options),
           settings:()=>call('settings.get'),
           terminal:Object.freeze({

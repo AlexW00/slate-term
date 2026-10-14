@@ -25,6 +25,8 @@ slate-term rpc workspace.get
 slate-term rpc context.get --params '{"scope":"global"}'
 ```
 
+See [agent API extensions](agent-api.md) for capability discovery, guarded self/workspace inspection, CLI routing/session rules and application settings writes. `workspace.get` and `layout.get` retain their legacy shapes; revisioned metadata uses `workspace.snapshot` and `pane.inspect`.
+
 Workspace commands use `command.run` with an `id` from `command.list` and routing fields. Read operations include `workspace.get`, `tabs.list`, `panes.list`, `layout.get`, `context.get`, `config.get`, `plugins.list/status/logs`. The CLI provides typed wrappers for workspace mutations, configuration, plugin registration, [events](events.md), and [terminal/browser automation](automation.md).
 
 Pane/tab identities (`p1`, `t1`, etc.) are stable across layout changes, but a terminal's **session** changes on replacement/restoration. Capture `sessionId` from context and provide it for delayed terminal work. Explicit CLI pane/tab options override inherited identifiers; an explicit tab suppresses an inherited pane. Event filters deliberately do not inherit those targets.

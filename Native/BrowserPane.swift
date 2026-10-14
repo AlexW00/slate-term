@@ -202,21 +202,22 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
     private func finishNavigation(_ result: Result<JSONValue, any Error>) {
         if let id = navigationOperation { complete(id, result) }
     }
-    var info: JSONValue { .object(["url": .string(web.url?.absoluteString ?? "about:blank"), "title": .string(web.title ?? ""), "loading": .bool(web.isLoading)]) }
+    var info: JSONValue { .object(["url": .string(web.url?.absoluteString ?? "about:blank"), "title": .string(web.title ?? ""), "loading": .bool(web.isLoading), "pendingOperations": .integer(operations.count)]) }
 
-    func navigate(_ value: String) async throws -> JSONValue {
+    func navigate(_ value: String, beforeSubmission: @escaping @MainActor () throws -> Void = {}) async throws -> JSONValue {
         let url = try Self.url(value)
         guard !closed else { throw RPCFailure(code: -32022, message: "Browser pane is closed") }
         cancelPendingNavigation()
-        return try await perform(timeoutMilliseconds: 15_000) { id in
+        return try await perform(timeoutMilliseconds: 15_000, beforeSubmission: beforeSubmission) { id in
             self.navigationOperation = id
             self.pendingNavigation = self.web.load(URLRequest(url: url))
         }
     }
 
-    func evaluate(_ source: String, isolated: Bool = false, timeoutMilliseconds: Int = 10_000) async throws -> JSONValue {
+    func evaluate(_ source: String, isolated: Bool = false, timeoutMilliseconds: Int = 10_000,
+                  beforeSubmission: @escaping @MainActor () throws -> Void = {}) async throws -> JSONValue {
         guard !closed else { throw RPCFailure(code: -32022, message: "Browser pane is closed") }
-        return try await perform(timeoutMilliseconds: timeoutMilliseconds) { id in
+        return try await perform(timeoutMilliseconds: timeoutMilliseconds, beforeSubmission: beforeSubmission) { id in
             self.web.evaluateJavaScript(source, in: nil, in: isolated ? self.automationWorld : .page) { [weak self] result in
                 guard let self, self.operations[id] != nil else { return }
                 do {
@@ -226,7 +227,7 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
         }
     }
 
-    func automate(_ action: BrowserAction) async throws -> JSONValue {
+    func automate(_ action: BrowserAction, beforeSubmission: @escaping @MainActor () throws -> Void = {}) async throws -> JSONValue {
         let generation = documentGeneration
         let deadline = ContinuousClock.now.advanced(by: .milliseconds(action.timeoutMilliseconds == 0 ? 10_000 : action.timeoutMilliseconds))
         func remainingMilliseconds() throws -> Int {
@@ -236,13 +237,13 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
         }
         // Bind selectors to the actual document before any mutation. The private
         // world rejects a queued action if navigation replaced that document.
-        let prepared = try await evaluate(BrowserAutomation.prepareScript(), isolated: true, timeoutMilliseconds: remainingMilliseconds())
+        let prepared = try await evaluate(BrowserAutomation.prepareScript(), isolated: true, timeoutMilliseconds: remainingMilliseconds(), beforeSubmission: beforeSubmission)
         guard let documentID = prepared.object?["documentId"]?.string else { throw RPCFailure(code: -32023, message: "Browser document identity unavailable") }
         let source = try BrowserAutomation.script(for: action, documentID: documentID)
         while true {
             try Task.checkCancellation()
             guard !closed, documentGeneration == generation else { throw RPCFailure(code: -32022, message: "Browser document was replaced") }
-            let result = try await evaluate(source, isolated: true, timeoutMilliseconds: remainingMilliseconds())
+            let result = try await evaluate(source, isolated: true, timeoutMilliseconds: remainingMilliseconds(), beforeSubmission: beforeSubmission)
             if action.kind != .wait || result.object?["matched"] == .bool(true) { return result }
             guard action.timeoutMilliseconds > 0 else { throw RPCFailure(code: -32024, message: "Browser condition did not match") }
             try await Task.sleep(for: .milliseconds(min(50, remainingMilliseconds())))
@@ -255,11 +256,12 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
         return try JSONDecoder().decode(JSONValue.self, from: data)
     }
 
-    private func perform(timeoutMilliseconds: Int = 10_000, _ start: (UUID) -> Void) async throws -> JSONValue {
+    private func perform(timeoutMilliseconds: Int = 10_000, beforeSubmission: @MainActor () throws -> Void = {}, _ start: (UUID) -> Void) async throws -> JSONValue {
         let id = UUID()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 guard !closed, !Task.isCancelled else { continuation.resume(throwing: CancellationError()); return }
+                do { try beforeSubmission() } catch { continuation.resume(throwing: error); return }
                 guard operations.count < 32 else { continuation.resume(throwing: RPCFailure(code: -32025, message: "Too many pending browser operations")); return }
                 let deadline = Task { [weak self] in
                     do { try await Task.sleep(for: .milliseconds(timeoutMilliseconds)) } catch { return }
@@ -283,13 +285,14 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
         operation.continuation.resume(with: result)
     }
 
-    func screenshot(to path: String) async throws -> JSONValue {
-        try await perform { id in
+    func screenshot(to path: String, beforeSubmission: @escaping @MainActor () throws -> Void = {}) async throws -> JSONValue {
+        try await perform(beforeSubmission: beforeSubmission) { id in
             self.web.takeSnapshot(with: nil) { [weak self] image, error in
                 guard let self, self.operations[id] != nil else { return }
                 do {
                     if let error { throw error }
                     guard let data = image?.tiffRepresentation, let bitmap = NSBitmapImageRep(data: data), let png = bitmap.representation(using: .png, properties: [:]) else { throw RPCFailure(code: -32023, message: "Snapshot unavailable") }
+                    try beforeSubmission()
                     try png.write(to: URL(fileURLWithPath: path), options: .atomic)
                     self.complete(id, .success(.object(["path": .string(path)])))
                 } catch { self.complete(id, .failure(error)) }
