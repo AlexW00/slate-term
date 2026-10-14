@@ -63,6 +63,25 @@ with tempfile.TemporaryDirectory(prefix="slate-pane-move-", dir="/tmp") as tempo
 
             assert not move("p1", "p1")["canDrag"]
             p2 = cli("panes", "split", "--right")["paneId"]
+            # Regression: moving the right sibling left/above used to paint the whole
+            # left pane or span both current panes using projected window geometry.
+            siblings = state()
+            for theme in ["light", "dark"]:
+                config.write_text(f'[appearance]\ntheme = "{theme}"\n')
+                rpc("config.reload")
+                for x, y, direction in [(.05, .5, "left"), (.95, .5, "right"), (.5, .95, "up"), (.5, .05, "down")]:
+                    result = move(p2, "p1", x, y)
+                    assert result["direction"] == direction and result["previewPanes"] == ["p1"], result
+                    capture(f"siblings-{theme}-{direction}")
+                    assert state() == siblings, "Preview mutated sibling layout"
+                assert not move(p2, "p1", .5, .5)["preview"], "Center left a preview"
+                rpc("debug.divider", fraction=0.1)
+                assert move(p2, "p1")["previewPanes"] == ["p1"], "Collapsed sibling move was rejected at narrow width"
+                capture(f"siblings-{theme}-narrow")
+                assert not move(p2, "p1", cancel=True)["preview"]
+                rpc("debug.divider", fraction=0.5)
+            config.write_text('[appearance]\ntheme = "light"\n')
+            rpc("config.reload")
             p3 = cli("panes", "split", "--down", "--pane", p2)["paneId"]
             for pane in ["p1", p2, p3]:
                 cli("panes", "send", "--pane", pane, "--text", f"printf 'MOVE_%s:%s\\n' '{pane}' \"$$\"\r")
@@ -76,7 +95,8 @@ with tempfile.TemporaryDirectory(prefix="slate-pane-move-", dir="/tmp") as tempo
             cli("panes", "focus", "--pane", p3)
             rpc("debug.menuPreview", pane=p3, move=True, path=str(ARTIFACTS / "pane-movement-menu.png"))
             assert panes()[p3]["firstResponder"] and panes()[p3]["terminalFocus"], "Cancelled move menu stole typing focus"
-            assert move(p3, "p1")["direction"] == "left"
+            result = move(p3, "p1")
+            assert result["direction"] == "left" and result["previewPanes"] == ["p1"], result
             assert state() == before, "Preview mutated workspace"
             capture("preview-left")
             assert move(p3, "p1", cancel=True)["preview"] is False
@@ -98,6 +118,9 @@ with tempfile.TemporaryDirectory(prefix="slate-pane-move-", dir="/tmp") as tempo
             cli("command", "run", "pane.zoom", "--pane", "p1")
 
             for x, y, direction in [(.05, .5, "left"), (.95, .5, "right"), (.5, .95, "up"), (.5, .05, "down")]:
+                preview = move(p3, "p1", x, y)
+                assert preview["direction"] == direction and preview["previewPanes"] == ["p1"], preview
+                capture(f"nested-{direction}")
                 result = move(p3, "p1", x, y, drop=True)
                 assert result["accepted"] and result["direction"] == direction and not result["preview"], result
                 layout = cli("layout", "get")
@@ -124,7 +147,7 @@ with tempfile.TemporaryDirectory(prefix="slate-pane-move-", dir="/tmp") as tempo
             assert rpc("browser.eval", pane=p2, script="window.moveSentinel") == "retained"
             assert rpc("debug.paneHeader", pane=p2)["title"] == "Server", "Manual title lost"
             # A web view remains a valid destination, not just a source.
-            assert move(p3, p2, .95, .5)["preview"]
+            assert move(p3, p2, .95, .5)["previewPanes"] == [p2]
             capture("browser-preview")
             assert move(p3, p2, .95, .5, drop=True)["accepted"]
             assert rpc("browser.eval", pane=p2, script="window.moveSentinel") == "retained"

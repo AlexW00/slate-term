@@ -2,7 +2,7 @@ import AppKit
 import SlateTermCore
 
 /// Predict the committed split geometry in bottom-up window coordinates, including dividers.
-/// Unlike a half-target highlight, this accounts for the source's collapsed parent.
+/// Used for size validation, not the target-local insertion cue shown during a drag.
 enum PaneMoveGeometry {
     static func frames(for layout: Layout, in rect: NSRect, divider: CGFloat) -> [PaneID: NSRect] {
         switch layout {

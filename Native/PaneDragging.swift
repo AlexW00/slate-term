@@ -122,18 +122,30 @@ final class PaneDropView: NSView {
         return direction
     }
 
-    /// Each retained pane draws its portion of the predicted window-space destination.
-    /// This can span the old source and target without adding subviews to NSSplitView.
-    func showPreview(windowRect: NSRect) {
-        let rect = convert(windowRect, from: nil).insetBy(dx: 3, dy: 3)
-        guard rect.intersects(bounds) else { clearPreview(); return }
+    /// Show insertion intent relative to the pane under the pointer, not future window
+    /// geometry over unchanged content. Removing the source can expand the final split.
+    static func previewRect(for direction: Direction, in bounds: NSRect) -> NSRect {
+        var rect = bounds
+        switch direction {
+        case .left: rect.size.width /= 2
+        case .right: rect.size.width /= 2; rect.origin.x = bounds.midX
+        case .up: rect.size.height /= 2; rect.origin.y = bounds.midY
+        case .down: rect.size.height /= 2
+        }
+        return rect
+    }
+
+    func showPreview(direction: Direction) {
         preview.frame = bounds
-        preview.destination = rect
+        preview.autoresizingMask = [.width, .height]
+        preview.direction = direction
         if preview.superview == nil { addSubview(preview, positioned: .above, relativeTo: nil) }
         preview.needsDisplay = true
     }
 
-    var previewFrame: NSRect? { preview.superview == nil ? nil : preview.destination.intersection(bounds) }
+    var previewFrame: NSRect? {
+        preview.superview == nil ? nil : Self.previewRect(for: preview.direction, in: bounds)
+    }
     func clearPreview() { preview.removeFromSuperview() }
 
     private func destination(_ sender: any NSDraggingInfo) -> (PaneDragHandle, Direction)? {
@@ -161,15 +173,48 @@ final class PaneDropView: NSView {
 
 @MainActor
 private final class PaneDropPreview: NSView {
-    var destination = NSRect.zero
+    var direction: Direction = .left
+    override var isOpaque: Bool { false }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override func draw(_ dirtyRect: NSRect) {
         NSBezierPath(rect: bounds).addClip()
-        let path = NSBezierPath(roundedRect: destination, xRadius: 5, yRadius: 5)
-        NSColor.controlAccentColor.withAlphaComponent(NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency ? 0.35 : 0.18).setFill()
+        let destination = PaneDropView.previewRect(for: direction, in: bounds)
+        // Like Ghostty, tint the entire half-pane without an inset, outline or extra seam.
+        let path = NSBezierPath(rect: destination)
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
+            NSColor.windowBackgroundColor.setFill()
+            path.fill()
+        }
+        NSColor.controlAccentColor.withAlphaComponent(
+            NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 0.4 : 0.3
+        ).setFill()
         path.fill()
-        NSColor.controlAccentColor.setStroke()
-        path.lineWidth = 2
-        path.stroke()
+
+        let arrow: String
+        let title: String
+        switch direction {
+        case .left, .right:
+            arrow = direction == .left ? "←" : "→"
+            title = direction == .left ? "Move to Left" : "Move to Right"
+        case .up, .down:
+            arrow = direction == .up ? "↑" : "↓"
+            title = direction == .up ? "Move Above" : "Move Below"
+        }
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+            .foregroundColor: NSColor.labelColor,
+        ]
+        var text = "\(arrow)  \(title)" as NSString
+        // Keep the directional cue legible even at the minimum pane size.
+        if text.size(withAttributes: attributes).width + 32 > destination.width { text = arrow as NSString }
+        let size = text.size(withAttributes: attributes)
+        guard destination.width >= size.width + 24, destination.height >= size.height + 20 else { return }
+        let badge = NSRect(x: destination.midX - (size.width + 20) / 2,
+                           y: destination.midY - (size.height + 12) / 2,
+                           width: size.width + 20, height: size.height + 12)
+        let badgePath = NSBezierPath(roundedRect: badge, xRadius: 6, yRadius: 6)
+        NSColor.windowBackgroundColor.setFill()
+        badgePath.fill()
+        text.draw(in: badge.insetBy(dx: 10, dy: 6), withAttributes: attributes)
     }
 }

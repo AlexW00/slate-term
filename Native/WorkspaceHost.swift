@@ -529,7 +529,11 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 source.onDragEnd?()
             }
             return .object(["accepted": .bool(accepted), "direction": direction.map { .string($0.rawValue) } ?? .null,
-                            "preview": .bool(containers.values.contains { $0.dropView.previewFrame != nil }), "canDrag": .bool(source.canDrag?() == true)])
+                            "preview": .bool(containers.values.contains { $0.dropView.previewFrame != nil }),
+                            "previewPanes": .array(containers.compactMap { id, container in
+                                container.dropView.previewFrame == nil ? nil : .string(id.description)
+                            }),
+                            "canDrag": .bool(source.canDrag?() == true)])
         case "debug.paneTypeMenu" where integration:
             let menu: NSMenu
             if params["pane"] != nil, let container = containers[try targetPaneID(params)] { menu = container.makeTypeMenu() }
@@ -1071,11 +1075,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
 
     private func previewPaneMove(source: PaneDragHandle, target: PaneID, direction: Direction) {
         clearPaneMovePreviews()
-        guard let next = proposedMove(source: source, target: target, direction: direction),
-              let pane = containers.first(where: { $0.value.dragHandle === source })?.key,
-              let tab = next.tabs.first(where: { $0.layout.paneIDs.contains(pane) }),
-              let frame = paneMoveFrames(layout: tab.layout, tab: tab.id)?[pane] else { return }
-        for id in tab.layout.paneIDs { containers[id]?.dropView.showPreview(windowRect: frame) }
+        guard proposedMove(source: source, target: target, direction: direction) != nil else { return }
+        containers[target]?.dropView.showPreview(direction: direction)
     }
 
     @discardableResult
