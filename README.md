@@ -8,26 +8,26 @@ Implemented:
 
 - Real, pinned libghostty terminal surfaces in AppKit windows.
 - Native tabs and nested `NSSplitViewController` panes, directional focus, zoom, and equalization.
-- Shared pane headers with type, a live title centered on the full panel width, a copy-ID button for CLI `--pane` targeting, and a close control using the existing confirmation policy. Titles stay centered and truncate before overlapping the controls in narrow panes. Click the title once to edit it inline; Enter or clicking away saves, and Escape cancels. Manual names persist and override plugin/browser/terminal updates. Clear the name to restore automatic titles.
+- Shared pane headers with type, a live title centered on the full panel width, optional command-backed plugin buttons, and a close control using the existing confirmation policy. Titles stay centered and truncate before overlapping the controls in narrow panes. Click the title once to edit it inline; Enter or clicking away saves, and Escape cancels. Manual names persist and override plugin/browser/terminal updates. Clear the name to restore automatic titles. **Copy Pane ID** is available in the command picker/Workspace menu and can be assigned a shortcut.
 - A six-dot grip to the left of each pane type: drag to another pane’s left/right/top/bottom edge to move the existing pane within its tab. The highlight previews its new position; Escape or an invalid drop cancels. Click the grip for an accessible destination menu. Live terminal sessions and web content are retained. Unzoom before moving; cross-tab/window moves are not supported.
 - A dropdown beside each pane type, plus a native Pane menu, for type changes without replacing pane identity or layout. Switching warns that the current state is discarded; “Don’t show again” remembers your choice separately from close warnings.
 - Real WebKit browsers with navigation, evaluation, screenshots, bounded DOM snapshots, click/fill/select/scroll and condition waits; isolated plugin web views with a scoped bridge.
 - Pure Swift workspace model: monotonic IDs, split/close/focus, terminal focus history, fractions, tab groups, validated JSON roundtrips.
-- Shared command registry for menus, default shortcuts, and CLI actions.
+- Shared command registry for menus, default shortcuts, and CLI actions; a keyboard-first **⌘K command picker** with native Liquid Glass, fuzzy search, context-aware availability, and built-in/plugin commands.
 - Private per-instance Unix control socket with same-user `LOCAL_PEERCRED`, JSON-RPC handshake, bounded framing/output, and nonblocking server I/O.
 - Bundled Swift Argument Parser CLI, terminal self-identification, literal input, protocol-aware key taps, bounded screen capture and authenticated shell run/condition waits.
 - Typed TOML settings with live font/theme/shortcut reload, last-valid retention, offline validation, and restart diagnostics.
 - Private, atomic workspace restoration with single-writer ownership, native tab order, and corruption-preserving recovery (never placeholder views).
 - Native terminal input/composition, mouse input, clipboard confirmation, and token-bound zsh context reporting.
-- Trusted plugin registration, pane/tab/global instances, private persisted storage, bounded process logs, restart supervision and owned-group cleanup after GUI crashes.
+- Trusted plugins can contribute on-demand executable commands, panels, or both. App-local shortcuts, namespaced settings, pane/tab/global panel instances, private persisted storage, bounded process logs, supervision and owned-group cleanup after GUI crashes.
 - Bounded resumable event polling/streaming, native source attribution, scoped plugin subscriptions, directed delivery and cancellation.
 - Unit, socket, native lifecycle, CLI-driven restart/configuration, production-zsh, and regression-mutation checks.
 
-The expanded whole-application suite passed all 25 gates, including 77 Swift tests, with current source/binary hashes recorded. Focused independent code and visual reviews found no remaining actionable issues. Manual IME/accessibility, long-use soak and wider platform coverage remain unverified. Capture is current-screen text, not an isolated last-command stdout stream. See [automation contracts and limits](docs/automation.md) and the [verification ledger](docs/verification.md).
+The sequential whole-application suite records source/binary hashes in `artifacts/verification.json` only after every gate passes without source changes. Consult the verification ledger and current run artifacts rather than treating historical results as certification of a later working tree. Manual IME/accessibility, long-use soak and wider platform coverage remain unverified. Capture is current-screen text, not an isolated last-command stdout stream. See [automation contracts and limits](docs/automation.md) and the [verification ledger](docs/verification.md).
 
 Core remains terminal-agnostic: no tmux adapter, session discovery, command parsing, or tmux runtime dependency. Extensions implement tool-specific integration using the generic bridge, managed backend, CLI/IPC, input/capture, and events. Isolated tmux fixtures verify compatibility only.
 
-See [trusted plugin panels](docs/plugins.md) for registration, scopes, the page API and supervision limits, and [workspace events](docs/events.md) for subscriptions, provenance and cursor recovery.
+See [trusted plugins](docs/plugins.md) for commands, panels, settings and supervision, the [command picker](docs/command-picker.md), and [workspace events](docs/events.md). Capability audits document [native UI/CLI layout parity](docs/layout-cli-audit.md) and [plugin integration/hooks](docs/plugin-integration-audit.md), including proposed next APIs and current limitations.
 
 Pane titles follow terminal process/context information, browser document titles, and plugin document titles or `workspace.setTitle(title)`. Passing `null` restores a plugin's document title. macOS can redact process environments; authenticated zsh reports supply ownership for foreground-process sampling, while unavailable process metadata falls back to the configured shell and engine title.
 
@@ -76,7 +76,7 @@ slate-term config validate --file ~/.config/slate-term/config.toml
 
 External shells must pass `--socket <path>` or set `SLATE_TERM_SOCKET`. Socket files live under `~/Library/Application Support/SlateTerm/control/`; the host accepts only the same user. This is intentionally a powerful local interface, like a tmux socket.
 
-`--pane`/`--tab` override the corresponding `SLATE_TERM_PANE_ID`/`SLATE_TERM_TAB_ID` defaults. An explicit tab also suppresses an inherited pane target. Closing a potentially busy terminal requires `--force` or confirmation in the native UI. All current CLI responses are JSON.
+`--pane`/`--tab` override the corresponding `SLATE_TERM_PANE_ID`/`SLATE_TERM_TAB_ID` defaults. An explicit tab suppresses an inherited pane target; an explicit pane suppresses an inherited tab target. Closing a potentially busy terminal requires `--force` or confirmation in the native UI. All current CLI responses are JSON.
 
 ## Configuration
 
@@ -104,6 +104,8 @@ bash scripts/verify-pane-movement-native.sh # drop geometry and native preview h
 python3 scripts/verify-pane-movement.py  # native drop callbacks, retained content, menu, previews and persistence
 python3 scripts/verify-plugins.py        # actual modules/bridge/storage/restoration/header controls
 python3 scripts/verify-plugin-services.py
+python3 scripts/verify-plugin-commands.py
+python3 scripts/verify-command-picker.py
 bash scripts/verify-plugin-process.sh
 python3 scripts/verify-plugin-worker.py
 bash scripts/verify-plugin-listener.sh

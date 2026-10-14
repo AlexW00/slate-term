@@ -52,9 +52,10 @@ with tempfile.TemporaryDirectory(prefix="slate-pane-titles-", dir="/tmp") as tem
                 assert header["titleCentered"], header
                 assert abs(header["titleCenterX"] - header["headerWidth"] / 2) < 0.5, header
                 assert header["titleLeadingX"] >= header["typeTrailingX"] + 7.5, header
-                assert header["titleTrailingX"] <= header["copyIDLeadingX"] - 5.5, header
+                assert header["titleTrailingX"] <= header["actionsLeadingX"] - 5.5, header
                 assert header["titleTrailingX"] > header["titleLeadingX"], header
-                assert header["copyIDVisible"] and header["closeVisible"] and header["dragHandleVisible"], header
+                assert header["actionsBeforeClose"] and header["closeVisible"] and header["dragHandleVisible"], header
+                assert header["headerActions"] == [], 'No built-in copy button should remain'
                 return header
 
             def capture(name):
@@ -99,7 +100,9 @@ with tempfile.TemporaryDirectory(prefix="slate-pane-titles-", dir="/tmp") as tem
 
             long_title = "A deliberately long panel title — 日本語 — " * 8
             rpc("debug.paneHeader", pane="p1", rename=long_title)
-            assert check("p1")["title"] == long_title
+            # Manual names normalize surrounding whitespace in Workspace.setManualTitle.
+            header = check("p1")
+            assert header["title"] == long_title.strip(), header
             for fraction in [0.25, 0.75, 0.5]:
                 rpc("debug.divider", tab="t1", fraction=fraction)
                 check("p1")

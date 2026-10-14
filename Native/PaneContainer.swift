@@ -1,15 +1,29 @@
 import AppKit
 import SlateTermCore
 
+struct PaneHeaderAction {
+    let id: String
+    let title: String
+    let symbol: String
+    let enabled: Bool
+    let revision: UUID
+    let perform: () -> Void
+
+    func hasSamePresentation(as other: Self) -> Bool {
+        id == other.id && title == other.title && symbol == other.symbol && enabled == other.enabled && revision == other.revision
+    }
+}
+
 /// Stable chrome around retained content; split reparenting never recreates a surface.
 @MainActor
 final class PaneContainer: NSViewController, NSTextFieldDelegate {
     let content: NSViewController
     private let typeName: String
     private let typeID: String
-    private let paneID: PaneID
-    private let copyIDButton = PaneHeaderButton()
-    private var copyPasteboard = NSPasteboard.general
+    private let actionStrip = NSStackView()
+    private var headerActions: [PaneHeaderAction] = []
+    private var actionCapacity = -1
+    private struct ActionToken { let id: String; let revision: UUID }
     private let typeButton = PaneHeaderButton()
     private let titleField = PaneTitleField(string: "")
     private let closeButton = PaneHeaderButton()
@@ -26,11 +40,10 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate {
     var typeChoices: (() -> [(name: String, id: String)])?
     var onChangeType: ((String) -> Void)?
 
-    init(content: NSViewController, type: String, typeID: String, paneID: PaneID) {
+    init(content: NSViewController, type: String, typeID: String) {
         self.content = content
         self.typeName = type
         self.typeID = typeID
-        self.paneID = paneID
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { nil }
@@ -71,13 +84,9 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate {
         typeButton.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
         titleField.setContentHuggingPriority(.defaultLow, for: .horizontal)
         titleField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        copyIDButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)?.withSymbolConfiguration(.init(pointSize: 10, weight: .medium))
-        copyIDButton.isBordered = false
-        copyIDButton.setButtonType(.momentaryPushIn)
-        copyIDButton.target = self
-        copyIDButton.action = #selector(copyPaneID)
-        copyIDButton.setAccessibilityLabel("Copy Panel ID: \(paneID.description)")
-        copyIDButton.toolTip = "Copy Panel ID"
+        actionStrip.orientation = .horizontal
+        actionStrip.spacing = 2
+        actionStrip.setContentHuggingPriority(.required, for: .horizontal)
         closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close Pane")?.withSymbolConfiguration(.init(pointSize: 10, weight: .medium))
         closeButton.isBordered = false
         closeButton.setButtonType(.momentaryPushIn)
@@ -85,13 +94,13 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate {
         closeButton.action = #selector(closePane)
         closeButton.setAccessibilityLabel("Close \(typeName) Pane")
         closeButton.toolTip = "Close Pane"
-        for child in [dragHandle, typeButton, titleField, copyIDButton, closeButton] { child.translatesAutoresizingMaskIntoConstraints = false; header.addSubview(child) }
+        for child in [dragHandle, typeButton, titleField, actionStrip, closeButton] { child.translatesAutoresizingMaskIntoConstraints = false; header.addSubview(child) }
         for child in [header, content.view] { child.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(child) }
         // Fill the largest symmetric title region without compressing the type control.
         let preferredTitleWidth = titleField.widthAnchor.constraint(equalTo: header.widthAnchor)
         preferredTitleWidth.priority = .init(500)
         let titleLeadingLimit = titleField.leadingAnchor.constraint(greaterThanOrEqualTo: typeButton.trailingAnchor, constant: 8)
-        let titleTrailingLimit = titleField.trailingAnchor.constraint(lessThanOrEqualTo: copyIDButton.leadingAnchor, constant: -6)
+        let titleTrailingLimit = titleField.trailingAnchor.constraint(lessThanOrEqualTo: actionStrip.leadingAnchor, constant: -6)
         // At the split's 80-point minimum there may be no title space at all.
         // Collapse the title rather than breaking its center or required control constraints.
         titleLeadingLimit.priority = .init(999)
@@ -103,7 +112,7 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate {
             typeButton.leadingAnchor.constraint(equalTo: dragHandle.trailingAnchor, constant: 3), typeButton.centerYAnchor.constraint(equalTo: header.centerYAnchor), typeButton.widthAnchor.constraint(lessThanOrEqualTo: header.widthAnchor, multiplier: 0.35),
             titleField.centerXAnchor.constraint(equalTo: header.centerXAnchor), titleField.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             titleField.widthAnchor.constraint(greaterThanOrEqualToConstant: 0),
-            copyIDButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -2), copyIDButton.centerYAnchor.constraint(equalTo: header.centerYAnchor), copyIDButton.widthAnchor.constraint(equalToConstant: 22), copyIDButton.heightAnchor.constraint(equalToConstant: 22),
+            actionStrip.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -2), actionStrip.centerYAnchor.constraint(equalTo: header.centerYAnchor), actionStrip.heightAnchor.constraint(equalToConstant: 22),
             closeButton.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -5), closeButton.centerYAnchor.constraint(equalTo: header.centerYAnchor), closeButton.widthAnchor.constraint(equalToConstant: 22), closeButton.heightAnchor.constraint(equalToConstant: 22),
             content.view.topAnchor.constraint(equalTo: header.bottomAnchor), content.view.leadingAnchor.constraint(equalTo: view.leadingAnchor), content.view.trailingAnchor.constraint(equalTo: view.trailingAnchor), content.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
@@ -173,25 +182,83 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate {
         guard let type = sender.representedObject as? String else { return }
         onChangeType?(type)
     }
-    @objc private func copyPaneID() {
-        copyPasteboard.clearContents()
-        guard copyPasteboard.setString(paneID.description, forType: .string) else { return }
-        copyIDButton.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil)?.withSymbolConfiguration(.init(pointSize: 10, weight: .medium))
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
-            self?.copyIDButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)?.withSymbolConfiguration(.init(pointSize: 10, weight: .medium))
-        }
-    }
     @objc private func closePane() { onClose?() }
     func performClose() { closeButton.performClick(nil) }
 
-    /// Exercise the real button without overwriting the user's clipboard.
-    func copyIDForTesting() -> String? {
+    func setHeaderActions(_ actions: [PaneHeaderAction]) {
         _ = view
-        let pasteboard = NSPasteboard.withUniqueName()
-        copyPasteboard = pasteboard
-        defer { copyPasteboard = .general; pasteboard.releaseGlobally() }
-        copyIDButton.performClick(nil)
-        return pasteboard.string(forType: .string)
+        let unchanged = headerActions.count == actions.count && zip(headerActions, actions).allSatisfy { $0.0.hasSamePresentation(as: $0.1) }
+        headerActions = actions
+        if !unchanged { rebuildHeaderActions() }
+    }
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        let capacity = header.bounds.width >= 500 ? 3 : header.bounds.width >= 320 ? 1 : header.bounds.width >= 180 ? 0 : -1
+        if capacity != actionCapacity { actionCapacity = capacity; rebuildHeaderActions() }
+    }
+    private func rebuildHeaderActions() {
+        for child in actionStrip.arrangedSubviews { actionStrip.removeArrangedSubview(child); child.removeFromSuperview() }
+        guard actionCapacity >= 0 else { return }
+        func button(_ title: String, symbol: String, id: String, action: Selector, enabled: Bool = true, revision: UUID? = nil) -> NSButton {
+            let button = PaneHeaderButton()
+            button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) ?? NSImage(systemSymbolName: "puzzlepiece.extension", accessibilityDescription: nil)
+            button.symbolConfiguration = .init(pointSize: 10, weight: .medium)
+            button.identifier = NSUserInterfaceItemIdentifier(id)
+            button.pluginRevision = revision
+            button.isBordered = false
+            button.setButtonType(.momentaryPushIn)
+            button.target = self
+            button.action = action
+            button.isEnabled = enabled
+            button.toolTip = title
+            button.setAccessibilityLabel(title)
+            button.widthAnchor.constraint(equalToConstant: 22).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 22).isActive = true
+            return button
+        }
+        for action in headerActions.prefix(actionCapacity) {
+            actionStrip.addArrangedSubview(button(action.title, symbol: action.symbol, id: action.id, action: #selector(performHeaderAction(_:)), enabled: action.enabled, revision: action.revision))
+        }
+        if headerActions.count > actionCapacity {
+            actionStrip.addArrangedSubview(button("More Plugin Actions", symbol: "ellipsis", id: "overflow", action: #selector(showHeaderActions(_:))))
+        }
+    }
+    @objc private func performHeaderAction(_ sender: NSButton) {
+        guard let revision = (sender as? PaneHeaderButton)?.pluginRevision else { return }
+        performHeaderAction(id: sender.identifier?.rawValue, revision: revision)
+    }
+    @objc private func performHeaderMenuAction(_ sender: NSMenuItem) {
+        // A native menu can keep tracking across a registration replacement.
+        // Never turn an old visible menu item into a newly registered action.
+        guard let token = sender.representedObject as? ActionToken else { return }
+        performHeaderAction(id: token.id, revision: token.revision)
+    }
+    private func performHeaderAction(id: String?, revision: UUID) {
+        guard let action = headerActions.first(where: { $0.id == id && $0.revision == revision }), action.enabled else { return }
+        action.perform()
+    }
+    func headerActionMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        for action in headerActions.dropFirst(max(0, actionCapacity)) {
+            let item = menu.addItem(withTitle: action.title, action: #selector(performHeaderMenuAction(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = ActionToken(id: action.id, revision: action.revision)
+            item.isEnabled = action.enabled
+            item.image = NSImage(systemSymbolName: action.symbol, accessibilityDescription: nil) ?? NSImage(systemSymbolName: "puzzlepiece.extension", accessibilityDescription: nil)
+        }
+        return menu
+    }
+    @objc private func showHeaderActions(_ sender: NSButton) { headerActionMenu().popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.maxY), in: sender) }
+
+    func clickHeaderActionForTesting(_ id: String) throws {
+        view.layoutSubtreeIfNeeded()
+        if let button = actionStrip.arrangedSubviews.first(where: { $0.identifier?.rawValue == id }) as? NSButton { button.performClick(nil); return }
+        if actionStrip.arrangedSubviews.contains(where: { $0.identifier?.rawValue == "overflow" }) {
+            let menu = headerActionMenu()
+            if let index = menu.items.firstIndex(where: { ($0.representedObject as? ActionToken)?.id == id }) { menu.performActionForItem(at: index); return }
+        }
+        throw RPCFailure(code: -32602, message: "Header action is not visible")
     }
 
     func editTitleForTesting(_ text: String?, finish: String?) throws {
@@ -218,11 +285,12 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate {
         return .object(["type": .string(typeName), "title": .string(latestTitle), "height": .number(header.bounds.height),
                  "headerWidth": .number(header.bounds.width), "titleCenterX": .number(titleRect.midX),
                  "titleLeadingX": .number(titleRect.minX), "titleTrailingX": .number(titleRect.maxX),
-                 "typeTrailingX": .number(typeButton.frame.maxX), "copyIDLeadingX": .number(copyIDButton.frame.minX),
+                 "typeTrailingX": .number(typeButton.frame.maxX), "actionsLeadingX": .number(actionStrip.frame.minX),
                  "titleCentered": .bool(titleField.alignment == .center),
                  "editing": .bool(titleField.currentEditor() != nil), "draft": .string(titleField.currentEditor()?.string ?? titleField.stringValue),
-                 "copyIDVisible": .bool(copyIDButton.frame.minX >= 0 && copyIDButton.frame.maxX <= closeButton.frame.minX && !copyIDButton.isHidden),
-                 "copyIDTooltip": .string(copyIDButton.toolTip ?? ""),
+                 "headerActions": .array(headerActions.map { .object(["id": .string($0.id), "enabled": .bool($0.enabled)]) }),
+                 "visibleHeaderActions": .array(actionStrip.arrangedSubviews.compactMap { $0.identifier?.rawValue }.map(JSONValue.string)),
+                 "actionsBeforeClose": .bool(actionStrip.frame.maxX <= closeButton.frame.minX),
                  "dragHandleVisible": .bool(dragHandle.frame.minX >= 0 && dragHandle.frame.maxX <= typeButton.frame.minX && !dragHandle.isHidden),
                  "closeVisible": .bool(closeButton.frame.minX >= 0 && closeButton.frame.maxX <= header.bounds.width && !closeButton.isHidden), "attached": .bool(header.window != nil)])
     }
@@ -230,6 +298,7 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate {
 
 @MainActor
 private final class PaneHeaderButton: NSButton {
+    var pluginRevision: UUID?
     override func resetCursorRects() {
         super.resetCursorRects()
         if isEnabled { addCursorRect(bounds, cursor: .pointingHand) }

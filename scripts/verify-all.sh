@@ -29,6 +29,8 @@ for iteration in 1 2 3; do
 done
 run config-cli python3 scripts/verify-config-cli.py
 run settings python3 scripts/verify-settings.py
+run settings-window python3 scripts/verify-settings-window.py
+run command-picker python3 scripts/verify-command-picker.py
 run window-recovery python3 scripts/verify-window-recovery.py
 run appearance python3 scripts/verify-appearance.py
 run palettes python3 scripts/verify-palettes.py
@@ -41,6 +43,7 @@ run pane-movement python3 scripts/verify-pane-movement.py
 run plugins python3 scripts/verify-plugins.py
 run plugin-services python3 scripts/verify-plugin-services.py
 run plugin-commands python3 scripts/verify-plugin-commands.py
+run plugin-header-buttons python3 scripts/verify-plugin-header-buttons.py
 run events python3 scripts/verify-events.py
 run extension-interop python3 scripts/verify-extension-interop.py
 run whitespace git diff --check

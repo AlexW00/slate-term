@@ -2,7 +2,29 @@
 
 The expanded end-to-end gate is `bash scripts/verify-all.sh`. It runs every check below sequentially, records each successful step in `artifacts/verification-checks.txt`, and writes `artifacts/verification.json` **only after all steps pass**. The manifest includes source and app/CLI binary SHA-256 hashes. Source changes during the run invalidate completion. A stale manifest does not certify newer edits.
 
-**Last full-suite checkpoint (before subsequent UI changes):** the expanded combined run passed on **2026-10-14 at 07:41:31 UTC** (`artifacts/complete-verification.log`), all **25 gates**, including **77 Swift tests** (53 core, 8 IPC, 16 settings) and three regression mutants. All **94 source hashes and 2 executable hashes** were rechecked against the working tree, including by an independent reviewer. This establishes the automated coverage below, not release certification or manual/platform coverage. [Historical evidence](verification-history.md) retains the earlier terminal/configuration slice.
+## Latest picker and header-button revision
+
+The complete sequential suite passed on **2026-10-14 at 13:36:08 UTC**: **37 gates**, including **120 Swift tests** (70 core, 8 IPC, 42 settings). Evidence: `artifacts/header-buttons-full-suite.log`, `artifacts/header-buttons-final-targeted.log`, and `artifacts/verification.json`. All recorded source and executable hashes matched the working tree/binaries when rechecked after completion.
+
+The native picker gate covers window attachment, centered placement and compact resizing, tiny-owner dismissal, owner-close observer cleanup, two-click execution (including ordinary delayed clicks and double clicks), keyboard execution, hidden unavailable actions, captured targets, title-edit cancellation, and copy-ID. The menu gate verifies Copy Pane ID's intentionally empty default binding and actual custom-shortcut dispatch without changing layout/focus or using the user's clipboard.
+
+Header-button checks cover all/built-in/widget type selectors, clicked-pane routing across focus/window changes, direct and overflow dispatch, disabled busy actions, persistence, live replacement/removal, unregister cancellation, and no hidden service. The native header fixture also verifies that unchanged/unrelated refreshes preserve valid menu actions while registration replacement invalidates stale ones.
+
+Independent rendered review found no visible issues in the inspected regular/compact light/dark picker states or normal/narrow contributed headers. Full manual VoiceOver/IME, multi-display/offscreen-window and soak testing remain release limitations. Concurrent unrelated work was preserved.
+
+## Command-plugin and picker follow-ups
+
+Before the subsequent picker-interaction/header-button revision, the complete sequential suite passed on **2026-10-14 at 12:19:53 UTC**: **36 gates**, including **118 Swift tests** (68 core, 8 IPC, 42 settings). Evidence: `artifacts/followups-full-suite.log` and `artifacts/verification.json`. The recorded source hashes and both executable hashes were rechecked after completion; all matched. The whole-project checkpoint before the picker/audits is `1f80bde`; the verification manifest records the tested source and binary contents independently of commit boundaries.
+
+Native checks cover command-only/mixed plugins, command supervision/routing/settings, and the real Liquid Glass picker, including text input, keyboard/mouse execution, live catalog/busy states, frozen and windowless context, original editor cancellation, shortcut alternatives, and light/dark/context captures. Independent code reviews led to routing, lifetime, and focus corrections. Final independent visual review of all nine picker captures found no visible issues; it did not independently execute the full test suite.
+
+The first complete run exposed an existing pane-title fixture expecting trailing spaces even though `Workspace.setManualTitle` trims them. The assertion now checks that established normalization contract; the focused pane-title gate and subsequent complete run passed. No product title behavior was changed for that test correction.
+
+Full manual accessibility/IME, multi-display, and soak verification remain release limitations, not checks claimed by this run.
+
+## Earlier verification
+
+**Earlier full-suite checkpoint:** the expanded combined run passed on **2026-10-14 at 07:41:31 UTC** (`artifacts/complete-verification.log`), all **25 gates**, including **77 Swift tests** (53 core, 8 IPC, 16 settings) and three regression mutants. All **94 source hashes and 2 executable hashes** were rechecked against the working tree, including by an independent reviewer. This establishes the automated coverage below, not release certification or manual/platform coverage. [Historical evidence](verification-history.md) retains the earlier terminal/configuration slice.
 
 ## Subsequent menu and close-warning changes
 
@@ -29,6 +51,9 @@ The menu/close-warning work has its own native gate, `python3 scripts/verify-men
 | `verify-app.py` ×3 | CLI drives actual native tabs/splits/focus/dividers, layout geometry, stable surfaces, terminfo, isolated tmux compatibility and shell closure |
 | `verify-config-cli.py` | Offline configuration validation |
 | `verify-settings.py` | Live reload, native shortcuts, last-valid retention, tab reorder persistence, writer lease, restart and corruption recovery |
+| `verify-settings-window.py` | Native Settings navigation, shortcut recording/reset/conflicts, persistence, validation and captures |
+| `verify-command-picker.py` | Centered native Liquid Glass, search/text input, keyboard/two-click execution, hidden unavailable actions, stock copy-ID command, live catalog, focus/routing, shortcuts, windowless use and light/dark/context captures |
+| `verify-plugin-header-buttons.py` | Manifest all/built-in/widget selectors, clicked-pane routing, direct/overflow actions, busy state, no hidden service, persistence, replacement/removal and light/dark/narrow renders |
 | `verify-window-recovery.py` | Empty saved workspace opens a terminal without resetting IDs, windowless ⌘N/⌘T, creation from Settings, and idempotent Dock reopening |
 | `verify-appearance.py` | Light/dark/auto, original palette choices, rendering-option translation, Settings/TOML persistence, invalid-edit retention, unchanged live PTY, and native settings/terminal captures |
 | `verify-palettes.py` | All 25 bundled palettes in both modes, names-only custom imports, collision-safe copies, path rejection, custom rendering/snapshots, CLI/UI validation, explicit reload, and safe startup fallback |

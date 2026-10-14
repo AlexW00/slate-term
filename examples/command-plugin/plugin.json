@@ -1,6 +1,15 @@
 {
   "id": "tools",
   "title": "My Tools",
+  "headerButtons": [
+    {
+      "id": "split-left",
+      "title": "Split Left",
+      "symbol": "rectangle.lefthalf.inset.filled",
+      "command": "split-left",
+      "paneTypes": ["*"]
+    }
+  ],
   "commands": [
     {
       "id": "split-left",

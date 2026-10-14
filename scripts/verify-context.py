@@ -58,10 +58,10 @@ with tempfile.TemporaryDirectory(prefix="slate-context-", dir="/tmp") as tempora
 
             def check_copy(pane):
                 before = rpc("workspace.get")
-                header = rpc("debug.paneHeader", pane=pane, copyID=True)
-                assert header["copyIDVisible"] and header["closeVisible"], header
-                assert header["copyIDTooltip"] == "Copy Panel ID", header
-                assert header["copiedID"] == pane, header
+                header = rpc("debug.paneHeader", pane=pane)
+                assert header["closeVisible"] and header["headerActions"] == [], header
+                assert rpc('command.run', id='pane.copyID', pane=pane)['paneId'] == pane
+                assert rpc('debug.commandClipboard') == pane
                 assert rpc("workspace.get") == before, "Copy changed pane identity, layout or focus"
 
             try:
@@ -210,7 +210,7 @@ with tempfile.TemporaryDirectory(prefix="slate-context-", dir="/tmp") as tempora
             assert disposable not in [p["id"] for p in cli("panes", "list")]
             after = next(p for p in rpc("debug.inspect")["panes"] if p["paneId"] == "p1")
             assert after["surface"] == surface and after["terminalFocus"], "Header close stole focus or recreated a sibling terminal"
-            print("PASS pane headers: type/title, foreground command and prompt updates, browser document title, copy ID/tooltip across tabs and type replacement without focus/layout changes, close control and sibling preservation")
+            print("PASS pane headers: type/title, foreground command and prompt updates, browser document title, copy-ID command across tabs and type replacement without focus/layout changes, close control and sibling preservation")
             print("PASS generic terminal run/wait: actual zsh, multiline quoting, nonzero status, timeout without process termination, output conditions and unknown-prompt refusal")
             print("PASS context: real zsh prompt/running/cwd/status, original startup files, monotonic session reports, token rejection, web-independent active terminal, replacement and integration-off unknown state")
         finally:

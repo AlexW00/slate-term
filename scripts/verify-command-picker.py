@@ -1,0 +1,277 @@
+#!/usr/bin/env python3
+"""Exercise the real native Liquid Glass picker and capture its rendered states."""
+import json
+import os
+import pathlib
+import subprocess
+import tempfile
+import time
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+APP = ROOT / '.derived/Build/Products/Debug/Slate Terminal.app/Contents/MacOS/Slate Terminal'
+CLI = APP.parent.parent / 'Helpers/slate-term'
+ARTIFACTS = ROOT / 'artifacts'
+
+
+def eventually(label, check, timeout=12):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if check():
+            return
+        time.sleep(.05)
+    raise AssertionError(label)
+
+
+with tempfile.TemporaryDirectory(prefix='slate-picker-', dir='/tmp') as temporary:
+    directory = pathlib.Path(temporary)
+    config = directory / 'config.toml'
+    ready = directory / 'ready'
+    config.write_text('[appearance]\ntheme = "dark"\n')
+    env = {k: v for k, v in os.environ.items() if not k.startswith('SLATE_TERM_')}
+    env.update(SLATE_TERM_INTEGRATION='1', SLATE_TERM_STATE_DIR=temporary,
+               SLATE_TERM_CONFIG_FILE=str(config), SLATE_TERM_SOCKET_FILE=str(ready))
+    ARTIFACTS.mkdir(exist_ok=True)
+    with (ARTIFACTS / 'command-picker-process.log').open('w') as log:
+        app = subprocess.Popen([str(APP)], env=env, stdout=log, stderr=log, start_new_session=True)
+        try:
+            eventually('App ready', lambda: ready.exists() and app.poll() is None)
+            env['SLATE_TERM_SOCKET'] = ready.read_text().strip()
+
+            def cli(*args):
+                result = subprocess.run([str(CLI), *args, '--json'], env=env, capture_output=True, text=True, timeout=35)
+                assert result.returncode == 0, result.stderr
+                return json.loads(result.stdout)
+
+            def rpc(method, **params):
+                return cli('rpc', method, '--params', json.dumps(params))
+
+            def picker(**params):
+                return rpc('debug.commandPicker', **params)
+
+            def key(chord, **params):
+                return rpc('debug.key', chord=chord, picker=True, dispatch=True, **params)
+
+            def activate_workspace(tab='t1'):
+                rpc('debug.activate', tab=tab)
+                def active():
+                    state = rpc('debug.inspect')
+                    return state['applicationActive'] and any(w['tabId'] == tab and w['key'] for w in state['windows'])
+                eventually('Owned workspace activation before input', active)
+
+            def capture(name, context=False):
+                # Allow native appearance/material transitions to settle before captures.
+                time.sleep(.7)
+                try:
+                    rpc('debug.screenshot', picker=True, pickerContext=True, pickerCrop=not context, path=str(ARTIFACTS / name))
+                except AssertionError:
+                    print('PICKER_CAPTURE_STATE', picker(), flush=True)
+                    raise
+
+            # A real command fixture, not a fake built-in action.
+            marker = directory / 'context.json'
+            manifest = directory / 'plugin.json'
+            manifest.write_text(json.dumps(dict(id='project-tools', title='Project Tools', commands=[
+                dict(id='inspect', title='Inspect Workspace', executable='/bin/sh',
+                     arguments=['-c', '"$SLATE_TERM_CLI" context get > "$MARKER"'], environment={'MARKER': str(marker)})])))
+            cli('plugins', 'register', '--manifest', str(manifest))
+            cli('panes', 'send', '--pane', 'p1', '--text', "printf '\\033[36mSlate Terminal\\033[0m  /  workspace\\n\\n  Ready for your next command.\\n'\r")
+            activate_workspace()
+            rpc('debug.key', chord='cmd+k')
+            state = picker()
+            assert state['visible'] and state['glass']
+            assert state['attachedToSource'] and state['insideSource'] and abs(state['centerOffsetX']) < .5 and abs(state['centerOffsetY']) < .5, state
+            assert state['executeLabel'] == 'Execute Command'
+            assert all(r['enabled'] for r in state['results'])
+            assert not any(r['id'].startswith('browser.') or r['id'] == 'tab.select8' for r in state['results'])
+            assert any(r['id'] == 'plugin.project-tools.inspect' for r in state['results'])
+            assert not any(r['id'] in ['command.picker', 'pane.type', 'pane.focus', 'tab.focus'] for r in state['results'])
+            capture('command-picker-dark.png')
+            capture('command-picker-dark-context.png', context=True)
+            state = picker(sourceWidth=500, sourceHeight=400)
+            assert state['attachedToSource'] and state['insideSource'] and abs(state['centerOffsetX']) < .5 and abs(state['centerOffsetY']) < .5, state
+            capture('command-picker-compact-context.png', context=True)
+            picker(sourceWidth=1000, sourceHeight=650)
+            # First click selects, a subsequent click executes; editing the query resets it.
+            before_copy = rpc('workspace.get')
+            picker(query='copy pane id')
+            picker(clickRow=0)
+            clicked = picker()
+            assert clicked['visible'] and clicked['searchFocused'], (clicked, rpc('debug.commandClipboard'))
+            assert rpc('debug.commandClipboard') is None
+            picker(query='copy pane')
+            picker(clickRow=0)
+            assert picker()['visible'], 'A new query must reset click-to-execute state'
+            picker(clickRow=0, doubleClick=True)
+            assert not picker()['visible'] and rpc('debug.commandClipboard') == 'p1'
+            assert rpc('workspace.get') == before_copy
+            rpc('debug.key', chord='cmd+k')
+            key('s')
+            eventually('Search field accepts real typing', lambda: picker()['query'] == 's')
+            state = picker(query='split')
+            assert len(state['results']) == 4, state
+            assert state['selected'] == 'split.right'
+            key('down')
+            assert picker()['selected'] == 'split.down'
+            capture('command-picker-search.png')
+            before = len(rpc('workspace.get')['panes'])
+            key('return')
+            assert not picker()['visible']
+            assert len(rpc('workspace.get')['panes']) == before + 1
+
+            rpc('debug.key', chord='cmd+k')
+            state = picker(query='project')
+            assert [r['id'] for r in state['results']] == ['plugin.project-tools.inspect']
+            capture('command-picker-plugin.png')
+            target = rpc('workspace.get')['tabs'][0]['focusedPane']
+            other = cli('tabs', 'new')['tabId']
+            assert picker()['visible'] and picker()['searchFocused'], 'Background mutation must not steal picker input'
+            key('return')
+            eventually('Picker invokes plugin command', marker.exists)
+            assert json.loads(marker.read_text())['focusedPaneId'] == target
+            cli('tabs', 'close', '--tab', other, '--force')
+            activate_workspace()
+            rpc('debug.key', chord='cmd+k')
+            picker(query='browser')
+            assert picker()['results'] == [], 'Browser commands must be hidden for terminals'
+            capture('command-picker-unavailable.png')
+            key('return')
+            assert picker()['visible'], 'Empty results must not execute or close'
+            picker(query='split')
+            picker(clickRow=0)
+            assert picker()['visible'] and picker()['searchFocused']
+            key('down')
+            key('up')
+            picker(clickRow=0)
+            assert picker()['visible'], 'Keyboard navigation must reset mouse activation'
+            key('s')
+            assert picker()['query'] == 'splits'
+            picker(query='no-such-command-xyz')
+            assert picker()['results'] == []
+            capture('command-picker-empty.png')
+            key('escape')
+            assert not picker()['visible']
+            assert any(p['terminalFocus'] for p in rpc('debug.inspect')['panes'])
+
+            rpc('debug.key', chord='cmd+k')
+            key('cmd+k')
+            assert not picker()['visible'], 'Shortcut should toggle picker from its search field'
+            original_title = next(p for p in rpc('workspace.get')['panes'] if p['id'] == target).get('manualTitle')
+            rpc('debug.paneHeader', pane=target, beginRename=True, draft='Uncommitted name')
+            rpc('debug.key', chord='cmd+k')
+            key('escape')
+            header = rpc('debug.paneHeader', pane=target)
+            assert header['editing'] and header['draft'] == 'Uncommitted name', header
+            rpc('debug.paneHeader', pane=target, finish='cancel')
+            assert next(p for p in rpc('workspace.get')['panes'] if p['id'] == target).get('manualTitle') == original_title
+            # Live catalog changes should neither stale-select nor execute removed commands.
+            rpc('debug.key', chord='cmd+k')
+            picker(query='project')
+            cli('plugins', 'unregister', 'project-tools')
+            assert picker()['results'] == []
+            cli('plugins', 'register', '--manifest', str(manifest))
+            assert picker()['selected'] == 'plugin.project-tools.inspect'
+            picker(dismiss=True)
+
+            # Light appearance uses the same native glass, not a separate opaque mock.
+            config.write_text('[appearance]\ntheme = "light"\n')
+            rpc('config.reload')
+            rpc('debug.key', chord='cmd+k')
+            picker(query='')
+            capture('command-picker-light.png')
+            capture('command-picker-light-context.png', context=True)
+            picker(query='new tab')
+            capture('command-picker-light-search.png')
+            key('escape')
+            # A closed target becomes unavailable without redirecting the action.
+            rpc('debug.key', chord='cmd+k')
+            picker(query='split')
+            cli('panes', 'close', '--pane', target, '--force')
+            assert picker()['visible'] and picker()['results'] == []
+            key('escape')
+            # Running plugin commands update availability without reopening the picker.
+            rpc('plugins.register', manifest=dict(id='busy', title='Busy Fixture', commands=[
+                dict(id='wait', title='Wait Briefly', executable='/bin/sleep', arguments=['2'])]))
+            job = subprocess.Popen([str(CLI), 'command', 'run', 'plugin.busy.wait'], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            try:
+                eventually('Busy command running', lambda: any(r['state'] == 'running' for r in cli('plugins', 'status', 'busy')))
+                rpc('debug.key', chord='cmd+k')
+                assert picker(query='busy')['results'] == [], 'Running commands must be hidden'
+                stdout, stderr = job.communicate(timeout=10)
+                assert job.returncode == 0, stderr
+                eventually('Completed command reappears', lambda: len(picker()['results']) == 1)
+                picker(clickRow=0)
+                assert picker()['visible'], 'First mouse click must only select'
+                time.sleep(.7)
+                picker(clickRow=0)
+                assert not picker()['visible'], 'A later second click must execute without requiring double-click timing'
+                eventually('Mouse-invoked command finishes', lambda: cli('plugins', 'status', 'busy')[-1]['state'] == 'succeeded')
+            finally:
+                if job.poll() is None: job.terminate(); job.communicate(timeout=10)
+            # App command from picker and configurable shortcut/reset behavior.
+            rpc('debug.key', chord='cmd+k')
+            picker(query='settings')
+            assert picker()['selected'] == 'settings.open'
+            key('return')
+            assert not picker()['visible']
+            config.write_text('[appearance]\ntheme = "dark"\n[keybind]\n"cmd+k" = "unbound"\n"cmd+shift+k" = "command.picker"\n"cmd+alt+s" = "settings.open"\n')
+            rpc('config.reload')
+            cli('command', 'run', 'tab.focus', '--tab', 't1')
+            activate_workspace()
+            rpc('debug.key', chord='cmd+shift+k')
+            assert picker()['visible']
+            key('cmd+alt+s')
+            state = picker()
+            assert not state['visible'], ('Alternative Settings bindings must work outside workspace windows', state)
+            # No-window use still offers creation and application commands.
+            for tab in rpc('workspace.get')['tabs']:
+                cli('tabs', 'close', '--tab', tab['id'], '--force')
+            rpc('debug.key', chord='cmd+alt+s', menu=True)
+            # Capture of no workspace must remain empty if a background client creates one.
+            context_marker = directory / 'empty-context'
+            rpc('plugins.register', manifest=dict(id='context-fixture', title='Context Fixture', commands=[
+                dict(id='capture', title='Capture Target', executable='/bin/sh',
+                     arguments=['-c', 'printf "%s/%s" "${SLATE_TERM_TAB_ID-unset}" "${SLATE_TERM_PANE_ID-unset}" > "$MARKER"'],
+                     environment={'MARKER': str(context_marker)})]))
+            cli('command', 'run', 'command.picker')
+            picker(query='capture target')
+            background_tab = cli('command', 'run', 'window.new')['tabId']
+            assert picker()['visible']
+            key('return')
+            eventually('Windowless command completed', context_marker.exists)
+            assert context_marker.read_text() == 'unset/unset'
+            cli('tabs', 'close', '--tab', background_tab, '--force')
+            cli('command', 'run', 'command.picker')
+            picker(query='new tab')
+            cli('command', 'run', 'window.new')
+            key('return')
+            assert len(rpc('workspace.get')['groups']) == 2, 'Windowless New Tab must not join a newly created background window'
+            for tab in rpc('workspace.get')['tabs']:
+                cli('tabs', 'close', '--tab', tab['id'], '--force')
+            cli('command', 'run', 'command.picker')
+            state = picker(query='split')
+            assert state['visible'] and state['results'] == []
+            picker(query='new window')
+            assert picker()['selected'] == 'window.new'
+            key('return')
+            assert len(rpc('workspace.get')['tabs']) == 1
+            # Small owners dismiss instead of overflowing; closing the owner cleans up attachment/observation.
+            picker(show=True)
+            state = picker(sourceWidth=300, sourceHeight=200)
+            assert not state['visible'] and not state['trackingSource'], state
+            state = picker(sourceWidth=1000, sourceHeight=650, show=True)
+            assert state['visible'] and state['attachedToSource'], state
+            owner = rpc('workspace.get')['tabs'][0]['id']
+            cli('tabs', 'close', '--tab', owner, '--force')
+            state = picker()
+            assert not state['visible'] and not state['attachedToSource'] and not state['trackingSource'], state
+            print('PASS command picker: native glass, text input, search, keyboard selection/activation, plugin commands, context/busy availability, catalog refresh, themes, editor/frozen-target focus, two-click activation, copy-ID command, centered placement, hidden unavailable actions, shortcut remapping and windowless use.')
+        except Exception:
+            if ready.exists() and app.poll() is None:
+                print('PICKER_FAILURE_STATE', picker(), 'clipboard:', rpc('debug.commandClipboard'), flush=True)
+            raise
+        finally:
+            app.terminate()
+            try:
+                app.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                app.kill(); app.wait()

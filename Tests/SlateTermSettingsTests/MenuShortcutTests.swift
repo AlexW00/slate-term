@@ -4,7 +4,7 @@ import SlateTermCore
 
 @Test func workspaceMenuActionsHaveDistinctDefaultShortcuts() throws {
     let bindings = AppConfiguration.defaults.keyBindings
-    for id in CommandRegistry.commands.map(\.id) where !["pane.type", "pane.focus", "tab.focus"].contains(id) {
+    for id in CommandRegistry.commands.map(\.id) where !["pane.type", "pane.focus", "tab.focus", "pane.copyID"].contains(id) {
         #expect(bindings.values.contains(id), "Missing shortcut for \(id)")
     }
     #expect(bindings[try KeyChord.parse("cmd+alt+d")] == "split.left")
@@ -15,6 +15,9 @@ import SlateTermCore
     #expect(bindings[try KeyChord.parse("cmd+alt+down")] == "focus.down")
     #expect(bindings[try KeyChord.parse("cmd+shift+e")] == "layout.equalize")
     #expect(bindings[try KeyChord.parse("cmd+shift+r")] == "config.reload")
+    #expect(!bindings.values.contains("pane.copyID"))
+    let copyBinding = try AppConfiguration.parse("[keybind]\n'cmd+shift+i' = 'pane.copyID'")
+    #expect(copyBinding.keyBindings[try KeyChord.parse("cmd+shift+i")] == "pane.copyID")
     let customized = try AppConfiguration.parse("[keybind]\n'cmd+alt+left' = 'unbound'\n'cmd+shift+e' = 'split.left'")
     #expect(customized.keyBindings[try KeyChord.parse("cmd+alt+left")] == nil)
     #expect(customized.keyBindings[try KeyChord.parse("cmd+shift+e")] == "split.left")

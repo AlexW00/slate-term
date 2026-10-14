@@ -18,7 +18,7 @@ struct PaneTitlesGate {
         let root = NSViewController()
         root.view = NSView(frame: NSRect(x: 0, y: 0, width: 1000, height: 260))
         window.contentViewController = root
-        func pane(_ id: Int, type: String, typeID: String) -> PaneContainer {
+        func pane(type: String, typeID: String) -> PaneContainer {
             let content = NSViewController()
             let label = NSTextField(labelWithString: "\(type) content fixture")
             label.alignment = .center
@@ -30,15 +30,15 @@ struct PaneTitlesGate {
                 label.centerXAnchor.constraint(equalTo: content.view.centerXAnchor),
                 label.centerYAnchor.constraint(equalTo: content.view.centerYAnchor),
             ])
-            let pane = PaneContainer(content: content, type: type, typeID: typeID, paneID: PaneID(id))
+            let pane = PaneContainer(content: content, type: type, typeID: typeID)
             pane.onRename = { [weak pane] in pane?.setTitle($0) }
             root.addChild(pane)
             root.view.addSubview(pane.view)
             pane.view.translatesAutoresizingMaskIntoConstraints = false
             return pane
         }
-        let left = pane(1, type: "Terminal", typeID: "terminal")
-        let right = pane(2, type: "Browser", typeID: "browser")
+        let left = pane(type: "Terminal", typeID: "terminal")
+        let right = pane(type: "Browser", typeID: "browser")
         let leftWidth = left.view.widthAnchor.constraint(equalToConstant: 500)
         NSLayoutConstraint.activate([
             leftWidth,
@@ -67,9 +67,9 @@ struct PaneTitlesGate {
             try require(info["titleCentered"] == .bool(true), "Title text not center aligned")
             try require(abs(number("titleCenterX") - number("headerWidth") / 2) < 0.5, "Title off-center across full pane")
             try require(number("titleLeadingX") >= number("typeTrailingX") + 7.5, "Title overlaps type control: \(info)")
-            try require(number("titleTrailingX") <= number("copyIDLeadingX") - 5.5, "Title overlaps copy control: \(info)")
+            try require(number("titleTrailingX") <= number("actionsLeadingX") - 5.5, "Title overlaps header actions: \(info)")
             try require(number("titleTrailingX") > number("titleLeadingX"), "Title editing region collapsed")
-            for key in ["copyIDVisible", "closeVisible", "dragHandleVisible"] {
+            for key in ["actionsBeforeClose", "closeVisible", "dragHandleVisible"] {
                 try require(info[key] == .bool(true), "Hidden header control: \(key)")
             }
         }
@@ -133,7 +133,47 @@ struct PaneTitlesGate {
         try require(left.info.object!["title"] == .string("Saved on blur"), "Blur failed")
         left.setTitle("")
         try check(left)
-        try require(left.copyIDForTesting() == "p1" && right.copyIDForTesting() == "p2", "Copy ID regressed")
-        print("PASS production pane header: true full-width centering, safe symmetric bounds at 250/500/750 points and collapse at 80 points, Unicode/empty/live titles, commit/cancel/blur, copy IDs and light/dark/inline native renders")
+        var invoked: [Int] = []
+        let initialActions = (0..<5).map { index in
+            PaneHeaderAction(id: "action\(index)", title: "Action \(index)", symbol: "bolt", enabled: index != 1, revision: UUID(), perform: { invoked.append(index) })
+        }
+        left.setHeaderActions(initialActions)
+        try check(left)
+        try require(left.info.object!["visibleHeaderActions"] == .array([.string("action0"), .string("action1"), .string("action2"), .string("overflow")]), "Header overflow missing")
+        try left.clickHeaderActionForTesting("action0")
+        try left.clickHeaderActionForTesting("action1")
+        try left.clickHeaderActionForTesting("action4")
+        try require(invoked == [0, 4], "Direct/overflow/disabled action dispatch incorrect")
+        let unchangedMenu = left.headerActionMenu()
+        left.setHeaderActions(initialActions)
+        unchangedMenu.performActionForItem(at: 0)
+        try require(invoked == [0, 4, 3], "An unchanged refresh must preserve open menu actions")
+        let unrelatedMenu = left.headerActionMenu()
+        left.setHeaderActions(initialActions.map { action in
+            PaneHeaderAction(id: action.id, title: action.title, symbol: action.symbol, enabled: action.id == "action0" ? false : action.enabled, revision: action.revision, perform: action.perform)
+        })
+        unrelatedMenu.performActionForItem(at: 0)
+        try require(invoked == [0, 4, 3, 3], "An unrelated busy-state change must preserve valid menu actions")
+        let staleMenu = left.headerActionMenu()
+        left.setHeaderActions((0..<5).map { index in
+            PaneHeaderAction(id: "action\(index)", title: "Replacement \(index)", symbol: "bolt", enabled: true, revision: UUID(), perform: { invoked.append(100 + index) })
+        })
+        staleMenu.performActionForItem(at: 0)
+        try require(invoked == [0, 4, 3, 3], "A stale menu must not execute a replacement action")
+        try left.clickHeaderActionForTesting("action4")
+        try require(invoked == [0, 4, 3, 3, 104], "Replacement action should execute from the new menu")
+        try capture("actions")
+        leftWidth.constant = 250
+        try check(left)
+        try require(left.info.object!["visibleHeaderActions"] == .array([.string("overflow")]), "Narrow header must use overflow")
+        try capture("actions-narrow")
+        leftWidth.constant = 80
+        settle()
+        try require(left.info.object!["visibleHeaderActions"] == .array([]), "Minimum-width header must preserve Close without overflowing")
+        leftWidth.constant = 500
+        left.setHeaderActions([])
+        try check(left)
+        try require(left.info.object!["visibleHeaderActions"] == .array([]), "Removed contributions remain visible")
+        print("PASS production pane header: centered titles, safe bounds at 250/500/750 points and collapse at 80, Unicode/live titles, commit/cancel/blur, command-backed buttons/overflow/disabled actions/removal and native renders")
     }
 }

@@ -18,6 +18,8 @@ public struct WorkspaceCommand: Sendable, Codable {
 
 public enum CommandRegistry {
     public static let commands: [WorkspaceCommand] = [
+        .init(id: "command.picker", title: "Search Commands…", key: "k", shift: false),
+        .init(id: "settings.open", title: "Open Settings", key: ",", shift: false),
         .init(id: "tab.new", title: "New Tab", key: "t", shift: false),
         .init(id: "window.new", title: "New Window", key: "n", shift: false),
         .init(id: "split.right", title: "Split Right", key: "d", shift: false),
@@ -31,6 +33,7 @@ public enum CommandRegistry {
         .init(id: "pane.zoom", title: "Toggle Pane Zoom", key: "return", shift: true),
         .init(id: "layout.equalize", title: "Equalize Panes", key: "e", shift: true),
         .init(id: "pane.type", title: "Change Pane Type", key: "", shift: false),
+        .init(id: "pane.copyID", title: "Copy Pane ID", key: "", shift: false),
         .init(id: "pane.close", title: "Close Pane", key: "w", shift: false),
         .init(id: "pane.focus", title: "Focus Pane", key: "", shift: false),
         .init(id: "tab.close", title: "Close Tab", key: "w", shift: true),

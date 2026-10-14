@@ -15,7 +15,7 @@ slate-term plugins restart notes
 slate-term plugins unregister notes --force
 ```
 
-The Pane menu includes only plugins with a panel source. **Workspace → Plugin Commands** and **Settings → Keyboard Shortcuts** include contributed commands. Switching type destroys the live view; saved plugin data follows its declared scope. Registration replacement (`--replace`) requires that type's visible panes to be closed first. Unregister refuses active views unless `--force` is supplied. Unregister retains saved data.
+The Pane menu includes only plugins with a panel source. **Workspace → Plugin Commands**, the **⌘K command picker**, and **Settings → Keyboard Shortcuts** include contributed commands. Switching type destroys the live view; saved plugin data follows its declared scope. Registration replacement (`--replace`) requires that type's visible panes to be closed first. Unregister refuses active views unless `--force` is supplied. Unregister retains saved data.
 
 ## Command-only plugins
 
@@ -52,6 +52,31 @@ Commands have namespaced IDs `plugin.<plugin-id>.<command-id>`. A local command 
 
 Each command declares an absolute `executable`, optional literal `arguments` (default `[]`), absolute `directory`, `environment` (string map), and `timeoutSeconds` (default 30; 0.1–295). Nothing is implicitly shell-expanded or evaluated. Invoke `/bin/sh` or another interpreter explicitly for scripts. Without `directory`, the command inherits the app's working directory, **not** a terminal's current directory. Use `context get` when terminal context is needed.
 
+### Native frame buttons
+
+Plugins may contribute native pane-header buttons immediately left of Close. Add `headerButtons` to either a command-only or mixed manifest:
+
+```json
+"headerButtons": [
+  {
+    "id": "split-left",
+    "title": "Split Left",
+    "symbol": "rectangle.lefthalf.inset.filled",
+    "command": "split-left",
+    "paneTypes": ["*"]
+  }
+]
+```
+
+- `command` is a **local command ID declared by this same plugin**, not arbitrary JavaScript or a cross-plugin/built-in command ID. It uses the existing supervised command runtime. To wrap a built-in operation, invoke it through the CLI from the command script.
+- `paneTypes` defaults to `["*"]` for every pane type. Use `["terminal"]`, `["browser"]`, a combination such as `["terminal", "browser"]`, or exact registered widget IDs such as `["acme.notes"]`. These are type IDs, not pane instance IDs or display titles. A target widget may be registered later. Wildcards cannot be mixed with explicit types. Selectors control button visibility, not permission to invoke the command through other entry points.
+- `id` uses the command-local identifier grammar (lowercase letter, then lowercase letters/digits/hyphens; at most 64 bytes). IDs must be unique within the plugin, with at most **8 buttons**. `title` is required, up to 100 characters without control characters; it supplies the tooltip/accessibility label, prefixed by the plugin title. `symbol` is an SF Symbols name (up to 128 ASCII letters/digits/dots/hyphens, lowercase); unavailable system symbols use a generic plugin icon. No remote/custom images are loaded.
+- The host preserves registration/button order, shows up to three direct buttons, and puts remaining actions in a native **More Plugin Actions** menu as the pane narrows. Below 180 points, contributions are hidden to preserve the structural controls; their commands remain available through the picker/menu/shortcuts. The title remains centered across the full pane.
+- A click captures the **clicked pane and its current tab**, even if another pane/window is focused. Commands receive the normal `SLATE_TERM_PANE_ID`/`SLATE_TERM_TAB_ID`, settings, and CLI environment. Rendering buttons does not start a plugin process or require a plugin panel to be open. Busy actions are disabled until the invocation finishes.
+- Register through the existing `plugins.register` RPC or `slate-term plugins register --manifest …`. Manifest contributions persist across app launches and update existing/new headers on registration, replacement, pane-type changes, and removal. Replacement/unregister removes old buttons and cancels owned running commands using the existing policy. A failed registration leaves the previous catalog/UI intact. There is no document-owned JavaScript callback registration API in this version.
+
+See [`examples/command-plugin/plugin.json`](../examples/command-plugin/plugin.json) for a complete command-backed button. `scripts/verify-plugin-header-buttons.py` exercises native rendering, filtering, routing, busy state, overflow, persistence and cleanup without using the user's clipboard.
+
 ### Shortcuts and settings
 
 Bind commands through the existing shortcut recorder or configuration:
@@ -87,7 +112,7 @@ One invocation per command may run at a time (duplicates fail rather than queue)
 
 `plugins restart` remains a panel-service operation; use `command run` for a fresh invocation. Do not blindly repeat a failed command: earlier workspace mutations may already have taken effect. Registration trusts executable code with your user's ordinary filesystem/process access, not just workspace APIs.
 
-See [planned follow-ups](plugin-followups.md) for the command picker, UI/CLI parity, and hooks/API audits.
+See the [command picker](command-picker.md) and [follow-up status and capability audits](plugin-followups.md) for UI/CLI parity and hooks/API boundaries.
 
 ## Panel manifest
 
@@ -187,7 +212,7 @@ Terminal operations use the active terminal in the plugin's context; an explicit
 
 ### Pane header
 
-Each pane has a common native header: type, custom title, and close button. Plugins can use their document title or explicitly control the header:
+Each pane has a common native header: type, custom title, optional contributed command buttons, and Close. **Copy Pane ID** is now a stock command (`pane.copyID`) in the picker/Workspace menu rather than a permanent header button. Plugins can use their document title or explicitly control the header:
 
 ```js
 await workspace.setTitle("Reviewing README.md");

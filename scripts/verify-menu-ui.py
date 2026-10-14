@@ -84,9 +84,13 @@ with tempfile.TemporaryDirectory(prefix='slate-menu-', dir='/tmp') as temporary:
                     if item['children']:
                         check(item['children'])
                     else:
+                        if item.get('command') == 'pane.copyID':
+                            assert item['key'] == '', 'Copy Pane ID intentionally has no default shortcut'
+                            continue
                         assert item['key'], item
                         shortcuts.append((item['key'], item['modifiers']))
             check(workspace['children'])
+            assert any(item.get('command') == 'pane.copyID' and item['title'] == 'Copy Pane ID' for item in workspace['children'])
             assert len(shortcuts) == len(set(shortcuts)), 'Duplicate workspace shortcuts'
             pane_menu = next(item for item in tree if item['title'] == 'Pane')
             assert not any('Switching discards' in item['title'] or 'Rename' in item['title'] for item in pane_menu['children'])
@@ -109,6 +113,14 @@ with tempfile.TemporaryDirectory(prefix='slate-menu-', dir='/tmp') as temporary:
             rpc('debug.key', chord='cmd+shift+r', dispatch=True)
             for pane in ['p2', 'p3']:
                 cli('panes', 'close', '--pane', pane, '--force')
+
+            (directory / 'config.toml').write_text('[keybind]\n"cmd+shift+j" = "pane.copyID"\n')
+            rpc('config.reload')
+            before_copy = rpc('workspace.get')
+            assert rpc('debug.commandClipboard') is None
+            rpc('debug.key', chord='cmd+shift+j', dispatch=True)
+            assert rpc('debug.commandClipboard') == 'p1'
+            assert rpc('workspace.get') == before_copy
 
             rpc('debug.paneTypeMenu', pane='p1', select='browser', answer='cancel', suppress=True,
                 screenshot=str(ARTIFACTS / 'pane-type-warning.png'))

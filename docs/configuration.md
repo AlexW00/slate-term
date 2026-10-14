@@ -43,6 +43,8 @@ The editor preserves comments and unrelated values in standard tables and dotted
 
 Register plugins and view their live status directly in **Settings → Plugins**. You or an agent can also run `slate-term plugins register --manifest /path/to/plugin.json`. Plugin registrations remain in the separate plugin catalog.
 
+**⌘K** opens the [command picker](command-picker.md) for built-in and plugin commands. Its `command.picker` binding and **⌘,** (`settings.open`) are configurable like other actions.
+
 **Keyboard Shortcuts** lists each action with one editable shortcut and a **Reset** button. Click the shortcut and press a replacement key combination. Escape cancels recording; Delete clears the binding. Reset restores the action's default shortcut. Assigning or resetting replaces that action's existing bindings. Conflicts are rejected without changing either action. Use **Apply** to save.
 
 ## Terminal palettes

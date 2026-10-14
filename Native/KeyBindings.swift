@@ -12,6 +12,13 @@ extension KeyChord {
         return result
     }
 
+    var displayLabel: String {
+        let prefix = (modifiers.contains(.ctrl) ? "⌃" : "") + (modifiers.contains(.alt) ? "⌥" : "")
+            + (modifiers.contains(.shift) ? "⇧" : "") + (modifiers.contains(.cmd) ? "⌘" : "")
+        let names = ["left": "←", "right": "→", "up": "↑", "down": "↓", "return": "↵", "escape": "⎋", "tab": "⇥", "space": "Space", "plus": "+"]
+        return prefix + (names[key] ?? key.uppercased())
+    }
+
     func matches(_ event: NSEvent) -> Bool {
         let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
         guard flags == nativeModifiers else { return false }

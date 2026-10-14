@@ -78,6 +78,7 @@ public struct PluginRegistration: Equatable, Codable, Sendable {
     public let scope: Scope
     public let process: PluginProcessSpec?
     public let commands: [PluginCommand]
+    public let headerButtons: [PluginHeaderButton]
 
     public var hasPanel: Bool { source != nil }
     public var entryURL: URL? {
@@ -97,9 +98,9 @@ public struct PluginRegistration: Equatable, Codable, Sendable {
         return try JSONDecoder().decode(Self.self, from: data)
     }
 
-    private enum Keys: String, CodingKey { case id, title, source, scope, process, commands }
+    private enum Keys: String, CodingKey { case id, title, source, scope, process, commands, headerButtons }
     public init(from decoder: any Decoder) throws {
-        try requirePluginKeys(decoder, allowed: ["id", "title", "source", "scope", "process", "commands"])
+        try requirePluginKeys(decoder, allowed: ["id", "title", "source", "scope", "process", "commands", "headerButtons"])
         let values = try decoder.container(keyedBy: Keys.self)
         id = try values.decode(String.self, forKey: .id)
         title = try values.decode(String.self, forKey: .title)
@@ -107,6 +108,11 @@ public struct PluginRegistration: Equatable, Codable, Sendable {
         scope = try values.decodeIfPresent(Scope.self, forKey: .scope) ?? .pane
         process = try values.decodeIfPresent(PluginProcessSpec.self, forKey: .process)
         commands = try values.decodeIfPresent([PluginCommand].self, forKey: .commands) ?? []
+        headerButtons = try values.decodeIfPresent([PluginHeaderButton].self, forKey: .headerButtons) ?? []
+        guard headerButtons.count <= 8, Set(headerButtons.map(\.id)).count == headerButtons.count,
+              headerButtons.allSatisfy({ button in commands.contains { $0.id == button.command } }) else {
+            throw invalidPlugin("Header buttons must be unique (at most 8) and reference this plugin's commands")
+        }
         guard commands.count <= 32, Set(commands.map(\.id)).count == commands.count,
               source != nil || !commands.isEmpty && process == nil else {
             throw invalidPlugin("A plugin needs a panel source or commands; commands must be unique (at most 32), and process requires a panel source")
@@ -168,7 +174,7 @@ private struct PluginKey: CodingKey {
     init?(stringValue: String) { self.stringValue = stringValue }
     init?(intValue: Int) { return nil }
 }
-private func requirePluginKeys(_ decoder: any Decoder, allowed: Set<String>) throws {
+func requirePluginKeys(_ decoder: any Decoder, allowed: Set<String>) throws {
     let keys = try decoder.container(keyedBy: PluginKey.self).allKeys.map(\.stringValue)
     if let unknown = keys.first(where: { !allowed.contains($0) }) { throw invalidPlugin("Unknown plugin field: \(unknown)") }
 }

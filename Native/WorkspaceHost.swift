@@ -14,6 +14,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     private var pluginCatalog: PluginCatalog
     private let pluginInstances: PluginInstances
     private let pluginCommands = PluginCommands()
+    private var headerActionRevisions: [String: UUID] = [:]
     private let runtime: GhosttyRuntime
     private var server: UnixServer?
     private var windows: [TabID: WorkspaceWindow] = [:]
@@ -38,6 +39,17 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     private var configurationWatcher: ConfigurationWatcher?
     private var appearanceObservation: NSKeyValueObservation?
     private var settingsWindow: SettingsWindowController?
+    private var commandPicker: CommandPicker?
+    private var pickerTarget: [String: JSONValue] = [:]
+    private var pickerReturnPane: PaneID?
+    private var testPasteboard: NSPasteboard?
+    private var commandPasteboard: NSPasteboard {
+        if !integration { return .general }
+        if let testPasteboard { return testPasteboard }
+        let board = NSPasteboard.withUniqueName()
+        testPasteboard = board
+        return board
+    }
     private var settingsModel: SettingsModel?
     private var statusMenuItem: NSMenuItem?
     private var workspaceShortcuts: NSMenu?
@@ -61,7 +73,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         self.workspace = settings.restore(or: workspace, registeredTypes: Set(catalog.registrations.filter(\.hasPanel).map(\.id)))
         runtime = try GhosttyRuntime(configurationURL: settings.engineURL)
         super.init()
-        pluginCommands.onChange = { [weak self] in self?.refreshSettings() }
+        pluginCommands.onChange = { [weak self] in self?.refreshSettings(); self?.refreshCommandPicker(); self?.refreshHeaderActions() }
         pluginInstances.onEvent = { [weak self] instance, name, value in
             guard let self else { return }
             self.refreshSettings()
@@ -125,6 +137,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         persistWorkspace()
         if let integrationKeyboardMonitor { NSEvent.removeMonitor(integrationKeyboardMonitor) }
         integrationKeyboardMonitor = nil
+        testPasteboard?.releaseGlobally()
+        testPasteboard = nil
         titleTimer?.cancel(); titleTimer = nil
         configurationWatcher?.close()
         configurationWatcher = nil
@@ -147,6 +161,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         windows.values.forEach { $0.close() }
         windows.removeAll()
         settingsWindow?.close()
+        commandPicker?.dismiss(restoreFocus: false)
+        commandPicker = nil
         runtime.close()
     }
 
@@ -188,6 +204,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         settings.save(workspace)
         updateStatusMenu()
         if let paneTypeMenu { menuNeedsUpdate(paneTypeMenu) }
+        refreshCommandPicker()
         if publishedWorkspace != workspace {
             publishedWorkspace = workspace
             events.publishHost("host.workspace.changed", payload: .object([
@@ -227,7 +244,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     /// Freeze routing and settings before yielding, including for menu/keyboard invocations.
-    private func preparePluginCommand(_ id: String, params: [String: JSONValue]) throws -> () async throws -> JSONValue {
+    private func preparePluginCommand(_ id: String, params: [String: JSONValue], resolveWorkspace: Bool = true) throws -> () async throws -> JSONValue {
         try synchronizeNativeGroups()
         guard let registration = pluginCatalog.registrations.first(where: { registration in registration.commands.contains { $0.namespacedID(plugin: registration.id) == id } }) else {
             throw RPCFailure(code: -32601, message: "Unknown plugin command: \(id)")
@@ -236,7 +253,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         guard let socketPath = server?.path else { throw RPCFailure(code: -32022, message: "Application is closing") }
         let pane: PaneID?
         let tab: TabID?
-        if params["pane"] != nil || params["tab"] != nil || workspace.keyTabID != nil {
+        if resolveWorkspace && (params["pane"] != nil || params["tab"] != nil || workspace.keyTabID != nil) {
             pane = try targetPaneID(params)
             tab = workspace.tabs.first { $0.layout.paneIDs.contains(pane!) }!.id
             if params["tab"] != nil, try targetTab(params).id != tab {
@@ -333,6 +350,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 _ = try PluginAssets(root: URL(fileURLWithPath: path)).file(forPercentEncodedPath: encodedPath)
             }
             try pluginCatalog.register(registration, replace: params["replace"] == .bool(true))
+            headerActionRevisions[registration.id] = UUID()
             pluginInstances.remove(type: registration.id)
             pluginCommands.remove(plugin: registration.id)
             buildMenus()
@@ -348,6 +366,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             // Persist before irreversible teardown. This reconciliation only
             // removes existing views, so it needs no new fallible resources.
             try pluginCatalog.remove(id)
+            headerActionRevisions.removeValue(forKey: id)
             if !using.isEmpty { try reconcile(next) }
             pluginInstances.remove(type: id)
             pluginCommands.remove(plugin: id)
@@ -389,6 +408,15 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         case "command.run":
             guard let id = params["id"]?.string else { throw RPCFailure(code: -32602, message: "Command id is required") }
             if id == "config.reload" { return try reloadConfiguration() }
+            if id == "settings.open" { showSettings(); return .object([:]) }
+            if id == "command.picker" { try toggleCommandPicker(params); return .object([:]) }
+            if id == "pane.copyID" {
+                let pane = try targetPaneID(params)
+                let board = commandPasteboard
+                board.clearContents()
+                guard board.setString(pane.description, forType: .string) else { throw RPCFailure(code: -32000, message: "Could not copy pane ID") }
+                return .object(["paneId": .string(pane.description)])
+            }
             if id.hasPrefix("browser.") {
                 guard let browser = leaves[try targetPaneID(params)] as? BrowserPane else {
                     throw RPCFailure(code: -32602, message: "Target pane is not a browser")
@@ -413,6 +441,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             return .object([:])
         case "panes.capture": return try .encoding(TerminalOutput(targetTerminal(params).capture()))
         case "debug.inspect" where integration: return inspect()
+        case "debug.commandClipboard" where integration: return commandPasteboard.string(forType: .string).map(JSONValue.string) ?? .null
         case "debug.menuTree" where integration:
             func entries(_ menu: NSMenu) -> JSONValue {
                 .array(menu.items.filter { !$0.isSeparatorItem && !$0.isHidden }.map { item in
@@ -488,7 +517,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             }
             if params["close"] == .bool(true) { header.performClose() }
             var info = header.info.object!
-            if params["copyID"] == .bool(true) { info["copiedID"] = header.copyIDForTesting().map(JSONValue.string) ?? .null }
+            if let action = params["clickAction"]?.string { try header.clickHeaderActionForTesting(action); info = header.info.object! }
             return .object(info)
         case "debug.paneMove" where integration:
             let sourceID = try targetPaneID(params)
@@ -627,6 +656,16 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                             "pluginStatuses": .array(model.plugins.map { .string($0.status) }),
                             "commands": .array(model.commands.map { .string($0.id) }),
                             "pluginsMenu": .bool(NSApp.mainMenu?.items.contains { $0.title == "Plugins" } ?? false)])
+        case "debug.commandPicker" where integration:
+            if case .integer(let width) = params["sourceWidth"], case .integer(let height) = params["sourceHeight"] {
+                guard (80...1200).contains(width), (80...800).contains(height), let window = commandPicker?.contextWindow else { throw RPCFailure(code: -32602, message: "An owned picker source and bounded size are required") }
+                window.setContentSize(NSSize(width: CGFloat(width), height: CGFloat(height)))
+            }
+            if params["show"] == .bool(true), commandPicker?.isVisible != true { try toggleCommandPicker(params) }
+            if let query = params["query"]?.string { commandPicker?.setQueryForTesting(query) }
+            if case .integer(let row) = params["clickRow"] { try commandPicker?.clickRowForTesting(row, clickCount: params["doubleClick"] == .bool(true) ? 2 : 1) }
+            if params["dismiss"] == .bool(true) { commandPicker?.dismiss(restoreFocus: true) }
+            return commandPicker?.info ?? .object(["visible": .bool(false)])
         case "debug.key" where integration:
             let chord = try KeyChord.parse(params["chord"]?.string ?? "cmd+d")
             let key = chord.modifiers.contains(.shift) ? (["1": "!", "=": "+"][chord.key] ?? chord.nativeKey.uppercased()) : chord.nativeKey
@@ -634,7 +673,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             let controlLetter = chord.modifiers.contains(.ctrl) && !chord.modifiers.contains(.cmd) && (97...122).contains(scalar)
             let text = controlLetter ? String(UnicodeScalar(scalar & 0x1f)!) : key
             let menuOnly = params["menu"] == .bool(true)
-            let window = menuOnly ? nil : (params["settings"] == .bool(true) ? settingsWindow?.window : windows[try targetTab(params).id])
+            let window = menuOnly ? nil : (params["picker"] == .bool(true) ? commandPicker?.window : (params["settings"] == .bool(true) ? settingsWindow?.window : windows[try targetTab(params).id]))
             guard let code = ["d": UInt16(2), "j": UInt16(38), "h": 4, "k": 40, "l": 37, "1": 18, "2": 19, "=": 24, "left": 123, "right": 124, "up": 126, "down": 125, "e": 14, "r": 15, "return": 36, "t": 17, "n": 45, "w": 13, "[": 33, "]": 30, ",": 43, "q": 12, "s": 1, "escape": 53, "delete": 51][chord.key],
                   let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: chord.nativeModifiers, timestamp: ProcessInfo.processInfo.systemUptime,
                                                windowNumber: window?.windowNumber ?? 0, context: nil, characters: text,
@@ -654,7 +693,29 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             }
             return .object([:])
         case "debug.screenshot" where integration:
-            guard let path = params["path"]?.string, let window = params["settings"] == .bool(true) ? settingsWindow?.window : windows[workspace.keyTabID ?? TabID(1)] else {
+            if params["pickerContext"] == .bool(true) {
+                guard let path = params["path"]?.string, let picker = commandPicker, picker.isVisible,
+                      let backdrop = picker.contextWindow, backdrop.isVisible, !backdrop.isMiniaturized,
+                      let panel = picker.window, backdrop.frame.contains(panel.frame),
+                      let screen = backdrop.screen, screen.visibleFrame.contains(backdrop.frame) else {
+                    throw RPCFailure(code: -32602, message: "Picker context capture requires an owned, fully visible backdrop window")
+                }
+                NSApp.activate(ignoringOtherApps: true)
+                backdrop.orderFront(nil)
+                panel.makeKeyAndOrderFront(nil)
+                // Capture the actual on-screen composite over our owned backdrop.
+                // Window-only captures of native glass can differ from the visible
+                // material (notably a gray surface instead of the light backdrop).
+                let frame = params["pickerCrop"] == .bool(true) ? panel.frame : backdrop.frame
+                let top = NSScreen.screens.first!.frame.maxY - frame.maxY
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+                process.arguments = ["-x", "-R\(Int(frame.minX)),\(Int(top)),\(Int(frame.width)),\(Int(frame.height))", path]
+                try process.run(); process.waitUntilExit()
+                guard process.terminationStatus == 0 else { throw RPCFailure(code: -32000, message: "Picker context capture failed") }
+                return .object([:])
+            }
+            guard let path = params["path"]?.string, let window = params["picker"] == .bool(true) ? commandPicker?.window : (params["settings"] == .bool(true) ? settingsWindow?.window : windows[workspace.keyTabID ?? TabID(1)]) else {
                 throw RPCFailure(code: -32602, message: "path and key window are required")
             }
             try Self.captureWindow(window.windowNumber, path: path)
@@ -914,7 +975,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 case .registered(let id): typeID = id
                 }
                 let type = availablePaneTypes.first { $0.id == typeID }!.name
-                let container = PaneContainer(content: leaves[pane.id]!, type: type, typeID: typeID, paneID: pane.id)
+                let container = PaneContainer(content: leaves[pane.id]!, type: type, typeID: typeID)
                 container.onClose = { [weak self] in self?.runUserCommand("pane.close", params: ["pane": .string(pane.id.description)]) }
                 container.onRename = { [weak self] title in
                     guard let self else { return }
@@ -948,6 +1009,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             }
             updatePaneTitle(pane.id)
         }
+        refreshHeaderActions()
         let retainedTabs = Set(next.tabs.map(\.id))
         for id in Array(windows.keys) where !retainedTabs.contains(id) {
             windows.removeValue(forKey: id)?.close()
@@ -1004,7 +1066,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             }
             first.orderFront(nil)
         }
-        if let tab = next.tabs.first(where: { $0.id == next.keyTabID }), let window = windows[tab.id] {
+        if commandPicker?.isVisible != true, let tab = next.tabs.first(where: { $0.id == next.keyTabID }), let window = windows[tab.id] {
             window.makeKeyAndOrderFront(nil)
             focusResponder(tab.focusedPane, in: window)
         }
@@ -1013,10 +1075,12 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             (windows[id]?.contentViewController as? WorkspaceSplitController)?.applyInitialFractions()
         }
         // Rebuilding a background tab can remove its first responder too.
-        for tab in next.tabs {
-            if let window = windows[tab.id] { focusResponder(tab.focusedPane, in: window) }
+        if commandPicker?.isVisible != true {
+            for tab in next.tabs {
+                if let window = windows[tab.id] { focusResponder(tab.focusedPane, in: window) }
+            }
         }
-        synchronizeTerminalFocus(workspace.tabs.first { $0.id == workspace.keyTabID }?.focusedPane)
+        synchronizeTerminalFocus(commandPicker?.isVisible == true ? nil : workspace.tabs.first { $0.id == workspace.keyTabID }?.focusedPane)
         observeNativeTabGroups()
         createdPlugins.values.forEach { $0.activate() }
         pluginInstances.prune(workspace: workspace)
@@ -1183,8 +1247,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         do {
             try workspace.focusTab(id)
             try synchronizeNativeGroups()
+            if commandPicker?.isRestoringFocus == true, let original = pickerReturnPane,
+               workspace.tabs.first(where: { $0.id == id })?.layout.paneIDs.contains(original) == true { try workspace.focus(original) }
             let pane = workspace.tabs.first { $0.id == id }?.focusedPane
-            if let pane { focusResponder(pane, in: window) }
+            if commandPicker?.isRestoringFocus != true, let pane { focusResponder(pane, in: window) }
             synchronizeTerminalFocus(pane)
             persistWorkspace()
         } catch { NSLog("Native tab update rejected: %@", String(describing: error)) }
@@ -1254,10 +1320,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         let about = appMenu.addItem(withTitle: "About Slate Terminal", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         about.target = NSApp
         appMenu.addItem(.separator())
-        let preferences = appMenu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
-        preferences.target = self
-        preferences.keyEquivalent = ""
-        setBuiltInShortcut(preferences, key: ",")
+        addCommands(["settings.open"], to: appMenu)
+        for item in appMenu.items where item.representedObject as? String == "settings.open" { item.title = "Settings…" }
         appMenu.addItem(.separator())
         let status = NSMenuItem(title: "Configuration & Workspace Status…", action: #selector(showSettingsStatus), keyEquivalent: "")
         status.target = self
@@ -1294,6 +1358,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 }
             }
         }
+        addCommands(["command.picker"], to: workspaceMenu)
+        workspaceMenu.addItem(.separator())
         addCommands(["window.new"], to: workspaceMenu)
         workspaceMenu.addItem(.separator())
         for (title, commands) in [
@@ -1316,7 +1382,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             group.submenu = submenu
         }
         workspaceMenu.addItem(.separator())
-        addCommands(["pane.close"], to: workspaceMenu)
+        addCommands(["pane.copyID", "pane.close"], to: workspaceMenu)
         workspaceMenu.addItem(.separator())
         addCommands(["config.reload"], to: workspaceMenu)
         let contributed = pluginCatalog.registrations.flatMap(\.workspaceCommands)
@@ -1362,6 +1428,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         workspaceShortcuts = workspaceMenu
         NSApp.windowsMenu = windowMenu
         NSApp.mainMenu = menu
+        refreshCommandPicker()
+        refreshHeaderActions()
     }
 
     private func setBuiltInShortcut(_ item: NSMenuItem, key: String, modifiers: NSEvent.ModifierFlags = [.command]) {
@@ -1379,6 +1447,128 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     @objc private func resetCloseWarnings() {
         do { try settings.setSuppressCloseWarning(false); updateStatusMenu() }
         catch { present(error) }
+    }
+
+    private func toggleCommandPicker(_ params: [String: JSONValue]) throws {
+        if commandPicker?.isVisible == true { commandPicker?.dismiss(restoreFocus: true); return }
+        try synchronizeNativeGroups()
+        pickerReturnPane = NSApp.keyWindow is WorkspaceWindow ? workspace.tabs.first(where: { $0.id == workspace.keyTabID })?.focusedPane : nil
+        pickerTarget = [:]
+        if params["pane"] != nil || params["tab"] != nil || workspace.keyTabID != nil {
+            let pane = try targetPaneID(params)
+            let tab = workspace.tabs.first { $0.layout.paneIDs.contains(pane) }!.id
+            if params["tab"] != nil, try targetTab(params).id != tab { throw RPCFailure(code: -32602, message: "Pane does not belong to the requested tab") }
+            pickerTarget = ["pane": .string(pane.description), "tab": .string(tab.description)]
+        }
+        if commandPicker == nil {
+            let picker = CommandPicker()
+            picker.onExecute = { [weak self] id in
+                guard let self, self.pickerEntries.contains(where: { $0.item.id == id && $0.unavailable == nil }) else { NSSound.beep(); return }
+                let independent = ["window.new", "settings.open", "config.reload"].contains(id)
+                // An empty captured context is intentional, not permission to
+                // retarget a window created by another client while searching.
+                let resolvedID = id == "tab.new" && self.pickerTarget.isEmpty ? "window.new" : id
+                self.runUserCommand(resolvedID, params: independent ? [:] : self.pickerTarget,
+                                    capturedWithoutWorkspace: self.pickerTarget.isEmpty)
+            }
+            commandPicker = picker
+        }
+        commandPicker?.show(commands: pickerEntries, relativeTo: NSApp.keyWindow ?? workspace.keyTabID.flatMap { windows[$0] })
+    }
+
+    private func refreshHeaderActions() {
+        for registration in pluginCatalog.registrations where headerActionRevisions[registration.id] == nil {
+            headerActionRevisions[registration.id] = UUID()
+        }
+        let running = Set(pluginCommands.all.filter { $0.object?["state"] == .string("running") }.compactMap { $0.object?["commandId"]?.string })
+        for pane in workspace.panes {
+            let type: String
+            switch pane.type {
+            case .terminal: type = "terminal"
+            case .browser: type = "browser"
+            case .registered(let id): type = id
+            }
+            let actions = pluginCatalog.registrations.flatMap { registration in
+                registration.headerButtons.filter { $0.matches(paneType: type) }.map { button in
+                    let command = "plugin.\(registration.id).\(button.command)"
+                    return PaneHeaderAction(id: button.namespacedID(plugin: registration.id), title: "\(registration.title): \(button.title)",
+                        symbol: button.symbol, enabled: !running.contains(command), revision: headerActionRevisions[registration.id]!, perform: { [weak self] in
+                            guard let self, let tab = self.workspace.tabs.first(where: { $0.layout.paneIDs.contains(pane.id) }),
+                                  self.workspace.panes.contains(where: { $0.id == pane.id && $0.type == pane.type }),
+                                  self.pluginCatalog.registrations.contains(where: { $0.id == registration.id && $0.headerButtons.contains(button) }) else { return }
+                            self.runUserCommand(command, params: ["pane": .string(pane.id.description), "tab": .string(tab.id.description)])
+                        })
+                }
+            }
+            containers[pane.id]?.setHeaderActions(actions)
+        }
+    }
+
+    private func refreshCommandPicker() {
+        guard commandPicker?.isVisible == true else { return }
+        commandPicker?.update(commands: pickerEntries)
+    }
+
+    private var pickerEntries: [PickerCommand] {
+        let pane = workspace.panes.first { $0.id.description == pickerTarget["pane"]?.string }
+        let tab = workspace.tabs.first { $0.id.description == pickerTarget["tab"]?.string }
+        let missingTarget = pickerTarget["pane"] != nil && pane == nil || pickerTarget["tab"] != nil && tab == nil
+        let running = Set(pluginCommands.all.filter { $0.object?["state"] == .string("running") }.compactMap { $0.object?["commandId"]?.string })
+        let bindings = activeKeyBindings
+        var shortcuts: [String: String] = [:]
+        for key in bindings.keys.sorted(by: { $0.description < $1.description }) {
+            if let id = bindings[key], shortcuts[id] == nil { shortcuts[id] = key.displayLabel }
+        }
+        let contributions = Dictionary(uniqueKeysWithValues: pluginCatalog.registrations.flatMap { registration in
+            registration.commands.map { ($0.namespacedID(plugin: registration.id), (title: $0.title, plugin: registration.title)) }
+        })
+        return availableCommands.filter { !["command.picker", "pane.type", "pane.focus", "tab.focus"].contains($0.id) }.map { command in
+            var title = command.title
+            var detail = "Workspace"
+            var symbol = "square.grid.2x2"
+            var keywords = ""
+            var unavailable: String?
+            if command.id.hasPrefix("plugin.") {
+                symbol = "puzzlepiece.extension"
+                if let contribution = contributions[command.id] {
+                    title = contribution.title
+                    detail = "\(contribution.plugin) · Plugin"
+                }
+                if running.contains(command.id) { unavailable = "This command is already running" }
+                else if missingTarget { unavailable = "The original workspace target was closed" }
+            } else {
+                switch command.id {
+                case "settings.open": detail = "Application"; symbol = "gearshape"; keywords = "preferences configuration"
+                case "config.reload": detail = "Application"; symbol = "arrow.clockwise"; keywords = "settings refresh"
+                case "window.new": symbol = "macwindow.badge.plus"; keywords = "create"
+                case "tab.new": symbol = "plus.square"; keywords = "create"
+                case "tab.close", "pane.close": symbol = "xmark.square"; keywords = "remove close"
+                case "pane.copyID": symbol = "doc.on.doc"; keywords = "clipboard panel identifier"
+                case "split.left": detail = "Layout"; symbol = "rectangle.lefthalf.inset.filled"; keywords = "pane panel"
+                case "split.right": detail = "Layout"; symbol = "rectangle.righthalf.inset.filled"; keywords = "pane panel"
+                case "split.up": detail = "Layout"; symbol = "rectangle.tophalf.inset.filled"; keywords = "pane panel above"
+                case "split.down": detail = "Layout"; symbol = "rectangle.bottomhalf.inset.filled"; keywords = "pane panel below"
+                case "pane.zoom": detail = "Layout"; symbol = "arrow.up.left.and.arrow.down.right"; keywords = "maximize expand"
+                case "layout.equalize": detail = "Layout"; symbol = "rectangle.split.2x2"; keywords = "balance resize"
+                default:
+                    if command.id.hasPrefix("browser.") { detail = "Browser"; symbol = "globe" }
+                    else if command.id.hasPrefix("focus.") { detail = "Layout"; symbol = "scope"; keywords = "pane navigate" }
+                    else if command.id.hasPrefix("tab.") { detail = "Tabs"; symbol = "square.on.square"; keywords = "navigate" }
+                }
+                if !["window.new", "settings.open", "config.reload"].contains(command.id) {
+                    if missingTarget { unavailable = "The original workspace target was closed" }
+                    else if tab == nil && command.id != "tab.new" { unavailable = "Open a workspace to use this command" }
+                    else if command.id.hasPrefix("browser."), pane?.type != .browser { unavailable = "Focus a browser pane to use this command" }
+                    else if command.id.hasPrefix("tab.select"), let number = Int(command.id.dropFirst("tab.select".count)),
+                            let tab, let group = workspace.groups.first(where: { $0.tabs.contains(tab.id) }), number > group.tabs.count {
+                        unavailable = "Tab \(number) is not available in this window"
+                    }
+                }
+            }
+            let shortcut = shortcuts[command.id] ?? ""
+            return PickerCommand(item: .init(id: command.id, title: title, detail: detail, keywords: keywords),
+                                 symbol: symbol, shortcut: shortcut, unavailable: unavailable)
+        }
     }
 
     @objc private func showSettings() {
@@ -1526,7 +1716,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         guard menuItem.action == #selector(runMenuCommand(_:)) else { return true }
         let id = menuItem.representedObject as? String
-        if id == "window.new" || id == "tab.new" || id == "config.reload" || id?.hasPrefix("plugin.") == true { return true }
+        if id == "window.new" || id == "tab.new" || id == "config.reload" || id == "command.picker" || id == "settings.open" || id?.hasPrefix("plugin.") == true { return true }
         guard NSApp.keyWindow is WorkspaceWindow else { return false }
         if id?.hasPrefix("browser.") == true { return focusedBrowser != nil }
         return true
@@ -1537,12 +1727,12 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         runUserCommand(id, params: [:])
     }
 
-    private func runUserCommand(_ id: String, params: [String: JSONValue]) {
+    private func runUserCommand(_ id: String, params: [String: JSONValue], capturedWithoutWorkspace: Bool = false) {
         var params = params
         params["id"] = .string(id)
         do {
             if id.hasPrefix("plugin.") {
-                let operation = try preparePluginCommand(id, params: params)
+                let operation = try preparePluginCommand(id, params: params, resolveWorkspace: !capturedWithoutWorkspace)
                 Task { [weak self] in
                     do { _ = try await operation() }
                     catch let error as RPCFailure where error.code == -32022 { /* teardown/cancellation */ }
