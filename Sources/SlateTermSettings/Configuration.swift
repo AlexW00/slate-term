@@ -214,7 +214,7 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
         }
         let plugins = try raw.plugins.map(parsePluginSettings) ?? [:]
         guard plugins.count <= 64, try JSONEncoder().encode(plugins).count <= 65_536,
-              plugins.keys.allSatisfy({ $0.utf8.count <= 64 && $0.range(of: "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$", options: .regularExpression) == $0.startIndex..<$0.endIndex }) else {
+              plugins.keys.allSatisfy({ (try? PluginSettingsPatch.validateNamespace($0)) != nil }) else {
             throw ConfigurationError.invalid("Invalid plugin settings namespace or settings exceed 64 KiB / 64 plugins")
         }
         return AppConfiguration(browser: try Browser.parse(raw.browser?.searchURL ?? defaults.browser.searchURL), theme: raw.appearance?.theme ?? defaults.theme, terminal: terminal,

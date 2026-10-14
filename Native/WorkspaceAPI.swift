@@ -3,13 +3,17 @@ import SlateTermCore
 
 /// Production adapters. Debug inspection deliberately remains separate from this schema.
 extension WorkspaceHost {
-    static let apiGuardKeys: Set<String> = ["expectedInstanceId", "expectedAnchorSessionId", "expectedWorkspaceRevision", "expectedLayoutRevision", "expectedSourceRevision"]
+    static let apiGuardKeys = APIGuards.names
 
     func withoutAPIGuards(_ params: [String: JSONValue]) -> [String: JSONValue] {
         params.filter { !Self.apiGuardKeys.contains($0.key) }
     }
 
     func validateAPIGuards(_ params: [String: JSONValue], method: String) throws {
+        let contributed = method == "command.run" && params["id"]?.string?.hasPrefix("plugin.") == true
+        if !contributed, let unknown = params.keys.sorted().first(where: { $0.hasPrefix("expected") && !Self.apiGuardKeys.contains($0) }) {
+            throw RPCFailure(code: -32602, message: "Unknown safety guard: \(unknown)")
+        }
         func string(_ key: String) throws -> String? {
             guard let value = params[key] else { return nil }
             guard let text = value.string, !text.isEmpty else { throw RPCFailure(code: -32602, message: "\(key) must be a nonempty string") }
@@ -36,6 +40,10 @@ extension WorkspaceHost {
             }
             guard try configurationRevision().revision == expected else { throw RPCFailure(code: APIError.conflict, message: "Configuration source changed; inspect again") }
         }
+        if let expected = try string("expectedWriteRevision") {
+            guard method == "plugins.settings.patch" else { throw RPCFailure(code: -32602, message: "expectedWriteRevision is only supported by plugins.settings.patch") }
+            guard try configurationRevision().revision == expected else { throw RPCFailure(code: APIError.conflict, message: "Settings source changed; read the namespace again") }
+        }
         if let expected = try string("expectedWorkspaceRevision") { try revisions.requireWorkspace(expected) }
         if let expected = try string("expectedLayoutRevision") {
             let tab = try params["pane"].map { _ in
@@ -61,7 +69,7 @@ extension WorkspaceHost {
         let common = ["api.describe", "context.get", "context.inspect", "workspace.get", "workspace.snapshot", "layout.get",
                       "tabs.list", "panes.list", "pane.inspect", "command.list", "command.run",
                       "terminal.send", "terminal.key", "terminal.capture", "terminal.run", "terminal.wait",
-                      "events.head", "events.poll", "events.emit"]
+                      "events.head", "events.poll", "events.emit", "plugins.settings.get", "plugins.settings.patch"]
         let administrative = ["version", "panes.send", "panes.capture", "config.get", "config.reload", "config.validate", "config.patch", "palette.list", "palette.import", "plugins.list", "plugins.register",
                               "plugins.unregister", "plugins.status", "plugins.restart", "plugins.logs",
                               "browser.get", "browser.navigate", "browser.snapshot", "browser.click", "browser.fill",
@@ -73,6 +81,7 @@ extension WorkspaceHost {
         return .object([
             "apiVersion": .integer(1), "appInstanceId": .string(instanceID), "identityGuards": .bool(true),
             "workspaceRevisions": .bool(true), "surface": .string(plugin ? "plugin" : "administrative"),
+            "guards": .array(Self.apiGuardKeys.sorted().map(JSONValue.string)),
             "methods": .array(apiMethods(plugin: plugin).map(JSONValue.string)),
             "commands": try .encoding(availableCommands.filter { !plugin || $0.contract.pluginAccessible }),
             "limits": .object(["inspectionPageSize": .integer(64), "inspectionBytes": .integer(262144), "eventWaitMilliseconds": .integer(25000)]),

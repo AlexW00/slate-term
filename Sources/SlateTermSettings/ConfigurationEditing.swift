@@ -5,7 +5,7 @@ extension AppConfiguration {
     /// Updates individual settings while preserving unrelated text and inline comments.
     /// Keys use `section.name`; values are single-line TOML literals.
     public static func updating(source: String, values: [String: String]) throws -> String {
-        _ = try parse(source)
+        let before = try parse(source)
         var lines = source.components(separatedBy: "\n")
         for (path, literal) in values.sorted(by: { $0.key < $1.key }) {
             guard let dot = path.firstIndex(of: ".") else {
@@ -13,56 +13,29 @@ extension AppConfiguration {
             }
             let section = String(path[..<dot])
             let name = String(path[path.index(after: dot)...])
+            guard ["appearance", "terminal", "browser", "layout", "keybind"].contains(section) else {
+                throw ConfigurationError.invalid("Use the path-aware plugin settings writer for namespaces; unsupported application section: \(section)")
+            }
             guard !literal.contains("\n"), !literal.contains("\r") else {
                 throw ConfigurationError.invalid("Settings values must be single-line TOML literals")
             }
-            var currentSection: [String] = []
-            var sectionInsertion: Int?
-            var rootInsertion = 0
             var found = false
-            for index in lines.indices {
-                let line = lines[index]
-                let comment = try separator("#", in: line) ?? line.endIndex
-                let content = String(line[..<comment]).trimmingCharacters(in: .whitespaces)
-                if content.isEmpty { continue }
-                if content.hasPrefix("[") {
-                    guard content.hasSuffix("]"), !content.hasPrefix("[[") else { throw editingSyntaxError() }
-                    currentSection = try keyPath(String(content.dropFirst().dropLast()))
-                    if currentSection == [section] { sectionInsertion = index + 1 }
-                    continue
-                }
-                guard let equal = try separator("=", in: line) else { throw editingSyntaxError() }
-                let key = try keyPath(String(line[..<equal]))
-                let valueStart = line.index(after: equal)
-                let value = String(line[valueStart..<comment]).trimmingCharacters(in: .whitespaces)
-                // These forms need a full syntax tree to preserve their contents safely.
-                guard !value.hasPrefix("{"), !value.hasPrefix("\"\"\""), !value.hasPrefix("'''") else {
-                    throw editingSyntaxError()
-                }
-                if currentSection.isEmpty { rootInsertion = index + 1 }
-                let existingPath = currentSection + key
+            for record in try TOMLSourceEditor.scan(lines) {
+                guard let existingPath = record.path else { continue }
                 let sameBinding = section == "keybind" && existingPath.count == 2
                     && existingPath[0] == "keybind"
                     && (try? KeyChord.parse(existingPath[1])) == (try? KeyChord.parse(name))
                 if existingPath == [section, name] || sameBinding {
-                    let valueRange = line[valueStart..<comment]
-                    let leading = valueRange.prefix(while: { $0 == " " || $0 == "\t" })
-                    let trailing = valueRange.reversed().prefix(while: { $0 == " " || $0 == "\t" }).reversed()
-                    lines[index] = String(line[...equal]) + leading + literal + String(trailing) + line[comment...]
+                    lines[record.index] = record.replacingValue(with: literal)
                     found = true
                 }
             }
-            if !found {
-                if let insertion = sectionInsertion {
-                    lines.insert("\(quotedString(name)) = \(literal)", at: insertion)
-                } else {
-                    // Root dotted keys also work when the section already uses dotted assignments.
-                    lines.insert("\(quotedString(section)).\(quotedString(name)) = \(literal)", at: rootInsertion)
-                }
-            }
+            if !found { try TOMLSourceEditor.insert(literal: literal, at: [section, name], into: &lines) }
         }
         let result = lines.joined(separator: "\n")
-        _ = try parse(result)
+        let after = try parse(result)
+        let allowed = Set(values.keys.map { $0.hasPrefix("keybind.") ? "keybind" : $0 })
+        guard after.changedKeys(from: before).allSatisfy(allowed.contains) else { throw editingSyntaxError() }
         return result.hasSuffix("\n") ? result : result + "\n"
     }
 
@@ -79,7 +52,7 @@ extension AppConfiguration {
         return result + "\""
     }
 
-    private static func keyPath(_ source: String) throws -> [String] {
+    static func keyPath(_ source: String) throws -> [String] {
         var remainder = source
         var result: [String] = []
         while true {
@@ -93,7 +66,7 @@ extension AppConfiguration {
         }
     }
 
-    private static func separator(_ separator: Character, in source: String) throws -> String.Index? {
+    static func separator(_ separator: Character, in source: String) throws -> String.Index? {
         var quote: Character?
         var escaped = false
         for index in source.indices {
@@ -105,6 +78,9 @@ extension AppConfiguration {
             } else if character == separator {
                 return index
             } else if character == "\"" || character == "'" {
+                // Triple delimiters can begin inside an array/compound value, not
+                // only immediately after '='. Never parse their contents as TOML lines.
+                if source[index...].hasPrefix(String(repeating: String(character), count: 3)) { throw editingSyntaxError() }
                 quote = character
             }
         }
@@ -112,7 +88,7 @@ extension AppConfiguration {
         return nil
     }
 
-    private static func editingSyntaxError() -> ConfigurationError {
+    static func editingSyntaxError() -> ConfigurationError {
         .invalid("This configuration uses inline tables or multiline syntax. Edit the configuration file directly, or use ordinary [section] tables to edit it in Settings.")
     }
 }

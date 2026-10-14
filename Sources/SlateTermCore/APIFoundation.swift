@@ -9,6 +9,33 @@ public enum APIError {
     public static let settingsWriteFailed = -32054
 }
 
+public enum APIGuards {
+    /// Reserved routing preconditions. Contributed commands may still define other
+    /// argument names beginning with "expected"; those are not host safety guards.
+    public static let legacyNames: Set<String> = ["expectedInstanceId", "expectedAnchorSessionId", "expectedWorkspaceRevision", "expectedLayoutRevision", "expectedSourceRevision"]
+    public static let names = legacyNames.union(["expectedWriteRevision"])
+
+    public static func supported(by capabilities: JSONValue) throws -> Set<String> {
+        guard let object = capabilities.object, object["identityGuards"] == .bool(true) else {
+            throw RPCFailure(code: APIError.incompatible, message: "Host cannot enforce identity guards")
+        }
+        if let advertised = object["guards"] {
+            guard case .array(let values) = advertised, values.allSatisfy({ $0.string != nil }) else {
+                throw RPCFailure(code: APIError.incompatible, message: "Host guard advertisement is malformed")
+            }
+            return Set(values.compactMap(\.string))
+        }
+        // The first versioned API (c629a67) enforced exactly these five guards but
+        // did not enumerate them. Never infer any later guard from the old flags.
+        guard object["apiVersion"] == .integer(1), object["workspaceRevisions"] == .bool(true),
+              object["surface"] == .string("administrative"), case .array(let methods) = object["methods"],
+              methods.contains(.string("config.patch")) else {
+            throw RPCFailure(code: APIError.incompatible, message: "Host does not advertise enforced guards or the legacy v1 guard contract")
+        }
+        return legacyNames
+    }
+}
+
 public struct WorkspaceChange: Sendable {
     public let topic: String
     public let tab: TabID?

@@ -59,6 +59,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     private var statusMenuItem: NSMenuItem?
     private var workspaceShortcuts: NSMenu?
     private var testConfirmationHandler: ((NSAlert) -> Void)?
+    private struct ConfigurationApplyFault { let replacement: String? }
+    private var configurationApplyFault: ConfigurationApplyFault?
     private var paneTypeMenu: NSMenu?
     private var tabGroupObservations: [ObjectIdentifier: (group: NSWindowTabGroup, token: NSKeyValueObservation)] = [:]
     private var tabGroupSyncScheduled = false
@@ -194,7 +196,14 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     private func reloadConfiguration(prepared: ApplicationSettings.PreparedConfiguration? = nil) throws -> JSONValue {
         defer { buildMenus(); refreshSettings() }
         let previous = settings.current
-        let result = try settings.reload(prepared: prepared) { try runtime.reload(from: $0) }
+        let result = try settings.reload(prepared: prepared) { url in
+            if integration, prepared != nil, let fault = configurationApplyFault {
+                configurationApplyFault = nil
+                if let replacement = fault.replacement { try replacement.write(to: settings.configURL, atomically: true, encoding: .utf8) }
+                throw RPCFailure(code: -32020, message: "Injected configuration apply failure")
+            }
+            try runtime.reload(from: url)
+        }
         if !settings.current.changedKeys(from: previous).isEmpty {
             appliedConfigurationRevision = UUID().uuidString
             events.publishHost("host.settings.changed", payload: .object(["appliedRevision": .string(appliedConfigurationRevision)]))
@@ -379,6 +388,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         case "context.inspect": return try inspectContext(params)
         case "pane.inspect": return try inspectPane(targetPaneID(params))
         case "config.patch": return try patchConfiguration(params)
+        case "plugins.settings.get": return try pluginSettingsInfo(params)
+        case "plugins.settings.patch": return try patchPluginSettings(params)
         case "palette.list": return try listPalettes()
         case "palette.import": return try importPalette(params)
         case "version": return .object(["cliVersion": .string("0.1.0-dev"), "appVersion": .string("0.1.0-dev"), "protocolVersion": .integer(1)])
@@ -667,6 +678,12 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             let length = (split.splitView.isVertical ? split.splitView.bounds.width : split.splitView.bounds.height) - split.splitView.dividerThickness
             split.splitView.setPosition(length * fraction, ofDividerAt: 0)
             return .object([:])
+        case "debug.configurationApplyFault" where integration:
+            guard let mode = params["mode"]?.string, ["reject", "externalEdit"].contains(mode) else { throw RPCFailure(code: -32602, message: "Fault mode must be reject or externalEdit") }
+            let replacement = params["source"]?.string
+            guard mode != "externalEdit" || (replacement != nil && replacement!.utf8.count <= 65536) else { throw RPCFailure(code: -32602, message: "A bounded replacement source is required") }
+            configurationApplyFault = .init(replacement: mode == "externalEdit" ? replacement : nil)
+            return .object(["armed": .bool(true)])
         case "debug.settings" where integration:
             showSettings()
             guard let model = settingsModel else { throw RPCFailure(code: -32000, message: "Settings unavailable") }
@@ -791,11 +808,19 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }
         if scoped["scope"] == nil { scoped["scope"] = .string(view.instance.registration.scope.rawValue) }
         try synchronizeNativeGroups()
-        if ["pane.title", "settings.get", "storage.get", "storage.set", "storage.delete"].contains(method) {
+        if method.hasPrefix("plugins.settings.") {
+            guard params["id"] == nil || params["id"] == .string(view.instance.registration.id) else { throw RPCFailure(code: APIError.forbidden, message: "Plugin settings are bound to the caller's namespace") }
+            scoped["id"] = .string(view.instance.registration.id)
+        }
+        if ["pane.title", "settings.get", "plugins.settings.get", "plugins.settings.patch", "storage.get", "storage.set", "storage.delete"].contains(method) {
             guard params["pane"] == nil || params["pane"] == .string(pane.description),
                   params["tab"] == nil || params["tab"] == .string(tab.id.description) else {
                 throw RPCFailure(code: -32602, message: "This operation is bound to the calling plugin view/namespace")
             }
+        }
+        if method.hasPrefix("plugins.settings.") {
+            do { return try call(method, params: scoped) }
+            catch { throw pluginSettingsFailure(error) }
         }
         try validateAPIGuards(scoped, method: method)
         let payload = withoutAPIGuards(params)
@@ -1691,6 +1716,11 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             throw ConfigurationError.invalid("The config file changed outside Settings. Choose Revert to load it before editing again.")
         }
         let updated = try AppConfiguration.updating(source: source, values: changes)
+        try saveConfigurationSource(source: source, updated: updated, refreshEditor: refreshEditor)
+    }
+
+    func saveConfigurationSource(source: String, updated: String, refreshEditor: Bool = true) throws {
+        guard try configurationSource() == source else { throw RPCFailure(code: APIError.conflict, message: "Configuration source changed before save") }
         // Resolve once and create stable snapshots before changing the TOML.
         let prepared = try settings.prepare(AppConfiguration.parse(updated))
         guard try configurationSource() == source else {

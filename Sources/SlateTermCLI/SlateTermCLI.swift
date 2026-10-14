@@ -50,15 +50,16 @@ struct Connection: ParsableArguments {
         }
         if let expectedInstanceId { guarded["expectedInstanceId"] = .string(expectedInstanceId) }
         let client = UnixClient(path: path, timeoutSeconds: timeoutSeconds)
-        if guarded.keys.contains(where: { $0.hasPrefix("expected") }) {
+        let contributed = method == "command.run" && guarded["id"]?.string?.hasPrefix("plugin.") == true
+        let requested = Set(guarded.keys.filter { $0.hasPrefix("expected") && (!contributed || APIGuards.names.contains($0)) })
+        if !requested.isEmpty {
             let capabilities: JSONValue
             do { capabilities = try client.call("api.describe", params: [:]) }
             catch let failure as RPCFailure where failure.code == -32601 {
                 throw RPCFailure(code: APIError.incompatible, message: "Host cannot enforce identity/revision guards; upgrade the host")
             }
-            guard capabilities.object?["identityGuards"] == .bool(true) else {
-                throw RPCFailure(code: APIError.incompatible, message: "Host cannot enforce identity guards")
-            }
+            let supported = try APIGuards.supported(by: capabilities)
+            guard requested.isSubset(of: supported) else { throw RPCFailure(code: APIError.incompatible, message: "Host cannot enforce requested guards: \(requested.subtracting(supported).sorted().joined(separator: ", "))") }
         }
         return try client.call(method, params: guarded)
     }
@@ -171,15 +172,34 @@ struct TerminalCommand: ParsableCommand {
 
 struct Plugins: ParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Register trusted web panels. Registered pages can control your terminals.")
-    enum Action: String, ExpressibleByArgument { case list, register, validate, unregister, status, restart, logs }
+    enum Action: String, ExpressibleByArgument { case list, register, validate, unregister, status, restart, logs, settings }
     @Argument var action: Action
     @Argument var id: String?
+    @Argument(help: "Plugin namespace for settings get/patch.") var namespace: String?
+    @Option(help: "JSON set/delete operation array for settings patch.") var operations: String?
+    @Option var expectedWriteRevision: String?
     @Option var manifest: String?
     @Option var instanceId: String?
     @Flag var replace = false
     @Flag var force = false
     @OptionGroup var connection: Connection
     func run() throws {
+        if action == .settings {
+            guard let id, ["get", "patch"].contains(id), let namespace, manifest == nil, instanceId == nil, !replace, !force else {
+                throw ValidationError("Use plugins settings get|patch PLUGIN-ID; registration/process options do not apply")
+            }
+            var params: [String: JSONValue] = ["id": .string(namespace)]
+            if id == "patch" {
+                guard let operations, let expectedWriteRevision else { throw ValidationError("settings patch requires --operations and --expected-write-revision") }
+                let value = try JSONDecoder().decode(JSONValue.self, from: Data(operations.utf8))
+                guard case .array = value else { throw ValidationError("--operations must be a JSON array") }
+                params["operations"] = value
+                params["expectedWriteRevision"] = .string(expectedWriteRevision)
+            } else if operations != nil || expectedWriteRevision != nil { throw ValidationError("get does not take patch options") }
+            try connection.call("plugins.settings.\(id)", params: params)
+            return
+        }
+        guard namespace == nil, operations == nil, expectedWriteRevision == nil else { throw ValidationError("Settings options require plugins settings get|patch") }
         var params: [String: JSONValue] = [:]
         if let id { params["id"] = .string(id) }
         if let instanceId { params["instanceId"] = .string(instanceId) }

@@ -15,7 +15,7 @@ slate-term panes inspect --pane p2 --json
 
 Terminal shells receive `SLATE_TERM_CLI`, `SLATE_TERM_SOCKET`, `SLATE_TERM_INSTANCE_ID`, `SLATE_TERM_PANE_ID`, `SLATE_TERM_TAB_ID` and `SLATE_TERM_SESSION_ID`. Pane IDs identify slots; session IDs identify a particular terminal lifetime. The tab environment variable is only a launch hint: the CLI resolves the pane's current tab from the host. Executable plugin commands additionally receive `SLATE_TERM_INVOCATION_ID`; their legacy `SLATE_TERM_PLUGIN_INSTANCE` alias remains unchanged. A panel service's logical instance is a different identity, and tab/global services may have no single pane.
 
-An explicit sibling pane/tab drops the launching session guard. Explicit `--session-id` guards the terminal actually selected. `--active` intentionally chooses current focus and drops inherited pane/tab/session routing, but does not waive an app-instance check. Switching sockets while carrying another app's environment requires explicit targeting or `--active` for target-dependent commands. `--expected-instance-id` can explicitly select an expected app epoch. Invalid/stale identities fail instead of falling back to another pane. The CLI refuses guards an older host cannot enforce.
+An explicit sibling pane/tab drops the launching session guard. Explicit `--session-id` guards the terminal actually selected. `--active` intentionally chooses current focus and drops inherited pane/tab/session routing, but does not waive an app-instance check. Switching sockets while carrying another app's environment requires explicit targeting or `--active` for target-dependent commands. `--expected-instance-id` can explicitly select an expected app epoch. Invalid/stale identities fail instead of falling back to another pane. The CLI negotiates the explicit `guards` list and refuses guards an older host cannot enforce. The first versioned API's five known guards have a narrowly defined compatibility fallback; new guards such as `expectedWriteRevision` are never inferred from an old boolean capability.
 
 Context distinguishes caller anchor, requested target, focused pane and active terminal. Socket-supplied routing identity is not proof of process provenance. Registered pages receive native-bound identity through `workspace.self()`; an explicit target does not change the caller's identity.
 
@@ -59,4 +59,29 @@ These operations reuse the native Settings writer, validation, palette preparati
 
 `config.get` exposes opaque `sourceRevision`, `appliedRevision`, `sourceValid` and `appliedMatchesSource`. Source and applied tokens have distinct meanings; they are not file hashes or expected to equal each other. A source token changes with observed source text; an applied token changes with runtime configuration. A supplied `expectedSourceRevision` is enforced on configuration patch/reload and relevant settings commands, and rejected on unrelated methods. External non-cooperating editor races cannot be given a filesystem compare-and-swap guarantee; apply/rollback errors must be inspected, not blindly retried.
 
-New application configuration writes, appearance, palette import and font-default commands are administrative/native capabilities, not page-bridge methods. Discovery filters them and `command.run` enforces the same restriction. **Compatibility exception:** the pre-existing `workspace.command('config.reload')` remains available to registered pages; it reloads the existing file, rather than providing the new settings-write endpoint. Trusted registered pages also retain existing workspace/terminal control and their own namespace read API; this is not a sandbox against arbitrary trusted local executable code.
+New application configuration writes, appearance, palette import and font-default commands are administrative/native capabilities, not page-bridge methods. Discovery filters them and `command.run` enforces the same restriction. **Compatibility exception:** the pre-existing `workspace.command('config.reload')` remains available to registered pages; it reloads the existing file, rather than providing the new settings-write endpoint. Trusted registered pages also retain existing workspace/terminal control and their own namespace read/write API; this is not a sandbox against arbitrary trusted local executable code.
+
+## Own-plugin settings
+
+```js
+const settings = await workspace.pluginSettings.get();
+await workspace.pluginSettings.patch([
+  {op: 'set', path: ['display', 'side'], value: 'left'},
+  {op: 'delete', path: ['obsolete']}
+], settings.writeRevision);
+```
+
+The administrative equivalents are `plugins.settings.get/patch` with an explicit plugin `id`, or:
+
+```sh
+slate-term plugins settings get acme.tools
+slate-term plugins settings patch acme.tools --operations '[{"op":"set","path":["enabled"],"value":true}]' --expected-write-revision TOKEN
+```
+
+Read results distinguish source `values`, live `appliedValues`, `sourceValid` and opaque `writeRevision`. A valid source with a removed namespace returns empty source values, not the older applied namespace. Invalid source can still expose last-valid own settings but cannot be overwritten by the patch API. A page cannot choose another plugin ID or retarget a self-bound settings operation to another view. Page errors retain typed failure codes/state but omit raw TOML/apply diagnostics that might quote another namespace.
+
+Patch limits are 32 operations/64 KiB, paths of 1–32 literal components (at most 1024 UTF-8 bytes each), source/edited TOML of at most 1 MiB, and the existing aggregate 64 KiB/64-namespace configuration limit. Wide subtrees are inserted in batches; pathological dotted-key serialization expansion is rejected before producing an oversized file. Objects and arrays are supported; arrays are replaced whole. Null is rejected at any depth, deletion is explicit, and overlapping ancestor/descendant operations are rejected atomically. Setting a subtree replaces it; patch children separately to merge. Deleting the last child retains its empty object parent.
+
+All settings writers share the same lexical source editor and semantic validation. Quoted/dotted keys, ordinary nested tables, arrays of tables and supported single-line array values remain editable by native Settings and appearance commands. Unsupported standalone inline-table or multiline syntax—including multiline strings nested inside arrays—fails closed, rather than being mistaken for application assignments. A patch does not normalize or overwrite unrelated plugin settings/comments.
+
+The write revision covers the whole config source, so unrelated edits can cause a safe conflict. Refetch and intentionally rebase; do not blindly replay writes. Applied changes emit a value-free, directed `host.plugin.settings.changed` lifecycle notification. `workspace.settings()` remains the compatible simple read of live own settings. Settings environments for commands/services do not change after launch.

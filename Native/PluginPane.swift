@@ -306,6 +306,7 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
           panes:Object.freeze({inspect:(params={})=>call('pane.inspect',params)}),
           command:(id,params={},options={})=>call('command.run',{...params,id},options),
           settings:()=>call('settings.get'),
+          pluginSettings:Object.freeze({get:()=>call('plugins.settings.get'),patch:(operations,expectedWriteRevision)=>call('plugins.settings.patch',{operations,expectedWriteRevision})}),
           terminal:Object.freeze({
             send:(text,params={})=>call('terminal.send',{...params,text}),
             capture:(params={})=>call('terminal.capture',params),

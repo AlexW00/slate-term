@@ -33,6 +33,21 @@ with AppFixture('api-settings', source) as app:
     app.cli('command', 'run', 'terminal.font.reset')
     assert app.rpc('config.get')['current']['terminal']['font_size'] == 13
     assert app.cli('palette', 'list')
+    # Fail after the new config reaches disk: rollback must restore the original source.
+    before_apply_failure = app.config.read_text()
+    app.rpc('debug.configurationApplyFault', mode='reject')
+    rollback = app.cli('appearance', 'light', error=True)
+    assert rollback['code'] == -32054 and rollback['data']['persisted'] is False, rollback
+    assert app.config.read_text() == before_apply_failure
+    assert app.rpc('config.get')['current']['appearance']['theme'] == 'dark'
+    assert app.rpc('pane.inspect', pane='p1')['sessionId'] == session
+    # A non-cooperating edit between write and apply failure must win over rollback.
+    external = before_apply_failure + '\n# edit during apply\n'
+    app.rpc('debug.configurationApplyFault', mode='externalEdit', source=external)
+    conflict = app.cli('appearance', 'light', error=True)
+    assert conflict['code'] == -32054 and 'external edit was preserved' in conflict['message'], conflict
+    assert app.config.read_text() == external
+    app.rpc('config.reload')
     before_failure = app.config.read_text()
     app.root.chmod(0o500)
     try:

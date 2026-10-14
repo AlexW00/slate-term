@@ -60,6 +60,8 @@ with AppFixture('api-context') as app:
     before_window = app.rpc('workspace.get')
     assert app.cli('command', 'run', 'window.new', '--expected-workspace-revision', 'stale', error=True)['code'] == -32050
     assert app.rpc('workspace.get') == before_window
+    app.rpc('command.run', id='window.new', expectedFutureGuard='unsupported', error=-32602)
+    assert app.rpc('workspace.get') == before_window
     assert app.cli('workspace', 'snapshot', '--expected-workspace-revision', 'stale', error=True)['code'] == -32050
 
     # Guards are checked again after WebKit preparation, immediately before mutation submission.

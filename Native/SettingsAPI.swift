@@ -36,8 +36,13 @@ extension WorkspaceHost {
         let read = try configurationRevision()
         if let expected, expected != read.revision { throw RPCFailure(code: APIError.conflict, message: "Configuration source changed; read config.get before retrying") }
         let updated = try ConfigurationPatch.updating(source: read.source, values: values)
-        if updated != read.source {
-            do { try saveSettings(source: read.source, changes: ConfigurationPatch.literals(values), refreshEditor: false) }
+        return try commitConfigurationSource(source: read.source, updated: updated)
+    }
+
+    func commitConfigurationSource(source: String, updated: String) throws -> JSONValue {
+        let candidate = try AppConfiguration.parse(updated)
+        if updated != source || !candidate.changedKeys(from: settings.current).isEmpty || settings.error != nil {
+            do { try saveConfigurationSource(source: source, updated: updated, refreshEditor: false) }
             catch {
                 var state = configurationRevisionInfo()
                 state["outcome"] = .string("unknown")
@@ -50,6 +55,44 @@ extension WorkspaceHost {
         result["operationId"] = .string(UUID().uuidString)
         result["restartRequired"] = try settings.status().object?["restartRequired"]
         return .object(result)
+    }
+
+    func pluginSettingsInfo(_ params: [String: JSONValue]) throws -> JSONValue {
+        guard let id = params["id"]?.string else { throw RPCFailure(code: -32602, message: "Plugin id is required") }
+        try PluginSettingsPatch.validateNamespace(id)
+        let read = try configurationRevision()
+        let candidate = try? AppConfiguration.parse(read.source)
+        return .object(["id": .string(id), "values": .object(candidate.map { $0.plugins[id] ?? [:] } ?? settings.current.plugins[id] ?? [:]),
+                        "appliedValues": .object(settings.current.plugins[id] ?? [:]), "sourceValid": .bool(candidate != nil),
+                        "writeRevision": .string(read.revision)])
+    }
+
+    func pluginSettingsFailure(_ error: Error) -> RPCFailure {
+        let failure = error as? RPCFailure
+        let code = failure?.code ?? -32602
+        let message: String
+        switch code {
+        case APIError.conflict: message = "Settings source or target changed; read the namespace again"
+        case APIError.settingsWriteFailed: message = "Plugin settings write/apply failed; inspect current state before retrying"
+        default: message = "Plugin settings request rejected; check the patch and source configuration"
+        }
+        // A TOML diagnostic or underlying apply failure may quote an unrelated
+        // namespace's source. Page errors retain typed state, never those diagnostics.
+        let safeKeys: Set<String> = ["sourceRevision", "appliedRevision", "sourceValid", "appliedMatchesSource", "outcome", "persisted"]
+        let data = failure?.data?.object.map { JSONValue.object($0.filter { safeKeys.contains($0.key) }) }
+        return RPCFailure(code: code, message: message, data: data)
+    }
+
+    func patchPluginSettings(_ params: [String: JSONValue]) throws -> JSONValue {
+        guard let id = params["id"]?.string, let expected = params["expectedWriteRevision"]?.string,
+              case .array(let operations) = params["operations"] else { throw RPCFailure(code: -32602, message: "id, operations and expectedWriteRevision are required") }
+        let read = try configurationRevision()
+        guard read.revision == expected else { throw RPCFailure(code: APIError.conflict, message: "Settings source changed; read the namespace again") }
+        let updated = try PluginSettingsPatch.updating(source: read.source, pluginID: id, operations: operations)
+        let result = try commitConfigurationSource(source: read.source, updated: updated)
+        var response = try pluginSettingsInfo(["id": .string(id)]).object!
+        response["operationId"] = result.object?["operationId"]
+        return .object(response)
     }
 
     func runSettingsCommand(_ id: String, params: [String: JSONValue]) throws -> JSONValue? {

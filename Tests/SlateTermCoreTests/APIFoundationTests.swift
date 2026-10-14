@@ -127,6 +127,19 @@ private let inherited: [String: String] = ["SLATE_TERM_SOCKET": "/tmp/a", "SLATE
     #expect(service["pane"] == nil)
 }
 
+@Test func guardNegotiationPreservesOnlyTheKnownLegacyV1Contract() throws {
+    let legacy: JSONValue = .object(["apiVersion": .integer(1), "identityGuards": .bool(true), "workspaceRevisions": .bool(true),
+                                     "surface": .string("administrative"), "methods": .array([.string("config.patch")])])
+    #expect(try APIGuards.supported(by: legacy) == APIGuards.legacyNames)
+    #expect(try APIGuards.supported(by: legacy).contains("expectedWriteRevision") == false)
+    #expect(throws: RPCFailure.self) { try APIGuards.supported(by: .object(["identityGuards": .bool(true)])) }
+    var modern = legacy.object!
+    modern["guards"] = .array([.string("expectedInstanceId")])
+    #expect(try APIGuards.supported(by: .object(modern)) == ["expectedInstanceId"])
+    modern["guards"] = .null
+    #expect(throws: RPCFailure.self) { try APIGuards.supported(by: .object(modern)) }
+}
+
 @Test func commandExposureKeepsContributionsSeparateFromAdministration() throws {
     #expect(CommandContract.forCommand("appearance.dark").pluginAccessible == false)
     #expect(CommandContract.forCommand("appearance.set").requiresArguments)
