@@ -6,8 +6,20 @@
 	objectVersion = 90;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* .build/bootstrap/ghostty/macos/GhosttyKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* .build/bootstrap/ghostty/macos/GhosttyKit.xcframework */; };
+		A10000000000000000000003 /* SlateTermCore in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000004 /* SlateTermCore */; };
+		A10000000000000000000005 /* SlateTermIPC in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000006 /* SlateTermIPC */; };
+		A10000000000000000000007 /* .build/bootstrap/ghostty/zig-out/share/ghostty in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000008 /* .build/bootstrap/ghostty/zig-out/share/ghostty */; };
+		A10000000000000000000011 /* .build/bootstrap/ghostty/zig-out/share/terminfo in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* .build/bootstrap/ghostty/zig-out/share/terminfo */; };
+		A10000000000000000000013 /* SlateTermSettings in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000014 /* SlateTermSettings */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
-		000000000000000000000120 /* slate-term.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "slate-term.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		000000000000000000000120 /* Slate Terminal.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Slate Terminal.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000002 /* .build/bootstrap/ghostty/macos/GhosttyKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = .build/bootstrap/ghostty/macos/GhosttyKit.xcframework; sourceTree = SOURCE_ROOT; };
+		A10000000000000000000008 /* .build/bootstrap/ghostty/zig-out/share/ghostty */ = {isa = PBXFileReference; lastKnownFileType = folder; path = ".build/bootstrap/ghostty/zig-out/share/ghostty"; sourceTree = SOURCE_ROOT; };
+		A10000000000000000000012 /* .build/bootstrap/ghostty/zig-out/share/terminfo */ = {isa = PBXFileReference; lastKnownFileType = folder; path = ".build/bootstrap/ghostty/zig-out/share/terminfo"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -16,12 +28,21 @@
 			path = "slate-term";
 			sourceTree = "<group>";
 		};
+		A10000000000000000000009 /* Native */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Native;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		000000000000000130000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				A10000000000000000000001 /* .build/bootstrap/ghostty/macos/GhosttyKit.xcframework in Frameworks */,
+				A10000000000000000000003 /* SlateTermCore in Frameworks */,
+				A10000000000000000000005 /* SlateTermIPC in Frameworks */,
+				A10000000000000000000013 /* SlateTermSettings in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -31,6 +52,10 @@
 			isa = PBXGroup;
 			children = (
 				000000000000000000000010 /* slate-term */,
+				A10000000000000000000009 /* Native */,
+				A10000000000000000000002 /* .build/bootstrap/ghostty/macos/GhosttyKit.xcframework */,
+				A10000000000000000000008 /* .build/bootstrap/ghostty/zig-out/share/ghostty */,
+				A10000000000000000000012 /* .build/bootstrap/ghostty/zig-out/share/terminfo */,
 				000000000000000000000020 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -38,7 +63,7 @@
 		000000000000000000000020 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				000000000000000000000120 /* slate-term.app */,
+				000000000000000000000120 /* Slate Terminal.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -58,10 +83,16 @@
 			);
 			fileSystemSynchronizedGroups = (
 				000000000000000000000010 /* slate-term */,
+				A10000000000000000000009 /* Native */,
 			);
 			name = "slate-term";
-			productName = MyApp;
-			productReference = 000000000000000000000120 /* slate-term.app */;
+			packageProductDependencies = (
+				A10000000000000000000004 /* SlateTermCore */,
+				A10000000000000000000006 /* SlateTermIPC */,
+				A10000000000000000000014 /* SlateTermSettings */,
+			);
+			productName = "Slate Terminal";
+			productReference = 000000000000000000000120 /* Slate Terminal.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -88,6 +119,9 @@
 			);
 			mainGroup = 000000000000000000000001;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A10000000000000000000010 /* XCLocalSwiftPackageReference "." */,
+			);
 			preferredProjectObjectVersion = 90;
 			productRefGroup = 000000000000000000000020 /* Products */;
 			projectDirPath = "";
@@ -102,6 +136,8 @@
 		000000000000000140000000 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			files = (
+				A10000000000000000000007 /* .build/bootstrap/ghostty/zig-out/share/ghostty in Resources */,
+				A10000000000000000000011 /* .build/bootstrap/ghostty/zig-out/share/terminfo in Resources */,
 			);
 		};
 /* End PBXResourcesBuildPhase section */
@@ -250,13 +286,17 @@
 		000000000000000111000000 /* Debug configuration for PBXNativeTarget "slate-term" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = YWRT8FQN6F;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Slate Terminal";
+				INFOPLIST_KEY_CFBundleName = "Slate Terminal";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -270,31 +310,52 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:rfc1034identifier)";
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lc++",
+					"-lz",
+					"-framework",
+					Metal,
+					"-framework",
+					MetalKit,
+					"-framework",
+					QuartzCore,
+					"-framework",
+					CoreText,
+					"-framework",
+					Carbon,
+					"-framework",
+					IOKit,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.alexandermoritzweichart.slateterm;
+				PRODUCT_NAME = "Slate Terminal";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SUPPORTED_PLATFORMS = macosx;
+				SUPPORTS_MACCATALYST = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
 			};
 			name = Debug;
 		};
 		000000000000000112000000 /* Release configuration for PBXNativeTarget "slate-term" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = YWRT8FQN6F;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Slate Terminal";
+				INFOPLIST_KEY_CFBundleName = "Slate Terminal";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -308,18 +369,35 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:rfc1034identifier)";
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lc++",
+					"-lz",
+					"-framework",
+					Metal,
+					"-framework",
+					MetalKit,
+					"-framework",
+					QuartzCore,
+					"-framework",
+					CoreText,
+					"-framework",
+					Carbon,
+					"-framework",
+					IOKit,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.alexandermoritzweichart.slateterm;
+				PRODUCT_NAME = "Slate Terminal";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SUPPORTED_PLATFORMS = macosx;
+				SUPPORTS_MACCATALYST = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
 			};
 			name = Release;
 		};
@@ -343,6 +421,28 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A10000000000000000000010 /* XCLocalSwiftPackageReference "." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = .;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A10000000000000000000004 /* SlateTermCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SlateTermCore;
+		};
+		A10000000000000000000006 /* SlateTermIPC */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SlateTermIPC;
+		};
+		A10000000000000000000014 /* SlateTermSettings */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SlateTermSettings;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 000000000000000000000000 /* Project object */;
 }
