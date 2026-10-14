@@ -1,4 +1,4 @@
-# Agent identity, inspection and application settings
+# Agent identity, inspection and shared commands
 
 These production interfaces extend the existing [control protocol](control.md), [terminal/browser automation](automation.md) and [event journal](events.md). The complete roadmap and outstanding verification are tracked in [implementation progress](api-extension-progress.md); unimplemented roadmap items are not implied by this document.
 
@@ -15,7 +15,7 @@ slate-term panes inspect --pane p2 --json
 
 Terminal shells receive `SLATE_TERM_CLI`, `SLATE_TERM_SOCKET`, `SLATE_TERM_INSTANCE_ID`, `SLATE_TERM_PANE_ID`, `SLATE_TERM_TAB_ID` and `SLATE_TERM_SESSION_ID`. Pane IDs identify slots; session IDs identify a particular terminal lifetime. The tab environment variable is only a launch hint: the CLI resolves the pane's current tab from the host. Executable plugin commands additionally receive `SLATE_TERM_INVOCATION_ID`; their legacy `SLATE_TERM_PLUGIN_INSTANCE` alias remains unchanged. A panel service's logical instance is a different identity, and tab/global services may have no single pane.
 
-An explicit sibling pane/tab drops the launching session guard. Explicit `--session-id` guards the terminal actually selected. `--active` intentionally chooses current focus and drops inherited pane/tab/session routing, but does not waive an app-instance check. Switching sockets while carrying another app's environment requires explicit targeting or `--active` for target-dependent commands. `--expected-instance-id` can explicitly select an expected app epoch. Invalid/stale identities fail instead of falling back to another pane. The CLI negotiates the explicit `guards` list and refuses guards an older host cannot enforce. The first versioned API's five known guards have a narrowly defined compatibility fallback; new guards such as `expectedWriteRevision` are never inferred from an old boolean capability.
+An explicit sibling pane/tab drops the launching session guard. Explicit `--session-id` guards the terminal actually selected. `--active` intentionally chooses current focus and drops inherited pane/tab/session routing, but does not waive an app-instance check. Switching sockets while carrying another app's environment requires explicit targeting or `--active` for target-dependent commands. `--expected-instance-id` can explicitly select an expected app epoch. Invalid/stale identities fail instead of falling back to another pane. The CLI negotiates the explicit `guards` list and refuses guards an older host cannot enforce. Negotiation and guarded dispatch share one handshaken connection; a disconnect never triggers reconnection to a potentially different host. The first versioned API's five known guards have a narrowly defined compatibility fallback; new guards such as `expectedWriteRevision` are never inferred from an old boolean capability.
 
 Context distinguishes caller anchor, requested target, focused pane and active terminal. Socket-supplied routing identity is not proof of process provenance. Registered pages receive native-bound identity through `workspace.self()`; an explicit target does not change the caller's identity.
 
@@ -36,6 +36,10 @@ Optional RPC preconditions are `expectedInstanceId`, `expectedAnchorSessionId`, 
 Workspace revisions track authoritative native and legacy API mutations. Layout revisions track topology, type and zoom visibility, not ordinary unzoomed focus or terminal output. Reads/no-ops do not advance the model ledger. Post-commit topics currently include pane created/closed/type/title changes, tab created/closed/grouping changes, layout changes and focus changes. Changes from one observed commit share an operation ID and resulting revisions. Broader semantic operation/cause attribution is subsequent work; events do not claim filesystem durability.
 
 Errors `-32050` (conflict), `-32051` (unavailable/bounds), `-32052` (administrative bridge denial), `-32053` (incompatible guard support), and `-32054` (settings write/apply failure) are shared. Write/apply failures carry optional error `data` with observed source/applied state and persistence; an unknown outcome must not be reported as a clean rejection. `--json` writes successful results to stdout and one machine-readable error object to stderr with nonzero exit status. Page bridge RPC failures reject with an `Error` carrying the same numeric `code`; success values (including null/false and objects with `ok`/`error` fields) remain ordinary results. Unknown transport/execution outcomes are not permission to repeat mutations automatically.
+
+## Layout, tabs and native windows
+
+See [guarded layout operations](layout-api.md) for atomic pane/root split with type/fraction/focus, pane move, subtree resize, manual title set/clear, native tab reorder/move/detach and paginated native window inspection/focus. Layout/tab rearrangement requires an observed revision. Typed CLI and registered-page wrappers use the same command route; window operations and the native detach convenience alias remain administrative.
 
 ## Appearance and application configuration
 

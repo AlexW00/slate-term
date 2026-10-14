@@ -12,9 +12,17 @@ public struct UnixClient: Sendable {
     }
 
     public func call(_ method: String, params: [String: JSONValue] = [:]) throws -> JSONValue {
+        try withSession { try $0.call(method, params: params) }
+    }
+
+    /// Capability checks and dependent requests share the same handshaken peer. Never reconnect
+    /// after a failure: another process may now own the path and ignore negotiated safeguards.
+    /// The session is serial, blocking, and invalidated when the closure exits (even if retained).
+    public func withSession<Result>(_ body: (Session) throws -> Result) throws -> Result {
         guard (1...300).contains(timeoutSeconds) else { throw SocketError.invalidTimeout }
         let descriptor = try makeSocket(nonblocking: false)
-        defer { Darwin.close(descriptor) }
+        let session = Session(descriptor: descriptor)
+        defer { session.close() }
         // WebKit navigation has a 15-second host deadline, followed by a bounded
         // document read. Keep the transport deadline outside those operation limits.
         var timeout = timeval(tv_sec: timeoutSeconds, tv_usec: 0)
@@ -25,11 +33,33 @@ public struct UnixClient: Sendable {
         try withSocketAddress(path) { address, length in
             guard connect(descriptor, address, length) == 0 else { throw SocketError.system("connect", errno) }
         }
-        _ = try exchange(RPCRequest(id: .integer(1), method: "hello", params: ["protocolVersion": .integer(protocolVersion)]), descriptor)
-        return try exchange(RPCRequest(id: .integer(2), method: method, params: params), descriptor)
+        _ = try Self.exchange(RPCRequest(id: .integer(1), method: "hello", params: ["protocolVersion": .integer(protocolVersion)]), descriptor)
+        return try body(session)
     }
 
-    private func exchange(_ request: RPCRequest, _ descriptor: Int32) throws -> JSONValue {
+    public final class Session {
+        private var descriptor: Int32?
+        private var nextID = 2
+        fileprivate init(descriptor: Int32) { self.descriptor = descriptor }
+        deinit { if let descriptor { Darwin.close(descriptor) } }
+
+        public func call(_ method: String, params: [String: JSONValue] = [:]) throws -> JSONValue {
+            guard let descriptor else { throw SocketError.disconnected }
+            guard nextID < Int.max else { close(); throw SocketError.invalidResponse }
+            let request = RPCRequest(id: .integer(nextID), method: method, params: params)
+            nextID += 1
+            do { return try UnixClient.exchange(request, descriptor) }
+            catch let failure as RPCFailure { throw failure }
+            catch { close(); throw error }
+        }
+
+        fileprivate func close() {
+            if let descriptor { Darwin.close(descriptor) }
+            descriptor = nil
+        }
+    }
+
+    private static func exchange(_ request: RPCRequest, _ descriptor: Int32) throws -> JSONValue {
         var bytes = try JSONEncoder().encode(request)
         bytes.append(10)
         guard bytes.count <= 1_048_576 else { throw ProtocolError.oversizedMessage }
@@ -51,9 +81,15 @@ public struct UnixClient: Sendable {
                 throw SocketError.system("read", errno)
             }
             guard count > 0 else { throw SocketError.disconnected }
-            let messages = try framing.append(Data(buffer.prefix(count)))
+            let messages: [Data]
+            do { messages = try framing.append(Data(buffer.prefix(count))) }
+            catch { throw SocketError.invalidResponse }
             guard let first = messages.first else { continue }
-            let response = try JSONDecoder().decode(RPCResponse.self, from: first)
+            let response: RPCResponse
+            do { response = try JSONDecoder().decode(RPCResponse.self, from: first) }
+            // Invalid output is a transport failure with an unknown operation outcome,
+            // not a local argument rejection. Do not expose untrusted decoder diagnostics.
+            catch { throw SocketError.invalidResponse }
             guard response.jsonrpc == "2.0", response.id == request.id,
                   (response.result == nil) != (response.error == nil) else { throw SocketError.invalidResponse }
             if let failure = response.error { throw failure }

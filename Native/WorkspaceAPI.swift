@@ -70,7 +70,7 @@ extension WorkspaceHost {
                       "tabs.list", "panes.list", "pane.inspect", "command.list", "command.run",
                       "terminal.send", "terminal.key", "terminal.capture", "terminal.run", "terminal.wait",
                       "events.head", "events.poll", "events.emit", "plugins.settings.get", "plugins.settings.patch"]
-        let administrative = ["version", "panes.send", "panes.capture", "config.get", "config.reload", "config.validate", "config.patch", "palette.list", "palette.import", "plugins.list", "plugins.register",
+        let administrative = ["version", "window.list", "window.get", "panes.send", "panes.capture", "config.get", "config.reload", "config.validate", "config.patch", "palette.list", "palette.import", "plugins.list", "plugins.register",
                               "plugins.unregister", "plugins.status", "plugins.restart", "plugins.logs",
                               "browser.get", "browser.navigate", "browser.snapshot", "browser.click", "browser.fill",
                               "browser.select", "browser.scroll", "browser.wait", "browser.eval", "browser.screenshot"]
@@ -173,7 +173,11 @@ extension WorkspaceHost {
         let container = containers[id]
         var geometry: JSONValue = .null
         var geometryState = "unavailable"
-        let visible = container?.view.window?.isVisible == true && container?.view.window?.isMiniaturized == false && (tab.zoomedPane == nil || tab.zoomedPane == id)
+        let nativeWindow = container?.view.window
+        let selected = nativeWindow?.tabGroup.map { $0.selectedWindow === nativeWindow } ?? true
+        let visible = nativeWindow?.isVisible == true && nativeWindow?.isMiniaturized == false
+            && selected && container?.view.isHiddenOrHasHiddenAncestor == false
+            && (tab.zoomedPane == nil || tab.zoomedPane == id)
         if visible, rendered[tab.id] == tab.layout, renderedZoom[tab.id] == tab.zoomedPane,
            let root = windows[tab.id]?.contentView, let view = container?.view, !root.needsLayout, !view.needsLayout {
             let rect = view.convert(view.bounds, to: root)
@@ -186,6 +190,9 @@ extension WorkspaceHost {
             "paneId": .string(id.description), "type": .string(type), "tabId": .string(tab.id.description),
             "groupId": workspace.groups.first { $0.tabs.contains(tab.id) }.map { .string($0.id.description) } ?? .null,
             "manualTitle": pane.manualTitle.map { .string(String($0.prefix(512))) } ?? .null,
+            "manualTitleTruncated": .bool((pane.manualTitle?.count ?? 0) > 512),
+            "windowId": windows[tab.id].map { .string($0.identity) } ?? .null,
+            "path": tab.layout.path(to: id).map { .array($0.map { .string($0.rawValue) }) } ?? .null,
             "title": .string(String((container?.effectiveTitle ?? type).prefix(512))),
             "visible": .bool(visible), "geometry": geometry, "geometryState": .string(geometryState),
             "layoutRevision": .string(revisions.layoutRevision(tab.id)!), "sampledAt": .number(Date().timeIntervalSince1970),

@@ -265,7 +265,8 @@ public enum EventJournalError: Error, Equatable, Sendable {
     case sequenceExhausted
 }
 
-private struct EventCursor {
+// Shared internally with host-issued causation-reference validation.
+struct EventCursor {
     let epoch: UUID
     let sequence: UInt64
     var description: String { "\(epoch.uuidString):\(sequence)" }

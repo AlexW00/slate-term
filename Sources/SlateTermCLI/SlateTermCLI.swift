@@ -7,7 +7,7 @@ import SlateTermSettings
 @main
 struct SlateTermCLI: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "slate-term", abstract: "Control a running Slate Terminal workspace.",
-        subcommands: [Tabs.self, Panes.self, TerminalCommand.self, BrowserCommand.self, Plugins.self, Events.self, ContextCommand.self, ShellCommand.self, LayoutCommand.self, Commands.self, ConfigCommand.self, WorkspaceCLI.self, APICLI.self, AppearanceCLI.self, PaletteCLI.self, RPC.self, Version.self, PluginWorker.self])
+        subcommands: [Tabs.self, Panes.self, WindowsCLI.self, TerminalCommand.self, BrowserCommand.self, Plugins.self, Events.self, ContextCommand.self, ShellCommand.self, LayoutCommand.self, Commands.self, ConfigCommand.self, WorkspaceCLI.self, APICLI.self, AppearanceCLI.self, PaletteCLI.self, RPC.self, Version.self, PluginWorker.self])
 
     static func main() {
         do {
@@ -52,16 +52,18 @@ struct Connection: ParsableArguments {
         let client = UnixClient(path: path, timeoutSeconds: timeoutSeconds)
         let contributed = method == "command.run" && guarded["id"]?.string?.hasPrefix("plugin.") == true
         let requested = Set(guarded.keys.filter { $0.hasPrefix("expected") && (!contributed || APIGuards.names.contains($0)) })
-        if !requested.isEmpty {
-            let capabilities: JSONValue
-            do { capabilities = try client.call("api.describe", params: [:]) }
-            catch let failure as RPCFailure where failure.code == -32601 {
-                throw RPCFailure(code: APIError.incompatible, message: "Host cannot enforce identity/revision guards; upgrade the host")
+        return try client.withSession { session in
+            if !requested.isEmpty {
+                let capabilities: JSONValue
+                do { capabilities = try session.call("api.describe", params: [:]) }
+                catch let failure as RPCFailure where failure.code == -32601 {
+                    throw RPCFailure(code: APIError.incompatible, message: "Host cannot enforce identity/revision guards; upgrade the host")
+                }
+                let supported = try APIGuards.supported(by: capabilities)
+                guard requested.isSubset(of: supported) else { throw RPCFailure(code: APIError.incompatible, message: "Host cannot enforce requested guards: \(requested.subtracting(supported).sorted().joined(separator: ", "))") }
             }
-            let supported = try APIGuards.supported(by: capabilities)
-            guard requested.isSubset(of: supported) else { throw RPCFailure(code: APIError.incompatible, message: "Host cannot enforce requested guards: \(requested.subtracting(supported).sorted().joined(separator: ", "))") }
+            return try session.call(method, params: guarded)
         }
-        return try client.call(method, params: guarded)
     }
 }
 
@@ -80,63 +82,6 @@ struct Target: ParsableArguments {
         if let expectedWorkspaceRevision { result["expectedWorkspaceRevision"] = .string(expectedWorkspaceRevision) }
         if let expectedLayoutRevision { result["expectedLayoutRevision"] = .string(expectedLayoutRevision) }
         return result
-    }
-}
-
-struct Tabs: ParsableCommand {
-    static let configuration = CommandConfiguration(abstract: "Create, list, close, or focus native tabs.")
-    enum Action: String, ExpressibleByArgument { case list, new, close, focus }
-    @Argument var action: Action
-    @OptionGroup var connection: Connection
-    @OptionGroup var target: Target
-    func run() throws {
-        try connection.call(action == .list ? "tabs.list" : "command.run",
-                            params: action == .list ? target.params(connection: connection) : target.params(connection: connection).merging(["id": .string("tab.\(action.rawValue)")]) { _, new in new })
-    }
-}
-
-struct Panes: ParsableCommand {
-    static let configuration = CommandConfiguration(abstract: "Inspect or modify terminal panes.")
-    enum Action: String, ExpressibleByArgument { case list, inspect, split, close, focus, send, capture, type }
-    @Argument var action: Action
-    @OptionGroup var connection: Connection
-    @OptionGroup var target: Target
-    @Flag var left = false
-    @Flag var right = false
-    @Flag var up = false
-    @Flag var down = false
-    @Option(help: "Literal input text for send. No shell escaping is added.") var text: String?
-    @Option(help: "New panel type for type: terminal, browser, or a registered type.") var type: String?
-    @Option(help: "Require this terminal session for send/capture; rejects a replaced shell.") var sessionId: String?
-    func run() throws {
-        var params = try target.params(connection: connection)
-        if let sessionId {
-            guard action == .send || action == .capture else { throw ValidationError("session-id is only valid for send/capture") }
-            params["sessionId"] = .string(sessionId)
-            params.removeValue(forKey: "expectedAnchorSessionId")
-        }
-        switch action {
-        case .inspect: try connection.call("pane.inspect", params: params)
-        case .type:
-            guard let type else { throw ValidationError("type requires --type") }
-            params["id"] = .string("pane.type")
-            params["type"] = .string(type)
-            try connection.call("command.run", params: params)
-        case .list: try connection.call("panes.list", params: params)
-        case .capture: try connection.call("panes.capture", params: params)
-        case .send:
-            guard let text else { throw ValidationError("send requires --text") }
-            params["text"] = .string(text)
-            try connection.call("panes.send", params: params)
-        case .split:
-            let directions = [(left, "left"), (right, "right"), (up, "up"), (down, "down")].filter(\.0)
-            guard directions.count == 1 else { throw ValidationError("Choose exactly one of --left, --right, --up, --down") }
-            params["id"] = .string("split.\(directions[0].1)")
-            try connection.call("command.run", params: params)
-        case .close, .focus:
-            params["id"] = .string("pane.\(action.rawValue)")
-            try connection.call("command.run", params: params)
-        }
     }
 }
 
@@ -368,15 +313,6 @@ struct BrowserCommand: ParsableCommand {
         if let timeoutMilliseconds { params["timeoutMilliseconds"] = .integer(timeoutMilliseconds) }
         try connection.call("browser.\(action.rawValue)", params: params)
     }
-}
-
-struct LayoutCommand: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "layout", abstract: "Read the authoritative layout.")
-    enum Action: String, ExpressibleByArgument { case get }
-    @Argument var action: Action
-    @OptionGroup var connection: Connection
-    @OptionGroup var target: Target
-    func run() throws { try connection.call("layout.get", params: target.params(connection: connection)) }
 }
 
 struct Commands: ParsableCommand {

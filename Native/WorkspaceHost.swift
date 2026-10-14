@@ -61,9 +61,12 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     private var testConfirmationHandler: ((NSAlert) -> Void)?
     private struct ConfigurationApplyFault { let replacement: String? }
     private var configurationApplyFault: ConfigurationApplyFault?
+    private var rejectNextTerminalPreparation = false
+    private var terminalPreparationCount = 0
     private var paneTypeMenu: NSMenu?
     private var tabGroupObservations: [ObjectIdentifier: (group: NSWindowTabGroup, token: NSKeyValueObservation)] = [:]
     private var tabGroupSyncScheduled = false
+    private var nativeGroupIDs: [ObjectIdentifier: GroupID] = [:]
 
     init(startingWith workspace: Workspace = Workspace()) throws {
         let environment = ProcessInfo.processInfo.environment
@@ -393,6 +396,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         case "palette.list": return try listPalettes()
         case "palette.import": return try importPalette(params)
         case "version": return .object(["cliVersion": .string("0.1.0-dev"), "appVersion": .string("0.1.0-dev"), "protocolVersion": .integer(1)])
+        case "window.list": return try nativeWindowsInfo(params)
+        case "window.get":
+            let target = try targetNativeWindow(params)
+            return nativeWindowInfo(target.window, tab: target.tab)
         case "tabs.list": return try .encoding(workspace.tabs)
         case "panes.list": return try .encoding(workspace.panes)
         case "plugins.list": return try .encoding(pluginCatalog.registrations)
@@ -487,28 +494,52 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 try browser.performCommand(id)
                 return .object([:])
             }
-            if id == "pane.type", !(["terminal", "browser"] + pluginCatalog.registrations.filter(\.hasPanel).map(\.id)).contains(params["type"]?.string ?? "") {
+            if id == "window.focus" {
+                let target = try targetNativeWindow(params, focusing: true)
+                if let activate = params["activate"], case .bool = activate {} else if params["activate"] != nil { throw RPCFailure(code: -32602, message: "activate must be a boolean") }
+                var next = workspace
+                try next.focusTab(target.tab)
+                try reconcile(next)
+                if target.window.isMiniaturized {
+                    target.window.deminiaturize(nil)
+                    target.window.makeKeyAndOrderFront(nil)
+                }
+                if params["activate"] == .bool(true) { NSApp.activate() }
+                return nativeWindowInfo(target.window, tab: target.tab)
+            }
+            if ["pane.type", "pane.split"].contains(id), !(["terminal", "browser"] + pluginCatalog.registrations.filter(\.hasPanel).map(\.id)).contains(params["type"]?.string ?? (id == "pane.split" ? "terminal" : "")) {
                 throw RPCFailure(code: -32602, message: "Unknown pane type")
             }
+            try validateMutationAdmission(id, params: params)
             var next = workspace
             let result = try CommandRegistry.execute(id, params: params, workspace: &next)
-            let remaining = Set(next.panes.filter { pane in workspace.panes.contains(where: { $0 == pane }) }.map(\.id))
+            try validateMutationGeometry(id, params: params, next: next, result: result)
+            let remaining = Set(next.panes.filter { pane in workspace.panes.contains(where: { $0.id == pane.id && $0.type == pane.type }) }.map(\.id))
             if params["force"] != .bool(true), terminals.contains(where: { !remaining.contains($0.key) && $0.value.needsConfirmClose }) {
                 throw RPCFailure(code: -32010, message: "The terminal may have a running process; pass --force to terminate it")
             }
-            try reconcile(next)
-            return result
+            if ["pane.title.set", "pane.title.clear"].contains(id) {
+                workspace = next
+                updatePaneTitle(try targetPaneID(params))
+                persistWorkspace()
+            } else { try reconcile(next) }
+            return mutationResponse(id, result: result)
         case "panes.send":
             guard let text = params["text"]?.string else { throw RPCFailure(code: -32602, message: "text is required") }
             try targetTerminal(params).send(text)
             return .object([:])
         case "panes.capture": return try .encoding(TerminalOutput(targetTerminal(params).capture()))
         case "debug.inspect" where integration: return inspect()
+        case "debug.rejectNextTerminalPreparation" where integration:
+            guard params.isEmpty else { throw RPCFailure(code: -32602, message: "This fixture takes no parameters") }
+            rejectNextTerminalPreparation = true
+            return .object(["armed": .bool(true)])
         case "debug.commandClipboard" where integration: return commandPasteboard.string(forType: .string).map(JSONValue.string) ?? .null
         case "debug.menuTree" where integration:
             func entries(_ menu: NSMenu) -> JSONValue {
-                .array(menu.items.filter { !$0.isSeparatorItem && !$0.isHidden }.map { item in
-                    .object(["title": .string(item.title), "key": .string(item.keyEquivalent),
+                menu.update()
+                return .array(menu.items.filter { !$0.isSeparatorItem && !$0.isHidden }.map { item in
+                    .object(["title": .string(item.title), "key": .string(item.keyEquivalent), "enabled": .bool(item.isEnabled),
                              "modifiers": .integer(Int(item.keyEquivalentModifierMask.rawValue)),
                              "command": (item.representedObject as? String).map(JSONValue.string) ?? .null,
                              "children": item.submenu.map(entries) ?? .array([])])
@@ -806,7 +837,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             scoped["pane"] = .string(pane.description)
             scoped["tab"] = .string(tab.id.description)
         }
-        if scoped["scope"] == nil { scoped["scope"] = .string(view.instance.registration.scope.rawValue) }
+        let inheritsScope = ["context.get", "workspace.snapshot"].contains(method) || method.hasPrefix("terminal.")
+            || (method == "command.run" && params["id"]?.string?.hasPrefix("plugin.") == true)
+        if inheritsScope, scoped["scope"] == nil { scoped["scope"] = .string(view.instance.registration.scope.rawValue) }
         try synchronizeNativeGroups()
         if method.hasPrefix("plugins.settings.") {
             guard params["id"] == nil || params["id"] == .string(view.instance.registration.id) else { throw RPCFailure(code: APIError.forbidden, message: "Plugin settings are bound to the caller's namespace") }
@@ -981,6 +1014,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                     }
                 }
                 created[pane.id] = try TerminalView(runtime: runtime, environment: environment)
+                if integration { terminalPreparationCount += 1 }
                 sessions[pane.id] = session
             }
             for pane in next.panes where leaves[pane.id] == nil || replacements.contains(pane.id) {
@@ -997,6 +1031,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                     return try await self.callFromPlugin(method, params: params, pane: pane.id, view: controller)
                 }
                 createdPlugins[pane.id] = controller
+            }
+            if integration, rejectNextTerminalPreparation, !created.isEmpty {
+                rejectNextTerminalPreparation = false
+                throw RPCFailure(code: APIError.unavailable, message: "Injected terminal preparation rejection")
             }
         } catch {
             created.values.forEach { $0.close() }
@@ -1130,6 +1168,11 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                     let bindings = self.activeKeyBindings.sorted { $0.key.description < $1.key.description }
                     guard let binding = bindings.first(where: { $0.key.matches(event) }) else { return false }
                     if binding.value.hasPrefix("browser."), self.focusedBrowser == nil { return false }
+                    if binding.value.hasPrefix("split."), self.splitUnavailableReason(binding.value, params: [:]) != nil { return false }
+                    if binding.value == "tab.detachCurrent" {
+                        guard let keyTab = self.workspace.keyTabID,
+                              (self.workspace.groups.first { $0.tabs.contains(keyTab) }?.tabs.count ?? 0) > 1 else { return false }
+                    }
                     self.runUserCommand(binding.value, params: [:])
                     return true
                 }
@@ -1151,18 +1194,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 renderedZoom[tab.id] = tab.zoomedPane
             }
         }
-        for group in next.groups {
-            guard let first = group.tabs.first.flatMap({ windows[$0] }) else { continue }
-            var previous = first
-            for id in group.tabs.dropFirst() {
-                guard let window = windows[id] else { continue }
-                if !(first.tabGroup?.windows ?? [first]).contains(window) {
-                    previous.addTabbedWindow(window, ordered: .above)
-                }
-                previous = window
-            }
-            first.orderFront(nil)
-        }
+        reconcileNativeGroups()
         if commandPicker?.isVisible != true, let tab = next.tabs.first(where: { $0.id == next.keyTabID }), let window = windows[tab.id] {
             window.makeKeyAndOrderFront(nil)
             focusResponder(tab.focusedPane, in: window)
@@ -1191,7 +1223,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             split.splitView.isVertical = axis == .horizontal
             for child in [controller(for: first, tab: tab, path: path + [.first]), controller(for: second, tab: tab, path: path + [.second])] {
                 let item = NSSplitViewItem(viewController: child)
-                item.minimumThickness = 80
+                item.minimumThickness = PaneMoveGeometry.minimumExtent
                 // Pane geometry belongs to the split model, not the intrinsic
                 // hugging size of a web pane's address bar or status text.
                 item.holdingPriority = NSLayoutConstraint.Priority(rawValue: 251)
@@ -1216,20 +1248,13 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         var next = workspace
         do {
             try next.move(pane, beside: target, direction: direction)
-            guard let layout = next.tabs.first(where: { $0.id == tab.id })?.layout,
-                  let frames = paneMoveFrames(layout: layout, tab: tab.id),
-                  [pane, target].allSatisfy({ id in
-                      guard let frame = frames[id] else { return false }
-                      return frame.width >= 80 && frame.height >= 80
-                  }) else { return nil }
+            try validateMutationGeometry("pane.move", params: ["pane": .string(pane.description), "target": .string(target.description)], next: next, result: .object([:]))
             return next
         } catch { return nil }
     }
 
     private func paneMoveFrames(layout: Layout, tab: TabID) -> [PaneID: NSRect]? {
-        guard let window = windows[tab], let content = window.contentView,
-              let split = window.contentViewController as? NSSplitViewController else { return nil }
-        return PaneMoveGeometry.frames(for: layout, in: content.convert(content.bounds, to: nil), divider: split.splitView.dividerThickness)
+        mutationFrames(layout: layout, tab: tab)
     }
 
     private func clearPaneMovePreviews() { containers.values.forEach { $0.dropView.clearPreview() } }
@@ -1242,9 +1267,13 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
 
     @discardableResult
     private func movePane(source: PaneDragHandle, target: PaneID, direction: Direction) -> Bool {
-        guard let next = proposedMove(source: source, target: target, direction: direction) else { return false }
-        do { try reconcile(next); return true }
-        catch { present(error); return false }
+        guard let pane = containers.first(where: { $0.value.dragHandle === source })?.key,
+              let tab = try? workspace.resolvedTab(pane: pane), proposedMove(source: source, target: target, direction: direction) != nil else { return false }
+        do {
+            _ = try call("command.run", params: ["id": .string("pane.move"), "pane": .string(pane.description), "target": .string(target.description),
+                                                "direction": .string(direction.rawValue), "expectedLayoutRevision": .string(revisions.layoutRevision(tab.id)!)])
+            return true
+        } catch { present(error); return false }
     }
 
     private func makeMoveMenu(for pane: PaneID) -> NSMenu {
@@ -1308,9 +1337,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     private func setManualPaneTitle(_ title: String, for pane: PaneID) throws {
-        try workspace.setManualTitle(title, for: pane)
-        updatePaneTitle(pane)
-        persistWorkspace()
+        _ = try call("command.run", params: ["id": .string("pane.title.set"), "pane": .string(pane.description), "title": .string(title)])
     }
 
     private func focused(_ pane: PaneID) {
@@ -1356,7 +1383,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     func synchronizeNativeGroups() throws {
         guard !reconciling else { return }
         let previous = workspace
-        try workspace.adoptTabGroups(nativeTabGroups())
+        let observed = nativeGroupsWithIdentity()
+        try workspace.adoptTabGroups(observed.map(\.tabs), retaining: observed.map(\.id))
         if workspace != previous { persistWorkspace() }
         observeNativeTabGroups()
     }
@@ -1367,6 +1395,11 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             if let group = window.tabGroup { groups[ObjectIdentifier(group)] = group }
         }
         tabGroupObservations = tabGroupObservations.filter { groups[$0.key] != nil }
+        nativeGroupIDs = nativeGroupIDs.filter { groups[$0.key] != nil }
+        for (id, group) in groups {
+            let members = Set(group.windows.compactMap { native in windows.first { $0.value === native }?.key })
+            if let model = workspace.groups.first(where: { Set($0.tabs) == members }) { nativeGroupIDs[id] = model.id }
+        }
         for (id, group) in groups where tabGroupObservations[id] == nil {
             // AppKit documents windows as KVO compliant. Reordering the selected
             // tab does not necessarily cause a windowDidBecomeKey notification.
@@ -1391,18 +1424,47 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }
     }
 
-    private func nativeTabGroups() -> [[TabID]] {
+    private func nativeTabGroups() -> [[TabID]] { nativeGroupsWithIdentity().map(\.tabs) }
+
+    private func nativeGroupsWithIdentity() -> [(tabs: [TabID], id: GroupID?)] {
         var seen = Set<TabID>()
-        var result: [[TabID]] = []
+        var result: [(tabs: [TabID], id: GroupID?)] = []
         for tab in workspace.tabs where !seen.contains(tab.id) {
             guard let window = windows[tab.id] else { continue }
             let members = (window.tabGroup?.windows ?? [window]).compactMap { native in
                 windows.first { $0.value === native }?.key
             }
             seen.formUnion(members)
-            result.append(members)
+            result.append((members, window.tabGroup.flatMap { nativeGroupIDs[ObjectIdentifier($0)] }))
         }
         return result
+    }
+
+    private func reconcileNativeGroups() {
+        var selected: [GroupID: NSWindow] = [:]
+        for window in windows.values {
+            if let native = window.tabGroup, let id = nativeGroupIDs[ObjectIdentifier(native)], let current = native.selectedWindow { selected[id] = current }
+        }
+        for group in workspace.groups {
+            let desired = group.tabs.compactMap { windows[$0] }
+            guard let first = desired.first else { continue }
+            // Keep the destination's actual native group/frame even when an arriving
+            // tab becomes its first member. A model group is not a window identity.
+            let anchor = desired.first { window in window.tabGroup.map { nativeGroupIDs[ObjectIdentifier($0)] == group.id } ?? false } ?? first
+            guard let native = anchor.tabGroup else { continue }
+            for outsider in native.windows where !desired.contains(where: { $0 === outsider }) { native.removeWindow(outsider) }
+            for (index, window) in desired.enumerated() where native.windows.firstIndex(where: { $0 === window }) != index {
+                // AppKit's same-group insertion can leave duplicate tab-bar items,
+                // asserting on a later detach/rejoin. Explicit removal is required
+                // for reordering; cross-group insertion already removes the source.
+                if window.tabGroup === native { native.removeWindow(window) }
+                native.insertWindow(window, at: index)
+            }
+            let focused: NSWindow? = workspace.keyTabID.flatMap { group.tabs.contains($0) ? windows[$0] : nil }
+            let retained = selected[group.id].flatMap { current in desired.contains(where: { $0 === current }) ? current : nil }
+            native.selectedWindow = focused ?? retained ?? first
+            native.selectedWindow?.orderFront(nil)
+        }
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -1519,8 +1581,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         menu.insertItem(editItem, at: 1)
         let windowMenu = NSMenu(title: "Window")
         addCommands(["tab.previous", "tab.next"], to: windowMenu)
-        let detachTab = windowMenu.addItem(withTitle: "Move Tab to New Window", action: #selector(NSWindow.moveTabToNewWindow(_:)), keyEquivalent: "")
-        setBuiltInShortcut(detachTab, key: "n", modifiers: [.command, .control])
+        addCommands(["tab.detachCurrent"], to: windowMenu)
         let windowItem = NSMenuItem(title: "Window", action: nil, keyEquivalent: "")
         windowItem.submenu = windowMenu
         menu.addItem(windowItem)
@@ -1643,6 +1704,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 case "tab.new": symbol = "plus.square"; keywords = "create"
                 case "tab.close", "pane.close": symbol = "xmark.square"; keywords = "remove close"
                 case "pane.copyID": symbol = "doc.on.doc"; keywords = "clipboard panel identifier"
+                case "pane.title.clear": symbol = "textformat"; keywords = "reset rename manual title"
+                case "tab.detachCurrent": detail = "Tabs"; symbol = "macwindow"; keywords = "detach move new window"
                 case "split.left": detail = "Layout"; symbol = "rectangle.lefthalf.inset.filled"; keywords = "pane panel"
                 case "split.right": detail = "Layout"; symbol = "rectangle.righthalf.inset.filled"; keywords = "pane panel"
                 case "split.up": detail = "Layout"; symbol = "rectangle.tophalf.inset.filled"; keywords = "pane panel above"
@@ -1658,6 +1721,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                     if missingTarget { unavailable = "The original workspace target was closed" }
                     else if tab == nil && command.id != "tab.new" { unavailable = "Open a workspace to use this command" }
                     else if command.id.hasPrefix("browser."), pane?.type != .browser { unavailable = "Focus a browser pane to use this command" }
+                    else if command.id == "pane.title.clear", pane?.manualTitle == nil { unavailable = "This pane has no manual title" }
+                    else if command.id == "tab.detachCurrent", let tab,
+                            workspace.groups.first(where: { $0.tabs.contains(tab.id) })?.tabs.count == 1 { unavailable = "This tab already has its own window" }
+                    else if command.id.hasPrefix("split.") { unavailable = splitUnavailableReason(command.id, params: pickerTarget) }
                     else if command.id.hasPrefix("tab.select"), let number = Int(command.id.dropFirst("tab.select".count)),
                             let tab, let group = workspace.groups.first(where: { $0.tabs.contains(tab.id) }), number > group.tabs.count {
                         unavailable = "Tab \(number) is not available in this window"
@@ -1823,6 +1890,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         if id.map({ CommandContract.forCommand($0).workspaceIndependent }) == true || id == "tab.new" || id?.hasPrefix("plugin.") == true { return true }
         guard NSApp.keyWindow is WorkspaceWindow else { return false }
         if id?.hasPrefix("browser.") == true { return focusedBrowser != nil }
+        if let id, id.hasPrefix("split.") { return splitUnavailableReason(id, params: [:]) == nil }
+        if id == "tab.detachCurrent", let tab = try? targetTab([:]) { return (workspace.groups.first { $0.tabs.contains(tab.id) }?.tabs.count ?? 0) > 1 }
+        if id == "pane.title.clear", let pane = try? targetPaneID([:]) { return workspace.panes.first { $0.id == pane }?.manualTitle != nil }
         return true
     }
 
@@ -1951,12 +2021,13 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         return .object(["panes": .array(panes), "nativeTabGroups": .array(groups), "windows": .array(windowSizes),
                         "appearance": .string(NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? "dark" : "light"),
                         "appearanceFollowsSystem": .bool(NSApp.appearance == nil),
-                        "applicationActive": .bool(NSApp.isActive), "pendingTerminalRuns": .integer(terminalControl.pendingRuns), "pendingTerminalWaits": .integer(terminalControl.pendingWaits)])
+                        "applicationActive": .bool(NSApp.isActive), "terminalPreparationCount": .integer(terminalPreparationCount), "pendingTerminalRuns": .integer(terminalControl.pendingRuns), "pendingTerminalWaits": .integer(terminalControl.pendingWaits)])
     }
 }
 
 @MainActor
 final class WorkspaceWindow: NSWindow {
+    let identity = "window-" + UUID().uuidString
     var keybindingHandler: ((NSEvent) -> Bool)?
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown, keybindingHandler?(event) == true { return }

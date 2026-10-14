@@ -2,6 +2,8 @@
 
 Audit baseline: checkpoint `1f80bde`. This is an inventory and a prioritized proposal, **not a new layout API**. Public means available in an ordinary app launch; `debug.*` test controls do not count.
 
+This matrix describes that historical checkpoint. Current incremental delivery is documented in [layout APIs](layout-api.md) and [implementation progress](api-extension-progress.md); entries marked absent below are not a current capability advertisement.
+
 ## Parity matrix
 
 | Operation | Native UI | Public CLI / socket | Gap / constraint |

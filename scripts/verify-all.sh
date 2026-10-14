@@ -42,6 +42,7 @@ run api-context python3 scripts/verify-api-context.py
 run api-settings python3 scripts/verify-api-settings.py
 run api-negotiation python3 scripts/verify-api-negotiation.py
 run plugin-settings-api python3 scripts/verify-plugin-settings-api.py
+run layout-api python3 scripts/verify-layout-api.py
 run pane-titles python3 scripts/verify-pane-titles.py
 run pane-movement python3 scripts/verify-pane-movement.py
 run plugins python3 scripts/verify-plugins.py

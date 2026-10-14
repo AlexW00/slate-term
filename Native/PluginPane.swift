@@ -303,7 +303,19 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
           self:()=>call('context.inspect'),
           inspect:(params={})=>call('workspace.snapshot',params),
           api:()=>call('api.describe'),
-          panes:Object.freeze({inspect:(params={})=>call('pane.inspect',params)}),
+          panes:Object.freeze({
+            inspect:(params={})=>call('pane.inspect',params),
+            split:(params)=>call('command.run',{...params,id:'pane.split'}),
+            move:(target,direction,params={})=>call('command.run',{...params,id:'pane.move',target,direction}),
+            setTitle:(title,params={})=>call('command.run',{...params,id:'pane.title.set',title}),
+            clearTitle:(params={})=>call('command.run',{...params,id:'pane.title.clear'})
+          }),
+          layout:Object.freeze({get:(params={})=>call('layout.get',params),resize:(path,firstChildFraction,params={})=>call('command.run',{...params,id:'layout.resize',path,firstChildFraction})}),
+          tabs:Object.freeze({
+            reorder:(index,params={})=>call('command.run',{...params,id:'tab.reorder',index}),
+            move:(group,params={})=>call('command.run',{...params,id:'tab.move',group}),
+            detach:(params={})=>call('command.run',{...params,id:'tab.detach'})
+          }),
           command:(id,params={},options={})=>call('command.run',{...params,id},options),
           settings:()=>call('settings.get'),
           pluginSettings:Object.freeze({get:()=>call('plugins.settings.get'),patch:(operations,expectedWriteRevision)=>call('plugins.settings.patch',{operations,expectedWriteRevision})}),

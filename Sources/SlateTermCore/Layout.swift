@@ -21,6 +21,24 @@ public indirect enum Layout: Equatable, Codable, Sendable {
         }
     }
 
+    public func path(to target: PaneID) -> [Branch]? {
+        switch self {
+        case .pane(let id): return id == target ? [] : nil
+        case .split(_, _, let first, let second):
+            if let path = first.path(to: target) { return [.first] + path }
+            return second.path(to: target).map { [.second] + $0 }
+        }
+    }
+
+    public func node(at path: [Branch]) throws -> Layout {
+        var node = self
+        for branch in path {
+            guard case .split(_, _, let first, let second) = node else { throw WorkspaceError.invalidLayout("Path extends beyond a pane") }
+            node = branch == .first ? first : second
+        }
+        return node
+    }
+
     func replacing(_ target: PaneID, with replacement: Layout) -> Layout {
         switch self {
         case .pane(let id): id == target ? replacement : self

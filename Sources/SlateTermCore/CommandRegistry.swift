@@ -6,15 +6,29 @@ public struct WorkspaceCommand: Sendable, Codable {
     public let key: String
     public let shift: Bool
     public let alt: Bool
+    public let control: Bool
     public let contract: CommandContract
 
-    public init(id: String, title: String, key: String, shift: Bool, alt: Bool = false) {
+    public init(id: String, title: String, key: String, shift: Bool, alt: Bool = false, control: Bool = false) {
         self.id = id
         self.title = title
         self.key = key
         self.shift = shift
         self.alt = alt
+        self.control = control
         self.contract = .forCommand(id)
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, title, key, shift, alt, control, contract }
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        title = try values.decode(String.self, forKey: .title)
+        key = try values.decode(String.self, forKey: .key)
+        shift = try values.decode(Bool.self, forKey: .shift)
+        alt = try values.decodeIfPresent(Bool.self, forKey: .alt) ?? false
+        control = try values.decodeIfPresent(Bool.self, forKey: .control) ?? false
+        contract = try values.decodeIfPresent(CommandContract.self, forKey: .contract) ?? .forCommand(id)
     }
 }
 
@@ -34,6 +48,16 @@ public enum CommandRegistry {
         .init(id: "focus.down", title: "Focus Below", key: "down", shift: false, alt: true),
         .init(id: "pane.zoom", title: "Toggle Pane Zoom", key: "return", shift: true),
         .init(id: "layout.equalize", title: "Equalize Panes", key: "e", shift: true),
+        .init(id: "pane.split", title: "Split Pane or Tab Root", key: "", shift: false),
+        .init(id: "pane.move", title: "Move Pane", key: "", shift: false),
+        .init(id: "layout.resize", title: "Resize Split", key: "", shift: false),
+        .init(id: "pane.title.set", title: "Set Pane Title", key: "", shift: false),
+        .init(id: "pane.title.clear", title: "Clear Pane Title", key: "", shift: false),
+        .init(id: "tab.reorder", title: "Reorder Tab", key: "", shift: false),
+        .init(id: "tab.move", title: "Move Tab to Group", key: "", shift: false),
+        .init(id: "tab.detach", title: "Detach Tab", key: "", shift: false),
+        .init(id: "tab.detachCurrent", title: "Move Tab to New Window", key: "n", shift: false, control: true),
+        .init(id: "window.focus", title: "Focus Native Window", key: "", shift: false),
         .init(id: "pane.type", title: "Change Pane Type", key: "", shift: false),
         .init(id: "pane.copyID", title: "Copy Pane ID", key: "", shift: false),
         .init(id: "pane.close", title: "Close Pane", key: "w", shift: false),
@@ -73,8 +97,12 @@ public enum CommandRegistry {
         guard commands.contains(where: { $0.id == id }) else {
             throw RPCFailure(code: -32601, message: "Unknown command: \(id)")
         }
+        if let result = try WorkspaceMutationCommand.execute(id, params: params, workspace: &workspace) { return result }
         func pane() throws -> PaneID {
-            if let value = params["pane"] { return try PaneID(parsing: requireString(value, name: "pane")) }
+            if let value = params["pane"] {
+                _ = try tab()
+                return try PaneID(parsing: requireString(value, name: "pane"))
+            }
             if let tabValue = params["tab"] {
                 let tab = try TabID(parsing: requireString(tabValue, name: "tab"))
                 guard let pane = workspace.tabs.first(where: { $0.id == tab })?.focusedPane else {

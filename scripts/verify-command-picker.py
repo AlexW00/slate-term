@@ -102,13 +102,19 @@ with tempfile.TemporaryDirectory(prefix='slate-picker-', dir='/tmp') as temporar
             picker(clickRow=0)
             assert picker()['visible'], 'A new query must reset click-to-execute state'
             picker(clickRow=0, doubleClick=True)
-            assert not picker()['visible'] and rpc('debug.commandClipboard') == 'p1'
+            # The fixture posts mouse-up; AppKit may finish the double-click action
+            # after the RPC returns. Observe completion without replaying the click.
+            eventually('Second click executes captured copy action',
+                       lambda: not picker()['visible'] and rpc('debug.commandClipboard') == 'p1')
             assert rpc('workspace.get') == before_copy
             rpc('debug.key', chord='cmd+k')
             key('s')
             eventually('Search field accepts real typing', lambda: picker()['query'] == 's')
             state = picker(query='split')
-            assert len(state['results']) == 4, state
+            # Exact title matches precede looser fuzzy matches (including the
+            # application-font commands added to the shared registry).
+            assert [r['id'] for r in state['results'][:4]] == [
+                'split.right', 'split.down', 'split.left', 'split.up'], state
             assert state['selected'] == 'split.right'
             key('down')
             assert picker()['selected'] == 'split.down'
@@ -124,7 +130,12 @@ with tempfile.TemporaryDirectory(prefix='slate-picker-', dir='/tmp') as temporar
             capture('command-picker-plugin.png')
             target = rpc('workspace.get')['tabs'][0]['focusedPane']
             other = cli('tabs', 'new')['tabId']
-            assert picker()['visible'] and picker()['searchFocused'], 'Background mutation must not steal picker input'
+            # Observe across AppKit's deferred tab updates, not only the RPC turn.
+            stable_until = time.monotonic() + 1
+            while time.monotonic() < stable_until:
+                state = picker()
+                assert state['visible'] and state['searchFocused'] and state['keyWindow'], ('Background mutation stole picker input', state)
+                time.sleep(.05)
             key('return')
             eventually('Picker invokes plugin command', marker.exists)
             assert json.loads(marker.read_text())['focusedPaneId'] == target
@@ -184,7 +195,7 @@ with tempfile.TemporaryDirectory(prefix='slate-picker-', dir='/tmp') as temporar
             key('escape')
             # A closed target becomes unavailable without redirecting the action.
             rpc('debug.key', chord='cmd+k')
-            picker(query='split')
+            picker(query='split right')
             cli('panes', 'close', '--pane', target, '--force')
             assert picker()['visible'] and picker()['results'] == []
             key('escape')
@@ -203,7 +214,8 @@ with tempfile.TemporaryDirectory(prefix='slate-picker-', dir='/tmp') as temporar
                 assert picker()['visible'], 'First mouse click must only select'
                 time.sleep(.7)
                 picker(clickRow=0)
-                assert not picker()['visible'], 'A later second click must execute without requiring double-click timing'
+                eventually('A later second click executes without double-click timing',
+                           lambda: not picker()['visible'])
                 eventually('Mouse-invoked command finishes', lambda: cli('plugins', 'status', 'busy')[-1]['state'] == 'succeeded')
             finally:
                 if job.poll() is None: job.terminate(); job.communicate(timeout=10)
@@ -248,7 +260,7 @@ with tempfile.TemporaryDirectory(prefix='slate-picker-', dir='/tmp') as temporar
             for tab in rpc('workspace.get')['tabs']:
                 cli('tabs', 'close', '--tab', tab['id'], '--force')
             cli('command', 'run', 'command.picker')
-            state = picker(query='split')
+            state = picker(query='split right')
             assert state['visible'] and state['results'] == []
             picker(query='new window')
             assert picker()['selected'] == 'window.new'
@@ -268,6 +280,7 @@ with tempfile.TemporaryDirectory(prefix='slate-picker-', dir='/tmp') as temporar
         except Exception:
             if ready.exists() and app.poll() is None:
                 print('PICKER_FAILURE_STATE', picker(), 'clipboard:', rpc('debug.commandClipboard'), flush=True)
+                print('PICKER_FAILURE_WORKSPACE', rpc('debug.inspect'), flush=True)
             raise
         finally:
             app.terminate()

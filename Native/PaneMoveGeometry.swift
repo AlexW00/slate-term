@@ -4,6 +4,8 @@ import SlateTermCore
 /// Predict the committed split geometry in bottom-up window coordinates, including dividers.
 /// Used for size validation, not the target-local insertion cue shown during a drag.
 enum PaneMoveGeometry {
+    static let minimumExtent: CGFloat = 80
+
     static func frames(for layout: Layout, in rect: NSRect, divider: CGFloat) -> [PaneID: NSRect] {
         switch layout {
         case .pane(let pane): return [pane: rect]

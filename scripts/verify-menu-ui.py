@@ -76,7 +76,10 @@ with tempfile.TemporaryDirectory(prefix='slate-menu-', dir='/tmp') as temporary:
             tree = rpc('debug.menuTree')
             workspace = next(item for item in tree if item['title'] == 'Workspace')
             groups = {item['title']: item for item in workspace['children'] if item['children']}
-            assert set(groups) == {'Tabs', 'Browser', 'Split Pane', 'Focus Pane', 'Layout'}, groups
+            assert set(groups) == {'Tabs', 'Browser', 'Split Pane', 'Focus Pane', 'Layout', 'Appearance', 'Application Font Size'}, groups
+            window_menu = next(item for item in tree if item['title'] == 'Window')
+            detach = next(item for item in window_menu['children'] if item.get('command') == 'tab.detachCurrent')
+            assert detach['key'] == 'n' and detach['modifiers'] == (1 << 20 | 1 << 18), detach
             shortcuts = []
 
             def check(items):
@@ -84,8 +87,9 @@ with tempfile.TemporaryDirectory(prefix='slate-menu-', dir='/tmp') as temporary:
                     if item['children']:
                         check(item['children'])
                     else:
-                        if item.get('command') == 'pane.copyID':
-                            assert item['key'] == '', 'Copy Pane ID intentionally has no default shortcut'
+                        if item.get('command') in {'pane.copyID', 'appearance.auto', 'appearance.light', 'appearance.dark',
+                                                   'terminal.font.increase', 'terminal.font.decrease', 'terminal.font.reset'}:
+                            assert item['key'] == '', 'This action intentionally has no default shortcut'
                             continue
                         assert item['key'], item
                         shortcuts.append((item['key'], item['modifiers']))
@@ -114,8 +118,18 @@ with tempfile.TemporaryDirectory(prefix='slate-menu-', dir='/tmp') as temporary:
             for pane in ['p2', 'p3']:
                 cli('panes', 'close', '--pane', pane, '--force')
 
-            (directory / 'config.toml').write_text('[keybind]\n"cmd+shift+j" = "pane.copyID"\n')
+            detached_tab = cli('tabs', 'new')['tabId']
+            rpc('debug.key', chord='cmd+ctrl+n', dispatch=True)
+            assert len(rpc('workspace.get')['groups']) == 2
+            assert rpc('workspace.get')['keyTabID'] == detached_tab
+            cli('tabs', 'close', '--tab', detached_tab, '--force')
+            (directory / 'config.toml').write_text('[keybind]\n"cmd+shift+j" = "pane.copyID"\n"cmd+ctrl+n" = "unbound"\n')
             rpc('config.reload')
+            attached_tab = cli('tabs', 'new')['tabId']
+            before_unbound = rpc('workspace.get')['groups']
+            rpc('debug.key', chord='cmd+ctrl+n', dispatch=True)
+            assert rpc('workspace.get')['groups'] == before_unbound, 'Unbound native detach still consumed the shortcut'
+            cli('tabs', 'close', '--tab', attached_tab, '--force')
             before_copy = rpc('workspace.get')
             assert rpc('debug.commandClipboard') is None
             rpc('debug.key', chord='cmd+shift+j', dispatch=True)

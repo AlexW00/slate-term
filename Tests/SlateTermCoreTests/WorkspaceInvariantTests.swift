@@ -78,7 +78,9 @@ func paneIdentitiesRejectNoncanonicalInput(value: String) {
 
 @Test(arguments: ["nextPane", "nextTab", "nextGroup"])
 func exhaustedCountersRejectAtomically(counter: String) throws {
-    var object = try #require(JSONSerialization.jsonObject(with: Workspace().encoded()) as? [String: Any])
+    var initial = Workspace()
+    if counter == "nextGroup" { _ = try initial.newTab(in: GroupID(1)) } // detach must actually allocate, not be a singleton no-op
+    var object = try #require(JSONSerialization.jsonObject(with: initial.encoded()) as? [String: Any])
     object[counter] = Int.max
     var workspace = try Workspace.restore(JSONSerialization.data(withJSONObject: object))
     let before = workspace

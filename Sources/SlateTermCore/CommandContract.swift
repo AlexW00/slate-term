@@ -15,17 +15,27 @@ public struct CommandContract: Codable, Sendable {
         // pages could invoke it before settings-write APIs existed. New writes stay administrative.
         let administrative = id.hasPrefix("appearance.") || id.hasPrefix("terminal.font.") || id.hasPrefix("terminal.palette.")
             || id.hasPrefix("warnings.") || id.hasPrefix("plugins.") || id.hasPrefix("window.frame.")
-            || ["window.focus", "window.minimize", "window.restore", "window.fullscreen.set"].contains(id)
-        let independent = administrative || ["window.new", "settings.open", "config.reload", "command.picker"].contains(id)
+            || ["window.focus", "window.minimize", "window.restore", "window.fullscreen.set", "tab.detachCurrent"].contains(id)
+        let independent = (administrative && id != "tab.detachCurrent") || ["window.new", "settings.open", "config.reload", "command.picker"].contains(id)
         let parameters: [String: String]
         let required: [String]
         switch id {
         case "appearance.set": parameters = ["mode": "light|dark|auto"]; required = ["mode"]
         case "terminal.font.set": parameters = ["size": "number[1,256]"]; required = ["size"]
         case "terminal.palette.set": parameters = ["slot": "light|dark", "name": "string"]; required = ["slot", "name"]
+        case "pane.split":
+            parameters = ["direction": "left|right|up|down", "target": "pane|root", "type": "pane-type", "newPaneFraction": "number(0,1)", "focus": "new|preserve", "expectedLayoutRevision": "string"]
+            required = ["direction", "expectedLayoutRevision"]
+        case "pane.move": parameters = ["target": "pane-id", "direction": "left|right|up|down", "expectedLayoutRevision": "string"]; required = ["target", "direction", "expectedLayoutRevision"]
+        case "layout.resize": parameters = ["path": "array<first|second>", "firstChildFraction": "number(0,1)", "expectedLayoutRevision": "string"]; required = ["path", "firstChildFraction", "expectedLayoutRevision"]
+        case "pane.title.set": parameters = ["title": "string<=4096 UTF-8 bytes after trimming"]; required = ["title"]
+        case "tab.reorder": parameters = ["index": "integer>=0", "focus": "target|preserve", "expectedWorkspaceRevision": "string"]; required = ["index", "expectedWorkspaceRevision"]
+        case "tab.move": parameters = ["group": "group-id", "index": "integer>=0", "focus": "target|preserve", "expectedWorkspaceRevision": "string"]; required = ["group", "expectedWorkspaceRevision"]
+        case "tab.detach": parameters = ["focus": "target|preserve", "expectedWorkspaceRevision": "string"]; required = ["expectedWorkspaceRevision"]
         case "pane.type": parameters = ["type": "pane-type"]; required = ["type"]
         case "pane.focus": parameters = ["pane": "pane-id"]; required = ["pane"]
         case "tab.focus": parameters = ["tab": "tab-id"]; required = ["tab"]
+        case "window.focus": parameters = ["windowId": "native-window-id", "activate": "boolean"]; required = ["windowId"]
         default: parameters = [:]; required = []
         }
         return Self(pluginAccessible: !administrative, requiresArguments: !required.isEmpty,

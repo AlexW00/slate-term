@@ -16,6 +16,8 @@ public enum PaneType: Equatable, Codable, Sendable {
     case registered(String)
 }
 
+public enum PaneSplitFocus: String, Codable, Sendable { case new, preserve }
+
 public struct Pane: Equatable, Codable, Sendable, Identifiable {
     public let id: PaneID
     public internal(set) var type: PaneType
@@ -73,20 +75,38 @@ public struct Workspace: Equatable, Sendable {
     }
 
     @discardableResult
-    public mutating func split(_ target: PaneID, direction: Direction, type: PaneType = .terminal) throws -> PaneID {
-        let index = try tabIndex(containing: target)
+    public mutating func split(_ target: PaneID, direction: Direction, type: PaneType = .terminal,
+                               newPaneFraction: Double = 0.5, focus: PaneSplitFocus = .new) throws -> PaneID {
+        try split(in: tabIndex(containing: target), target: target, direction: direction, type: type,
+                  newPaneFraction: newPaneFraction, focus: focus)
+    }
+
+    @discardableResult
+    public mutating func splitRoot(_ tab: TabID, direction: Direction, type: PaneType = .terminal,
+                                   newPaneFraction: Double = 0.5, focus: PaneSplitFocus = .new) throws -> PaneID {
+        guard let index = tabs.firstIndex(where: { $0.id == tab }) else { throw WorkspaceError.tabNotFound(tab) }
+        return try split(in: index, target: nil, direction: direction, type: type, newPaneFraction: newPaneFraction, focus: focus)
+    }
+
+    private mutating func split(in index: Int, target: PaneID?, direction: Direction, type: PaneType,
+                                newPaneFraction: Double, focus policy: PaneSplitFocus) throws -> PaneID {
+        guard newPaneFraction.isFinite, newPaneFraction > 0, newPaneFraction < 1 else {
+            throw WorkspaceError.invalidLayout("New-pane fractions must be finite and between 0 and 1")
+        }
         try requireAvailable(nextPane)
         let id = PaneID(nextPane)
-        let first = Layout.pane(direction.insertsBefore ? id : target)
-        let second = Layout.pane(direction.insertsBefore ? target : id)
-        let replacement = Layout.split(axis: direction.axis, fraction: 0.5, first: first, second: second)
-        let layout = tabs[index].layout.replacing(target, with: replacement)
+        let original = target.map(Layout.pane) ?? tabs[index].layout
+        let replacement = Layout.split(axis: direction.axis, fraction: direction.insertsBefore ? newPaneFraction : 1 - newPaneFraction,
+                                       first: direction.insertsBefore ? .pane(id) : original,
+                                       second: direction.insertsBefore ? original : .pane(id))
+        let layout = target.map { tabs[index].layout.replacing($0, with: replacement) } ?? replacement
         _ = try layout.checkedPaneIDs()
         nextPane += 1
         panes.append(Pane(id: id, type: type))
         tabs[index].layout = layout
         tabs[index].zoomedPane = nil
-        focus(id, in: index)
+        if policy == .new { focus(id, in: index) }
+        else if type == .terminal { tabs[index].terminalHistory.append(id) }
         return id
     }
 
@@ -125,6 +145,7 @@ public struct Workspace: Equatable, Sendable {
     public mutating func setManualTitle(_ title: String, for pane: PaneID) throws {
         guard let index = panes.firstIndex(where: { $0.id == pane }) else { throw WorkspaceError.paneNotFound(pane) }
         let text = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.utf8.count <= 4096 else { throw WorkspaceError.invalidLayout("Manual titles must not exceed 4096 UTF-8 bytes") }
         panes[index].manualTitle = text.isEmpty ? nil : text
     }
 
@@ -208,7 +229,8 @@ public struct Workspace: Equatable, Sendable {
 
     @discardableResult
     public mutating func detach(_ tab: TabID) throws -> GroupID {
-        guard tabs.contains(where: { $0.id == tab }) else { throw WorkspaceError.tabNotFound(tab) }
+        guard tabs.contains(where: { $0.id == tab }), let owner = groups.first(where: { $0.tabs.contains(tab) }) else { throw WorkspaceError.tabNotFound(tab) }
+        if owner.tabs.count == 1 { return owner.id }
         try requireAvailable(nextGroup)
         let group = GroupID(nextGroup)
         nextGroup += 1
@@ -218,19 +240,33 @@ public struct Workspace: Equatable, Sendable {
         return group
     }
 
-    public mutating func moveTab(_ tab: TabID, to group: GroupID) throws {
+    public mutating func moveTab(_ tab: TabID, to group: GroupID, at index: Int? = nil) throws {
         guard tabs.contains(where: { $0.id == tab }) else { throw WorkspaceError.tabNotFound(tab) }
-        guard groups.contains(where: { $0.id == group }) else { throw WorkspaceError.groupNotFound(group) }
-        if groups.first(where: { $0.id == group })!.tabs.contains(tab) { return }
+        guard let destination = groups.firstIndex(where: { $0.id == group }) else { throw WorkspaceError.groupNotFound(group) }
+        if groups[destination].tabs.contains(tab), index == nil { return }
+        var members = groups[destination].tabs.filter { $0 != tab }
+        let insertion = index ?? members.count
+        guard insertion >= 0, insertion <= members.count else { throw WorkspaceError.invalidLayout("Tab index is outside the destination's final order") }
+        members.insert(tab, at: insertion)
         for index in groups.indices { groups[index].tabs.removeAll { $0 == tab } }
-        // Remove empty groups only after adding to the destination, keeping indices stable.
-        let destination = groups.firstIndex { $0.id == group }!
-        groups[destination].tabs.append(tab)
+        groups[destination].tabs = members
         groups.removeAll { $0.tabs.isEmpty }
     }
 
+    public mutating func reorderTab(_ tab: TabID, to index: Int) throws {
+        guard let group = groups.first(where: { $0.tabs.contains(tab) }) else { throw WorkspaceError.tabNotFound(tab) }
+        try moveTab(tab, to: group.id, at: index)
+    }
+
     /// Import native tab drag/reorder/merge operations without recreating tabs or panes.
-    public mutating func adoptTabGroups(_ nativeGroups: [[TabID]]) throws {
+    public mutating func adoptTabGroups(_ nativeGroups: [[TabID]], retaining identities: [GroupID?]? = nil) throws {
+        if let identities {
+            let retained = identities.compactMap { $0 }
+            guard identities.count == nativeGroups.count, Set(retained).count == retained.count,
+                  Set(retained).isSubset(of: Set(groups.map(\.id))) else {
+                throw WorkspaceError.invalidSnapshot("Native group identities must be distinct current groups")
+            }
+        }
         let ids = nativeGroups.flatMap { $0 }
         guard nativeGroups.allSatisfy({ !$0.isEmpty }), ids.count == tabs.count,
               Set(ids) == Set(tabs.map(\.id)) else {
@@ -239,9 +275,10 @@ public struct Workspace: Equatable, Sendable {
         var used = Set<GroupID>()
         var next = nextGroup
         var result: [TabGroup] = []
-        for members in nativeGroups {
+        for (index, members) in nativeGroups.enumerated() {
             let id: GroupID
-            if let existing = groups.first(where: { !used.contains($0.id) && $0.tabs.contains(members[0]) }) {
+            if let identity = identities?[index] { id = identity }
+            else if identities == nil, let existing = groups.first(where: { !used.contains($0.id) && $0.tabs.contains(members[0]) }) {
                 id = existing.id
             } else {
                 try requireAvailable(next)
@@ -250,6 +287,13 @@ public struct Workspace: Equatable, Sendable {
             }
             used.insert(id)
             result.append(TabGroup(id: id, tabs: members))
+        }
+        if identities != nil {
+            // Window enumeration order is not a group mutation. Retain creation order
+            // for surviving identities and append newly discovered native groups.
+            let oldOrder = Dictionary(uniqueKeysWithValues: groups.enumerated().map { ($0.element.id, $0.offset) })
+            let newOrder = Dictionary(uniqueKeysWithValues: result.enumerated().map { ($0.element.id, groups.count + $0.offset) })
+            result.sort { (oldOrder[$0.id] ?? newOrder[$0.id]!) < (oldOrder[$1.id] ?? newOrder[$1.id]!) }
         }
         groups = result
         nextGroup = next

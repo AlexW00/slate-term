@@ -150,6 +150,7 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
             var modifiers: Set<KeyChord.Modifier> = [.cmd]
             if command.shift { modifiers.insert(.shift) }
             if command.alt { modifiers.insert(.alt) }
+            if command.control { modifiers.insert(.ctrl) }
             return (KeyChord(modifiers: modifiers, key: command.key), command.id)
         }).merging([
             KeyChord(modifiers: [.ctrl, .alt], key: "h"): "focus.left",

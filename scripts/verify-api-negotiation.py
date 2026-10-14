@@ -10,8 +10,8 @@ import threading
 from api_fixture import CLI
 
 
-def exercise(capabilities, params, expected_error=None):
-    seen, errors = [], []
+def exercise(capabilities, params, expected_error=None, drop_after_capabilities=False, malformed_response=False):
+    seen, errors, connections = [], [], []
     stop = threading.Event()
     with tempfile.TemporaryDirectory(prefix='slate-negotiate-', dir='/tmp') as temporary:
         path = str(Path(temporary) / 'peer.sock')
@@ -27,17 +27,28 @@ def exercise(capabilities, params, expected_error=None):
                             peer, _ = listener.accept()
                         except TimeoutError:
                             continue
+                        connection = []
+                        connections.append(connection)
                         with peer, peer.makefile('rb') as stream:
                             peer.settimeout(2)
                             while line := stream.readline(65536):
                                 request = json.loads(line)
                                 method = request['method']
+                                connection.append(method)
                                 if method == 'hello':
                                     result = {'protocolVersion': 1}
                                 else:
                                     seen.append(request)
                                     result = capabilities if method == 'api.describe' else {'received': request['params']}
-                                peer.sendall(json.dumps({'jsonrpc': '2.0', 'id': request['id'], 'result': result}).encode() + b'\n')
+                                response = {'jsonrpc': '2.0', 'id': request['id'], 'result': result}
+                                if method == 'api.describe' and capabilities is None:
+                                    response = {'jsonrpc': '2.0', 'id': request['id'], 'error': {'code': -32601, 'message': 'Unknown method'}}
+                                if method == 'command.run' and malformed_response:
+                                    peer.sendall(b'{malformed response\n')
+                                else:
+                                    peer.sendall(json.dumps(response).encode() + b'\n')
+                                if drop_after_capabilities and method == 'api.describe':
+                                    break
                 except BaseException as error:
                     errors.append(error)
 
@@ -51,11 +62,16 @@ def exercise(capabilities, params, expected_error=None):
                 stop.set()
                 worker.join(timeout=3)
             assert not worker.is_alive() and not errors, errors
+        assert len(connections) == 1, ('Capability negotiation and dispatch must share a connection', connections)
         mutations = [r for r in seen if r['method'] == 'command.run']
         if expected_error is not None:
             assert result.returncode != 0 and not result.stdout, result
             assert json.loads(result.stderr)['error']['code'] == expected_error, result.stderr
-            assert not mutations, 'A rejected guard still reached mutation dispatch'
+            if malformed_response:
+                assert len(mutations) == 1
+                assert json.loads(result.stderr)['error']['outcome'] == 'unknown', result.stderr
+            else:
+                assert not mutations, 'A rejected guard still reached mutation dispatch'
         else:
             assert result.returncode == 0, result.stderr
             assert len(mutations) == 1 and mutations[0]['params'] == params
@@ -66,9 +82,14 @@ def exercise(capabilities, params, expected_error=None):
 legacy = {'apiVersion': 1, 'identityGuards': True, 'workspaceRevisions': True,
           'surface': 'administrative', 'methods': ['config.patch']}
 exercise(legacy, {'id': 'window.new', 'expectedWorkspaceRevision': 'captured'})
+# A lost negotiated peer must never reconnect and dispatch to a replacement host.
+exercise(legacy, {'id': 'window.new', 'expectedWorkspaceRevision': 'captured'}, -32602, drop_after_capabilities=True)
 exercise(legacy, {'id': 'window.new', 'expectedWriteRevision': 'new-guard'}, -32053)
+exercise(None, {'id': 'window.new', 'expectedInstanceId': 'old'}, -32053)
+# A malformed response after dispatch does not establish that the mutation was rejected.
+exercise(legacy, {'id': 'window.new', 'expectedWorkspaceRevision': 'captured'}, -32602, malformed_response=True)
 exercise({'identityGuards': True}, {'id': 'window.new', 'expectedInstanceId': 'old'}, -32053)
 exercise(legacy | {'guards': ['expectedInstanceId']}, {'id': 'window.new', 'expectedWorkspaceRevision': 'captured'}, -32053)
 seen = exercise({}, {'id': 'plugin.demo.inspect', 'expectedCustomResult': 'author-owned argument'})
 assert [r['method'] for r in seen] == ['command.run'], seen
-print('Guard negotiation: legacy compatibility, explicit advertisement and no unsafe mutation dispatch passed')
+print('Guard negotiation: legacy compatibility, explicit advertisement, same-peer dispatch and no reconnect after negotiation passed')

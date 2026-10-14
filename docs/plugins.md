@@ -214,6 +214,8 @@ await workspace.storage.delete("draft");
 
 Terminal operations use the active terminal in the plugin's context; an explicit terminal `pane` overrides that history. A nonterminal focus does not erase it. Run/wait accept `{signal}` as a final options argument. Run requires authenticated zsh prompt/empty-buffer checks; it is not a generic TUI command runner. See [automation](automation.md) for limits, deadlines and the distinction between current-screen text and command stdout. `workspace.plugin` contains the type ID, logical `instanceId`, `viewId`, `paneId`, and scope.
 
+Guarded pane split/move/resize, manual titles and native tab rearrangement are available through `workspace.panes`, `workspace.layout` and `workspace.tabs`; see [layout/page adapters](layout-api.md#registered-page-adapters). They use captured/live validated targets and explicit revisions rather than retargeting current focus. Administrative window operations are not exposed to pages.
+
 ### Pane header
 
 Each pane has a common native header: type, custom title, optional contributed command buttons, and Close. **Copy Pane ID** is now a stock command (`pane.copyID`) in the picker/Workspace menu rather than a permanent header button. Plugins can use their document title or explicitly control the header:
@@ -223,7 +225,7 @@ await workspace.setTitle("Reviewing README.md");
 await workspace.setTitle(null); // use document.title again
 ```
 
-An explicit plugin title is limited to 512 UTF-8 bytes and resets on a new document. Each view has its own title, even when it shares a tab/global instance. A user can override it by clicking the header title once and editing inline (Enter or blur saves; Escape cancels). Manual names persist with the workspace and take priority over both document and plugin titles. Plugin updates are still accepted; clearing the manual name reveals the latest automatic title. Close uses the normal pane-close command; it does not implicitly close sibling panes.
+An explicit plugin title is limited to 512 UTF-8 bytes and resets on a new document. Each view has its own title, even when it shares a tab/global instance. A user can override it by clicking the header title once and editing inline (Enter or blur saves; Escape cancels). Manual names persist with the workspace and take priority over both document and plugin titles. `workspace.panes.setTitle(title, params)` / `clearTitle(params)` set/clear this manual override; unlike `workspace.setTitle`, they are not automatic per-document title updates. Plugin updates are still accepted; clearing the manual name reveals the latest automatic title. Close uses the normal pane-close command; it does not implicitly close sibling panes.
 
 ### Events and cancellation
 
