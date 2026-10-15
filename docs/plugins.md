@@ -218,7 +218,7 @@ Guarded pane split/move/resize, manual titles and native tab rearrangement are a
 
 ### Saved layouts
 
-Panel manifests may declare `layoutFields` for per-pane starting configuration. `workspace.layoutConfiguration(params, options)` reads these values, defaulting to this pane or accepting an explicit pane. `workspace.layouts` exposes the same recipe library, guarded file updates, capture, opening/replacement and startup status as CLI/service clients. Panel scope supplies context, not a restriction on explicit cross-window access. See [saved layouts](saved-layouts.md) for schemas, helper signatures and whole-window-group targeting.
+Panel manifests may declare `layoutFields` for per-pane starting configuration. `workspace.layoutConfiguration(params, options)` reads these values, defaulting to this pane or accepting an explicit pane. `workspace.layouts` exposes the same recipe library, guarded file updates, capture, new-window opening, launcher creation and startup status as CLI/service clients. Panel scope supplies context, not a restriction on explicit cross-window access. See [saved layouts](saved-layouts.md) for schemas, helper signatures and whole-window-group targeting.
 
 ### Structured web interaction
 
@@ -262,6 +262,20 @@ stop();
 Subscriptions follow the owning tab (or all tabs for global instances); directed delivery addresses a logical `instanceId`. Native source attribution cannot be supplied by page code. Unsubscribe, document navigation and view closure cancel outstanding native polls. Generic `workspace.call(method, params, {signal, cause})` supports cancellation and explicit event causation. Mutation helpers accept equivalent final options; `emit` accepts them alongside routing options. Pass `event.deliveryContext` as `cause` for event-triggered work. References are view/document-bound, and all views of a plugin share its mutation budget. See [causation and loop admission](events.md#causation-and-loop-admission).
 
 See [workspace events](events.md) for bounds, replay, explicit cursor resynchronization, and cached-history lifecycle behavior.
+
+### Reloading a panel
+
+Plugin content fills its pane without a native status/reload footer. With a plugin focused, choose **Reload Plugin** in ⌘K or the Workspace menu. The same bindable command is available to CLI, page and service clients:
+
+```sh
+slate-term command run plugins.reload --pane p2
+```
+
+```js
+await workspace.command('plugins.reload', {pane: 'p2'});
+```
+
+The command captures/resolves a plugin pane using normal pane/tab routing and guards; stale or non-plugin targets fail rather than falling back to focus. A ready instance reloads only that view’s document. An unready instance retries its logical backend (shared views follow its normal scope). Replies are `{paneId,reloading:true}`: acceptance, not proof that the document/backend is ready. Reload retires document-bound requests, so self-reloading pages may not receive their reply. Read `web.get` / `plugins.status` for readiness and diagnostics. This is distinct from `plugins.restart`, which restarts all active backend instances for a registered type.
 
 ## Supervision and limits
 

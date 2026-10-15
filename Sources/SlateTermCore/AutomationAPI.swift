@@ -8,7 +8,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
     case workspaceGet = "workspace.get", workspaceSnapshot = "workspace.snapshot"
     case layoutsList = "layouts.list", layoutsGet = "layouts.get", layoutsFields = "layouts.fields", layoutsValidate = "layouts.validate"
     case layoutsCreate = "layouts.create", layoutsUpdate = "layouts.update", layoutsWindows = "layouts.windows"
-    case layoutsCapture = "layouts.capture", layoutsOpen = "layouts.open", layoutsStartupStatus = "layouts.startupStatus"
+    case layoutsCapture = "layouts.capture", layoutsOpen = "layouts.open", layoutsLauncher = "layouts.launcher", layoutsStartupStatus = "layouts.startupStatus"
     case layoutConfiguration = "layout.configuration"
     case layoutGet = "layout.get", tabsList = "tabs.list", panesList = "panes.list", paneInspect = "pane.inspect"
     case commandList = "command.list", commandRun = "command.run"
@@ -36,7 +36,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
     public enum Family: String, Sendable { case synchronous, contextual, terminal, browser, web, events, pluginRuntime, services, integration }
     public var family: Family {
         switch self {
-        case .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsCreate, .layoutsUpdate, .layoutsWindows, .layoutsCapture, .layoutsOpen, .layoutsStartupStatus,
+        case .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsCreate, .layoutsUpdate, .layoutsWindows, .layoutsCapture, .layoutsOpen, .layoutsLauncher, .layoutsStartupStatus,
              .describe, .version, .contextGet, .workspaceGet, .workspaceSnapshot, .layoutGet, .tabsList, .panesList, .paneInspect,
              .commandList, .commandRun, .windowList, .windowGet, .configGet, .configReload, .configValidate, .configPatch,
              .paletteList, .paletteImport, .appearanceGet, .skillsList, .skillsInstall, .skillsUninstall, .pluginsList, .pluginsRegister, .pluginsUnregister, .pluginsStatus, .pluginsLogs,
@@ -65,7 +65,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
              .paletteList, .appearanceGet, .skillsList, .pluginsList, .pluginsStatus, .pluginsLogs, .pluginSettingsGet, .settingsGet, .storageGet,
              .terminalCapture, .terminalWait, .panesCapture, .eventsHead, .eventsPoll, .webGet, .webSnapshot, .webWait,
              .browserGet, .browserSnapshot, .browserWait, .serviceList, .serviceStatus, .serviceLogs: .read
-        case .layoutsCreate, .layoutsUpdate, .layoutsCapture, .layoutsOpen, .commandRun, .configReload, .configPatch, .paletteImport, .skillsInstall, .skillsUninstall, .pluginsRegister, .pluginsUnregister,
+        case .layoutsCreate, .layoutsUpdate, .layoutsCapture, .layoutsOpen, .layoutsLauncher, .commandRun, .configReload, .configPatch, .paletteImport, .skillsInstall, .skillsUninstall, .pluginsRegister, .pluginsUnregister,
              .pluginsRestart, .pluginSettingsPatch, .storageSet, .storageDelete, .paneTitle, .terminalSend,
              .terminalKey, .terminalRun, .panesSend, .eventsEmit, .webClick, .webFill, .webSelect, .webScroll,
              .webScreenshot, .browserNavigate, .browserClick, .browserFill, .browserSelect, .browserScroll,
@@ -106,7 +106,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
             if params["id"] == nil, let plugin = defaults.pluginID { params["id"] = .string(plugin) }
         case .storageGet, .storageSet, .storageDelete:
             if params["instanceId"] == nil, !explicitTarget, let instance = defaults.instanceID { params["instanceId"] = .string(instance) }
-        case .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsCreate, .layoutsUpdate, .layoutsWindows, .layoutsCapture, .layoutsOpen, .layoutsStartupStatus,
+        case .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsCreate, .layoutsUpdate, .layoutsWindows, .layoutsCapture, .layoutsOpen, .layoutsLauncher, .layoutsStartupStatus,
              .describe, .version, .workspaceGet, .tabsList, .panesList, .commandList, .windowList, .windowGet,
              .configGet, .configReload, .configValidate, .configPatch, .paletteList, .paletteImport, .appearanceGet,
              .skillsList, .skillsInstall, .skillsUninstall, .pluginsList, .pluginsRegister, .pluginsUnregister, .pluginsStatus, .pluginsRestart, .pluginsLogs,

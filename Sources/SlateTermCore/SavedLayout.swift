@@ -62,15 +62,8 @@ public struct SavedLayoutDefinition: Equatable, Codable, Sendable {
                                              panes: [SavedLayoutPane(id: PaneID(1), type: "terminal")])])
     }
 
-    public func opening(in workspace: Workspace, replacing group: GroupID? = nil) throws -> SavedLayoutOpening {
+    public func opening(in workspace: Workspace) throws -> SavedLayoutOpening {
         _ = try validated()
-        let removedTabs: [TabID]
-        if let group {
-            guard let target = workspace.groups.first(where: { $0.id == group }) else {
-                throw invalidSavedLayout("Replacement group does not exist: \(group)")
-            }
-            removedTabs = target.tabs
-        } else { removedTabs = [] }
         var result = workspace
         var mapping: [PaneID: SavedLayoutPane] = [:]
         do {
@@ -83,8 +76,6 @@ public struct SavedLayoutDefinition: Equatable, Codable, Sendable {
                 try buildSavedTree(tab.layout, seed: seed, tab: tabID, path: [], recipes: recipes,
                                    workspace: &result, mapping: &mapping)
             }
-            // Never merge into or remove an implicit destination group.
-            for tab in removedTabs { try result.closeTab(tab) }
             try result.focusTab(firstTab)
             return SavedLayoutOpening(workspace: result, groupID: groupID, panes: mapping)
         } catch let error as RPCFailure { throw error }

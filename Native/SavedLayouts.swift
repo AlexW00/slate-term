@@ -18,19 +18,30 @@ final class SavedLayouts {
     var types: () -> [SavedLayoutPaneType] = { [] }
     var windows: () -> [LayoutSourceWindow] = { [] }
     var capture: ((String, Bool, Bool, Bool) throws -> SavedLayoutDefinition)?
-    var open: ((SavedLayoutDefinition, String?, Bool, WorkspaceOperationContext) throws -> JSONValue)?
+    var open: ((SavedLayoutDefinition, WorkspaceOperationContext) throws -> JSONValue)?
     var invoke: ((String, [String: JSONValue], WorkspaceOperationContext) throws -> JSONValue)?
     var onChange: (() -> Void)?
-    private(set) var editor: SavedLayoutsWindowController?
+    private(set) var editorModel: SavedLayoutsModel?
+    var showSettings: (() -> Void)?
+    var isVisible: () -> Bool = { false }
     private var refreshTimer: Timer?
 
-    init(directory: URL) { self.directory = directory }
+    init(directory: URL) {
+        self.directory = directory
+        // Child-file writes need rescanning; retain drafts and refresh only active UI.
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.isVisible() else { return }
+                self.refresh()
+            }
+        }
+    }
     var usesDefaultLibrary: Bool {
         directory.standardizedFileURL == FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config/slate-term/layouts").standardizedFileURL
     }
     var store: SavedLayoutStore { get throws { try SavedLayoutStore(directory: directory) } }
-    func close() { refreshTimer?.invalidate(); refreshTimer = nil; editor?.close() }
+    func close() { refreshTimer?.invalidate(); refreshTimer = nil }
 
     func call(_ method: String, params: [String: JSONValue], operation: WorkspaceOperationContext) throws -> JSONValue {
         try operation.validateCaller()
@@ -42,7 +53,8 @@ final class SavedLayouts {
         case "layouts.validate", "layouts.create": allowed = ["definition"]
         case "layouts.update": allowed = ["definition", "expectedSavedLayoutRevision"]
         case "layouts.capture": allowed = ["window", "name", "includeDirectories", "includeURLs", "includeCommands"]
-        case "layouts.open": allowed = ["id", "replaceWindow", "force"]
+        case "layouts.open": allowed = ["id"]
+        case "layouts.launcher": allowed = ["id", "path"]
         default: throw RPCFailure(code: -32601, message: "Unknown saved layout operation")
         }
         guard params.keys.allSatisfy(allowed.contains) else { throw RPCFailure(code: -32602, message: "Unknown parameter for \(method)") }
@@ -100,11 +112,18 @@ final class SavedLayouts {
             return try .encoding(save(definition, revision: nil))
         case "layouts.open":
             let saved = try entry()
-            if let value = params["replaceWindow"], value.string == nil { throw RPCFailure(code: -32602, message: "replaceWindow must be a window ID") }
             guard let open, let definition = saved.definition else { throw RPCFailure(code: -32022, message: "Workspace is unavailable") }
             let problems = definition.problems(types: types())
             guard problems.isEmpty else { throw RPCFailure(code: -32602, message: problems.joined(separator: "\n")) }
-            return try open(definition, params["replaceWindow"]?.string, flag("force", default: false), operation)
+            return try open(definition, operation)
+        case "layouts.launcher":
+            guard usesDefaultLibrary else { throw RPCFailure(code: -32602, message: "Spotlight launchers require the default ~/.config/slate-term/layouts library") }
+            let saved = try entry()
+            let path = try string("path")
+            guard path.hasPrefix("/"), !path.utf8.contains(0) else { throw RPCFailure(code: -32602, message: "path must be an absolute new .app destination") }
+            guard let definition = saved.definition else { throw RPCFailure(code: -32602, message: "Layout is unavailable") }
+            try LayoutLauncher.create(at: URL(fileURLWithPath: path), layoutID: definition.id, name: definition.name)
+            return .object(["id": .string(definition.id.uuidString), "path": .string(path)])
         default: preconditionFailure("Operation checked above")
         }
     }
@@ -129,27 +148,26 @@ final class SavedLayouts {
         return entry
     }
 
-    func showEditor() throws {
-        if editor == nil {
-            let model = SavedLayoutsModel(store: try store) { [weak self] definition, revision in
-                guard let self else { throw RPCFailure(code: -32022, message: "Layouts are unavailable") }
-                return try self.save(definition, revision: revision)
-            }
-            editor = SavedLayoutsWindowController(model: model)
-            // A directory vnode does not report in-place writes to its children.
-            // Rescan only while visible; save still checks exact content revisions.
-            refreshTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    guard let self, self.editor?.window?.isVisible == true else { return }
-                    self.refresh()
-                }
-            }
+    func makeEditorModel() throws -> SavedLayoutsModel {
+        if let editorModel { return editorModel }
+        let model = SavedLayoutsModel(store: try store) { [weak self] definition, revision in
+            guard let self else { throw RPCFailure(code: -32022, message: "Layouts are unavailable") }
+            return try self.save(definition, revision: revision)
         }
+        model.createLauncher = { [weak self] id in
+            try self?.createLauncher(id: id, operation: .init(origin: .native))
+        }
+        model.launcherUnavailable = usesDefaultLibrary ? nil : "Spotlight launchers require the default layout library."
+        editorModel = model
         refresh()
-        editor?.showWindow(nil)
-        editor?.window?.makeKeyAndOrderFront(nil)
+        return model
     }
-    func refresh() { editor?.model.types = types(); editor?.model.refresh(); onChange?() }
+    func showEditor() throws {
+        _ = try makeEditorModel()
+        refresh()
+        showSettings?()
+    }
+    func refresh() { editorModel?.types = types(); editorModel?.refresh(); onChange?() }
 
     private func request(_ method: String, params: [String: JSONValue], operation: WorkspaceOperationContext) throws -> JSONValue {
         // A modal loop can outlive its socket request even while the caller's service stays live.
@@ -167,30 +185,14 @@ final class SavedLayouts {
         case "layouts.edit": try showEditor()
         case "layouts.folder": NSWorkspace.shared.open(try store.directory)
         case "layouts.captureWindow": try captureWindow(operation: operation)
-        case "layouts.openWindow", "layouts.replaceWindow", "layouts.launcher":
+        case "layouts.openWindow", "layouts.launcher":
             let entries = try store.list().filter { $0.definition != nil && $0.diagnostic == nil }
             guard !entries.isEmpty else { try showEditor(); return }
-            guard let index = choose(title: command == "layouts.launcher" ? "Create Spotlight Launcher" : "Open Saved Layout", prompt: "Layout", choices: entries.map { $0.definition!.name }) else { return }
+            guard let index = choose(title: command == "layouts.launcher" ? "Create Spotlight Launcher" : "Open Layout in New Window", prompt: "Layout", choices: entries.map { $0.definition!.name }) else { return }
             let id = entries[index].definition!.id
-            guard editor?.model.hasDraft(id: id) != true else { throw RPCFailure(code: -32602, message: "Save or revert this layout’s unsaved changes first") }
+            guard editorModel?.hasDraft(id: id) != true else { throw RPCFailure(code: -32602, message: "Save or revert this layout’s unsaved changes first") }
             if command == "layouts.launcher" { try createLauncher(id: id, operation: operation); return }
-            var params: [String: JSONValue] = ["id": .string(id.uuidString)]
-            if command == "layouts.replaceWindow" {
-                let sources = windows()
-                guard !sources.isEmpty else { throw RPCFailure(code: -32602, message: "No workspace windows are open") }
-                guard let target = choose(title: "Replace a Window", prompt: "Window", choices: sources.map { "\($0.title) · \($0.tabs.count) tabs" }) else { return }
-                let source = sources[target]
-                // Always confirm replacement; the selected identity survives modal focus changes.
-                let alert = NSAlert()
-                alert.messageText = "Replace \(source.title)?"
-                alert.informativeText = "Its panes and running processes will close."
-                alert.addButton(withTitle: "Cancel"); alert.addButton(withTitle: "Replace")
-                guard alert.runModal() == .alertSecondButtonReturn else { return }
-                guard windows().contains(where: { $0.id == source.id && $0.tabs == source.tabs }) else { throw RPCFailure(code: -32022, message: "The selected window changed or closed; select it again") }
-                params["replaceWindow"] = .string(source.id); params["force"] = .bool(true)
-                params["expectedWorkspaceRevision"] = .string(source.workspaceRevision)
-            }
-            _ = try request("layouts.open", params: params, operation: operation)
+            _ = try request("layouts.open", params: ["id": .string(id.uuidString)], operation: operation)
         default: throw RPCFailure(code: -32601, message: "Unknown saved layout command")
         }
     }
@@ -216,7 +218,7 @@ final class SavedLayouts {
         let result = try request("layouts.capture", params: ["window": .string(source.id), "name": .string(name.stringValue),
                                 "expectedWorkspaceRevision": .string(source.workspaceRevision)], operation: operation)
         try showEditor()
-        editor?.model.select(result.object?["file"]?.string)
+        editorModel?.select(result.object?["file"]?.string)
     }
     private func choose(title: String, prompt: String, choices: [String]) -> Int? {
         let alert = NSAlert(); alert.messageText = title; alert.informativeText = prompt
@@ -226,6 +228,8 @@ final class SavedLayouts {
         return alert.runModal() == .alertFirstButtonReturn ? chooser.indexOfSelectedItem : nil
     }
     private func createLauncher(id: UUID, operation: WorkspaceOperationContext) throws {
+        guard usesDefaultLibrary else { throw RPCFailure(code: -32602, message: "Spotlight launchers require the default layout library") }
+        guard editorModel?.hasDraft(id: id) != true else { throw RPCFailure(code: -32602, message: "Save or revert this layout’s unsaved changes first") }
         let entry = try store.get(id: id)
         let panel = NSSavePanel()
         panel.title = "Create Spotlight Launcher"
@@ -235,7 +239,7 @@ final class SavedLayouts {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         try Task.checkCancellation()
         try operation.validateCaller()
-        try LayoutLauncher.create(at: url, layoutID: id, name: entry.definition!.name)
+        _ = try request("layouts.launcher", params: ["id": .string(id.uuidString), "path": .string(url.path)], operation: operation)
     }
 }
 

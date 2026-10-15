@@ -103,7 +103,7 @@ The host injects the `--st-*` palette variables, `data-appearance` and `color-sc
 2. `plugins register --replace`. Replacement needs the plugin's visible panes closed first; `panes type` the pane to something else, or close it.
 3. Open it with `panes type --pane P --type ID --force`, or `command run plugin.ID.CMD`.
 4. Inspect with `web snapshot --pane P`, `web screenshot --pane P --path /abs/out.png`, `plugins status ID` and `plugins logs`.
-5. To load edited files, open a fresh view: switch the pane to another type and back with `panes type`. `plugins restart ID` restarts a managed panel `process`. Check `command list` for any newer reload command.
+5. To load edited files, use `slate-term command run plugins.reload --pane P` (or Reload Plugin in ⌘K with that plugin focused). This reloads the selected document, or retries its backend if unready; check `web get` for readiness. `plugins restart ID` restarts all active managed panel instances of that type.
 
 ## Pitfalls
 

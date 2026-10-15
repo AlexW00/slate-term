@@ -5,7 +5,7 @@ import Testing
 @Test func savedLayoutCatalogSeparatesLibraryActionsFromPaneDefaults() {
     let defaults = AutomationDefaults(pane: PaneID(2), tab: TabID(2), pluginID: "notes", instanceID: "instance", scope: "tab")
     let reads: [AutomationMethod] = [.layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsWindows, .layoutsStartupStatus]
-    let writes: [AutomationMethod] = [.layoutsCreate, .layoutsUpdate, .layoutsCapture, .layoutsOpen]
+    let writes: [AutomationMethod] = [.layoutsCreate, .layoutsUpdate, .layoutsCapture, .layoutsOpen, .layoutsLauncher]
     for method in reads + writes {
         #expect(method.isPublic)
         #expect(method.family == .synchronous)
@@ -30,13 +30,14 @@ import Testing
     let revisions = WorkspaceRevisions(epoch: "fixture", workspace: before)
     var definition = SavedLayoutDefinition.blank()
     definition.tabs[0].panes[0].configuration = ["command": .string("private command"), "directory": .string("/private/path")]
-    let opening = try definition.opening(in: before, replacing: GroupID(1))
+    let opening = try definition.opening(in: before)
     let transition = try WorkspaceTransition(observing: opening.workspace, from: before, revisions: revisions, action: .savedLayoutOpen)
     #expect(transition.changed)
     #expect(transition.beforeWorkspaceRevision == revisions.revision)
     #expect(transition.revisions.revision != revisions.revision)
     #expect(transition.workspace.tabs.contains { $0.id == untouched })
-    #expect(transition.changes.contains { $0.topic == "host.pane.closed" && $0.pane == PaneID(1) })
+    #expect(!transition.changes.contains { $0.topic == "host.pane.closed" })
+    #expect(before.groups.allSatisfy { opening.workspace.groups.contains($0) })
     #expect(transition.changes.contains { $0.topic == "host.pane.created" })
     for fact in transition.changes {
         #expect(fact.payload["actionKind"] == .string("layouts.open"))

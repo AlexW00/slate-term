@@ -170,15 +170,19 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             guard let self else { throw SocketError.disconnected }
             return try self.captureLayout(source: source, directories: directories, urls: urls, commands: commands)
         }
-        savedLayouts.open = { [weak self] definition, source, force, operation in
+        savedLayouts.open = { [weak self] definition, operation in
             guard let self else { throw SocketError.disconnected }
-            return try self.openSavedLayout(definition, replacing: source, force: force, operation: operation)
+            return try self.openSavedLayout(definition, operation: operation)
         }
         savedLayouts.invoke = { [weak self] method, params, operation in
             guard let self else { throw SocketError.disconnected }
             return try self.call(method, params: params, operation: operation)
         }
         savedLayouts.onChange = { [weak self] in self?.refreshCommandPicker() }
+        savedLayouts.showSettings = { [weak self] in self?.showSettings(section: .layouts) }
+        savedLayouts.isVisible = { [weak self] in
+            self?.settingsWindow?.window?.isVisible == true || self?.commandPicker?.isVisible == true
+        }
         layoutStartup.run = { [weak self] pane, session, command in
             guard let self else { throw SocketError.disconnected }
             // Once committed, startup belongs to the new session, not the initiating page/service.
@@ -376,7 +380,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     func confirmTermination() -> Bool {
-        if let model = savedLayouts.editor?.model, model.hasUnsavedChanges {
+        if let model = savedLayouts.editorModel, model.hasUnsavedChanges {
             let alert = NSAlert()
             alert.messageText = "Save changes to your layouts before quitting?"
             alert.informativeText = "Unsaved layout drafts will be lost."
@@ -627,7 +631,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         case .layoutsStartupStatus:
             guard withoutAPIGuards(params).isEmpty else { throw RPCFailure(code: -32602, message: "layouts.startupStatus takes no payload parameters") }
             return layoutStartup.status
-        case .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsCreate, .layoutsUpdate, .layoutsWindows, .layoutsCapture, .layoutsOpen:
+        case .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsCreate, .layoutsUpdate, .layoutsWindows, .layoutsCapture, .layoutsOpen, .layoutsLauncher:
             var payload = withoutAPIGuards(params)
             payload["expectedSavedLayoutRevision"] = params["expectedSavedLayoutRevision"]
             return try savedLayouts.call(method, params: payload, operation: operation)
@@ -742,6 +746,14 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             if id == "skills.settings" { showSettings(section: .agents); return .object([:]) }
             if id == "skills.reveal" { return try revealAgentSkill() }
             if id.hasPrefix("layouts.") { try savedLayouts.perform(id, operation: operation); return .object([:]) }
+            if id == "plugins.reload" {
+                let allowed = Set(["id", "pane", "tab"])
+                guard Set(withoutAPIGuards(params).keys).isSubset(of: allowed) else { throw RPCFailure(code: -32602, message: "Unknown parameter for plugins.reload") }
+                let paneID = try targetPaneID(params)
+                guard let plugin = leaves[paneID] as? PluginPane else { throw RPCFailure(code: -32602, message: "Target pane is not a plugin") }
+                plugin.reloadPlugin()
+                return .object(["paneId": .string(paneID.description), "reloading": .bool(true)])
+            }
             if id == "command.picker" { try toggleCommandPicker(params); return .object([:]) }
             if id == "pane.rename" {
                 let pane = try targetPaneID(params)
@@ -1048,7 +1060,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             return .object(["armed": .bool(true)])
         case "debug.savedLayouts" where integration:
             try savedLayouts.showEditor()
-            let model = savedLayouts.editor!.model
+            let model = savedLayouts.editorModel!
             if let path = params["launcherPath"]?.string, let definition = model.definition {
                 try LayoutLauncher.create(at: URL(fileURLWithPath: path), layoutID: definition.id, name: definition.name)
             }
@@ -1062,17 +1074,24 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             if params["split"] == .string("right") { model.split(.horizontal) }
             if params["split"] == .string("below") { model.split(.vertical) }
             if params["remove"] == .bool(true) { model.removePane() }
+            if case .integer(let index) = params["selectTab"] { model.selectTab(index) }
+            if params["addTab"] == .bool(true) { model.addTab() }
+            if case .integer(let index) = params["removeTab"] { model.removeTab(at: index) }
+            if case .integer(let source) = params["moveTab"], case .integer(let destination) = params["toTab"] { model.moveTab(from: source, to: destination) }
+            if let payload = params["dropTab"]?.string, case .integer(let destination) = params["toTab"] { _ = model.dropTab(payload, at: destination) }
             if params["create"] == .bool(true) { model.create() }
             if params["save"] == .bool(true) { model.save() }
             if params["revert"] == .bool(true) { model.revert() }
             if let width = params["width"], case .integer(let width) = width {
                 let height: Int
                 if case .integer(let requested) = params["height"] { height = max(488, requested) } else { height = 620 }
-                savedLayouts.editor?.window?.setContentSize(NSSize(width: max(920, width), height: height))
+                settingsWindow?.window?.setContentSize(NSSize(width: max(1000, width), height: max(560, height)))
             }
-            let contentSize = savedLayouts.editor?.window?.contentView?.frame.size ?? .zero
+            let contentSize = settingsWindow?.window?.contentView?.frame.size ?? .zero
             return .object(["width": .number(contentSize.width), "height": .number(contentSize.height),
                             "dirty": .bool(model.isDirty), "conflict": .bool(model.conflict), "error": model.error.map(JSONValue.string) ?? .null,
+                            "selectedTab": .integer(model.selectedTab), "settingsSection": .string(settingsModel?.selection?.rawValue ?? ""),
+                            "tabDragID": .string(model.tabDragID(at: model.selectedTab)),
                             "file": model.selection.map(JSONValue.string) ?? .null, "definition": try model.definition.map(JSONValue.encoding) ?? .null])
         case "debug.settings" where integration:
             if params["inspectOnly"] == .bool(true) {
@@ -1080,7 +1099,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 if let section = params["section"]?.string { settingsModel?.selection = SettingsSection(rawValue: section) }
                 let skills = (settingsModel?.agentSkills ?? []).map { ($0.target.id, JSONValue.string($0.status.rawValue)) }
                 return .object(["visible": .bool(settingsWindow?.window?.isVisible == true),
-                                "agentSkills": .object(Dictionary(uniqueKeysWithValues: skills))])
+                                "agentSkills": .object(Dictionary(uniqueKeysWithValues: skills)),
+                                "layoutsAvailable": .bool(settingsModel?.layouts != nil)])
             }
             showSettings()
             guard let model = settingsModel else { throw RPCFailure(code: -32000, message: "Settings unavailable") }
@@ -1139,7 +1159,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             let controlLetter = chord.modifiers.contains(.ctrl) && !chord.modifiers.contains(.cmd) && (97...122).contains(scalar)
             let text = controlLetter ? String(UnicodeScalar(scalar & 0x1f)!) : key
             let menuOnly = params["menu"] == .bool(true)
-            let window = menuOnly ? nil : (params["layouts"] == .bool(true) ? savedLayouts.editor?.window : (params["picker"] == .bool(true) ? commandPicker?.window : (params["settings"] == .bool(true) ? settingsWindow?.window : windows[try targetTab(params).id])))
+            let window = menuOnly ? nil : (params["layouts"] == .bool(true) ? settingsWindow?.window : (params["picker"] == .bool(true) ? commandPicker?.window : (params["settings"] == .bool(true) ? settingsWindow?.window : windows[try targetTab(params).id])))
             guard let code = ["d": UInt16(2), "j": UInt16(38), "h": 4, "k": 40, "l": 37, "1": 18, "2": 19, "=": 24, "left": 123, "right": 124, "up": 126, "down": 125, "e": 14, "r": 15, "return": 36, "t": 17, "n": 45, "w": 13, "[": 33, "]": 30, ",": 43, "q": 12, "s": 1, "escape": 53, "delete": 51][chord.key],
                   let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: chord.nativeModifiers, timestamp: ProcessInfo.processInfo.systemUptime,
                                                windowNumber: window?.windowNumber ?? 0, context: nil, characters: text,
@@ -1181,7 +1201,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 guard process.terminationStatus == 0 else { throw RPCFailure(code: -32000, message: "Picker context capture failed") }
                 return .object([:])
             }
-            guard let path = params["path"]?.string, let window = params["layouts"] == .bool(true) ? savedLayouts.editor?.window : (params["picker"] == .bool(true) ? commandPicker?.window : (params["settings"] == .bool(true) ? settingsWindow?.window : windows[workspace.keyTabID ?? TabID(1)])) else {
+            guard let path = params["path"]?.string, let window = params["layouts"] == .bool(true) ? settingsWindow?.window : (params["picker"] == .bool(true) ? commandPicker?.window : (params["settings"] == .bool(true) ? settingsWindow?.window : windows[workspace.keyTabID ?? TabID(1)])) else {
                 throw RPCFailure(code: -32602, message: "path and key window are required")
             }
             try Self.captureWindow(window.windowNumber, path: path)
@@ -1328,9 +1348,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         return try SavedLayoutDefinition(name: "Untitled Layout", tabs: tabs).validated()
     }
 
-    private func openSavedLayout(_ definition: SavedLayoutDefinition, replacing source: String?, force: Bool,
+    private func openSavedLayout(_ definition: SavedLayoutDefinition,
                                  operation: WorkspaceOperationContext) throws -> JSONValue {
-        let group = try source.map(layoutGroup)
         let problems = definition.problems(types: savedLayouts.types())
         guard problems.isEmpty else { throw RPCFailure(code: -32602, message: problems.joined(separator: "\n")) }
         let recipes = definition.tabs.flatMap(\.panes)
@@ -1349,13 +1368,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 }
             }
         }
-        if let group, !force {
-            let removed = Set(workspace.tabs.filter { group.tabs.contains($0.id) }.flatMap { $0.layout.paneIDs })
-            guard !terminals.contains(where: { removed.contains($0.key) && $0.value.needsConfirmClose }) else {
-                throw RPCFailure(code: -32010, message: "The selected window has running processes; pass force to replace it")
-            }
-        }
-        let opening = try definition.opening(in: workspace, replacing: group?.id)
+        let opening = try definition.opening(in: workspace)
         var openingRecipes: [PaneID: SavedLayoutPane] = [:]
         for (id, var pane) in opening.panes {
             if let type = savedLayouts.types().first(where: { $0.id == pane.type }) {
@@ -2117,7 +2130,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         workspaceMenu.addItem(.separator())
         addCommands(["window.new"], to: workspaceMenu)
         workspaceMenu.addItem(.separator())
-        addCommands(["layouts.edit", "layouts.openWindow", "layouts.replaceWindow", "layouts.captureWindow", "layouts.launcher", "layouts.folder"], to: workspaceMenu)
+        addCommands(["layouts.edit", "layouts.openWindow", "layouts.captureWindow", "plugins.reload"], to: workspaceMenu)
         workspaceMenu.addItem(.separator())
         for (title, commands) in [
             ("Tabs", ["tab.new", "tab.close", "tab.previous", "tab.next"]),
@@ -2230,6 +2243,14 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         // Freeze before restoring focus; background clients must not redirect
         // shortcuts away from the same context used by Return/click execution.
         let target = pickerTarget
+        // These rows are projections of layouts.open, not a second command API.
+        if id.hasPrefix("layout-template.") {
+            let layoutID = String(id.dropFirst("layout-template.".count))
+            commandPicker?.dismiss(restoreFocus: true)
+            do { _ = try call("layouts.open", params: ["id": .string(layoutID)]) }
+            catch { present(error) }
+            return
+        }
         let independent = CommandContract.forCommand(id).workspaceIndependent
         let resolvedID = id == "tab.new" && target.isEmpty ? "window.new" : id
         commandPicker?.dismiss(restoreFocus: true)
@@ -2283,7 +2304,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         let contributions = Dictionary(uniqueKeysWithValues: pluginCatalog.registrations.flatMap { registration in
             registration.commands.map { ($0.namespacedID(plugin: registration.id), (title: $0.title, plugin: registration.title)) }
         })
-        return availableCommands.filter { $0.id != "command.picker" && !$0.contract.requiresArguments }.map { command in
+        let excluded: Set<String> = ["command.picker", "layouts.openWindow", "layouts.launcher", "layouts.folder"]
+        let commands = availableCommands.filter { !excluded.contains($0.id) && !$0.contract.requiresArguments }.map { command in
             var title = command.title
             var detail = "Workspace"
             var symbol = "square.grid.2x2"
@@ -2302,6 +2324,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 case let id where id.hasPrefix("layouts."): detail = "Saved Layouts"; symbol = "rectangle.split.2x2"; keywords = "recipe template save launch spotlight"
                 case "settings.open": detail = "Application"; symbol = "gearshape"; keywords = "preferences configuration"
                 case "config.reload": detail = "Application"; symbol = "arrow.clockwise"; keywords = "settings refresh"
+                case "plugins.reload": detail = "Plugin"; symbol = "arrow.clockwise"; keywords = "refresh widget panel"
                 case "skills.settings": detail = "AI"; symbol = "sparkles"; keywords = "agent skill claude codex install"
                 case "skills.reveal": detail = "AI"; symbol = "folder"; keywords = "agent skill finder show"
                 case "window.new": symbol = "macwindow.badge.plus"; keywords = "create"
@@ -2330,6 +2353,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 if !command.contract.workspaceIndependent {
                     if missingTarget { unavailable = "The original workspace target was closed" }
                     else if tab == nil && command.id != "tab.new" { unavailable = "Open a workspace to use this command" }
+                    else if command.id == "plugins.reload", pane.flatMap({ leaves[$0.id] as? PluginPane }) == nil { unavailable = "Focus a plugin pane to reload it" }
                     else if command.id.hasPrefix("browser."), pane?.type.isBrowser != true { unavailable = "Focus a browser pane to use this command" }
                     else if command.id == "browser.clearSiteData", let pane,
                             (leaves[pane.id] as? BrowserPane)?.currentURL.flatMap({ try? BrowserDataRequest.siteHost($0) }) == nil { unavailable = "Open an HTTP or HTTPS site to clear its data" }
@@ -2349,6 +2373,15 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             return PickerCommand(item: .init(id: command.id, title: title, detail: detail, keywords: keywords),
                                  symbol: symbol, shortcut: shortcut, unavailable: unavailable)
         }
+        let templates = ((try? savedLayouts.store.list()) ?? []).compactMap { entry -> PickerCommand? in
+            guard let definition = entry.definition, entry.diagnostic == nil else { return nil }
+            let problems = definition.problems(types: savedLayouts.types())
+            return PickerCommand(item: .init(id: "layout-template." + definition.id.uuidString,
+                title: "Open \(definition.name) in New Window", detail: "Saved Layout",
+                keywords: "layout template recipe launch"), symbol: "macwindow.badge.plus", shortcut: "",
+                unavailable: problems.first)
+        }
+        return commands + templates
     }
 
     @objc private func showSettings() { showSettings(section: nil) }
@@ -2375,6 +2408,13 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             settingsWindow = SettingsWindowController(model: model) { [weak self] in self?.refreshSettings(force: true) }
         }
         refreshSettings()
+        if settingsModel?.layouts == nil {
+            do {
+                settingsModel?.layouts = try savedLayouts.makeEditorModel()
+                settingsModel?.layoutsError = nil
+            } catch { settingsModel?.layoutsError = layoutErrorText(error) }
+        }
+        savedLayouts.refresh()
         if let section { settingsModel?.selection = section }
         settingsWindow?.showWindow(nil)
         settingsWindow?.window?.makeKeyAndOrderFront(nil)
@@ -2511,6 +2551,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }
         if id.map({ CommandContract.forCommand($0).workspaceIndependent }) == true || id == "tab.new" || id?.hasPrefix("plugin.") == true { return true }
         guard NSApp.keyWindow is WorkspaceWindow else { return false }
+        if id == "plugins.reload" { return (try? targetPaneID([:])).flatMap { leaves[$0] as? PluginPane } != nil }
         if id == "browser.clearSiteData" { return focusedBrowser?.currentURL.flatMap { try? BrowserDataRequest.siteHost($0) } != nil }
         if id?.hasPrefix("browser.") == true { return focusedBrowser != nil }
         if let id, id.hasPrefix("split.") { return splitUnavailableReason(id, params: [:]) == nil }

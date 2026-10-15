@@ -88,6 +88,44 @@ extension SavedLayoutDefinition {
         return result
     }
 
+    /// Conventional Tab N labels are automatic; all other names are preserved.
+    private mutating func renumberTabs() {
+        for index in tabs.indices where tabs[index].name.range(of: "^Tab [1-9][0-9]*$", options: .regularExpression) != nil {
+            tabs[index].name = "Tab \(index + 1)"
+        }
+    }
+
+    @discardableResult
+    public mutating func addTab() throws -> PaneID {
+        guard tabs.count < 8 else { throw RPCFailure(code: -32602, message: "A layout can have at most eight tabs") }
+        var next = self
+        let used = Set(tabs.flatMap(\.panes).map(\.id))
+        let id = (1...65).map(PaneID.init).first { !used.contains($0) }!
+        next.tabs.append(.init(name: "Tab \(tabs.count + 1)", layout: .pane(id), panes: [.init(id: id)]))
+        next.renumberTabs()
+        self = try next.validated()
+        return id
+    }
+
+    public mutating func removeTab(at index: Int) throws {
+        guard tabs.count > 1, tabs.indices.contains(index) else { throw RPCFailure(code: -32602, message: "The last tab cannot be removed; select an existing tab") }
+        var next = self
+        next.tabs.remove(at: index)
+        next.renumberTabs()
+        self = try next.validated()
+    }
+
+    /// The destination is the final zero-based index, for both drag and menu actions.
+    public mutating func moveTab(from source: Int, to destination: Int) throws {
+        guard tabs.indices.contains(source), tabs.indices.contains(destination) else { throw RPCFailure(code: -32602, message: "Select existing source and destination tabs") }
+        guard source != destination else { return }
+        var next = self
+        let tab = next.tabs.remove(at: source)
+        next.tabs.insert(tab, at: destination)
+        next.renumberTabs()
+        self = try next.validated()
+    }
+
     public mutating func splitPane(_ pane: PaneID, axis: Axis) throws -> PaneID {
         guard let index = tabs.firstIndex(where: { $0.layout.paneIDs.contains(pane) }), tabs[index].panes.count < 8 else {
             throw RPCFailure(code: -32602, message: "Select a pane in a tab with fewer than eight panes")

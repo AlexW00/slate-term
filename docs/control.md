@@ -33,7 +33,7 @@ slate-term rpc context.get --params '{"scope":"global"}'
 
 See [agent API extensions](agent-api.md) for capability discovery, guarded self/workspace inspection, CLI routing/session rules and application settings writes. `workspace.get` and `layout.get` retain their legacy shapes; revisioned metadata uses `workspace.snapshot` and `pane.inspect`.
 
-[Saved layouts](saved-layouts.md) add the shared `layouts.*` recipe library and pane-targeted `layout.configuration`. File updates use `expectedSavedLayoutRevision`; replacing a whole window group requires `expectedWorkspaceRevision`. These are separate from the live `layout.get` and native `windowId` contracts.
+[Saved layouts](saved-layouts.md) add the shared `layouts.*` recipe library and pane-targeted `layout.configuration`. File updates use `expectedSavedLayoutRevision`; opening always creates a new window group. Capture/open optionally accept `expectedWorkspaceRevision`. These are separate from the live `layout.get` and native `windowId` contracts.
 
 Workspace commands use `command.run` with an `id` from `command.list` and routing fields. Read operations include `workspace.get`, `tabs.list`, `panes.list`, `layout.get`, `context.get`, `config.get`, `appearance.get`, `skills.list`, `window.list/get`, `plugins.list/status/logs`. [Guarded layout operations](layout-api.md) document the shared pane/tab commands and stable native window targeting. The CLI provides typed wrappers for workspace mutations, configuration, plugin registration, [events](events.md), and [terminal/browser automation](automation.md).
 

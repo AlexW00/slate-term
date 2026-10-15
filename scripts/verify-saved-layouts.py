@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Saved recipes: real native UI/CLI/bridge, isolated files and owned app process only."""
+import contextlib
 import copy
+import errno
 import json
 import os
 import pathlib
@@ -27,7 +29,25 @@ def eventually(label, check):
     raise AssertionError(label)
 
 
-with tempfile.TemporaryDirectory(prefix='slate-layouts-', dir='/tmp') as temporary:
+@contextlib.contextmanager
+def fixture_directory():
+    directory = tempfile.TemporaryDirectory(prefix='slate-layouts-', dir='/tmp')
+    try:
+        yield directory.name
+    finally:
+        # An owned zsh can publish its final history just after the app exits.
+        # Retry only this fixture's ENOTEMPTY cleanup race, never test operations.
+        for attempt in range(20):
+            try:
+                directory.cleanup()
+                break
+            except OSError as error:
+                if error.errno != errno.ENOTEMPTY or attempt == 19:
+                    raise
+                time.sleep(.05)
+
+
+with fixture_directory() as temporary:
     base = pathlib.Path(temporary)
     ready = base / 'socket'
     config = base / 'config.toml'
@@ -61,30 +81,90 @@ with tempfile.TemporaryDirectory(prefix='slate-layouts-', dir='/tmp') as tempora
             def command(id, **params):
                 return rpc('command.run', id=id, **params)
 
+            def activate_owned():
+                rpc('debug.activate', tab='t1')
+                eventually('owned app active for capture', lambda: rpc('debug.inspect')['applicationActive'])
+
             def screenshot(name):
-                time.sleep(.5)  # Render settling only, never an operation-success condition.
+                activate_owned()
                 frame = rpc('debug.savedLayouts')
-                expected = (920, 520) if name == 'final-narrow' else (1060, 620)
+                time.sleep(.7)  # Render settling only, never an operation-success condition.
+                expected = (1000, 560) if name == 'final-narrow' else (1060, 680)
                 assert (frame['width'], frame['height']) == expected, (name, frame)
                 rpc('debug.screenshot', layouts=True, path=str(ROOT / f'artifacts/layouts-{name}.png'))
 
+            def agent_screenshot(theme):
+                activate_owned()
+                rpc('debug.settings', section='AI Agents', theme=theme, apply=True)
+                time.sleep(.7)
+                rpc('debug.screenshot', settings=True, path=str(ROOT / f'artifacts/notes-agents-{theme}.png'))
+
+            # Activate only the owned fixture for genuine native input and untransformed captures.
+            rpc('debug.activate', tab='t1')
+            # Repairing a broken library after opening Settings reattaches the editor.
+            (base / 'layouts').write_text('not a directory')
+            command('settings.open')
+            assert not rpc('debug.settings', inspectOnly=True)['layoutsAvailable']
+            (base / 'layouts').unlink()
+            command('settings.open')
+            assert rpc('debug.settings', inspectOnly=True)['layoutsAvailable']
             assert cli('list') == []
             sources = cli('windows')
             assert len(sources) == 1
             source = sources[0]['id']
             assert 'required' in rpc('layouts.capture', fail=True, name='Unsafe')
             rpc('command.run', id='layouts.edit')
-            frame = rpc('debug.savedLayouts', width=1060, height=620)
-            assert (frame['width'], frame['height']) == (1060, 620), frame
+            frame = rpc('debug.savedLayouts', width=1060, height=680)
+            assert (frame['width'], frame['height']) == (1060, 680), frame
+            assert frame['settingsSection'] == 'Layouts'
+            assert rpc('debug.settings', inspectOnly=True)['visible']
             screenshot('empty-dark')
             captured = cli('capture', '--window', source, '--name', 'Development')
             original = captured['definition']
             layout_id = original['id']
             file = captured['file']
             assert original['tabs'][0]['panes'][0]['configuration'].get('command') is None
-            assert len(cli('fields')) == 2
+            if '--render-only' in sys.argv:
+                rpc('debug.savedLayouts', file=file, split='right')
+                rpc('debug.savedLayouts', type='browser', title='Documentation', configuration={'url': 'https://example.com'})
+                rpc('debug.savedLayouts', addTab=True)
+                rpc('debug.savedLayouts', addTab=True)
+                screenshot('tabs-dark')
+                rpc('debug.savedLayouts', selectTab=0)
+                screenshot('final-dark')
+                rpc('debug.settings', theme='light', apply=True)
+                screenshot('final-light')
+                rpc('debug.savedLayouts', width=1000, height=560)
+                screenshot('final-narrow')
+                agent_screenshot('dark')
+                agent_screenshot('light')
+                activate_owned()
+                rpc('debug.savedLayouts')
+                rpc('debug.commandPicker', show=True, query='Development')
+                time.sleep(.7)
+                rpc('debug.screenshot', picker=True, path=str(ROOT / 'artifacts/layouts-template-picker.png'))
+                print('Focused native layout/settings/palette render captures passed.')
+                raise SystemExit(0)
+            assert {t['id'] for t in cli('fields')} == {'terminal', 'browser', 'private-browser'}
             assert cli('fields', '--type', 'terminal')[0]['id'] == 'terminal'
             assert 'default' in rpc('command.run', fail=True, id='layouts.launcher')
+            assert 'default' in rpc('layouts.launcher', fail=True, id=layout_id, path=str(base / 'Unsupported.app'))
+            # Tabs preserve selected content, normalize numbers and share drag/menu operations.
+            first = rpc('debug.savedLayouts', file=file)['definition']['tabs'][0]
+            rpc('debug.savedLayouts', addTab=True)
+            state = rpc('debug.savedLayouts', addTab=True)
+            assert state['selectedTab'] == 2
+            drag_id = state['tabDragID']
+            state = rpc('debug.savedLayouts', dropTab=drag_id, toTab=0)
+            assert state['selectedTab'] == 0 and state['definition']['tabs'][1] == dict(first, name='Tab 2')
+            state = rpc('debug.savedLayouts', removeTab=1)
+            assert [t['name'] for t in state['definition']['tabs']] == ['Tab 1', 'Tab 2']
+            state = rpc('debug.savedLayouts', addTab=True)
+            assert [t['name'] for t in state['definition']['tabs']] == ['Tab 1', 'Tab 2', 'Tab 3']
+            state = rpc('debug.savedLayouts', moveTab=2, toTab=1)
+            assert state['selectedTab'] == 1
+            assert rpc('debug.savedLayouts', dropTab='foreign-layout', toTab=0)['definition'] == state['definition']
+            rpc('debug.savedLayouts', revert=True)
             state = rpc('debug.savedLayouts', file=file, split='right')
             assert state['dirty'] and len(state['definition']['tabs'][0]['panes']) == 2
             state = rpc('debug.savedLayouts', type='browser', title='Documentation', configuration={'url': 'https://example.com'})
@@ -99,6 +179,11 @@ with tempfile.TemporaryDirectory(prefix='slate-layouts-', dir='/tmp') as tempora
             assert not state['dirty'] and not state['error'], state
             saved = cli('get', '--id', layout_id)
             assert saved['definition'] == state['definition']
+            # Capture the new tab strip with multiple tabs, then keep the fixture recipe unchanged.
+            rpc('debug.savedLayouts', addTab=True)
+            rpc('debug.savedLayouts', addTab=True)
+            screenshot('tabs-dark')
+            rpc('debug.savedLayouts', revert=True)
             rpc('debug.savedLayouts', name='Retained draft')
             second = cli('capture', '--window', source, '--name', 'Writing')
             rpc('debug.savedLayouts', file=second['file'])
@@ -164,6 +249,17 @@ with tempfile.TemporaryDirectory(prefix='slate-layouts-', dir='/tmp') as tempora
             assert cli('configuration', '--pane', plugin_pane) == bridge('await workspace.layoutConfiguration()')
             assert any(item['id'] == 'layouts.edit' for item in bridge("await workspace.call('command.list')"))
             assert bridge("await workspace.command('layouts.edit')") == {}
+            assert 'plugins.reload' in {c['id'] for c in bridge("await workspace.call('command.list')")}
+            # Reload the explicit plugin only, with fresh document identity and no footer.
+            before_web = rpc('web.get', pane=plugin_pane)
+            assert command('plugins.reload', pane=plugin_pane)['reloading']
+            eventually('reload document', lambda: rpc('web.get', pane=plugin_pane)['documentId'] not in [None, before_web['documentId']])
+            eventually('reloaded bridge', lambda: bridge("typeof workspace === 'object'"))
+            assert 'not a plugin' in rpc('command.run', fail=True, id='plugins.reload', pane='p1')
+            rpc('debug.screenshot', pane=plugin_pane, path=str(ROOT / 'artifacts/layouts-plugin-footer.png'))
+            rpc('debug.commandPicker', show=True, pane=plugin_pane, query='Reload Plugin')
+            assert any(r['id'] == 'plugins.reload' for r in rpc('debug.commandPicker')['results'])
+            rpc('debug.commandPicker', dismiss=True)
 
             # A managed service uses the same catalog and writer, with no page-only context.
             worker = base / 'service.py'
@@ -182,6 +278,18 @@ while True: time.sleep(1)
             service_env = dict(env, **json.loads(context_file.read_text()))
             def service(method, **params):
                 return rpc(method, client_env=service_env, **params)
+            # The same focused reload command is available to service and registered pages.
+            old_document = rpc('web.get', pane=plugin_pane)['documentId']
+            assert service('command.run', id='plugins.reload', pane=plugin_pane)['paneId'] == plugin_pane
+            eventually('service reload document', lambda: rpc('web.get', pane=plugin_pane)['documentId'] not in [None, old_document])
+            eventually('service reloaded bridge', lambda: bridge("typeof workspace === 'object'"))
+            old_document = rpc('web.get', pane=plugin_pane)['documentId']
+            assert bridge("(()=>{setTimeout(()=>workspace.command('plugins.reload').catch(()=>{}),0);return 'scheduled';})()") == 'scheduled'
+            eventually('page reload document', lambda: rpc('web.get', pane=plugin_pane)['documentId'] not in [None, old_document])
+            eventually('page reloaded bridge', lambda: bridge("typeof workspace === 'object'"))
+            old_document = rpc('web.get', pane=plugin_pane)['documentId']
+            assert rpc('command.run', fail=True, id='plugins.reload', pane='p999999')
+            assert rpc('web.get', pane=plugin_pane)['documentId'] == old_document
             describe = rpc('api.describe')
             assert bridge("await workspace.call('api.describe')") == service('api.describe') == describe
             assert bridge('workspace.methods') == describe['methods']
@@ -204,7 +312,7 @@ while True: time.sleep(1)
             own_capture = bridge(f"await workspace.layouts.capture({{window:{json.dumps(opened['window'])},name:'Plugin Copy'}})")
             assert own_capture['definition']['tabs'][0]['panes'][0]['configuration']['view'] == 'list'
 
-            # Openings allocate new runtime IDs, not template IDs, and only replace the chosen window.
+            # Openings allocate fresh runtime IDs and preserve every existing window.
             cursor = rpc('events.head')['cursor']
             running = cli('open', '--id', layout_id)
             assert running['outcome'] == 'committed' and running['workspacePersistence'] == 'saved'
@@ -215,30 +323,15 @@ while True: time.sleep(1)
             assert set(running['windowIds']) <= {w['windowId'] for w in rpc('window.list')['windows']}
             assert not set(running['paneIds']) & set(before_pane['id'] for before_pane in before['panes'])
             windows_before = cli('windows')
-            assert 'expectedWorkspaceRevision' in rpc('layouts.open', fail=True, id=layout_id, replaceWindow=running['window'], force=True)
-            assert json.loads(rpc('layouts.open', fail=True, id=layout_id, replaceWindow=running['window'], force=True, expectedWorkspaceRevision='stale'))['error']['code'] == -32050
-            # A direct layout RPC settles native divider work before checking its revision.
-            command('window.focus', windowId=running['windowIds'][0], activate=True)
-            windows_before = cli('windows')
-            assert rpc('debug.dividerGesture', phase='begin', pane=running['paneIds'][0], path=[])['active']
-            assert rpc('debug.dividerGesture', phase='move', fraction=.62)['active']
-            assert json.loads(rpc('layouts.open', fail=True, id=layout_id, replaceWindow=running['window'], force=True,
-                                 expectedWorkspaceRevision=windows_before[0]['workspaceRevision']))['error']['code'] == -32050
-            assert any(w['id'] == running['window'] for w in cli('windows'))
-            windows_before = cli('windows')
-            replaced = cli('open', '--id', second['definition']['id'], '--replace-window', running['window'], '--force',
-                           '--expected-workspace-revision', windows_before[0]['workspaceRevision'])
-            stable = rpc('workspace.get')
-            rpc('debug.dividerGesture', phase='end')
-            assert rpc('workspace.get') == stable, 'Late mouse-up mutated replacement topology'
+            assert 'Unknown parameter' in rpc('layouts.open', fail=True, id=layout_id, replaceWindow=running['window'])
+            assert 'Unknown parameter' in rpc('layouts.open', fail=True, id=layout_id, force=True)
+            assert rpc('layouts.open', fail=True, id=layout_id, expectedWorkspaceRevision='stale')
+            another = cli('open', '--id', second['definition']['id'])
             windows_after = cli('windows')
-            assert len(windows_before) == len(windows_after)
-            assert source in [item['id'] for item in windows_after]
-            assert opened['window'] in [item['id'] for item in windows_after]
-            assert running['window'] not in [item['id'] for item in windows_after]
-            assert 'closed' in rpc('layouts.capture', fail=True, window=running['window'], name='Closed')
+            assert len(windows_after) == len(windows_before) + 1
+            assert {w['id'] for w in windows_before} <= {w['id'] for w in windows_after}
 
-            # Capacity rejection happens before replacing/closing the chosen window.
+            # Capacity rejection happens before opening or changing any window.
             crowded = copy.deepcopy(original); crowded['id'] = str(uuid.uuid4()); crowded['name'] = 'Too Many Startup Commands'; crowded['tabs'] = []
             def tree(ids):
                 if len(ids) == 1:
@@ -250,8 +343,7 @@ while True: time.sleep(1)
                 crowded['tabs'].append({'name': f'Tab {start}', 'layout': tree(ids), 'panes': [{'id': id, 'type': 'terminal', 'title': '', 'configuration': {'command': 'sleep 60'}} for id in ids]})
             rpc('layouts.create', definition=crowded)
             before_capacity = rpc('workspace.get')
-            assert '32' in rpc('layouts.open', fail=True, id=crowded['id'], replaceWindow=source, force=True,
-                               expectedWorkspaceRevision=cli('windows')[0]['workspaceRevision'])
+            assert '32' in rpc('layouts.open', fail=True, id=crowded['id'])
             assert rpc('workspace.get') == before_capacity
 
             # Startup folder and command are applied once to a new, authenticated shell.
@@ -266,8 +358,7 @@ while True: time.sleep(1)
                 revision = cli('windows')[0]['workspaceRevision']
                 cursor = rpc('events.head')['cursor']
                 rpc(fault)
-                failure = json.loads(rpc('layouts.open', fail=True, id=startup['id'], replaceWindow=source, force=True,
-                                         expectedWorkspaceRevision=revision))['error']
+                failure = json.loads(rpc('layouts.open', fail=True, id=startup['id'], expectedWorkspaceRevision=revision))['error']
                 assert failure['code'] == -32051, failure
                 assert rpc('workspace.get') == before_failure
                 assert rpc('pane.inspect', pane='p1')['sessionId'] == previous_session
@@ -285,18 +376,12 @@ while True: time.sleep(1)
             configured = cli('capture', '--window', started['window'], '--name', 'Configured Capture', '--include-commands')
             assert configured['definition']['tabs'][0]['panes'][0]['configuration']['command'] == startup['tabs'][0]['panes'][0]['configuration']['command']
 
-            # Cross-window page replacement has plugin attribution and uses the same guards.
-            target = next(w for w in cli('windows') if w['id'] == replaced['window'])
+            # Page opening has plugin attribution and never removes its initiating view.
             cursor = rpc('events.head')['cursor']
-            page_open = bridge(f"await workspace.layouts.open({json.dumps(second['definition']['id'])}, {{replaceWindow:{json.dumps(target['id'])},expectedWorkspaceRevision:{json.dumps(target['workspaceRevision'])},force:true}})")
+            page_open = bridge(f"await workspace.layouts.open({json.dumps(second['definition']['id'])})")
             page_facts = [e for e in rpc('events.poll', after=cursor, waitMilliseconds=0)['events'] if e['payload'].get('operationId') == page_open['operationId']]
             assert page_facts and all(e['payload']['origin']['kind'] == 'plugin' for e in page_facts)
-            # Replacing the initiating view retires its reply, not startup in the committed new session.
-            marker.unlink()
-            own = next(w for w in cli('windows') if w['id'] == opened['window'])
-            bridge(f"(()=>{{setTimeout(()=>workspace.layouts.open({json.dumps(startup['id'])}, {{replaceWindow:{json.dumps(own['id'])},expectedWorkspaceRevision:{json.dumps(own['workspaceRevision'])},force:true}}).catch(()=>{{}}),0); return 'scheduled';}})()")
-            eventually('self-replacement startup', lambda: marker.exists() and marker.read_text() == 'once')
-            assert opened['window'] not in [w['id'] for w in cli('windows')]
+            assert opened['window'] in [w['id'] for w in cli('windows')]
 
             # CLI definitions and revision-guarded edits use exactly the same file writer.
             saved = cli('get', '--id', layout_id)
@@ -321,7 +406,7 @@ while True: time.sleep(1)
             rpc('debug.settings', theme='light', apply=True)
             rpc('debug.savedLayouts', name='Development Draft')
             screenshot('final-light')
-            rpc('debug.savedLayouts', width=920, height=520)
+            rpc('debug.savedLayouts', width=1000, height=560)
             screenshot('final-narrow')
             rpc('debug.savedLayouts', revert=True)
             # Quit accounts for dirty drafts in other library selections too.
@@ -339,10 +424,27 @@ while True: time.sleep(1)
             rpc('debug.savedLayouts', file=second['file'])
             assert rpc('debug.closeConfirmation', quit=True, answer='save') is True
             assert not rpc('debug.savedLayouts', file=file)['dirty']
-            rpc('debug.commandPicker', show=True, query='saved layout')
+            agent_screenshot('dark')
+            agent_screenshot('light')
+            rpc('debug.commandPicker', show=True, query='')
             picker = rpc('debug.commandPicker')
-            assert picker['visible']
-            rpc('debug.commandPicker', dismiss=True)
+            ids = {r['id'] for r in picker['results']}
+            assert picker['visible'] and 'layout-template.' + layout_id in ids
+            assert not ids & {'layouts.openWindow', 'layouts.launcher', 'layouts.folder', 'layouts.replaceWindow'}
+            assert not describe['savedLayouts']['replacementSupported']
+            assert describe['savedLayouts']['openMode'] == 'newWindow'
+            rpc('debug.commandPicker', query='Development')
+            rpc('debug.screenshot', picker=True, path=str(ROOT / 'artifacts/layouts-template-picker.png'))
+            # External edits refresh template labels while the picker remains open.
+            rpc('debug.commandPicker', query='')
+            palette_saved = cli('get', '--id', layout_id)
+            palette_recipe = copy.deepcopy(palette_saved['definition']); palette_recipe['name'] = 'Palette Renamed'
+            path.write_text(json.dumps(palette_recipe))
+            eventually('external template rename', lambda: any(r['title'] == 'Open Palette Renamed in New Window' for r in rpc('debug.commandPicker')['results']))
+            rpc('debug.commandPicker', query='Palette Renamed')
+            before_open = len(cli('windows'))
+            rpc('debug.key', picker=True, chord='return', dispatch=True)
+            eventually('template palette opens window', lambda: len(cli('windows')) == before_open + 1)
             print('Saved layout UI, CLI, bridge, conflict, capture, open, startup and launcher packaging checks passed.')
         finally:
             os.killpg(app.pid, signal.SIGTERM)

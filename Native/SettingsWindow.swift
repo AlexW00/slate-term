@@ -33,6 +33,8 @@ final class SettingsModel: ObservableObject {
     @Published var agentSkills: [AgentSkills.Entry] = []
     @Published var commands: [WorkspaceCommand] = CommandRegistry.commands
     @Published var error: String?
+    @Published var layouts: SavedLayoutsModel?
+    @Published var layoutsError: String?
     @Published private var baseline: [String: String] = [:]
     private var source = ""
     let configURL: URL
@@ -139,12 +141,12 @@ final class SettingsModel: ObservableObject {
 @MainActor
 final class SettingsWindowController: NSWindowController {
     init(model: SettingsModel, reload: @escaping () -> Void) {
-        let window = SettingsWindow(contentRect: NSRect(x: 0, y: 0, width: 840, height: 620),
+        let window = SettingsWindow(contentRect: NSRect(x: 0, y: 0, width: 1060, height: 680),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "Settings"
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
-        window.minSize = NSSize(width: 740, height: 520)
+        window.minSize = NSSize(width: 1000, height: 560)
         window.contentViewController = NSHostingController(rootView: SettingsView(model: model, reload: reload))
         super.init(window: window)
         window.center()
@@ -164,7 +166,7 @@ final class SettingsWindowController: NSWindowController {
 }
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general = "General", appearance = "Appearance", terminal = "Terminal", browser = "Browser", shortcuts = "Keyboard Shortcuts", plugins = "Plugins", agents = "AI Agents"
+    case general = "General", appearance = "Appearance", terminal = "Terminal", browser = "Browser", layouts = "Layouts", shortcuts = "Keyboard Shortcuts", plugins = "Plugins", agents = "AI Agents"
     var id: String { rawValue }
     var symbol: String {
         switch self {
@@ -172,6 +174,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .appearance: "circle.lefthalf.filled"
         case .terminal: "terminal"
         case .browser: "globe"
+        case .layouts: "rectangle.split.2x2"
         case .shortcuts: "keyboard"
         case .plugins: "puzzlepiece.extension"
         case .agents: "sparkles"
@@ -183,6 +186,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .appearance: .indigo
         case .terminal: .black
         case .browser: .blue
+        case .layouts: .teal
         case .shortcuts: .purple
         case .plugins: .orange
         case .agents: .pink
@@ -218,7 +222,9 @@ private struct SettingsView: View {
                     .font(.title2.weight(.semibold))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 8)
-                if model.selection == .plugins && model.plugins.isEmpty {
+                if model.selection == .layouts, let layouts = model.layouts {
+                    SavedLayoutsView(model: layouts)
+                } else if model.selection == .plugins && model.plugins.isEmpty {
                     emptyPlugins
                 } else {
                     Form {
@@ -227,6 +233,7 @@ private struct SettingsView: View {
                         case .appearance: appearance
                         case .terminal: terminal
                         case .browser: browser
+                        case .layouts: Text(model.layoutsError ?? "Layouts are unavailable.").textSelection(.enabled)
                         case .shortcuts: keyboard
                         case .plugins: plugins
                         case .agents: agents
@@ -235,14 +242,23 @@ private struct SettingsView: View {
                     .formStyle(.grouped)
                     .scrollContentBackground(.automatic)
                 }
+                if model.selection == .agents {
+                    Divider().padding(.horizontal, 24)
+                    HStack {
+                        Spacer()
+                        Button("Open Skill Folder") { model.revealAgentSkill?() }
+                        Spacer()
+                    }.padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 20)
+                }
                 if let error = model.error {
                     Text(model.selection == .terminal && error.hasPrefix("terminal.")
                          ? "Check the highlighted setting before applying." : error)
                         .font(.callout).foregroundStyle(.red)
                         .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding()
                 }
-                Divider()
-                HStack {
+                if model.selection != .layouts {
+                  Divider()
+                  HStack {
                     Button("Show Config File") {
                         NSWorkspace.shared.selectFile(model.configURL.path, inFileViewerRootedAtPath: model.configURL.deletingLastPathComponent().path)
                     }
@@ -250,7 +266,8 @@ private struct SettingsView: View {
                     Button("Revert", action: reload).disabled(!model.isDirty && model.error == nil)
                     Button("Apply") { model.apply() }.disabled(!model.isDirty)
                         .keyboardShortcut("s", modifiers: .command)
-                }.padding(16)
+                  }.padding(16)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -463,16 +480,9 @@ private struct SettingsView: View {
             } header: {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Slate Terminal skill")
-                    Text("Teaches coding agents to automate Slate Terminal and build plugins. Most agents read the shared folder; Claude Code needs its own.")
+                    Text("Install this skill so your coding agent knows how to use Slate Terminal, control panes, and build plugins.")
                         .font(.callout).fontWeight(.regular).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            Section {
-                HStack {
-                    Spacer()
-                    Button("Open Skill Folder") { model.revealAgentSkill?() }
-                    Spacer()
                 }
             }
         }

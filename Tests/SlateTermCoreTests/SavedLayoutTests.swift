@@ -39,7 +39,7 @@ import SlateTermCore
         }
     }
 
-    @Test func openingsAllocateFreshIDsAndReplaceOnlyTheExplicitGroup() throws {
+    @Test func openingsAllocateFreshIDsAndPreserveEveryExistingGroup() throws {
         var workspace = Workspace()
         let removed = try workspace.split(PaneID(1), direction: .right)
         try workspace.close(removed)
@@ -48,12 +48,14 @@ import SlateTermCore
         let targetSecondTab = try workspace.newTab(in: targetGroup)
         let original = workspace
         let definition = savedLayoutFixture()
-        let opening = try definition.opening(in: workspace, replacing: targetGroup)
+        let opening = try definition.opening(in: workspace)
         #expect(workspace == original)
         #expect(opening.groupID != targetGroup)
         #expect(opening.workspace.groups.first == original.groups.first)
         #expect(opening.workspace.tabs.first == original.tabs.first)
-        #expect(!opening.workspace.tabs.contains { $0.id == targetTab || $0.id == targetSecondTab })
+        #expect(opening.workspace.tabs.contains { $0.id == targetTab })
+        #expect(opening.workspace.tabs.contains { $0.id == targetSecondTab })
+        #expect(original.groups.allSatisfy { opening.workspace.groups.contains($0) })
         #expect(Set(opening.panes.keys).isDisjoint(with: Set(original.panes.map(\.id))))
         #expect(opening.panes.keys.allSatisfy { $0.number > (original.panes.map(\.id.number).max() ?? 0) })
         let group = try #require(opening.workspace.groups.first { $0.id == opening.groupID })
@@ -80,8 +82,7 @@ import SlateTermCore
         let original = workspace
         var invalid = SavedLayoutDefinition.blank()
         invalid.tabs[0].layout = .pane(PaneID(99))
-        #expect(throws: RPCFailure.self) { try invalid.opening(in: workspace, replacing: GroupID(1)) }
-        #expect(throws: RPCFailure.self) { try SavedLayoutDefinition.blank().opening(in: workspace, replacing: GroupID(999)) }
+        #expect(throws: RPCFailure.self) { try invalid.opening(in: workspace) }
         #expect(workspace == original)
     }
 

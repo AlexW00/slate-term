@@ -47,6 +47,13 @@ import SlateTermCore
     #expect(count > 0)
 }
 
+@Test func savedLayoutCLIOnlyOpensNewWindowsAndAcceptsExplicitLaunchers() throws {
+    #expect(throws: (any Error).self) { try SavedLayoutsCommand.parse(["open", "--id", "id", "--replace-window", "window"]) }
+    #expect(throws: (any Error).self) { try SavedLayoutsCommand.parse(["open", "--id", "id", "--force"]) }
+    let launcher = try SavedLayoutsCommand.parse(["launcher", "--id", "id", "--path", "/tmp/Test.app"])
+    #expect(launcher.action == .launcher && launcher.path == "/tmp/Test.app")
+}
+
 @Test func eventRecipientOptionsMatchTheHostSelectors() throws {
     #expect(try Events.recipient("all") == .string("all"))
     #expect(try Events.recipient("instance:i1") == .object(["instanceId": .string("i1")]))

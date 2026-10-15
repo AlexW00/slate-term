@@ -23,7 +23,7 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
     }
     var onRelease: (() -> Void)?
     var onCall: ((String, [String: JSONValue], RPCMetadata?) async throws -> JSONValue)?
-    private let status = NSTextField(labelWithString: "")
+    private var status = ""
     private let world = WKContentWorld.world(name: "SlatePluginBridge")
     private var observer: UUID?
     private var closed = false
@@ -31,7 +31,7 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
     private var currentNavigation: WKNavigation?
     private var blockedNavigations = 0
     var info: JSONValue { .object(["instanceId": .string(instance.id), "viewId": .string(viewID), "url": web.url.map { .string($0.absoluteString) } ?? .null,
-                                  "status": .string(status.stringValue), "documentId": activeDocumentID.map(JSONValue.string) ?? .null, "blockedNavigations": .integer(blockedNavigations)]) }
+                                  "status": .string(status), "documentId": activeDocumentID.map(JSONValue.string) ?? .null, "blockedNavigations": .integer(blockedNavigations)]) }
     private var requests: [String: Task<Void, Never>] = [:]
     // Cached documents retain their isolated script. The view credential stays
     // stable; a separate generation invalidates owned native work on navigation.
@@ -74,24 +74,11 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
         root.autoresizingMask = [.width, .height]
         root.onFocus = { [weak self] in self?.onFocus?() }
         view = root
-        status.font = .systemFont(ofSize: 11)
-        status.textColor = .secondaryLabelColor
-        status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        status.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        status.lineBreakMode = .byTruncatingMiddle
-        let reload = NSButton(image: NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Reload Plugin")!, target: self, action: #selector(reloadPlugin))
-        reload.isBordered = false
-        reload.toolTip = "Reload Plugin"
-        reload.setContentHuggingPriority(.required, for: .horizontal)
-        reload.setContentCompressionResistancePriority(.required, for: .horizontal)
-        let toolbar = NSStackView(views: [status, reload])
-        toolbar.distribution = .fill
-        toolbar.setHuggingPriority(.fittingSizeCompression, for: .horizontal)
-        toolbar.edgeInsets = NSEdgeInsets(top: 4, left: 8, bottom: 4, right: 8)
-        for child in [toolbar, web] { child.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(child) }
+        web.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(web)
         NSLayoutConstraint.activate([
-            toolbar.bottomAnchor.constraint(equalTo: root.bottomAnchor), toolbar.leadingAnchor.constraint(equalTo: root.leadingAnchor), toolbar.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            web.topAnchor.constraint(equalTo: root.topAnchor), web.leadingAnchor.constraint(equalTo: root.leadingAnchor), web.trailingAnchor.constraint(equalTo: root.trailingAnchor), web.bottomAnchor.constraint(equalTo: toolbar.topAnchor),
+            web.topAnchor.constraint(equalTo: root.topAnchor), web.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            web.trailingAnchor.constraint(equalTo: root.trailingAnchor), web.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
         observer = instance.observe { [weak self] in self?.updateState() }
     }
@@ -104,8 +91,7 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
     }
     private func updateState() {
         guard !closed else { return }
-        status.stringValue = instance.error ?? instance.state.capitalized
-        status.toolTip = status.stringValue
+        status = instance.error ?? instance.state.capitalized
         if instance.isReady, !loadedReadyState {
             loadedReadyState = true
             installBridgeScripts()
@@ -117,7 +103,7 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
             web.stopLoading()
         }
     }
-    @objc private func reloadPlugin() {
+    func reloadPlugin() {
         if instance.isReady { installBridgeScripts(); currentNavigation = web.reload() }
         else { Task { [weak self] in await self?.instance.restart() } }
     }
@@ -144,12 +130,12 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         let allowed = instance.isReady && (navigationAction.request.url.map { instance.origin.matches($0) } ?? false)
-        if !allowed { blockedNavigations += 1; status.stringValue = "External plugin navigation blocked" }
+        if !allowed { blockedNavigations += 1; status = "External plugin navigation blocked" }
         decisionHandler(allowed ? .allow : .cancel)
     }
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         if let url = navigationAction.request.url, instance.isReady, instance.origin.matches(url) { currentNavigation = web.load(navigationAction.request) }
-        else { blockedNavigations += 1; status.stringValue = "External plugin navigation blocked" }
+        else { blockedNavigations += 1; status = "External plugin navigation blocked" }
         return nil
     }
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
@@ -167,15 +153,15 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
         if let navigation, navigation === currentNavigation, !closed, instance.isReady,
            web.url.map({ instance.origin.matches($0) }) == true {
             automation.documentFinished()
-            status.stringValue = "Ready"; status.toolTip = nil
+            status = "Ready"
         }
     }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {
-        if navigation === currentNavigation { status.stringValue = error.localizedDescription; automation.invalidate() }
+        if navigation === currentNavigation { status = error.localizedDescription; automation.invalidate() }
     }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) {
         guard let navigation, navigation === currentNavigation else { return }
-        status.stringValue = error.localizedDescription
+        status = error.localizedDescription
         if !closed, instance.isReady, !web.isLoading,
            web.url.map({ instance.origin.matches($0) }) == true { automation.documentFinished() }
     }
@@ -183,7 +169,7 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
         currentNavigation = nil
         invalidateDocument()
         automation.processTerminated()
-        status.stringValue = "Web process exited — Reload to recover"
+        status = "Web process exited — Reload Plugin to recover"
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage,
@@ -416,6 +402,7 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
             windows:(params={},options={})=>call('layouts.windows',params,options),
             capture:(params,options={})=>call('layouts.capture',params,options),
             open:(id,params={},options={})=>call('layouts.open',{...params,id},options),
+            launcher:(id,path,options={})=>call('layouts.launcher',{id,path},options),
             startupStatus:(params={},options={})=>call('layouts.startupStatus',params,options)
           }),
           terminal:Object.freeze({

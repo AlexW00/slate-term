@@ -26,9 +26,6 @@ extension WorkspaceHost {
             if let unsupported = Set(params.keys).intersection(Self.apiGuardKeys).subtracting(supported).sorted().first {
                 throw RPCFailure(code: -32602, message: "\(unsupported) is not supported by \(method)")
             }
-            if method == "layouts.open", params["replaceWindow"] != nil, params["expectedWorkspaceRevision"] == nil {
-                throw RPCFailure(code: -32602, message: "Replacement requires expectedWorkspaceRevision from layouts.windows")
-            }
         }
         if let _ = try string("expectedSavedLayoutRevision") {
             guard method == "layouts.update" else { throw RPCFailure(code: -32602, message: "expectedSavedLayoutRevision is only supported by layouts.update") }
@@ -126,6 +123,10 @@ extension WorkspaceHost {
                 "workspacePersistence": .array(WorkspacePersistence.allCases.map { .string($0.rawValue) }),
                 "nativeDividerCoalescing": .bool(false)
             ]),
+            "pluginReload": .object([
+                "command": .string("plugins.reload"), "target": .string("pane"),
+                "resultFields": .array([.string("paneId"), .string("reloading")]), "completion": .string("acceptedNotDocumentReady")
+            ]),
             "paneHeader": .object([
                 "version": .integer(1), "stateField": .string("headerVisible"),
                 "commands": .array(["pane.header.show", "pane.header.hide", "pane.header.toggle"].map(JSONValue.string)),
@@ -134,7 +135,8 @@ extension WorkspaceHost {
             ]),
             "savedLayouts": .object([
                 "version": .integer(1), "targetKind": .string("windowGroup"),
-                "targetDiscovery": .string("layouts.windows"), "replacementGuard": .string("expectedWorkspaceRevision"),
+                "targetDiscovery": .string("layouts.windows"), "openMode": .string("newWindow"),
+                "replacementSupported": .bool(false), "launcherMethod": .string("layouts.launcher"),
                 "writeGuard": .string("expectedSavedLayoutRevision"), "configurationTarget": .string("pane"),
                 "startupLifetime": .string("committedTerminalSession"), "mergeSupported": .bool(false)
             ]),

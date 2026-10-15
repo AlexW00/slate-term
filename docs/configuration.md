@@ -35,11 +35,13 @@ These tables and `[plugins.<id>]` settings are supported currently. Unknown keys
 
 ## Settings window
 
-Open **Slate Terminal → Settings…** (⌘,) for native General, Appearance, Terminal, Browser, Keyboard Shortcuts, and Plugins sections. **Apply** validates and saves changes to the config file; **Revert** discards pending edits. External edits reload automatically when there are no pending GUI changes. If the file changes while you edit, Settings asks you to revert before saving.
+Open **Slate Terminal → Settings…** (⌘,) for native General, Appearance, Terminal, Browser, Layouts, Keyboard Shortcuts, Plugins, and AI Agents sections. **Apply** validates and saves changes to the config file; **Revert** discards pending edits. External edits reload automatically when there are no pending GUI changes. If the file changes while you edit, Settings asks you to revert before saving.
 
 The editor preserves comments and unrelated values in standard tables and dotted assignments. Inline tables and multiline values must currently be edited in the file. Invalid files are never overwritten by the settings editor.
 
 **Appearance** contains the Light / Dark / Auto switcher and terminal palettes. **Terminal** contains font, contrast, cursor, padding, and shell controls. All controls save the same TOML keys shown above; choose **Apply** to save changes.
+
+**Layouts** embeds the [saved-layout editor](saved-layouts.md), with a top layout selector, New Layout button, clickable/reorderable tabs, pane inspector and per-layout Spotlight launcher creation. Its Save Changes/Revert controls apply to the selected recipe, independently of TOML Apply/Revert.
 
 Register plugins and view their live status directly in **Settings → Plugins**. You or an agent can also run `slate-term plugins register --manifest /path/to/plugin.json`. Plugin registrations remain in the separate plugin catalog.
 

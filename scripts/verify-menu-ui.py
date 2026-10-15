@@ -98,8 +98,8 @@ with tempfile.TemporaryDirectory(prefix='slate-menu-', dir='/tmp') as temporary:
                     if item['children']:
                         check(item['children'])
                     else:
-                        if item.get('command') in {'layouts.edit', 'layouts.openWindow', 'layouts.replaceWindow',
-                                                   'layouts.captureWindow', 'layouts.launcher', 'layouts.folder',
+                        if item.get('command') in {'layouts.edit', 'layouts.openWindow', 'layouts.captureWindow', 'plugins.reload',
+                                                   'pane.header.show', 'pane.header.hide', 'pane.header.toggle',
                                                    'pane.rename', 'pane.copyID', 'appearance.auto', 'appearance.light', 'appearance.dark',
                                                    'terminal.font.increase', 'terminal.font.decrease', 'terminal.font.reset'}:
                             assert item['key'] == '', 'This action intentionally has no default shortcut'

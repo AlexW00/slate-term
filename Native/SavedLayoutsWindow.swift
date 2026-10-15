@@ -22,6 +22,14 @@ final class SavedLayoutsModel: ObservableObject {
     let store: SavedLayoutStore
     let saveDefinition: (SavedLayoutDefinition, String?) throws -> SavedLayoutEntry
     var didSave: (() -> Void)?
+    var createLauncher: ((UUID) throws -> Void)?
+    var launcherUnavailable: String?
+
+    func makeLauncher() {
+        guard let definition else { return }
+        do { try createLauncher?(definition.id); error = nil }
+        catch { self.error = layoutErrorText(error) }
+    }
 
     init(store: SavedLayoutStore, save: @escaping (SavedLayoutDefinition, String?) throws -> SavedLayoutEntry) {
         self.store = store; saveDefinition = save
@@ -85,16 +93,47 @@ final class SavedLayoutsModel: ObservableObject {
             change { $0 = definition }; self.selectedPane = next
         } catch { self.error = layoutErrorText(error) }
     }
-    func addTab() {
-        guard let definition, definition.tabs.count < 8 else { return }
-        let used = Set(definition.tabs.flatMap(\.panes).map(\.id))
-        let id = (1...65).map(PaneID.init).first { !used.contains($0) }!
-        change { $0.tabs.append(.init(name: "Tab \($0.tabs.count + 1)", layout: .pane(id), panes: [.init(id: id)])) }
-        selectedTab = definition.tabs.count; selectedPane = id
+    func selectTab(_ index: Int) {
+        selectedTab = index; selectedPane = nil; normalizeSelection()
     }
-    func removeTab() {
-        guard let definition, definition.tabs.count > 1 else { return }
-        change { $0.tabs.remove(at: selectedTab) }; selectedTab = 0; selectedPane = nil; normalizeSelection()
+    func addTab() {
+        guard var definition else { return }
+        do {
+            let id = try definition.addTab()
+            change { $0 = definition }
+            selectedTab = definition.tabs.count - 1; selectedPane = id
+        } catch { self.error = layoutErrorText(error) }
+    }
+    func removeTab(at index: Int) {
+        guard var definition else { return }
+        do {
+            try definition.removeTab(at: index)
+            change { $0 = definition }
+            if selectedTab > index { selectedTab -= 1 }
+            else if selectedTab == index { selectedTab = min(index, definition.tabs.count - 1); selectedPane = nil }
+            normalizeSelection()
+        } catch { self.error = layoutErrorText(error) }
+    }
+    func moveTab(from source: Int, to destination: Int) {
+        guard var definition else { return }
+        do {
+            try definition.moveTab(from: source, to: destination)
+            change { $0 = definition }
+            if selectedTab == source { selectedTab = destination }
+            else if source < selectedTab && selectedTab <= destination { selectedTab -= 1 }
+            else if destination <= selectedTab && selectedTab < source { selectedTab += 1 }
+            normalizeSelection()
+        } catch { self.error = layoutErrorText(error) }
+    }
+    func tabDragID(at index: Int) -> String {
+        guard let definition, definition.tabs.indices.contains(index) else { return "" }
+        return "slate-layout-tab:\(definition.id):\(definition.tabs[index].layout.paneIDs[0])"
+    }
+    func dropTab(_ value: String, at destination: Int) -> Bool {
+        guard let definition, let source = definition.tabs.indices.first(where: { tabDragID(at: $0) == value }),
+              source != destination else { return false }
+        moveTab(from: source, to: destination)
+        return error == nil
     }
     func create() {
         do {
@@ -131,54 +170,23 @@ final class SavedLayoutsModel: ObservableObject {
 
 func layoutErrorText(_ error: any Error) -> String { (error as? RPCFailure)?.message ?? error.localizedDescription }
 
-@MainActor
-final class SavedLayoutsWindowController: NSWindowController, NSWindowDelegate {
-    let model: SavedLayoutsModel
-    init(model: SavedLayoutsModel) {
-        self.model = model
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1060, height: 620),
-                              styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-        window.title = "Saved Layouts"
-        window.isReleasedWhenClosed = false
-        window.tabbingMode = .disallowed
-        window.minSize = NSSize(width: 920, height: 520)
-        window.contentViewController = NSHostingController(rootView: SavedLayoutsView(model: model))
-        super.init(window: window)
-        window.delegate = self
-        window.center()
-    }
-    required init?(coder: NSCoder) { nil }
-    func windowDidBecomeKey(_ notification: Notification) { model.refresh() }
-}
-
-private struct SavedLayoutsView: View {
+struct SavedLayoutsView: View {
     @ObservedObject var model: SavedLayoutsModel
     @State private var previewSize = CGSize(width: 360, height: 260)
+    @State private var inspectorHasMore = false
     var body: some View {
-        HStack(spacing: 0) {
-            VStack(spacing: 0) {
-                List(selection: Binding(get: { model.selection }, set: { model.select($0) })) {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Picker("Layout", selection: Binding(get: { model.selection }, set: { model.select($0) })) {
+                    if model.entries.isEmpty { Text("No Saved Layouts").tag(String?.none) }
                     ForEach(model.entries) { entry in
-                        Label {
-                            HStack {
-                                Text(model.drafts[entry.file]?.definition.name ?? entry.definition?.name ?? entry.file)
-                                    .lineLimit(2).fontWeight(model.selection == entry.file ? .semibold : .regular)
-                                if model.drafts[entry.file]?.dirty == true { Circle().fill(.secondary).frame(width: 5, height: 5).accessibilityLabel("Unsaved changes") }
-                            }
-                        } icon: {
-                            Image(systemName: entry.diagnostic == nil ? "rectangle.split.2x2" : "exclamationmark.triangle")
-                                .font(.system(size: 13, weight: .medium)).foregroundStyle(.white)
-                                .frame(width: 25, height: 25)
-                                .background((entry.diagnostic == nil ? Color.indigo : Color.orange).gradient, in: RoundedRectangle(cornerRadius: 6))
-                        }.padding(.vertical, 4).tag(entry.file)
+                        let name = model.drafts[entry.file]?.definition.name ?? entry.definition?.name ?? entry.file
+                        Text(name + (model.drafts[entry.file]?.dirty == true ? " •" : "") + (entry.diagnostic != nil ? " (Needs Repair)" : ""))
+                            .tag(Optional(entry.file))
                     }
-                }.listStyle(.sidebar)
-                Divider()
-                HStack {
-                    Button(action: model.create) { Label("New Layout", systemImage: "plus") }
-                    Spacer()
-                }.padding(16)
-            }.frame(width: 210)
+                }
+                Button(action: model.create) { Label("New Layout", systemImage: "plus") }
+            }.padding(.horizontal, 24).padding(.vertical, 16)
             Divider()
             VStack(spacing: 0) {
                 if let definition = model.definition {
@@ -199,9 +207,15 @@ private struct SavedLayoutsView: View {
                         .frame(maxWidth: .infinity, alignment: .leading).padding()
                 }
                 Divider()
-                HStack {
-                    Text(model.conflict ? "File changed externally. Revert to reload." : model.isDirty ? "Unsaved changes" : "")
+                if model.conflict || model.isDirty {
+                    Text(model.conflict ? "File changed externally. Revert to reload." : "Unsaved changes")
                         .font(.callout).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.top, 12)
+                }
+                HStack {
+                    Button("Create Spotlight Launcher…", action: model.makeLauncher)
+                        .disabled(model.definition == nil || model.isDirty || model.conflict || model.launcherUnavailable != nil)
+                        .help(model.launcherUnavailable ?? "Create an app shortcut for the saved layout. Save changes first.")
                     Spacer()
                     Button("Revert", action: model.revert).disabled(!model.isDirty && !model.conflict)
                     Button("Save Changes", action: model.save).keyboardShortcut("s", modifiers: .command)
@@ -217,32 +231,69 @@ private struct SavedLayoutsView: View {
                 .font(.title2.weight(.semibold)).textFieldStyle(.plain).padding(24)
                 .accessibilityLabel("Layout Name")
             HStack(spacing: 0) {
-                ScrollView {
-                  VStack(alignment: .leading, spacing: 16) {
-                    HStack {
-                        Picker("Tab", selection: $model.selectedTab) {
-                            ForEach(definition.tabs.indices, id: \.self) { index in Text(definition.tabs[index].name).tag(index) }
-                        }.labelsHidden().onChange(of: model.selectedTab) { model.normalizeSelection() }
-                        Menu {
-                            Button("Add Tab", action: model.addTab).disabled(definition.tabs.count >= 8)
-                            Button("Remove Tab", action: model.removeTab).disabled(definition.tabs.count <= 1)
-                        } label: { Image(systemName: "ellipsis.circle") }.menuStyle(.borderlessButton).fixedSize()
-                    }
+                VStack(alignment: .leading, spacing: 16) {
+                    tabStrip(definition)
                     if let tab = model.tab {
                         SavedLayoutMap(tree: tab.layout, panes: tab.panes, types: model.types, selected: model.selectedPane) { model.selectedPane = $0 }
-                            .frame(height: 260)
+                            .frame(minHeight: 120, maxHeight: .infinity)
                             .onGeometryChange(for: CGSize.self, of: { $0.size }) { previewSize = $0 }
                         HStack(spacing: 8) {
                             splitButtons
                             Button("Remove Pane", action: model.removePane).disabled(tab.panes.count <= 1)
                         }.labelStyle(.titleOnly).fixedSize(horizontal: true, vertical: false)
                     }
-                  }.padding(.horizontal, 24).padding(.bottom, 24)
-                }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                }.padding(.horizontal, 24).padding(.bottom, 24)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 Divider()
-                inspector.frame(width: 300)
+                inspector.frame(width: 280)
             }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    private func tabStrip(_ definition: SavedLayoutDefinition) -> some View {
+        HStack(spacing: 8) {
+            ScrollViewReader { proxy in
+              ScrollView(.horizontal) {
+                HStack(spacing: 4) {
+                    ForEach(definition.tabs.indices, id: \.self) { index in
+                        HStack(spacing: 4) {
+                            Button { model.selectTab(index) } label: {
+                                Text(definition.tabs[index].name).lineLimit(1)
+                                    .font(.system(size: 12, weight: model.selectedTab == index ? .semibold : .regular))
+                                    .padding(.vertical, 7).padding(.leading, 10).padding(.trailing, 4)
+                            }.buttonStyle(.plain)
+                                .accessibilityAddTraits(model.selectedTab == index ? .isSelected : [])
+                            Button { model.removeTab(at: index) } label: {
+                                Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
+                                    .frame(width: 22, height: 26).contentShape(Rectangle())
+                            }.buttonStyle(.plain).disabled(definition.tabs.count <= 1)
+                                .help("Remove \(definition.tabs[index].name)")
+                                .accessibilityLabel("Remove \(definition.tabs[index].name)")
+                        }
+                        .foregroundStyle(model.selectedTab == index ? Color.primary : Color.secondary)
+                        .background(model.selectedTab == index ? Color(nsColor: .selectedControlColor) : Color(nsColor: .quaternarySystemFill), in: RoundedRectangle(cornerRadius: 6))
+                        .id(index)
+                        .draggable(model.tabDragID(at: index))
+                        .dropDestination(for: String.self, action: { (items: [String], _: CGPoint) -> Bool in
+                            items.first.map { model.dropTab($0, at: index) } ?? false
+                        })
+                        .contextMenu {
+                            Button("Move Left") { model.moveTab(from: index, to: index - 1) }.disabled(index == 0)
+                            Button("Move Right") { model.moveTab(from: index, to: index + 1) }.disabled(index == definition.tabs.count - 1)
+                            Divider()
+                            Button("Remove Tab") { model.removeTab(at: index) }.disabled(definition.tabs.count <= 1)
+                        }
+                        .accessibilityAction(named: "Move Left") { if index > 0 { model.moveTab(from: index, to: index - 1) } }
+                        .accessibilityAction(named: "Move Right") { if index + 1 < definition.tabs.count { model.moveTab(from: index, to: index + 1) } }
+                    }
+                }
+              }.scrollIndicators(.hidden)
+                .onChange(of: model.selectedTab) { proxy.scrollTo(model.selectedTab, anchor: .center) }
+                .onChange(of: definition.tabs.count) { proxy.scrollTo(model.selectedTab, anchor: .center) }
+            }
+            Button(action: model.addTab) { Image(systemName: "plus").frame(width: 24, height: 24) }
+                .buttonStyle(.borderless).disabled(definition.tabs.count >= 8)
+                .help("Add Tab").accessibilityLabel("Add Tab")
+        }
     }
     @ViewBuilder private var splitButtons: some View {
         Button { model.split(.horizontal) } label: { Label("Split Right", systemImage: "rectangle.split.2x1") }
@@ -294,6 +345,17 @@ private struct SavedLayoutsView: View {
                 }
             }
         }.formStyle(.grouped)
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.visibleRect.maxY + 1 < geometry.contentSize.height
+            } action: { _, hasMore in inspectorHasMore = hasMore }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if inspectorHasMore {
+                    Label("Scroll for more settings", systemImage: "chevron.down")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity).padding(8)
+                        .background(.background)
+                }
+            }
     }
     @ViewBuilder private func fieldView(_ field: SavedLayoutField) -> some View {
         let text = Binding(get: { (model.pane?.configuration[field.id] ?? field.defaultValue)?.string ?? "" },
