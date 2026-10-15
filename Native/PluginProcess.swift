@@ -46,6 +46,12 @@ final class PluginProcess {
 
     // The resource capsule also permits synchronous cleanup from Swift's nonisolated deinit.
     private let resources: ProcessResources
+    /// Observation only: closing still suppresses callbacks and remains .closed.
+    /// Confirmation means the exclusively owned leader was reaped after group teardown;
+    /// it does not contain descendants that deliberately escaped that group.
+    var cleanupObservation: ProcessCleanup { resources.reapObservation }
+    var cleanupFinished: Bool { cleanupObservation.snapshot.finished }
+    var cleanupConfirmed: Bool { cleanupObservation.snapshot.confirmed }
     private var stopDeadline: ContinuousClock.Instant?
 
     /// Requires an absolute executable path. Environment is exact, not merged with the host's.
@@ -218,7 +224,7 @@ final class PluginProcess {
         source.resume()
     }
 
-    private static func yieldForCleanup() async {
+    static func yieldForCleanup() async {
         // Unlike Task.sleep this does not turn cancellation into a tight loop or abandoned teardown.
         await withCheckedContinuation { continuation in
             DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(10)) { continuation.resume() }
@@ -300,9 +306,27 @@ final class PluginProcess {
     }
 }
 
+/// The only data shared with the blocking reap worker. Never signals or owns a PID.
+nonisolated final class ProcessCleanup: @unchecked Sendable {
+    private let lock = NSLock()
+    private var finished = false
+    private var confirmed = false
+    var snapshot: (finished: Bool, confirmed: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        return (finished, confirmed)
+    }
+    fileprivate func complete(confirmed: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        guard !finished else { return }
+        self.confirmed = confirmed
+        finished = true
+    }
+}
+
 /// Accessed on the main actor while its owner is alive. After destruction only close() is called.
-/// Dispatch cancellation handlers capture FDs, not this capsule; the reap worker captures only PID.
-private final class ProcessResources: @unchecked Sendable {
+/// Dispatch cancellation handlers capture FDs; the reap worker captures only PID and observation.
+/// Explicitly nonisolated preserves synchronous destruction even in a default-MainActor module.
+private nonisolated final class ProcessResources: @unchecked Sendable {
     let pid: pid_t
     let stdout: Int32
     let stderr: Int32
@@ -310,6 +334,7 @@ private final class ProcessResources: @unchecked Sendable {
     var exitSource: DispatchSourceProcess?
     private var ownsGroup = true
     private var ownsReap = true
+    let reapObservation = ProcessCleanup()
 
     init(pid: pid_t, stdout: Int32, stderr: Int32) {
         self.pid = pid
@@ -324,10 +349,13 @@ private final class ProcessResources: @unchecked Sendable {
         if reapNonblocking() != nil { return }
         ownsReap = false
         let child = pid
+        let observation = reapObservation
         // Never signal from this worker: the group was relinquished synchronously above.
         DispatchQueue.global(qos: .utility).async {
             var status: Int32 = 0
-            while waitpid(child, &status, 0) < 0 && errno == EINTR {}
+            var result: pid_t
+            repeat { result = waitpid(child, &status, 0) } while result < 0 && errno == EINTR
+            observation.complete(confirmed: result == child)
         }
     }
 
@@ -342,6 +370,7 @@ private final class ProcessResources: @unchecked Sendable {
     func abandonOwnership() {
         ownsGroup = false
         ownsReap = false
+        reapObservation.complete(confirmed: false)
     }
 
     func reapNonblocking() -> PluginProcess.ExitStatus? {
@@ -350,8 +379,10 @@ private final class ProcessResources: @unchecked Sendable {
         var result: pid_t
         repeat { result = waitpid(pid, &status, WNOHANG) } while result < 0 && errno == EINTR
         if result == 0 { return nil }
+        let error = errno
         ownsReap = false
-        if result < 0 { return .unavailable(errno) }
+        reapObservation.complete(confirmed: result == pid)
+        if result < 0 { return .unavailable(error) }
         let signal = status & 0x7f
         return signal == 0 ? .code((status >> 8) & 0xff) : .signal(signal)
     }

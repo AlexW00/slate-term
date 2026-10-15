@@ -11,6 +11,7 @@ struct TerminalRunsChecks {
             try await checkQuotingAndSynchronousCompletion()
             try await checkValidation()
             try await checkInputClaims()
+            try await checkCallerRetirement()
             try await checkMatchingAndInterruption()
             try await checkOutputBounds()
             try await checkReplacementAndSendFailure()
@@ -123,6 +124,26 @@ struct TerminalRunsChecks {
             throw Failure(message: "Retired command was delivered")
         } catch TerminalRunError.replaced {}
         print("PASS shell-side input claim: one delivery, session ownership, draft refusal and retired request rejection")
+    }
+
+    static func checkCallerRetirement() async throws {
+        let runs = TerminalRuns()
+        defer { runs.close() }
+        var callerLive = true
+        var claimed = false
+        do {
+            _ = try await runs.run(pane: PaneID(1), sessionID: "s", command: "must not execute",
+                validateCaller: { if !callerLive { throw CancellationError() } }, send: { _ in
+                    // Retire and claim synchronously: cancellation cleanup cannot run first.
+                    callerLive = false
+                    do { _ = try runs.claimInput(pane: PaneID(1), sessionID: "s", emptyBuffer: true); claimed = true }
+                    catch is CancellationError { }
+                    if claimed { throw Failure(message: "Retired caller's input was delivered") }
+                })
+            throw Failure(message: "Retired caller's run succeeded")
+        } catch is CancellationError { }
+        try require(!claimed && runs.pendingCount == 0, "Retired caller retained or delivered pending input")
+        print("PASS caller lifetime revalidated at input claim before asynchronous cancellation cleanup")
     }
 
     static func checkMatchingAndInterruption() async throws {

@@ -81,9 +81,12 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate {
             self?.beginTitleEditing()
         }
         typeButton.setContentHuggingPriority(.required, for: .horizontal)
-        typeButton.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
-        titleField.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        titleField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // Preserve the header's internal ordering, but keep optional text below the
+        // split item's 251 holding priority. Otherwise fitting-size pressure silently
+        // overrides model fractions (the type label alone imposed a 193-point minimum).
+        typeButton.setContentCompressionResistancePriority(.init(rawValue: 249), for: .horizontal)
+        titleField.setContentHuggingPriority(.init(rawValue: 246), for: .horizontal)
+        titleField.setContentCompressionResistancePriority(.init(rawValue: 247), for: .horizontal)
         actionStrip.orientation = .horizontal
         actionStrip.spacing = 2
         actionStrip.setContentHuggingPriority(.required, for: .horizontal)
@@ -98,13 +101,13 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate {
         for child in [header, content.view] { child.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(child) }
         // Fill the largest symmetric title region without compressing the type control.
         let preferredTitleWidth = titleField.widthAnchor.constraint(equalTo: header.widthAnchor)
-        preferredTitleWidth.priority = .init(500)
+        preferredTitleWidth.priority = .init(248)
         let titleLeadingLimit = titleField.leadingAnchor.constraint(greaterThanOrEqualTo: typeButton.trailingAnchor, constant: 8)
         let titleTrailingLimit = titleField.trailingAnchor.constraint(lessThanOrEqualTo: actionStrip.leadingAnchor, constant: -6)
         // At the split's 80-point minimum there may be no title space at all.
         // Collapse the title rather than breaking its center or required control constraints.
-        titleLeadingLimit.priority = .init(999)
-        titleTrailingLimit.priority = .init(999)
+        titleLeadingLimit.priority = .init(250)
+        titleTrailingLimit.priority = .init(250)
         NSLayoutConstraint.activate([
             preferredTitleWidth, titleLeadingLimit, titleTrailingLimit,
             header.topAnchor.constraint(equalTo: view.topAnchor), header.leadingAnchor.constraint(equalTo: view.leadingAnchor), header.trailingAnchor.constraint(equalTo: view.trailingAnchor), header.heightAnchor.constraint(equalToConstant: 28),

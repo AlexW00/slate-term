@@ -1,19 +1,22 @@
 import Foundation
 
 /// A bounded value-type journal. Callers provide trusted source identities and own synchronization.
-/// Byte limits measure compact JSONEncoder output, including event metadata and the batch envelope.
+/// Byte limits measure compact JSONEncoder output plus any explicitly reserved delivery metadata.
+/// The default reservation is zero for existing callers; causation-aware hosts reserve before admission.
 public struct EventJournal: Sendable {
     public static let maximumRetainedEvents = 1_024
     public static let maximumRetainedBytes = 2_097_152
     public static let maximumEventBytes = 16_384
     public static let maximumBatchBytes = 524_288
     public static let maximumBatchEvents = 128
+    public static let maximumDeliveryMetadataBytes = 128
 
     public let epoch: UUID
     public var cursor: String { EventCursor(epoch: epoch, sequence: sequence).description }
 
     private let maximumEvents: Int
     private let maximumBytes: Int
+    private let reservedDeliveryBytes: Int
     private let timestampMillis: @Sendable () -> Int64
     private var sequence: UInt64 = 0
     private var retained: [StoredEvent] = []
@@ -23,6 +26,7 @@ public struct EventJournal: Sendable {
         maximumEvents: Int = EventJournal.maximumRetainedEvents,
         maximumBytes: Int = EventJournal.maximumRetainedBytes,
         epoch: UUID = UUID(),
+        reservedDeliveryBytes: Int = 0,
         timestampMillis: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1_000) }
     ) throws {
         guard (1...Self.maximumRetainedEvents).contains(maximumEvents) else {
@@ -31,8 +35,12 @@ public struct EventJournal: Sendable {
         guard (1...Self.maximumRetainedBytes).contains(maximumBytes) else {
             throw EventJournalError.invalidCapacity(name: "maximumBytes", value: maximumBytes)
         }
+        guard (0...Self.maximumDeliveryMetadataBytes).contains(reservedDeliveryBytes) else {
+            throw EventJournalError.invalidCapacity(name: "reservedDeliveryBytes", value: reservedDeliveryBytes)
+        }
         self.maximumEvents = maximumEvents
         self.maximumBytes = maximumBytes
+        self.reservedDeliveryBytes = reservedDeliveryBytes
         self.epoch = epoch
         self.timestampMillis = timestampMillis
     }
@@ -45,7 +53,9 @@ public struct EventJournal: Sendable {
         source: EventSource = .host,
         tab: TabID? = nil,
         pane: PaneID? = nil,
-        targetInstanceId: String? = nil
+        targetInstanceId: String? = nil,
+        targetService: ServiceEventRecipient? = nil,
+        lineage: OperationLineage? = nil
     ) throws -> WorkspaceEvent {
         let topic = try EventTopic(topic)
         let source = try source.checked()
@@ -55,15 +65,16 @@ public struct EventJournal: Sendable {
         if let targetInstanceId, !validEventIdentity(targetInstanceId) {
             throw EventJournalError.invalidTargetInstanceId
         }
+        guard targetInstanceId == nil || targetService == nil else { throw EventJournalError.invalidServiceRecipient }
         guard sequence < UInt64.max else { throw EventJournalError.sequenceExhausted }
         let next = sequence + 1
         let event = WorkspaceEvent(
             cursor: EventCursor(epoch: epoch, sequence: next).description,
             sequence: next, topic: topic.value, timestampMillis: timestampMillis(),
-            source: source, tab: tab, pane: pane, targetInstanceId: targetInstanceId, payload: payload
+            source: source, tab: tab, pane: pane, targetInstanceId: targetInstanceId, targetService: targetService, payload: payload
         )
         let encodedBytes: Int
-        do { encodedBytes = try JSONEncoder().encode(event).count }
+        do { encodedBytes = try JSONEncoder().encode(event).count + reservedDeliveryBytes }
         catch { throw EventJournalError.invalidPayload }
         guard encodedBytes <= Self.maximumEventBytes else {
             throw EventJournalError.eventTooLarge(encodedBytes: encodedBytes, maximumBytes: Self.maximumEventBytes)
@@ -74,12 +85,33 @@ public struct EventJournal: Sendable {
         }
 
         sequence = next
-        retained.append(StoredEvent(event: event, encodedBytes: encodedBytes))
+        retained.append(StoredEvent(event: event, encodedBytes: encodedBytes, lineage: lineage))
         retainedBytes += encodedBytes
         while retained.count > maximumEvents || retainedBytes > maximumBytes {
             retainedBytes -= retained.removeFirst().encodedBytes
         }
         return event
+    }
+
+    /// Atomically preflight an operation's facts. Rejection cannot consume IDs or evict history.
+    /// Copying the journal lets a host prepare a candidate before assigning its live model.
+    @discardableResult
+    public mutating func appendBatch(_ publications: [EventPublication]) throws -> [WorkspaceEvent] {
+        var candidate = self
+        let events = try publications.map { publication in
+            try candidate.append(topic: publication.topic, payload: publication.payload, source: publication.source,
+                                 tab: publication.tab, pane: publication.pane, targetInstanceId: publication.targetInstanceId,
+                                 targetService: publication.targetService, lineage: publication.lineage)
+        }
+        self = candidate
+        return events
+    }
+
+    /// Host-only lineage is not encoded in an event. Snapshot it alongside a returned batch
+    /// before yielding, because another publication may evict its retained record.
+    public func lineage(for cursor: String) -> OperationLineage? {
+        guard let parsed = try? EventCursor(parsing: cursor), parsed.epoch == epoch else { return nil }
+        return retained.first { $0.event.sequence == parsed.sequence }?.lineage
     }
 
     /// Nil starts at the current head; an explicit epoch:0 requests replay, subject to retention.
@@ -127,6 +159,27 @@ public struct EventJournal: Sendable {
     private struct StoredEvent: Sendable {
         let event: WorkspaceEvent
         let encodedBytes: Int
+        let lineage: OperationLineage?
+    }
+}
+
+/// Host-created publication input, not a decodable client authority or wire envelope.
+public struct EventPublication: Sendable {
+    public let topic: String
+    public let payload: JSONValue
+    public let source: EventSource
+    public let tab: TabID?
+    public let pane: PaneID?
+    public let targetInstanceId: String?
+    public let targetService: ServiceEventRecipient?
+    public let lineage: OperationLineage?
+
+    public init(topic: String, payload: JSONValue = .null, source: EventSource = .host,
+                tab: TabID? = nil, pane: PaneID? = nil, targetInstanceId: String? = nil,
+                targetService: ServiceEventRecipient? = nil, lineage: OperationLineage? = nil) {
+        self.topic = topic; self.payload = payload; self.source = source
+        self.tab = tab; self.pane = pane; self.targetInstanceId = targetInstanceId
+        self.targetService = targetService; self.lineage = lineage
     }
 }
 
@@ -183,41 +236,79 @@ public struct WorkspaceEvent: Equatable, Sendable, Codable {
     public let tab: TabID?
     public let pane: PaneID?
     public let targetInstanceId: String?
+    public let targetService: ServiceEventRecipient?
     public let payload: JSONValue
 }
 
+/// Public routing identity, not a credential. Its generation prevents restart delivery leakage.
+public struct ServiceEventRecipient: Hashable, Sendable, Codable {
+    public let serviceID: String
+    public let generation: String
+    public init(serviceID: String, generation: String) throws {
+        guard ServiceIdentity.opaque(serviceID), ServiceIdentity.opaque(generation) else {
+            throw EventJournalError.invalidServiceRecipient
+        }
+        self.serviceID = serviceID; self.generation = generation
+    }
+    private enum CodingKeys: String, CodingKey { case serviceID = "serviceId", generation }
+    public init(from decoder: any Decoder) throws {
+        try requireEventKeys(decoder, allowed: ["serviceId", "generation"])
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(serviceID: values.decode(String.self, forKey: .serviceID), generation: values.decode(String.self, forKey: .generation))
+    }
+}
+
+/// Always selected by the host adapter, never from a caller's claimed recipient fields.
+public enum EventObserver: Equatable, Sendable {
+    case administrator
+    case plugin(instanceID: String)
+    case service(ServiceEventRecipient)
+}
+
 /// Topics are ORed. Untargeted events with absent tab/pane fields broadcast to scoped recipients.
-/// Nil recipientInstanceId monitors all recipients. Directed delivery bypasses scope, never topics.
+/// Directed delivery bypasses scope, never topics; only explicit administrators monitor all recipients.
 public struct EventFilter: Equatable, Sendable, Codable {
     public static let all = try! EventFilter()
 
     public let topics: [String]
     public let tab: TabID?
     public let pane: PaneID?
-    public let recipientInstanceId: String?
+    public let observer: EventObserver
+    public var recipientInstanceId: String? {
+        if case .plugin(let instance) = observer { instance } else { nil }
+    }
     private let patterns: [TopicPattern]
 
     public init(topics: [String] = [], tab: TabID? = nil, pane: PaneID? = nil, recipientInstanceId: String? = nil) throws {
-        patterns = try topics.map { try TopicPattern(parsing: $0) }
-        if let recipientInstanceId, !validEventIdentity(recipientInstanceId) {
-            throw EventJournalError.invalidFilter("recipientInstanceId must be nonempty and contain no whitespace or controls")
-        }
-        self.topics = topics
-        self.tab = tab
-        self.pane = pane
-        self.recipientInstanceId = recipientInstanceId
+        try self.init(topics: topics, tab: tab, pane: pane,
+                      observer: recipientInstanceId.map { .plugin(instanceID: $0) } ?? .administrator)
     }
 
-    private enum Keys: String, CodingKey { case topics, tab, pane, recipientInstanceId }
+    public init(topics: [String] = [], tab: TabID? = nil, pane: PaneID? = nil, observer: EventObserver) throws {
+        patterns = try topics.map { try TopicPattern(parsing: $0) }
+        if case .plugin(let instance) = observer, !validEventIdentity(instance) {
+            throw EventJournalError.invalidFilter("recipientInstanceId must be nonempty and contain no whitespace or controls")
+        }
+        self.topics = topics; self.tab = tab; self.pane = pane; self.observer = observer
+    }
+
+    private enum Keys: String, CodingKey { case topics, tab, pane, recipientInstanceId, serviceRecipient }
 
     public init(from decoder: any Decoder) throws {
-        try requireEventKeys(decoder, allowed: ["topics", "tab", "pane", "recipientInstanceId"])
+        try requireEventKeys(decoder, allowed: ["topics", "tab", "pane", "recipientInstanceId", "serviceRecipient"])
         let values = try decoder.container(keyedBy: Keys.self)
+        let observer: EventObserver
+        if values.contains(.serviceRecipient) {
+            guard !values.contains(.recipientInstanceId) else { throw EventJournalError.invalidServiceRecipient }
+            observer = .service(try values.decode(ServiceEventRecipient.self, forKey: .serviceRecipient))
+        } else {
+            observer = try values.decodeIfPresent(String.self, forKey: .recipientInstanceId)
+                .map { .plugin(instanceID: $0) } ?? .administrator
+        }
         try self.init(
             topics: values.contains(.topics) ? values.decode([String].self, forKey: .topics) : [],
             tab: values.decodeIfPresent(TabID.self, forKey: .tab),
-            pane: values.decodeIfPresent(PaneID.self, forKey: .pane),
-            recipientInstanceId: values.decodeIfPresent(String.self, forKey: .recipientInstanceId)
+            pane: values.decodeIfPresent(PaneID.self, forKey: .pane), observer: observer
         )
     }
 
@@ -227,12 +318,24 @@ public struct EventFilter: Equatable, Sendable, Codable {
         try values.encodeIfPresent(tab, forKey: .tab)
         try values.encodeIfPresent(pane, forKey: .pane)
         try values.encodeIfPresent(recipientInstanceId, forKey: .recipientInstanceId)
+        if case .service(let recipient) = observer { try values.encode(recipient, forKey: .serviceRecipient) }
     }
 
     fileprivate func matches(_ event: WorkspaceEvent) -> Bool {
         guard patterns.isEmpty || patterns.contains(where: { $0.matches(event.topic) }) else { return false }
         if let target = event.targetInstanceId {
-            return recipientInstanceId == nil || recipientInstanceId == target
+            switch observer {
+            case .administrator: return true
+            case .plugin(let instance): return instance == target
+            case .service: return false
+            }
+        }
+        if let target = event.targetService {
+            switch observer {
+            case .administrator: return true
+            case .service(let recipient): return recipient == target
+            case .plugin: return false
+            }
         }
         if let tab, let eventTab = event.tab, tab != eventTab { return false }
         if let pane, let eventPane = event.pane, pane != eventPane { return false }
@@ -251,6 +354,7 @@ public enum EventJournalError: Error, Equatable, Sendable {
     case reservedTopic(String)
     case invalidSource
     case invalidTargetInstanceId
+    case invalidServiceRecipient
     case invalidPayload
     case eventTooLarge(encodedBytes: Int, maximumBytes: Int)
     case eventExceedsRetentionCapacity(encodedBytes: Int, maximumBytes: Int)

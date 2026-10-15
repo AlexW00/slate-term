@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Native WebKit plugin gate: real modules/bridge, origins, scopes, persistence, disposal."""
+import argparse
 import http.server
 import json
 import os
@@ -10,6 +11,10 @@ import subprocess
 import tempfile
 import threading
 import time
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--functional-only', action='store_true', help='Omit foreground screenshot checks; does not certify visual verification.')
+args = parser.parse_args()
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP = pathlib.Path(os.environ.get("SLATE_TERM_TEST_APP", ROOT / ".derived/Build/Products/Debug/Slate Terminal.app/Contents/MacOS/Slate Terminal"))
@@ -218,7 +223,10 @@ try:
                 assert "scoped" in evaluate("workspace.call('events.poll',{tab:'t1',waitMilliseconds:0}).then(()=> 'unexpected',error=>String(error))", other_pane)
                 directed = evaluate("workspace.emit('test.direct',{text:'private'},{targetInstanceId:" + json.dumps(info()["instanceId"]) + "})", other_pane)
                 eventually("directed event crosses tabs", lambda: evaluate("window.directEvents.length===1"))
-                assert evaluate("window.directEvents[0]") == directed
+                delivered = evaluate("window.directEvents[0]")
+                reference = delivered.pop("deliveryContext")
+                assert isinstance(reference, str) and 1 <= len(reference) <= 64, reference
+                assert delivered == directed, (delivered, directed)
                 assert evaluate("window.directEvents.length", other_pane) == 0
                 assert directed["source"]["instanceId"] == info(other_pane)["instanceId"] != info()["instanceId"]
                 evaluate("(window.stopDirect(),true)")
@@ -259,7 +267,8 @@ try:
                 assert evaluate("workspace.storage.get('note')") == "保存したメモ"
                 assert evaluate("document.querySelector('#send').getBoundingClientRect().bottom<=innerHeight"), "Plugin fixture action is clipped"
                 rpc("debug.paneHeader", pane="p2", rename="My notes — 手動")
-                rpc("debug.activate", tab="t1")
+                if not args.functional_only:
+                    rpc("debug.activate", tab="t1")
                 capture_path = ROOT / "artifacts/plugin-workspace.png"
                 previous_dimensions = None
                 stable_captures = 0
@@ -273,17 +282,20 @@ try:
                     previous_dimensions = dimensions
                     return dimensions[0] >= window["width"] and dimensions[1] >= window["height"] and stable_captures >= 3
 
-                try:
-                    eventually("full-sized capture after native window animation", settled_capture)
-                except AssertionError as error:
-                    raise AssertionError(f"{error}; pixels={previous_dimensions}; native={rpc('debug.inspect')}") from error
+                if not args.functional_only:
+                    try:
+                        eventually("full-sized capture after native window animation", settled_capture)
+                    except AssertionError as error:
+                        raise AssertionError(f"{error}; pixels={previous_dimensions}; native={rpc('debug.inspect')}") from error
                 cli("plugins", "unregister", "notes", success=False)
                 cli("plugins", "register", "--manifest", str(manifest), "--replace", success=False)
                 rpc("debug.paneHeader", pane="p2", beginRename=True)
-                capture_path = ROOT / "artifacts/pane-rename-inline.png"
-                previous_dimensions = None
-                stable_captures = 0
-                eventually("inline rename capture", settled_capture)
+                assert rpc("debug.paneHeader", pane="p2")["editing"] is True
+                if not args.functional_only:
+                    capture_path = ROOT / "artifacts/pane-rename-inline.png"
+                    previous_dimensions = None
+                    stable_captures = 0
+                    eventually("inline rename capture", settled_capture)
                 stop()
                 app = start()
                 eventually("restored registered view is functional", lambda: evaluate("window.fixtureReady===true"))
@@ -301,7 +313,7 @@ try:
                 cli("plugins", "unregister", "notes", "--force")
                 assert cli("plugins", "list") == [] and cli("plugins", "status") == []
                 assert [pane["id"] for pane in cli("panes", "list")] == ["p1"]
-                print("PASS plugins: static modules, origin-gated isolated bridge, trusted registry/menu, iframe rejection, terminal control, tab scope, persistent storage, fresh views, restoration, and forced unregister")
+                print("PASS plugins: static modules, origin-gated isolated bridge, trusted registry/menu, iframe rejection, terminal control, tab scope, persistent storage, fresh views, restoration, and forced unregister" + (" [foreground screenshots OMITTED]" if args.functional_only else ""))
             finally:
                 stop()
 finally:

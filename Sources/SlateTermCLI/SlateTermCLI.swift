@@ -7,7 +7,7 @@ import SlateTermSettings
 @main
 struct SlateTermCLI: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "slate-term", abstract: "Control a running Slate Terminal workspace.",
-        subcommands: [Tabs.self, Panes.self, WindowsCLI.self, TerminalCommand.self, BrowserCommand.self, Plugins.self, Events.self, ContextCommand.self, ShellCommand.self, LayoutCommand.self, Commands.self, ConfigCommand.self, WorkspaceCLI.self, APICLI.self, AppearanceCLI.self, PaletteCLI.self, RPC.self, Version.self, PluginWorker.self])
+        subcommands: [Tabs.self, Panes.self, WindowsCLI.self, TerminalCommand.self, BrowserCommand.self, WebCLI.self, Plugins.self, Events.self, ContextCommand.self, ShellCommand.self, LayoutCommand.self, Commands.self, ConfigCommand.self, WorkspaceCLI.self, APICLI.self, AppearanceCLI.self, PaletteCLI.self, RPC.self, Version.self, PluginWorker.self])
 
     static func main() {
         do {
@@ -33,23 +33,37 @@ struct Connection: ParsableArguments {
     @Option(help: "Unix socket path; defaults to SLATE_TERM_SOCKET.") var socket: String?
     @Flag(help: "Emit JSON results and machine-readable JSON errors.") var json = false
     @Option(help: "Require this app instance; rejects a restarted/replaced host.") var expectedInstanceId: String?
+    @Option(help: "Opaque deliveryContext from an event poll for this caller; never inferred from environment.") var cause: String?
 
     func call(_ method: String, params: [String: JSONValue] = [:], timeoutSeconds: Int = 30) throws {
         try printJSON(request(method, params: params, timeoutSeconds: timeoutSeconds))
     }
 
     func request(_ method: String, params: [String: JSONValue] = [:], timeoutSeconds: Int = 30) throws -> JSONValue {
-        guard let path = socket ?? ProcessInfo.processInfo.environment["SLATE_TERM_SOCKET"] else {
+        let environment = ProcessInfo.processInfo.environment
+        let service = try ServiceCredentials.inherited(from: environment)
+        if let service {
+            guard let inheritedSocket = environment["SLATE_TERM_SOCKET"],
+                  inheritedSocket.hasPrefix("/"), !inheritedSocket.contains("\0"),
+                  socket == nil || socket == inheritedSocket,
+                  expectedInstanceId == nil || expectedInstanceId == service.identity.appInstanceID,
+                  params["expectedInstanceId"] == nil || params["expectedInstanceId"] == .string(service.identity.appInstanceID) else {
+                throw RPCFailure(code: APIError.serviceSessionUnavailable, message: "Service session unavailable")
+            }
+        }
+        guard let path = socket ?? environment["SLATE_TERM_SOCKET"] else {
             throw ValidationError("Set SLATE_TERM_SOCKET or pass --socket. Run inside Slate Terminal for automatic discovery.")
         }
         var guarded = params
-        let environment = ProcessInfo.processInfo.environment
         if method != "api.describe", !method.hasPrefix("shell."), guarded["expectedInstanceId"] == nil,
            socket == nil || socket == environment["SLATE_TERM_SOCKET"], let inherited = environment["SLATE_TERM_INSTANCE_ID"] {
             guarded["expectedInstanceId"] = .string(inherited)
         }
         if let expectedInstanceId { guarded["expectedInstanceId"] = .string(expectedInstanceId) }
-        let client = UnixClient(path: path, timeoutSeconds: timeoutSeconds)
+        let metadata: RPCMetadata?
+        do { metadata = try cause.map { try RPCMetadata(cause: $0) } }
+        catch { throw ValidationError("--cause must be an opaque delivery reference of 1–64 ASCII letters, digits, hyphens or underscores") }
+        let client = UnixClient(path: path, timeoutSeconds: timeoutSeconds, service: service)
         let contributed = method == "command.run" && guarded["id"]?.string?.hasPrefix("plugin.") == true
         let requested = Set(guarded.keys.filter { $0.hasPrefix("expected") && (!contributed || APIGuards.names.contains($0)) })
         return try client.withSession { session in
@@ -62,7 +76,7 @@ struct Connection: ParsableArguments {
                 let supported = try APIGuards.supported(by: capabilities)
                 guard requested.isSubset(of: supported) else { throw RPCFailure(code: APIError.incompatible, message: "Host cannot enforce requested guards: \(requested.subtracting(supported).sorted().joined(separator: ", "))") }
             }
-            return try session.call(method, params: guarded)
+            return try session.call(method, params: guarded, metadata: metadata)
         }
     }
 }

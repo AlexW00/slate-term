@@ -77,6 +77,8 @@ public struct PluginRegistration: Equatable, Codable, Sendable {
     public let source: PluginSource?
     public let scope: Scope
     public let process: PluginProcessSpec?
+    /// App-level headless runtime, independent of the panel's HTTP process.
+    public let service: PluginProcessSpec?
     public let commands: [PluginCommand]
     public let headerButtons: [PluginHeaderButton]
 
@@ -98,15 +100,16 @@ public struct PluginRegistration: Equatable, Codable, Sendable {
         return try JSONDecoder().decode(Self.self, from: data)
     }
 
-    private enum Keys: String, CodingKey { case id, title, source, scope, process, commands, headerButtons }
+    private enum Keys: String, CodingKey { case id, title, source, scope, process, service, commands, headerButtons }
     public init(from decoder: any Decoder) throws {
-        try requirePluginKeys(decoder, allowed: ["id", "title", "source", "scope", "process", "commands", "headerButtons"])
+        try requirePluginKeys(decoder, allowed: ["id", "title", "source", "scope", "process", "service", "commands", "headerButtons"])
         let values = try decoder.container(keyedBy: Keys.self)
         id = try values.decode(String.self, forKey: .id)
         title = try values.decode(String.self, forKey: .title)
         source = try values.decodeIfPresent(PluginSource.self, forKey: .source)
         scope = try values.decodeIfPresent(Scope.self, forKey: .scope) ?? .pane
         process = try values.decodeIfPresent(PluginProcessSpec.self, forKey: .process)
+        service = try values.decodeIfPresent(PluginProcessSpec.self, forKey: .service)
         commands = try values.decodeIfPresent([PluginCommand].self, forKey: .commands) ?? []
         headerButtons = try values.decodeIfPresent([PluginHeaderButton].self, forKey: .headerButtons) ?? []
         guard headerButtons.count <= 8, Set(headerButtons.map(\.id)).count == headerButtons.count,
@@ -114,8 +117,8 @@ public struct PluginRegistration: Equatable, Codable, Sendable {
             throw invalidPlugin("Header buttons must be unique (at most 8) and reference this plugin's commands")
         }
         guard commands.count <= 32, Set(commands.map(\.id)).count == commands.count,
-              source != nil || !commands.isEmpty && process == nil else {
-            throw invalidPlugin("A plugin needs a panel source or commands; commands must be unique (at most 32), and process requires a panel source")
+              (source != nil || !commands.isEmpty || service != nil), source != nil || process == nil else {
+            throw invalidPlugin("A plugin needs a panel, commands or service; commands must be unique (at most 32), and process requires a panel source")
         }
         guard id.utf8.count <= 64, id.range(of: "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$", options: .regularExpression) == id.startIndex..<id.endIndex,
               !["terminal", "browser"].contains(id), !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,

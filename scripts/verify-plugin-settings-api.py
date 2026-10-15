@@ -66,7 +66,10 @@ with AppFixture('plugin-settings-api', source) as app:
     query = json.dumps({'after': cursor, 'topics': ['host.plugin.settings.changed'], 'waitMilliseconds': 0})
     own = evaluate('await workspace.call("events.poll",' + query + ')')
     other = evaluate('await workspace.call("events.poll",' + query + ')', p2)
-    assert len(own['events']) == 1 and own['events'][0]['payload'] == {'pluginId': 'acme.tools'}, own
+    assert len(own['events']) == 1, own
+    detail = own['events'][0]['payload']
+    assert detail['pluginId'] == 'acme.tools' and detail['operationId'] and detail['changedPaths'], detail
+    assert not {'values', 'appliedValues', 'origin', 'parentOperationId'} & detail.keys(), detail
     assert not other['events'], other
     before_failure = app.config.read_text()
     app.root.chmod(0o500)
@@ -86,7 +89,7 @@ with AppFixture('plugin-settings-api', source) as app:
     preserved = evaluate('(async()=>{const s=await workspace.pluginSettings.get();try{await workspace.pluginSettings.patch([{op:"set",path:["postWrite"],value:true}],s.writeRevision);return null;}catch(e){return {code:e.code,message:e.message,data:e.data};}})()')
     assert preserved['code'] == -32054 and preserved['data']['persisted'] is False, preserved
     assert 'external edit was preserved' not in preserved['message'] and app.config.read_text() == external
-    assert set(preserved['data']) <= {'sourceRevision', 'appliedRevision', 'sourceValid', 'appliedMatchesSource', 'outcome', 'persisted'}
+    assert set(preserved['data']) <= {'operationId', 'sourceRevision', 'appliedRevision', 'sourceValid', 'appliedMatchesSource', 'outcome', 'persisted'}
     invalid = before_failure + '\n[plugins.hidden]\npassword = "foreign-private-value" trailing\n'
     app.config.write_text(invalid)
     assert evaluate('await workspace.pluginSettings.get()')['sourceValid'] is False

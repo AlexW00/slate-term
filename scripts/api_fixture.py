@@ -23,18 +23,25 @@ def eventually(label, condition, timeout=15):
 
 
 class AppFixture:
-    def __init__(self, name, configuration='[terminal]\nshell = "/bin/zsh"\n'):
+    def __init__(self, name, configuration='[terminal]\nshell = "/bin/zsh"\n', *, workspace_source=None):
         self.name, self.configuration = name, configuration
+        self.workspace_source = workspace_source
 
     def __enter__(self):
         self.temporary = tempfile.TemporaryDirectory(prefix='slate-api-', dir='/tmp')
         self.root = Path(self.temporary.name)
         self.config = self.root / 'config.toml'
         self.config.write_text(self.configuration)
+        if self.workspace_source is not None:
+            state = self.root / 'state'
+            state.mkdir(mode=0o700)
+            snapshot = state / 'workspace.json'
+            snapshot.write_text(self.workspace_source)
+            snapshot.chmod(0o600)
         startup = self.root / 'startup'
         startup.mkdir()
         (startup / '.zshenv').write_text('export HISTFILE=/dev/null\n')
-        (startup / '.zshrc').write_text('HISTSIZE=0; SAVEHIST=0; PS1="API_TEST> "\n')
+        (startup / '.zshrc').write_text('HISTSIZE=0; SAVEHIST=0; PS1="API_TEST> "; RPS1=""; RPROMPT=""\n')
         self.ready = self.root / 'ready'
         self.env = {k: v for k, v in os.environ.items() if not k.startswith('SLATE_TERM_')}
         self.env.update(SLATE_TERM_INTEGRATION='1', SLATE_TERM_TEST_REAL_SHELL='1',
@@ -62,7 +69,7 @@ class AppFixture:
         self.log.close()
         self.temporary.cleanup()
 
-    def rpc(self, method, *, error=None, **params):
+    def rpc(self, method, *, error=None, request_metadata=None, **params):
         with socket.socket(socket.AF_UNIX) as client:
             client.settimeout(35)
             client.connect(self.path)
@@ -70,7 +77,10 @@ class AppFixture:
                 client.sendall(json.dumps(dict(jsonrpc='2.0', id=1, method='hello', params={'protocolVersion': 1})).encode() + b'\n')
                 hello = json.loads(stream.readline(2**20))
                 assert 'error' not in hello, hello
-                client.sendall(json.dumps(dict(jsonrpc='2.0', id=2, method=method, params=params)).encode() + b'\n')
+                request = dict(jsonrpc='2.0', id=2, method=method, params=params)
+                if request_metadata is not None:
+                    request['metadata'] = request_metadata
+                client.sendall(json.dumps(request).encode() + b'\n')
                 response = json.loads(stream.readline(2**20))
         if error is not None:
             assert response.get('error', {}).get('code') == error, response

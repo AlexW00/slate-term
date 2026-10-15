@@ -223,7 +223,13 @@ elif mode=='wait':
         text = config.read_text().replace('\"cmd+shift+j\" = \"unbound\"', '\"cmd+shift+j\" = \"plugin.tools.inspect\"')
         config.write_text(text)
         rpc('config.reload')
-        rpc('debug.menuPreview', menu='Workspace', submenu='Plugin Commands', path=str(ARTIFACTS / 'plugin-commands-menu.png'))
+        # The watcher debounces for 100 ms and rebuilds NSApp.mainMenu even on a
+        # no-op reload. Finish that rebuild before entering menu tracking, and
+        # make the owned workspace (not the Settings window) the capture target.
+        time.sleep(.2)
+        window = rpc('window.list')['windows'][0]
+        rpc('command.run', id='window.focus', windowId=window['windowId'], activate=True)
+        rpc('debug.menuPreview', tab=window['tabId'], menu='Workspace', submenu='Plugin Commands', path=str(ARTIFACTS / 'plugin-commands-menu.png'))
 
         # Unregister cancels active jobs and retains inactive keybindings; registration survives restart.
         (directory / 'wait.json').unlink()

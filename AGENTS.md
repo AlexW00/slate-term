@@ -25,6 +25,7 @@
 
 - Start with high-value failing tests where practical: model invariants, invalid/stale routing, atomic failure, destructive consent, bridge denials, lifetime races and compatibility. Include successful native/CLI/plugin parity, not only parser/unit coverage.
 - Integration-only `debug.*` is not a production capability. Test through production APIs wherever possible; use isolated fixture roots, owned processes/windows and private clipboards.
+- Keep desktop integration tests sparse while the user is working on the Mac. Prefer unit/static checks and reuse owned fixtures for focused GUI verification; do not repeatedly launch/activate apps for broad regression loops. Check with the user before a long, window-heavy suite. Necessary behavioral verification must not be replaced by assumptions.
 - Add applicable integration gates to `scripts/verify-all.sh` and its verification manifest. Run GUI gates sequentially. A baseline pass does not verify changed source; inspect actual outputs and the source/binary manifest.
 - Read relevant `docs/control.md`, `docs/automation.md`, `docs/events.md`, `docs/plugins.md` and configuration documentation before changing their contracts. Track broad work in `docs/api-extension-progress.md`; distinguish implemented, tested, deferred and blocked work honestly.
 - Preserve unrelated changes. No push/deploy or destructive operations without explicit authorization.

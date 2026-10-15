@@ -4,12 +4,6 @@ import WebKit
 import SlateTermCore
 import SlateTermSettings
 
-struct PluginControlConnection {
-    let socketPath: String
-    let appInstanceID: String
-    let cliPath: String
-}
-
 /// A logical pane/tab/app-scoped plugin instance. Each visible pane owns a new
 /// web view; only explicitly scoped service/storage state is shared.
 @MainActor
@@ -37,7 +31,7 @@ final class PluginInstance {
     private var logTail = Data()
     var panes = Set<PaneID>()
     private var observers: [UUID: () -> Void] = [:]
-    var onEvent: ((String, JSONValue) -> Void)?
+    var onEvent: ((String, JSONValue, OperationLineage?) -> Void)?
 
     init(registration: PluginRegistration, scopeKey: String, tab: TabID?, directory: URL, connection: PluginControlConnection) throws {
         self.registration = registration; self.scopeKey = scopeKey; self.tab = tab
@@ -67,14 +61,14 @@ final class PluginInstance {
     var logs: String { String(decoding: logTail, as: UTF8.self) }
 
     func storageGet(_ key: String?) -> JSONValue { key.map { values[$0] ?? .null } ?? .object(values) }
-    func storageSet(_ key: String, value: JSONValue?) throws {
+    func storageSet(_ key: String, value: JSONValue?, lineage: OperationLineage? = nil) throws {
         guard !key.isEmpty, key.utf8.count <= 256 else { throw RPCFailure(code: -32602, message: "Storage key must contain 1–256 UTF-8 bytes") }
         var next = values
         next[key] = value
         guard next.count <= 1024 else { throw RPCFailure(code: -32602, message: "Plugin storage exceeds 1024 keys") }
         try storage.save(next)
         values = next
-        onEvent?("storageChanged", .object(["key": .string(key)]))
+        onEvent?("storageChanged", .object(["key": .string(key)]), lineage)
     }
 
     func restart() async {
@@ -208,7 +202,7 @@ final class PluginInstance {
     private func update(_ state: String, error: String? = nil) {
         self.state = state; self.error = error
         for callback in Array(observers.values) { callback() }
-        onEvent?("stateChanged", info)
+        onEvent?("stateChanged", info, nil)
     }
 }
 
@@ -228,7 +222,7 @@ final class PluginInstances {
     private var instances: [String: PluginInstance] = [:]
     private let directory: URL
     private var connection: PluginControlConnection?
-    var onEvent: ((PluginInstance, String, JSONValue) -> Void)?
+    var onEvent: ((PluginInstance, String, JSONValue, OperationLineage?) -> Void)?
     init(directory: URL) { self.directory = directory }
 
     func connect(socketPath: String, appInstanceID: String) {
@@ -250,9 +244,9 @@ final class PluginInstances {
         else {
             instance = try PluginInstance(registration: registration, scopeKey: scopeKey,
                                           tab: registration.scope == .global ? nil : tab, directory: directory, connection: connection)
-            instance.onEvent = { [weak self, weak instance] name, payload in
+            instance.onEvent = { [weak self, weak instance] name, payload, lineage in
                 guard let instance else { return }
-                self?.onEvent?(instance, name, payload)
+                self?.onEvent?(instance, name, payload, lineage)
             }
             instances[key] = instance
         }

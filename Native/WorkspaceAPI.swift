@@ -19,6 +19,14 @@ extension WorkspaceHost {
             guard let text = value.string, !text.isEmpty else { throw RPCFailure(code: -32602, message: "\(key) must be a nonempty string") }
             return text
         }
+        if params["expectedViewId"] != nil || params["expectedDocumentId"] != nil {
+            guard Self.webMethods.contains(method) || method == "web.screenshot" else {
+                throw RPCFailure(code: -32602, message: "Automation identity guards are only supported by web methods")
+            }
+            _ = try WebIdentity.expected(in: params)
+            // The shared helper checks fresh native/DOM identity before submission;
+            // parsing here must not substitute a cached document for that check.
+        }
         if let expected = try string("expectedInstanceId"), expected != instanceID {
             throw RPCFailure(code: APIError.conflict, message: "App instance changed; rediscover context")
         }
@@ -54,23 +62,12 @@ extension WorkspaceHost {
         }
     }
 
-    func publishWorkspaceChanges() {
-        let changes = revisions.observe(workspace)
-        guard !changes.isEmpty else { return }
-        let operation = UUID().uuidString
-        for change in changes {
-            var payload = change.payload
-            payload["operationId"] = .string(operation)
-            events.publishHost(change.topic, payload: .object(payload), tab: change.tab, pane: change.pane)
-        }
-    }
-
     func apiMethods(plugin: Bool) -> [String] {
-        let common = ["api.describe", "context.get", "context.inspect", "workspace.get", "workspace.snapshot", "layout.get",
+        let common = Self.webMethods + ["api.describe", "context.get", "context.inspect", "workspace.get", "workspace.snapshot", "layout.get",
                       "tabs.list", "panes.list", "pane.inspect", "command.list", "command.run",
                       "terminal.send", "terminal.key", "terminal.capture", "terminal.run", "terminal.wait",
                       "events.head", "events.poll", "events.emit", "plugins.settings.get", "plugins.settings.patch"]
-        let administrative = ["version", "window.list", "window.get", "panes.send", "panes.capture", "config.get", "config.reload", "config.validate", "config.patch", "palette.list", "palette.import", "plugins.list", "plugins.register",
+        let administrative = ["web.screenshot", "version", "window.list", "window.get", "panes.send", "panes.capture", "config.get", "config.reload", "config.validate", "config.patch", "palette.list", "palette.import", "plugins.list", "plugins.register",
                               "plugins.unregister", "plugins.status", "plugins.restart", "plugins.logs",
                               "browser.get", "browser.navigate", "browser.snapshot", "browser.click", "browser.fill",
                               "browser.select", "browser.scroll", "browser.wait", "browser.eval", "browser.screenshot"]
@@ -81,6 +78,33 @@ extension WorkspaceHost {
         return .object([
             "apiVersion": .integer(1), "appInstanceId": .string(instanceID), "identityGuards": .bool(true),
             "workspaceRevisions": .bool(true), "surface": .string(plugin ? "plugin" : "administrative"),
+            "webAutomation": .object([
+                "version": .integer(1), "paneKinds": .array([.string("browser"), .string("registeredPlugin")]),
+                "identity": .array([.string("viewId"), .string("documentId")]),
+                "selectorMutationGuardsRequired": .bool(true), "mainDocumentOnly": .bool(true),
+                "pendingActionsPerView": .integer(32), "pendingWebKitOperationsPerView": .integer(32), "resultByteLimit": .integer(900_000),
+                "screenshot": .bool(!plugin), "pluginEvaluation": .bool(false)
+            ]),
+            "causation": OperationControl.descriptor,
+            "settingsLifecycle": .object([
+                "version": .integer(1), "scope": .string("configurationSourceAndApplied"),
+                "topics": .array(["host.settings.source.changed", "host.settings.changed", "host.plugin.settings.changed", "host.settings.failed"].map(JSONValue.string)),
+                "globalProjection": .string("opaqueCorrelationAndRevisions"),
+                "changedPathKind": .string("topLevel"), "maximumChangedPaths": .integer(32), "maximumPathBytes": .integer(4096)
+            ]),
+            "commandLifecycle": .object([
+                "version": .integer(1), "scope": .string("registeredCommands"),
+                "topics": .array([.string("host.command.started"), .string("host.command.finished")]),
+                "revisionSampling": .string("publicationTime"), "includesOutput": .bool(false)
+            ]),
+            "workspaceCommit": .object([
+                "version": .integer(1), "scope": .string("workspace-model mutations"),
+                "additionalMethods": .array(plugin ? [] : [.string("plugins.unregister")]),
+                "resultFields": .array(["operationId", "outcome", "workspaceRevision", "workspacePersistence"].map(JSONValue.string)),
+                "outcomes": .array(["committed", "unchanged"].map(JSONValue.string)),
+                "workspacePersistence": .array(WorkspacePersistence.allCases.map { .string($0.rawValue) }),
+                "nativeDividerCoalescing": .bool(false)
+            ]),
             "guards": .array(Self.apiGuardKeys.sorted().map(JSONValue.string)),
             "methods": .array(apiMethods(plugin: plugin).map(JSONValue.string)),
             "commands": try .encoding(availableCommands.filter { !plugin || $0.contract.pluginAccessible }),
@@ -178,7 +202,7 @@ extension WorkspaceHost {
         let visible = nativeWindow?.isVisible == true && nativeWindow?.isMiniaturized == false
             && selected && container?.view.isHiddenOrHasHiddenAncestor == false
             && (tab.zoomedPane == nil || tab.zoomedPane == id)
-        if visible, rendered[tab.id] == tab.layout, renderedZoom[tab.id] == tab.zoomedPane,
+        if visible, !nativeGeometryUnavailable(tab.id), rendered[tab.id] == tab.layout, renderedZoom[tab.id] == tab.zoomedPane,
            let root = windows[tab.id]?.contentView, let view = container?.view, !root.needsLayout, !view.needsLayout {
             let rect = view.convert(view.bounds, to: root)
             geometry = .object(["x": .number(rect.minX), "y": .number(root.isFlipped ? rect.minY : root.bounds.height - rect.maxY),
@@ -208,9 +232,14 @@ extension WorkspaceHost {
             result["pluginInstanceId"] = .string(plugin.instance.id)
             result["viewId"] = .string(plugin.viewID)
             result["state"] = .string(plugin.instance.state)
-            result["contentOperations"] = .array([])
+            result["contentOperations"] = .array(Self.webMethods.map(JSONValue.string))
         } else {
-            result["contentOperations"] = .array(["browser.get", "browser.snapshot", "browser.click", "browser.fill", "browser.select", "browser.scroll", "browser.wait"].map(JSONValue.string))
+            result["contentOperations"] = .array(Self.webMethods.map(JSONValue.string))
+        }
+        if let automation = webAutomation(for: id) {
+            result["viewId"] = .string(automation.viewID)
+            result["documentId"] = automation.info["documentId"]
+            result["webReady"] = automation.info["ready"]
         }
         return .object(result)
     }

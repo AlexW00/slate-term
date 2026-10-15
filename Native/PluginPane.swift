@@ -9,6 +9,7 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
     let paneID: PaneID
     let viewID = UUID().uuidString
     let web: WKWebView
+    lazy var automation = WebPaneAutomation(web: web, viewID: viewID)
     var onFocus: (() -> Void)?
     var onTitleChange: (() -> Void)?
     private var titleObservation: NSKeyValueObservation?
@@ -20,12 +21,13 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
         onTitleChange?()
     }
     var onRelease: (() -> Void)?
-    var onCall: ((String, [String: JSONValue]) async throws -> JSONValue)?
+    var onCall: ((String, [String: JSONValue], RPCMetadata?) async throws -> JSONValue)?
     private let status = NSTextField(labelWithString: "")
     private let world = WKContentWorld.world(name: "SlatePluginBridge")
     private var observer: UUID?
     private var closed = false
     private var loadedReadyState = false
+    private var currentNavigation: WKNavigation?
     private var blockedNavigations = 0
     var info: JSONValue { .object(["instanceId": .string(instance.id), "viewId": .string(viewID), "url": web.url.map { .string($0.absoluteString) } ?? .null,
                                   "status": .string(status.stringValue), "documentId": activeDocumentID.map(JSONValue.string) ?? .null, "blockedNavigations": .integer(blockedNavigations)]) }
@@ -37,6 +39,12 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
     private var acceptsDocument = false
     private var activeDocumentID: String?
     private var retiredDocumentIDs: [String] = []
+
+    func causationAudience(epoch: UUID) throws -> CausationAudience {
+        guard !closed, instance.isReady, acceptsDocument, activeDocumentID != nil else { throw CancellationError() }
+        return .plugin(epoch: epoch, registrationID: instance.registration.id, instanceID: instance.id,
+                       viewID: UUID(uuidString: viewID)!, documentGeneration: generation)
+    }
 
     init(instance: PluginInstance, paneID: PaneID) {
         self.instance = instance
@@ -99,21 +107,24 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
         if instance.isReady, !loadedReadyState {
             loadedReadyState = true
             installBridgeScripts()
-            web.load(URLRequest(url: instance.entryURL))
+            currentNavigation = web.load(URLRequest(url: instance.entryURL))
         } else if !instance.isReady {
             loadedReadyState = false
+            currentNavigation = nil
             invalidateDocument()
             web.stopLoading()
         }
     }
     @objc private func reloadPlugin() {
-        if instance.isReady { installBridgeScripts(); web.reload() }
+        if instance.isReady { installBridgeScripts(); currentNavigation = web.reload() }
         else { Task { [weak self] in await self?.instance.restart() } }
     }
 
     func close() {
         guard !closed else { return }
         closed = true
+        automation.close()
+        currentNavigation = nil
         requests.values.forEach { $0.cancel() }
         requests.removeAll()
         if let observer { instance.removeObserver(observer); self.observer = nil }
@@ -135,23 +146,41 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
         decisionHandler(allowed ? .allow : .cancel)
     }
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if let url = navigationAction.request.url, instance.isReady, instance.origin.matches(url) { web.load(navigationAction.request) }
+        if let url = navigationAction.request.url, instance.isReady, instance.origin.matches(url) { currentNavigation = web.load(navigationAction.request) }
         else { blockedNavigations += 1; status.stringValue = "External plugin navigation blocked" }
         return nil
     }
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        currentNavigation = navigation
+        automation.invalidate()
+    }
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        currentNavigation = navigation
         invalidateDocument()
         acceptsDocument = true
         customTitle = nil
         onTitleChange?()
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        if !closed, instance.isReady { status.stringValue = "Ready"; status.toolTip = nil }
+        if let navigation, navigation === currentNavigation, !closed, instance.isReady,
+           web.url.map({ instance.origin.matches($0) }) == true {
+            automation.documentFinished()
+            status.stringValue = "Ready"; status.toolTip = nil
+        }
     }
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) { status.stringValue = error.localizedDescription }
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) { status.stringValue = error.localizedDescription }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {
+        if navigation === currentNavigation { status.stringValue = error.localizedDescription; automation.invalidate() }
+    }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) {
+        guard let navigation, navigation === currentNavigation else { return }
+        status.stringValue = error.localizedDescription
+        if !closed, instance.isReady, !web.isLoading,
+           web.url.map({ instance.origin.matches($0) }) == true { automation.documentFinished() }
+    }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        currentNavigation = nil
         invalidateDocument()
+        automation.processTerminated()
         status.stringValue = "Web process exited — Reload to recover"
     }
 
@@ -182,13 +211,14 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
             }
             guard requests.count < 32, requests[id] == nil,
                   let method = object["method"]?.string, let params = object["params"]?.object else { throw RPCFailure(code: -32602, message: "Bridge request limit or duplicate/invalid request") }
+            let metadata = try object["metadata"].map { try JSONDecoder().decode(RPCMetadata.self, from: JSONEncoder().encode($0)) }
             let expectedGeneration = generation
             requests[id] = Task { [weak self] in
                 guard let self else { replyHandler(nil, "Plugin view closed"); return }
                 defer { self.requests.removeValue(forKey: id) }
                 do {
                     guard !self.closed, self.instance.isReady, self.generation == expectedGeneration, self.activeDocumentID == documentID, !Task.isCancelled, let call = self.onCall else { throw CancellationError() }
-                    let result = try await call(method, params)
+                    let result = try await call(method, params, metadata)
                     guard !self.closed, self.instance.isReady, self.generation == expectedGeneration, self.activeDocumentID == documentID, !Task.isCancelled else { throw CancellationError() }
                     let bytes = try JSONEncoder().encode(result)
                     guard bytes.count <= 1_048_576 else { throw RPCFailure(code: -32025, message: "Bridge response exceeds 1 MiB") }
@@ -213,6 +243,7 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
     }
 
     private func invalidateDocument() {
+        automation.invalidate()
         acceptsDocument = false
         generation = UUID()
         if let activeDocumentID {
@@ -253,7 +284,7 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
               if(event.source!==window||!data||data.documentId!==documentId||!['slate-request','slate-cancel'].includes(data.channel)||!Number.isSafeInteger(data.id)||data.id<=0)return;
               const cancel=data.channel==='slate-cancel',requestDocumentId=documentId;
               try {
-                const value=await window.webkit.messageHandlers.slate.postMessage({token,documentId:requestDocumentId,requestId:data.id,cancel,method:data.method??'',params:data.params??{}});
+                const value=await window.webkit.messageHandlers.slate.postMessage({token,documentId:requestDocumentId,requestId:data.id,cancel,method:data.method??'',params:data.params??{},...(data.metadata===undefined?{}:{metadata:data.metadata})});
                 if(!cancel)send({channel:'slate-response',documentId:requestDocumentId,id:data.id,...(value.ok?{value:value.value}:{error:value.error})},'*');
               } catch(error) {if(!cancel)send({channel:'slate-response',documentId:requestDocumentId,id:data.id,error:String(error)},'*');}
             });
@@ -280,7 +311,7 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
           if(data.error){const error=new Error(typeof data.error==='object'?data.error.message:String(data.error));if(Number.isInteger(data.error.code))error.code=data.error.code;if(data.error.data!==undefined)error.data=data.error.data;request.reject(error);}
           else request.resolve(data.value);
         });
-        const call=(method,params={}, {signal}={})=>new Promise((resolve,reject)=>{
+        const call=(method,params={}, {signal,cause}={})=>new Promise((resolve,reject)=>{
           if(signal?.aborted){reject(new DOMException('Workspace request aborted','AbortError'));return;}
           if(pending.size>=32){reject(new Error('Too many outstanding workspace requests'));return;}
           const id=++sequence,documentId=currentDocumentId();
@@ -294,40 +325,41 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
           const timer=setTimeout(()=>cancel(new Error('Workspace request timed out')),timeout);
           pending.set(id,{resolve,reject,cleanup,cancel,documentId});
           signal?.addEventListener('abort',abort,{once:true});
-          try{send({channel:'slate-request',documentId,id,method,params},'*');}catch(error){cleanup();reject(error);}
+          try{send({channel:'slate-request',documentId,id,method,params,...(cause===undefined?{}:{metadata:{version:1,cause}})},'*');}catch(error){cleanup();reject(error);}
         });
         const workspace={
           plugin,call,
-          setTitle:title=>call('pane.title',{title}),
+          setTitle:(title,options={})=>call('pane.title',{title},options),
           context:(params={})=>call('context.get',params),
           self:()=>call('context.inspect'),
           inspect:(params={})=>call('workspace.snapshot',params),
           api:()=>call('api.describe'),
           panes:Object.freeze({
             inspect:(params={})=>call('pane.inspect',params),
-            split:(params)=>call('command.run',{...params,id:'pane.split'}),
-            move:(target,direction,params={})=>call('command.run',{...params,id:'pane.move',target,direction}),
-            setTitle:(title,params={})=>call('command.run',{...params,id:'pane.title.set',title}),
-            clearTitle:(params={})=>call('command.run',{...params,id:'pane.title.clear'})
+            split:(params,options={})=>call('command.run',{...params,id:'pane.split'},options),
+            move:(target,direction,params={},options={})=>call('command.run',{...params,id:'pane.move',target,direction},options),
+            setTitle:(title,params={},options={})=>call('command.run',{...params,id:'pane.title.set',title},options),
+            clearTitle:(params={},options={})=>call('command.run',{...params,id:'pane.title.clear'},options)
           }),
-          layout:Object.freeze({get:(params={})=>call('layout.get',params),resize:(path,firstChildFraction,params={})=>call('command.run',{...params,id:'layout.resize',path,firstChildFraction})}),
+          layout:Object.freeze({get:(params={})=>call('layout.get',params),resize:(path,firstChildFraction,params={},options={})=>call('command.run',{...params,id:'layout.resize',path,firstChildFraction},options)}),
           tabs:Object.freeze({
-            reorder:(index,params={})=>call('command.run',{...params,id:'tab.reorder',index}),
-            move:(group,params={})=>call('command.run',{...params,id:'tab.move',group}),
-            detach:(params={})=>call('command.run',{...params,id:'tab.detach'})
+            reorder:(index,params={},options={})=>call('command.run',{...params,id:'tab.reorder',index},options),
+            move:(group,params={},options={})=>call('command.run',{...params,id:'tab.move',group},options),
+            detach:(params={},options={})=>call('command.run',{...params,id:'tab.detach'},options)
           }),
           command:(id,params={},options={})=>call('command.run',{...params,id},options),
           settings:()=>call('settings.get'),
-          pluginSettings:Object.freeze({get:()=>call('plugins.settings.get'),patch:(operations,expectedWriteRevision)=>call('plugins.settings.patch',{operations,expectedWriteRevision})}),
+          pluginSettings:Object.freeze({get:()=>call('plugins.settings.get'),patch:(operations,expectedWriteRevision,options={})=>call('plugins.settings.patch',{operations,expectedWriteRevision},options)}),
+          web:Object.freeze(Object.fromEntries(['get','snapshot','click','fill','select','scroll','wait'].map(method=>[method,(params={},options={})=>call('web.'+method,params,options)]))),
           terminal:Object.freeze({
-            send:(text,params={})=>call('terminal.send',{...params,text}),
+            send:(text,params={},options={})=>call('terminal.send',{...params,text},options),
             capture:(params={})=>call('terminal.capture',params),
-            key:(key,params={})=>call('terminal.key',{...params,key}),
+            key:(key,params={},options={})=>call('terminal.key',{...params,key},options),
             run:(command,params={},options={})=>call('terminal.run',{...params,command},options),
             wait:(params={},options={})=>call('terminal.wait',params,options)
           }),
-          storage:Object.freeze({get:key=>call('storage.get',key===undefined?{}:{key}),set:(key,value)=>call('storage.set',{key,value}),delete:key=>call('storage.delete',{key})}),
-          emit:(topic,payload,options={})=>call('events.emit',{...options,topic,payload}),
+          storage:Object.freeze({get:key=>call('storage.get',key===undefined?{}:{key}),set:(key,value,options={})=>call('storage.set',{key,value},options),delete:(key,options={})=>call('storage.delete',{key},options)}),
+          emit:(topic,payload,options={})=>{const {cause,signal,...routing}=options;return call('events.emit',{...routing,topic,payload},{cause,signal});},
           subscribe:async (handler,options={})=>{
             let active=true,cursor=options.after;
             const {onError,...query}=options,controller=new AbortController();

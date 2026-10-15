@@ -41,14 +41,16 @@ public struct RPCRequest: Codable, Sendable {
     public let id: JSONValue?
     public let method: String
     public let params: [String: JSONValue]?
+    public let metadata: RPCMetadata?
 
-    public init(id: JSONValue?, method: String, params: [String: JSONValue]? = nil) {
+    public init(id: JSONValue?, method: String, params: [String: JSONValue]? = nil, metadata: RPCMetadata? = nil) {
         self.id = id
         self.method = method
         self.params = params
+        self.metadata = metadata
     }
 
-    private enum CodingKeys: String, CodingKey { case jsonrpc, id, method, params }
+    private enum CodingKeys: String, CodingKey { case jsonrpc, id, method, params, metadata }
 
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -56,6 +58,7 @@ public struct RPCRequest: Codable, Sendable {
         id = container.contains(.id) ? try container.decode(JSONValue.self, forKey: .id) : nil
         method = try container.decode(String.self, forKey: .method)
         params = try container.decodeIfPresent([String: JSONValue].self, forKey: .params)
+        metadata = container.contains(.metadata) ? try container.decode(RPCMetadata.self, forKey: .metadata) : nil
     }
 
     public static func decode(_ data: Data) throws -> RPCRequest {
@@ -129,6 +132,7 @@ public struct ProtocolSession: Sendable {
 
     public mutating func accept(_ request: RPCRequest) throws -> Accepted {
         if request.method == "hello" {
+            guard request.metadata == nil else { throw ProtocolError.invalidRequest }
             guard request.params?["protocolVersion"] == .integer(1) else { throw ProtocolError.incompatibleVersion }
             handshaken = true
             return .hello

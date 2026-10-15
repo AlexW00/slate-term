@@ -161,6 +161,8 @@ http.server.ThreadingHTTPServer(('127.0.0.1',port),Handler).serve_forever()
                 evaluate(shared, "(location.href='/second',true)")
                 eventually("document before native restart", lambda: evaluate(shared, "location.pathname==='/second' && window.fixtureReady===true"))
                 evaluate(shared, "(window.restartMarker='cached-before-restart',true)")
+                eventually("automation ready before managed restart", lambda: rpc("pane.inspect", pane=shared)["webReady"])
+                automation_before = rpc("pane.inspect", pane=shared)
                 with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
                     restarting = pool.submit(cli, "plugins", "restart", "shared")
                     eventually("First restart enters stopping", lambda: statuses("shared")[0]["state"] == "stopping")
@@ -169,9 +171,17 @@ http.server.ThreadingHTTPServer(('127.0.0.1',port),Handler).serve_forever()
                 eventually("Concurrent restart coalesces without a port collision", lambda: loaded("shared") and statuses("shared")[0]["pid"] != first["pid"])
                 eventually("Old group ended after restart", lambda: not running(first["pid"]))
                 eventually("restart loaded entry document", lambda: evaluate(shared, "location.pathname==='/' && window.fixtureReady===true"))
+                eventually("automation ready after managed restart", lambda: rpc("pane.inspect", pane=shared)["webReady"])
+                automation_entry = rpc("pane.inspect", pane=shared)
+                assert automation_entry["viewId"] == automation_before["viewId"]
+                assert automation_entry["documentId"] != automation_before["documentId"]
                 evaluate(shared, "(history.back(),true)")
                 eventually("cached history after native restart", lambda: evaluate(shared, "location.pathname==='/second' && window.fixtureReady===true"))
                 assert evaluate(shared, "window.wasCached===true && window.restartMarker==='cached-before-restart'")
+                eventually("automation ready after managed history restore", lambda: rpc("pane.inspect", pane=shared)["webReady"])
+                automation_restored = rpc("pane.inspect", pane=shared)
+                assert automation_restored["viewId"] == automation_before["viewId"]
+                assert automation_restored["documentId"] not in [automation_before["documentId"], automation_entry["documentId"]]
                 assert evaluate(shared, "workspace.call('events.head').then(value=>!!value.cursor)")
                 assert evaluate(shared, "workspace.emit('test.after-restart',null).then(event=>event.source.kind)") == "plugin"
                 register("private")

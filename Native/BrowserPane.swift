@@ -8,8 +8,7 @@ import SlateTermSettings
 final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, NSTextFieldDelegate {
     var browserConfiguration = AppConfiguration.defaults.browser
     let web: WKWebView
-    // Named worlds are only reused while their WKContentWorld is retained.
-    private let automationWorld = WKContentWorld.world(name: "SlateAutomation")
+    lazy var automation = WebPaneAutomation(web: web)
     var onFocus: (() -> Void)?
     var onTitleChange: (() -> Void)?
     var paneTitle: String { web.title.flatMap { $0.isEmpty ? nil : $0 } ?? web.url?.host ?? "New Browser" }
@@ -19,15 +18,10 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
     private let forward = NSButton(title: "Forward", target: nil, action: nil)
     private var observations: [NSKeyValueObservation] = []
     private var navigationOperation: UUID?
-    private var pendingNavigation: WKNavigation?
+    private var currentNavigation: WKNavigation?
+    private var trackedNavigations: [ObjectIdentifier: (navigation: WKNavigation, operation: UUID)] = [:]
     private var closed = false
-    private var documentGeneration = UUID()
     private var resumeAddressEditing = false
-    private struct Operation {
-        let continuation: CheckedContinuation<JSONValue, any Error>
-        let deadline: Task<Void, Never>
-    }
-    private var operations: [UUID: Operation] = [:]
 
     init() {
         let configuration = WKWebViewConfiguration()
@@ -89,8 +83,8 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
     func close() {
         guard !closed else { return }
         closed = true
-        for id in Array(operations.keys) { complete(id, .failure(RPCFailure(code: -32022, message: "Browser pane was closed"))) }
-        finishNavigation(.failure(RPCFailure(code: -32022, message: "Browser pane was closed")))
+        automation.close()
+        trackedNavigations.removeAll(); currentNavigation = nil
         observations.removeAll()
         web.stopLoading()
         web.navigationDelegate = nil
@@ -130,12 +124,18 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
     }
 
     func controlTextDidBeginEditing(_ obj: Notification) { resumeAddressEditing = true; onFocus?() }
-    private func cancelPendingNavigation() { finishNavigation(.failure(RPCFailure(code: -32022, message: "Navigation was superseded"))) }
-    @objc private func goBack() { cancelPendingNavigation(); web.goBack() }
-    @objc private func goForward() { cancelPendingNavigation(); web.goForward() }
-    @objc private func reloadPage() { cancelPendingNavigation(); web.reload() }
+    private func cancelPendingNavigation() {
+        if let id = navigationOperation { automation.cancel(id, error: RPCFailure(code: -32022, message: "Navigation was superseded")) }
+    }
+    private func startNavigation(_ load: () -> WKNavigation?) {
+        cancelPendingNavigation()
+        if let navigation = load() { currentNavigation = navigation; automation.invalidate() }
+    }
+    @objc private func goBack() { startNavigation { web.goBack() } }
+    @objc private func goForward() { startNavigation { web.goForward() } }
+    @objc private func reloadPage() { startNavigation { web.reload() } }
     @objc private func openAddress() {
-        do { let url = try browserConfiguration.addressURL(for: address.stringValue); cancelPendingNavigation(); web.load(URLRequest(url: url)); view.window?.makeFirstResponder(web) }
+        do { let url = try browserConfiguration.addressURL(for: address.stringValue); startNavigation { web.load(URLRequest(url: url)) }; view.window?.makeFirstResponder(web) }
         catch { status.stringValue = String(describing: error) }
     }
     private func updateControls() {
@@ -162,142 +162,107 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
         decisionHandler(.allow)
     }
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if let url = navigationAction.request.url, Self.allowed(url) { web.load(navigationAction.request) }
+        if let url = navigationAction.request.url, Self.allowed(url) { startNavigation { web.load(navigationAction.request) } }
         return nil
     }
-    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        documentGeneration = UUID()
-        for id in Array(operations.keys) where id != navigationOperation {
-            complete(id, .failure(RPCFailure(code: -32022, message: "Browser document changed during the operation")))
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        guard let navigation else { return }
+        currentNavigation = navigation
+        let preserved = trackedNavigations[ObjectIdentifier(navigation)]?.operation
+        if let id = navigationOperation, id != preserved {
+            navigationOperation = nil // Do not stop the successor navigation.
+            automation.cancel(id, error: RPCFailure(code: -32022, message: "Navigation was superseded"))
         }
+        automation.invalidate(except: preserved)
+    }
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        guard let navigation else { return }
+        currentNavigation = navigation
+        automation.invalidate(except: trackedNavigations[ObjectIdentifier(navigation)]?.operation)
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        if navigation === pendingNavigation, let id = navigationOperation {
-            // Native title KVO can lag didFinish. Complete the tracked navigation
-            // with document metadata, without observing a successor's document.
-            web.evaluateJavaScript("({url:location.href,title:document.title,loading:false})", in: nil, in: automationWorld) { [weak self] result in
-                guard let self, self.navigationOperation == id else { return }
-                do { self.complete(id, .success(try Self.jsonValue(result.get()))) }
-                catch { self.complete(id, .failure(error)) }
+        guard let navigation else { return }
+        let tracked = trackedNavigations.removeValue(forKey: ObjectIdentifier(navigation))
+        guard navigation === currentNavigation else {
+            if let tracked { automation.complete(tracked.operation, .failure(CancellationError())) }
+            return
+        }
+        automation.documentFinished()
+        if let id = tracked?.operation {
+            guard navigationOperation == id else { automation.complete(id, .failure(CancellationError())); return }
+            // Retain the submission slot through this metadata callback, even if
+            // cancellation has already released its caller continuation.
+            web.evaluateJavaScript("({url:location.href,title:document.title,loading:false})", in: nil, in: automation.world) { [weak self] result in
+                guard let self else { return }
+                do {
+                    guard self.navigationOperation == id else { throw CancellationError() }
+                    self.automation.complete(id, .success(try WebPaneAutomation.jsonValue(result.get())))
+                } catch { self.automation.complete(id, .failure(error)) }
             }
         }
         updateControls()
     }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {
-        if navigation === pendingNavigation { failed(error) }
+        navigationFailed(navigation, error: error)
+        if navigation === currentNavigation { automation.invalidate() }
     }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) {
-        if navigation === pendingNavigation { failed(error) }
+        navigationFailed(navigation, error: error)
+        if let navigation, navigation === currentNavigation, !web.isLoading {
+            automation.documentFinished() // Only the failed current load can restore the prior document.
+        }
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        documentGeneration = UUID()
-        let error = RPCFailure(code: -32023, message: "Browser process exited; reload to recover")
-        failed(error)
-        for id in Array(operations.keys) { complete(id, .failure(error)) }
+        status.stringValue = "Browser process exited; reload to recover"
+        navigationOperation = nil
+        automation.processTerminated()
+        trackedNavigations.removeAll(); currentNavigation = nil
     }
-    private func failed(_ error: any Error) {
-        status.stringValue = error.localizedDescription
-        if let id = navigationOperation { complete(id, .failure(error), stopNavigation: false) }
+    private func navigationFailed(_ navigation: WKNavigation?, error: any Error) {
+        guard let navigation else { return }
+        if navigation === currentNavigation { status.stringValue = error.localizedDescription }
+        if let tracked = trackedNavigations.removeValue(forKey: ObjectIdentifier(navigation)) {
+            if navigationOperation == tracked.operation { navigationOperation = nil }
+            automation.complete(tracked.operation, .failure(error))
+        }
     }
-    private func finishNavigation(_ result: Result<JSONValue, any Error>) {
-        if let id = navigationOperation { complete(id, result) }
+    var info: JSONValue {
+        var fields = automation.info
+        fields.merge(["url": .string(web.url?.absoluteString ?? "about:blank"), "title": .string(web.title ?? ""), "loading": .bool(web.isLoading)]) { _, new in new }
+        return .object(fields)
     }
-    var info: JSONValue { .object(["url": .string(web.url?.absoluteString ?? "about:blank"), "title": .string(web.title ?? ""), "loading": .bool(web.isLoading), "pendingOperations": .integer(operations.count)]) }
 
     func navigate(_ value: String, beforeSubmission: @escaping @MainActor () throws -> Void = {}) async throws -> JSONValue {
         let url = try Self.url(value)
         guard !closed else { throw RPCFailure(code: -32022, message: "Browser pane is closed") }
-        cancelPendingNavigation()
-        return try await perform(timeoutMilliseconds: 15_000, beforeSubmission: beforeSubmission) { id in
+        return try await automation.perform(timeoutMilliseconds: 15_000, beforeSubmission: beforeSubmission, onComplete: { [weak self] result in
+            guard let self, self.navigationOperation != nil else { return }
+            self.navigationOperation = nil
+            if case .failure = result { self.web.stopLoading() }
+        }) { id in
+            self.cancelPendingNavigation()
             self.navigationOperation = id
-            self.pendingNavigation = self.web.load(URLRequest(url: url))
+            self.automation.invalidate(except: id)
+            guard let navigation = self.web.load(URLRequest(url: url)) else {
+                self.automation.complete(id, .failure(RPCFailure(code: APIError.unavailable, message: "Navigation could not start")))
+                return
+            }
+            self.currentNavigation = navigation
+            self.trackedNavigations[ObjectIdentifier(navigation)] = (navigation, id)
         }
     }
 
     func evaluate(_ source: String, isolated: Bool = false, timeoutMilliseconds: Int = 10_000,
                   beforeSubmission: @escaping @MainActor () throws -> Void = {}) async throws -> JSONValue {
-        guard !closed else { throw RPCFailure(code: -32022, message: "Browser pane is closed") }
-        return try await perform(timeoutMilliseconds: timeoutMilliseconds, beforeSubmission: beforeSubmission) { id in
-            self.web.evaluateJavaScript(source, in: nil, in: isolated ? self.automationWorld : .page) { [weak self] result in
-                guard let self, self.operations[id] != nil else { return }
-                do {
-                    self.complete(id, .success(try Self.jsonValue(result.get())))
-                } catch { self.complete(id, .failure(error)) }
-            }
-        }
+        try await automation.evaluate(source, isolated: isolated, timeoutMilliseconds: timeoutMilliseconds, beforeSubmission: beforeSubmission)
     }
 
     func automate(_ action: BrowserAction, beforeSubmission: @escaping @MainActor () throws -> Void = {}) async throws -> JSONValue {
-        let generation = documentGeneration
-        let deadline = ContinuousClock.now.advanced(by: .milliseconds(action.timeoutMilliseconds == 0 ? 10_000 : action.timeoutMilliseconds))
-        func remainingMilliseconds() throws -> Int {
-            let remaining = ContinuousClock.now.duration(to: deadline)
-            guard remaining > .zero else { throw RPCFailure(code: -32024, message: "Browser condition timed out") }
-            return max(1, Int(remaining.components.seconds * 1000 + remaining.components.attoseconds / 1_000_000_000_000_000))
-        }
-        // Bind selectors to the actual document before any mutation. The private
-        // world rejects a queued action if navigation replaced that document.
-        let prepared = try await evaluate(BrowserAutomation.prepareScript(), isolated: true, timeoutMilliseconds: remainingMilliseconds(), beforeSubmission: beforeSubmission)
-        guard let documentID = prepared.object?["documentId"]?.string else { throw RPCFailure(code: -32023, message: "Browser document identity unavailable") }
-        let source = try BrowserAutomation.script(for: action, documentID: documentID)
-        while true {
-            try Task.checkCancellation()
-            guard !closed, documentGeneration == generation else { throw RPCFailure(code: -32022, message: "Browser document was replaced") }
-            let result = try await evaluate(source, isolated: true, timeoutMilliseconds: remainingMilliseconds(), beforeSubmission: beforeSubmission)
-            if action.kind != .wait || result.object?["matched"] == .bool(true) { return result }
-            guard action.timeoutMilliseconds > 0 else { throw RPCFailure(code: -32024, message: "Browser condition did not match") }
-            try await Task.sleep(for: .milliseconds(min(50, remainingMilliseconds())))
-        }
-    }
-
-    private static func jsonValue(_ value: Any?) throws -> JSONValue {
-        let data = try JSONSerialization.data(withJSONObject: value ?? NSNull(), options: [.fragmentsAllowed])
-        guard data.count <= 900_000 else { throw RPCFailure(code: -32025, message: "Browser result exceeds 900000 bytes") }
-        return try JSONDecoder().decode(JSONValue.self, from: data)
-    }
-
-    private func perform(timeoutMilliseconds: Int = 10_000, beforeSubmission: @MainActor () throws -> Void = {}, _ start: (UUID) -> Void) async throws -> JSONValue {
-        let id = UUID()
-        return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                guard !closed, !Task.isCancelled else { continuation.resume(throwing: CancellationError()); return }
-                do { try beforeSubmission() } catch { continuation.resume(throwing: error); return }
-                guard operations.count < 32 else { continuation.resume(throwing: RPCFailure(code: -32025, message: "Too many pending browser operations")); return }
-                let deadline = Task { [weak self] in
-                    do { try await Task.sleep(for: .milliseconds(timeoutMilliseconds)) } catch { return }
-                    self?.complete(id, .failure(RPCFailure(code: -32024, message: "Browser operation timed out")))
-                }
-                operations[id] = Operation(continuation: continuation, deadline: deadline)
-                start(id)
-            }
-        } onCancel: {
-            Task { @MainActor [weak self] in self?.complete(id, .failure(CancellationError())) }
-        }
-    }
-    private func complete(_ id: UUID, _ result: Result<JSONValue, any Error>, stopNavigation: Bool = true) {
-        guard let operation = operations.removeValue(forKey: id) else { return }
-        if navigationOperation == id {
-            navigationOperation = nil
-            pendingNavigation = nil
-            if stopNavigation, case .failure = result { web.stopLoading() }
-        }
-        operation.deadline.cancel()
-        operation.continuation.resume(with: result)
+        try await automation.automate(action, beforeSubmission: beforeSubmission)
     }
 
     func screenshot(to path: String, beforeSubmission: @escaping @MainActor () throws -> Void = {}) async throws -> JSONValue {
-        try await perform(beforeSubmission: beforeSubmission) { id in
-            self.web.takeSnapshot(with: nil) { [weak self] image, error in
-                guard let self, self.operations[id] != nil else { return }
-                do {
-                    if let error { throw error }
-                    guard let data = image?.tiffRepresentation, let bitmap = NSBitmapImageRep(data: data), let png = bitmap.representation(using: .png, properties: [:]) else { throw RPCFailure(code: -32023, message: "Snapshot unavailable") }
-                    try beforeSubmission()
-                    try png.write(to: URL(fileURLWithPath: path), options: .atomic)
-                    self.complete(id, .success(.object(["path": .string(path)])))
-                } catch { self.complete(id, .failure(error)) }
-            }
-        }
+        try await automation.screenshot(to: path, beforeSubmission: beforeSubmission)
     }
 }
 

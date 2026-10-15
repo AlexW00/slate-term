@@ -30,7 +30,9 @@ final class TerminalControl {
         runs.observe(pane: pane, sessionID: sessionID, report: report, capture: { target.view.capture() })
     }
 
-    func call(_ action: String, pane: PaneID, params: [String: JSONValue]) async throws -> JSONValue {
+    func call(_ action: String, pane: PaneID, params: [String: JSONValue],
+              validateCaller: @escaping @MainActor () throws -> Void = {}) async throws -> JSONValue {
+        try validateCaller()
         let fields: Set<String>
         switch action {
         case "send": fields = ["text"]
@@ -79,7 +81,7 @@ final class TerminalControl {
             guard let command = params["command"]?.string else { throw RPCFailure(code: -32602, message: "command must be a string") }
             do {
                 let result = try await runs.run(pane: pane, sessionID: target.sessionID, command: command,
-                    timeoutMilliseconds: timeout, send: { _ in try target.view.send(target.runKey) })
+                    timeoutMilliseconds: timeout, validateCaller: validateCaller, send: { _ in try target.view.send(target.runKey) })
                 return try .encoding(result)
             } catch let error as TerminalRunError {
                 throw RPCFailure(code: error == .timeout ? -32024 : -32042, message: error.localizedDescription)
@@ -109,6 +111,7 @@ final class TerminalControl {
         let deadline = ContinuousClock.now.advanced(by: .milliseconds(timeout))
         while true {
             try Task.checkCancellation()
+            try validateCaller()
             guard !closed, let current = lookup(pane), current.sessionID == target.sessionID else {
                 throw RPCFailure(code: -32022, message: "Terminal session was replaced while waiting")
             }

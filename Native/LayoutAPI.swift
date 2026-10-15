@@ -13,7 +13,7 @@ extension WorkspaceHost {
     }
 
     func mutationFrames(layout: Layout, tab: TabID) -> [PaneID: NSRect]? {
-        guard let window = windows[tab],
+        guard dividerGesture?.tab != tab, let window = windows[tab],
               let content = (window.tabGroup?.selectedWindow ?? window).contentView,
               content.bounds.width.isFinite, content.bounds.height.isFinite,
               content.bounds.width > 0, content.bounds.height > 0 else { return nil }

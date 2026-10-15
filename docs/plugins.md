@@ -112,7 +112,7 @@ Inherited/manifest `SLATE_TERM_*` fields are discarded before authoritative valu
 
 `command.run` waits asynchronously for completion and returns the invocation ID, state, exit code, and bounded stdout/stderr tails. Nonzero exit, signal, launch failure, timeout, or cancellation returns an RPC error containing the invocation ID; inspect `plugins status <id>` and `plugins logs --instance-id <invocation-id>`. The typed `command run` CLI allows a 300-second transport timeout; raw socket clients must allow longer than the manifest deadline. Generic `rpc` retains its default transport timeout.
 
-One invocation per command may run at a time (duplicates fail rather than queue); at most 16 command processes run concurrently. The last 64 invocations are retained in memory, with up to 64 KiB per output stream. Commands are never automatically restarted or retried. Closing a pane does not cancel an independent command, but subsequent CLI operations against stale targets fail. Caller disconnect/page cancellation, timeout, replacement/unregister, and app shutdown stop the owned process group. The supervisor also watches app death. Deliberately daemonizing into another process group escapes containment and is unsupported. Command stdin is `/dev/null`; interactive prompts are not supported.
+One invocation per command may run at a time (duplicates fail rather than queue); at most 16 command process slots are occupied concurrently. Unconfirmed cleanup retains its slot and diagnostic record, even after the invocation reports a terminal state. Status/results expose `cleanupPending`; confirmed reaping releases the slot without emitting a second finished event. At most 64 invocation records are retained in memory, with up to 64 KiB per output stream. Commands are never automatically restarted or retried. Closing a pane does not cancel an independent command, but subsequent CLI operations against stale targets fail. Caller disconnect/page cancellation, timeout, replacement/unregister, and app shutdown stop the owned process group. The supervisor also watches app death. Deliberately daemonizing into another process group escapes containment and is unsupported. Command stdin is `/dev/null`; interactive prompts are not supported.
 
 `plugins restart` remains a panel-service operation; use `command run` for a fresh invocation. Do not blindly repeat a failed command: earlier workspace mutations may already have taken effect. Registration trusts executable code with your user's ordinary filesystem/process access, not just workspace APIs.
 
@@ -216,6 +216,10 @@ Terminal operations use the active terminal in the plugin's context; an explicit
 
 Guarded pane split/move/resize, manual titles and native tab rearrangement are available through `workspace.panes`, `workspace.layout` and `workspace.tabs`; see [layout/page adapters](layout-api.md#registered-page-adapters). They use captured/live validated targets and explicit revisions rather than retargeting current focus. Administrative window operations are not exposed to pages.
 
+### Structured web interaction
+
+`workspace.web.get/snapshot/click/fill/select/scroll/wait(params, {signal, cause})` reuse the same guarded automation as browser panes. They target this pane by default or an explicit `pane`; cross-pane interaction is intentional for trusted registered controllers. Selector mutations require paired `expectedViewId`/`expectedDocumentId`, while opaque snapshot refs bind both identities. These public automation IDs are separate from bridge document credentials and initialize without a page API call. No page-facing screenshot/filesystem output, arbitrary evaluation or navigation capability is added. See [shared web automation](automation.md#shared-web-panes) for renderability, cancellation, platform-capacity and stale-document rules.
+
 ### Pane header
 
 Each pane has a common native header: type, custom title, optional contributed command buttons, and Close. **Copy Pane ID** is now a stock command (`pane.copyID`) in the picker/Workspace menu rather than a permanent header button. Plugins can use their document title or explicitly control the header:
@@ -238,7 +242,7 @@ await workspace.emit("notes.updated", { key: "draft" });
 stop();
 ```
 
-Subscriptions follow the owning tab (or all tabs for global instances); directed delivery addresses a logical `instanceId`. Native source attribution cannot be supplied by page code. Unsubscribe, document navigation and view closure cancel outstanding native polls. Generic `workspace.call(method, params, {signal})` also supports `AbortSignal`.
+Subscriptions follow the owning tab (or all tabs for global instances); directed delivery addresses a logical `instanceId`. Native source attribution cannot be supplied by page code. Unsubscribe, document navigation and view closure cancel outstanding native polls. Generic `workspace.call(method, params, {signal, cause})` supports cancellation and explicit event causation. Mutation helpers accept equivalent final options; `emit` accepts them alongside routing options. Pass `event.deliveryContext` as `cause` for event-triggered work. References are view/document-bound, and all views of a plugin share its mutation budget. See [causation and loop admission](events.md#causation-and-loop-admission).
 
 See [workspace events](events.md) for bounds, replay, explicit cursor resynchronization, and cached-history lifecycle behavior.
 

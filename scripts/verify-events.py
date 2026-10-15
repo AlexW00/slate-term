@@ -82,13 +82,16 @@ with tempfile.TemporaryDirectory(prefix="slate-events-", dir="/tmp") as temporar
                 assert not pending.done(), "Unmatched publication completed a filtered poll"
                 published = cli("events", "emit", "--topic", "test.ready", "--payload", '{"text":"日本語"}')
                 received = pending.result(timeout=8)
-            assert len(received["events"]) == 1 and received["events"][0] == published
+            assert len(received["events"]) == 1
+            delivered = dict(received["events"][0])
+            reference = delivered.pop("deliveryContext")
+            assert isinstance(reference, str) and delivered == published
             assert published["source"] == {"kind": "client"} and published["payload"] == {"text": "日本語"}
             assert rpc("events.head")["pendingPolls"] == 0
             replay = cli("events", "poll", "--after", cursor, "--topic", "test.*", "--limit", "1", "--wait-milliseconds", "0")
             assert replay["events"][0]["topic"] == "test.ignored"
             next_batch = cli("events", "poll", "--after", replay["cursor"], "--topic", "test.*", "--wait-milliseconds", "0")
-            assert next_batch["events"] == [published]
+            assert next_batch["events"] == received["events"], 'Live audience replay must reuse the delivery reference'
             cursor = rpc("events.head")["cursor"]
             watch = subprocess.Popen([str(CLI), "events", "watch", "--after", cursor, "--topic", "test.watch", "--json"],
                                      env=environment, stdout=subprocess.PIPE, stderr=log, start_new_session=True)

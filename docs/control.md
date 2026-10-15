@@ -17,6 +17,12 @@ Wait for the matching handshake response before commands. Successful responses c
 
 Messages are limited to 1 MiB excluding newline. Per-peer pending queues are bounded to 64 messages/1 MiB; output is bounded too. Exceeding transport bounds closes the peer. Requests on one connection are processed in order; different connections progress independently. Use another connection while an event poll, navigation, or terminal run is waiting. Disconnect cancels owned asynchronous work, not already performed side effects or an already running shell command.
 
+## Causation metadata
+
+When `api.describe.causation.version` is `1`, requests may include `"metadata":{"version":1,"cause":"DELIVERY_CONTEXT"}` alongside `params`. Obtain the opaque reference from an event poll's `deliveryContext`; do not invent provenance or move it into command arguments. Unknown/malformed metadata is rejected, including explicit null. Handshakes do not accept metadata. Without metadata, a request starts independent work.
+
+The CLI's `--cause` negotiates support and dispatches on the same handshaken connection, without reconnect/retry fallback. Administrative references work across same-user connections within the app epoch; page references are restricted to their issuing view/document. Registered plugins remain trusted controllers, not a sandbox. See [events](events.md#causation-and-loop-admission) for expiry, rate limits and recovery.
+
 ## Discovery and methods
 
 ```sh
@@ -40,5 +46,9 @@ Normal Browser pages have no bridge. Registered plugin main frames get a [scoped
 - `-32022`: resource/document/session closed or replaced; obtain fresh state before retrying.
 - `-32024`: operation deadline/condition failure; do not assume side effects were undone.
 - `-32031`: event cursor unavailable; explicitly resynchronize as described in [events](events.md).
+- `-32055`: delivery context unavailable/expired/foreign; inspect state before starting new work.
+- `-32056`: causal-depth limit; stop the feedback loop.
+- `-32057`: automation mutation limit; bounded `data.retryAfterMilliseconds` indicates refill time, not permission to replay.
+- `-32058`: operation admission unavailable.
 
 Other workspace, storage, shell-state and admission errors have descriptive messages. Do not automatically replay a mutation after disconnect, timeout or malformed response: it may already have taken effect. The CLI reports transport/response failures with `outcome: unknown`, not a clean rejection. Read current state and decide deliberately. Unknown shell context stays unknown; neither quiet output nor process-name sampling proves an idle prompt.

@@ -2,6 +2,11 @@ import AppKit
 import SlateTermCore
 import SlateTermSettings
 
+/// Workspace snapshot status only; not a transaction result for shells, WebKit or other files.
+enum WorkspacePersistence: String, CaseIterable {
+    case saved, disabled, suspended, failed, notRequired
+}
+
 @MainActor
 final class ApplicationSettings {
     let base: URL
@@ -80,10 +85,12 @@ final class ApplicationSettings {
 
     /// Autosave is best effort; failures are visible in the app menu and config.get.
     /// A bad startup snapshot is never silently replaced by the recovery workspace.
-    func save(_ workspace: Workspace) {
-        guard current.restoreWorkspace, !savingSuspended else { return }
-        do { try store.save(workspace); workspaceError = nil }
-        catch { workspaceError = "Could not save \(store.url.path): \(error)" }
+    @discardableResult
+    func save(_ workspace: Workspace) -> WorkspacePersistence {
+        guard current.restoreWorkspace else { return .disabled }
+        guard !savingSuspended else { return .suspended }
+        do { try store.save(workspace); workspaceError = nil; return .saved }
+        catch { workspaceError = "Could not save \(store.url.path): \(error)"; return .failed }
     }
 
     func setSuppressCloseWarning(_ suppress: Bool) throws {

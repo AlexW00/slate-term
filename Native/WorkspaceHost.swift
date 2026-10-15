@@ -10,10 +10,13 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     var workspace = Workspace()
     let instanceID: String
     let events: EventControl
+    let operations: OperationControl
     lazy var revisions = WorkspaceRevisions(epoch: instanceID, workspace: workspace)
-    private var publishedWorkspace: Workspace?
     var shellSessions: [PaneID: ShellSession] = [:]
     private var pluginCatalog: PluginCatalog
+    var pluginSettingsRecipients: [(id: String, plugin: String)] {
+        pluginInstances.all.map { (id: $0.id, plugin: $0.registration.id) }
+    }
     private let pluginInstances: PluginInstances
     private let pluginCommands = PluginCommands()
     private var headerActionRevisions: [String: UUID] = [:]
@@ -34,6 +37,43 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     var rendered: [TabID: Layout] = [:]
     var renderedZoom: [TabID: PaneID] = [:]
     private var reconciling = false
+    var dividerGesture: NativeDividerGesture?
+    var nativeLayoutPending: [TabID: NativeLayoutObservation] = [:]
+    var nativeLayoutInvalid: [TabID: UUID] = [:]
+    var nativeLayoutSyncScheduled = false
+    var settlingNativeLayouts = false
+    private var nativeLayoutProbe: NativeLayoutTestProbe?
+    private var nativeLayoutProbeResult: JSONValue = .null
+
+    func runNativeLayoutProbe(tab: TabID) {
+        guard integration, let probe = nativeLayoutProbe, probe.tab == tab else { return }
+        nativeLayoutProbe = nil
+        guard let container = probe.container, containers[probe.pane] === container else {
+            nativeLayoutProbeResult = .object(["retired": .bool(true)]); return
+        }
+        let inspection = try? inspectPane(probe.pane)
+        var rejected: JSONValue = .null
+        do { _ = try call("command.run", params: ["id": .string("pane.title.set"), "pane": .string(probe.pane.description), "title": .string("must-not-commit")]) }
+        catch let error as RPCFailure { rejected = .integer(error.code) }
+        catch { rejected = .string("unexpected") }
+        let editing = container.info.object?["editing"] == .bool(true)
+        if editing { try? container.editTitleForTesting(nil, finish: "blur") }
+        nativeLayoutProbeResult = .object(["geometryState": inspection?.object?["geometryState"] ?? .null,
+            "geometryWasWithheld": .bool(inspection?.object?["geometry"] == .null),
+            "inFlightGeometryWithheld": .bool(nativeGeometryUnavailable(tab)), "reentrantErrorCode": rejected,
+            "endedEditor": .bool(editing)])
+    }
+
+    func saveNativeLayoutObservation() { persistWorkspace() }
+    func finishNativeLayoutCallbacks() { finishPendingPaneRenames() }
+    var dividerFixture: (controller: WorkspaceSplitController, window: WorkspaceWindow, tab: TabID)?
+    var canHandleNativeDivider: Bool { !reconciling && server != nil }
+
+    func commitNativeDivider(_ gesture: NativeDividerGesture) throws {
+        _ = try call("command.run", params: ["id": .string("layout.resize"), "tab": .string(gesture.tab.description),
+            "path": .array(gesture.path.map { .string($0.rawValue) }), "firstChildFraction": .number(gesture.fraction),
+            "expectedLayoutRevision": .string(gesture.layoutRevision)], operation: gesture.operation)
+    }
     private let integration: Bool
     private var integrationKeyboardMonitor: Any?
     private var dispatchingTestKey = false
@@ -62,11 +102,18 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     private struct ConfigurationApplyFault { let replacement: String? }
     private var configurationApplyFault: ConfigurationApplyFault?
     private var rejectNextTerminalPreparation = false
+    var rejectNextWorkspacePublication = false
     private var terminalPreparationCount = 0
     private var paneTypeMenu: NSMenu?
     private var tabGroupObservations: [ObjectIdentifier: (group: NSWindowTabGroup, token: NSKeyValueObservation)] = [:]
     private var tabGroupSyncScheduled = false
     private var nativeGroupIDs: [ObjectIdentifier: GroupID] = [:]
+    private struct PendingPaneRename {
+        weak var container: PaneContainer?
+        let title: String
+        let expectedManualTitle: String?
+    }
+    private var pendingPaneRenames: [PaneID: PendingPaneRename] = [:]
 
     init(startingWith workspace: Workspace = Workspace()) throws {
         let environment = ProcessInfo.processInfo.environment
@@ -74,7 +121,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         self.integration = integration
         let epoch = UUID()
         instanceID = epoch.uuidString
-        events = try EventControl(epoch: epoch)
+        operations = try OperationControl(epoch: epoch)
+        events = try EventControl(epoch: epoch, operations: operations)
         let settings = try ApplicationSettings(environment: environment, integration: integration)
         self.settings = settings
         let catalog = try PluginCatalog(directory: settings.base.appendingPathComponent("state"))
@@ -93,13 +141,17 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         super.init()
         _ = revisions // Seed before the first mutation, including native/legacy paths.
         pluginCommands.onChange = { [weak self] in self?.refreshSettings(); self?.refreshCommandPicker(); self?.refreshHeaderActions() }
-        pluginInstances.onEvent = { [weak self] instance, name, value in
+        pluginCommands.onLifecycle = { [weak self] record, context in
+            guard let self else { throw CancellationError() }
+            try self.publishCommandLifecycle(record, context: context)
+        }
+        pluginInstances.onEvent = { [weak self] instance, name, value, lineage in
             guard let self else { return }
             self.refreshSettings()
             var payload: [String: JSONValue] = ["instanceId": .string(instance.id), "type": .string(instance.registration.id)]
             if name == "storageChanged" {
                 payload["key"] = value.object?["key"]
-                self.events.publishHost("host.plugin.storage.changed", payload: .object(payload), targetInstanceId: instance.id)
+                self.events.publishHost("host.plugin.storage.changed", payload: .object(payload), targetInstanceId: instance.id, lineage: lineage)
             } else if name == "stateChanged" {
                 payload["state"] = value.object?["state"]
                 self.events.publishHost("host.plugin.state.changed", payload: .object(payload), tab: instance.tab)
@@ -115,9 +167,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             }
         }
         let environment = ProcessInfo.processInfo.environment
-        server = try UnixServer(directory: settings.base.appendingPathComponent("control")) { [weak self] method, params in
+        server = try UnixServer(directory: settings.base.appendingPathComponent("control")) { [weak self] method, params, metadata in
             guard let self else { throw SocketError.disconnected }
-            return try await self.callAsync(method, params: params)
+            return try await self.callAsync(method, params: params, metadata: metadata)
         }
         pluginInstances.connect(socketPath: server!.path, appInstanceID: instanceID)
         buildMenus()
@@ -153,6 +205,12 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             do { try synchronizeNativeGroups() }
             catch { NSLog("Final native tab synchronization failed: %@", String(describing: error)) }
         }
+        try? finishNativeDivider(cancelled: true)
+        drainNativeLayouts()
+        nativeLayoutPending.removeAll()
+        nativeLayoutInvalid.removeAll()
+        dividerFixture = nil
+        nativeLayoutProbe = nil
         persistWorkspace()
         if let integrationKeyboardMonitor { NSEvent.removeMonitor(integrationKeyboardMonitor) }
         integrationKeyboardMonitor = nil
@@ -166,13 +224,13 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         reconciling = true
         server?.close()
         server = nil
+        pluginCommands.close()
         events.close()
         terminalControl.close()
         terminals.values.forEach { $0.close() }
         leaves.values.compactMap { $0 as? BrowserPane }.forEach { $0.close() }
         leaves.values.compactMap { $0 as? PluginPane }.forEach { $0.close() }
         pluginInstances.close()
-        pluginCommands.close()
         terminals.removeAll()
         shellSessions.removeAll()
         leaves.removeAll()
@@ -196,9 +254,13 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }
     }
 
-    private func reloadConfiguration(prepared: ApplicationSettings.PreparedConfiguration? = nil) throws -> JSONValue {
+    private func reloadConfiguration(operation: WorkspaceOperationContext = .init(origin: .native)) throws -> JSONValue {
+        let candidate = try? AppConfiguration.parse(configurationSource())
+        return try performSettingsOperation(operation: operation, candidate: candidate) { try applyConfiguration() }
+    }
+
+    private func applyConfiguration(prepared: ApplicationSettings.PreparedConfiguration? = nil) throws -> JSONValue {
         defer { buildMenus(); refreshSettings() }
-        let previous = settings.current
         let result = try settings.reload(prepared: prepared) { url in
             if integration, prepared != nil, let fault = configurationApplyFault {
                 configurationApplyFault = nil
@@ -206,13 +268,6 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 throw RPCFailure(code: -32020, message: "Injected configuration apply failure")
             }
             try runtime.reload(from: url)
-        }
-        if !settings.current.changedKeys(from: previous).isEmpty {
-            appliedConfigurationRevision = UUID().uuidString
-            events.publishHost("host.settings.changed", payload: .object(["appliedRevision": .string(appliedConfigurationRevision)]))
-            for instance in pluginInstances.all where previous.plugins[instance.registration.id] != settings.current.plugins[instance.registration.id] {
-                events.publishHost("host.plugin.settings.changed", payload: .object(["pluginId": .string(instance.registration.id)]), targetInstanceId: instance.id)
-            }
         }
         applyAppearance()
         for browser in leaves.values.compactMap({ $0 as? BrowserPane }) { browser.browserConfiguration = settings.current.browser }
@@ -234,18 +289,15 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         runtime.setColorScheme(dark: dark, terminals: Array(terminals.values))
     }
 
-    private func persistWorkspace() {
-        publishWorkspaceChanges()
-        settings.save(workspace)
+    @discardableResult
+    private func persistWorkspace() -> WorkspacePersistence {
+        // Persistence observes an already committed model; it must never discover/attribute
+        // earlier native mutations to whichever request happens to save next.
+        let persistence = settings.save(workspace)
         updateStatusMenu()
         if let paneTypeMenu { menuNeedsUpdate(paneTypeMenu) }
         refreshCommandPicker()
-        if publishedWorkspace != workspace {
-            publishedWorkspace = workspace
-            events.publishHost("host.workspace.changed", payload: .object([
-                "keyTabId": workspace.keyTabID.map { .string($0.description) } ?? .null
-            ]))
-        }
+        return persistence
     }
 
     func updateStatusMenu() {
@@ -279,7 +331,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     /// Freeze routing and settings before yielding, including for menu/keyboard invocations.
-    private func preparePluginCommand(_ id: String, params: [String: JSONValue], resolveWorkspace: Bool = true) throws -> () async throws -> JSONValue {
+    private func preparePluginCommand(_ id: String, params: [String: JSONValue], resolveWorkspace: Bool = true,
+                                      operation: WorkspaceOperationContext = WorkspaceOperationContext(origin: .native)) throws -> () async throws -> JSONValue {
         try synchronizeNativeGroups()
         guard let registration = pluginCatalog.registrations.first(where: { registration in registration.commands.contains { $0.namespacedID(plugin: registration.id) == id } }) else {
             throw RPCFailure(code: -32601, message: "Unknown plugin command: \(id)")
@@ -306,28 +359,39 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                   self.pluginCatalog.registrations.contains(registration) else {
                 throw RPCFailure(code: -32022, message: "Plugin registration or application closed")
             }
+            try operation.validateCaller()
             return try await self.pluginCommands.execute(plugin: registration, command: command, connection: connection,
-                tab: tab, pane: pane, params: invocation, settings: preferences)
+                tab: tab, pane: pane, params: invocation, settings: preferences,
+                lifecycle: CommandLifecycleContext(operation: operation, launchWorkspaceRevision: self.revisions.revision,
+                                                   launchLayoutRevision: tab.flatMap(self.revisions.layoutRevision)))
         }
     }
 
-    private func callAsync(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
+    private func callAsync(_ method: String, params: [String: JSONValue], operation suppliedOperation: WorkspaceOperationContext? = nil,
+                           metadata: RPCMetadata? = nil) async throws -> JSONValue {
+        guard !reconciling, !settlingNativeLayouts else { throw RPCFailure(code: APIError.conflict, message: "Workspace presentation is being reconciled") }
+        try synchronizeNativeGroups()
+        drainNativeLayouts()
+        try settleDividerBeforeMutation(method)
         var params = params
         if let reference = params.removeValue(forKey: "contextPane") {
             guard params["pane"] == nil, params["tab"] == nil else { throw RPCFailure(code: -32602, message: "Context anchor cannot be combined with a target") }
             let pane = try targetPaneID(["pane": reference])
             params["tab"] = .string(workspace.tabs.first { $0.layout.paneIDs.contains(pane) }!.id.description)
         }
+        try Task.checkCancellation()
+        try suppliedOperation?.validateCaller()
         try validateAPIGuards(params, method: method)
+        let operation = try suppliedOperation ?? operations.admit(method, metadata: metadata, origin: .administrative, audience: operations.administrativeAudience)
         if method == "command.run", let id = params["id"]?.string, id.hasPrefix("plugin.") {
-            let operation = try preparePluginCommand(id, params: params)
-            return try await operation()
+            let invoke = try preparePluginCommand(id, params: params, operation: operation)
+            return try await invoke()
         }
         if method.hasPrefix("terminal.") {
             let pane = try terminalPane(params)
             var input = withoutAPIGuards(params)
             if input["sessionId"] == nil { input["sessionId"] = params["expectedAnchorSessionId"] }
-            return try await terminalControl.call(String(method.dropFirst("terminal.".count)), pane: pane, params: input)
+            return try await terminalControl.call(String(method.dropFirst("terminal.".count)), pane: pane, params: input, validateCaller: operation.validateCaller)
         }
         if method.hasPrefix("events.") {
             try synchronizeNativeGroups()
@@ -336,8 +400,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             case "events.head":
                 guard params.isEmpty else { throw RPCFailure(code: -32602, message: "events.head takes no parameters") }
                 return events.head
-            case "events.poll": return try await events.poll(params)
-            case "events.emit": return try events.emit(params, source: .client, knownInstances: Set(pluginInstances.all.map(\.id)))
+            case "events.poll": return try await events.poll(params, audience: operations.administrativeAudience, validateCaller: operation.validateCaller)
+            case "events.emit": return try events.emit(params, source: .client, operation: operation, knownInstances: Set(pluginInstances.all.map(\.id)))
             default: throw RPCFailure(code: -32601, message: "Unknown event method: \(method)")
             }
         }
@@ -354,7 +418,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             guard let pane = leaves[try targetPaneID(params)] as? PluginPane, let source = params["script"]?.string else { throw RPCFailure(code: -32602, message: "Plugin pane and script are required") }
             return try await pane.evaluateForTesting(source)
         }
-        guard method.hasPrefix("browser.") else { return try call(method, params: params) }
+        if method.hasPrefix("web.") { return try await callWeb(method, params: params, operation: operation) }
+        guard method.hasPrefix("browser.") else { return try call(method, params: params, operation: operation) }
         let pane = try targetPaneID(params)
         guard let browser = leaves[pane] as? BrowserPane else { throw RPCFailure(code: -32602, message: "Target pane is not a browser") }
         params["pane"] = .string(pane.description)
@@ -362,6 +427,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         let captured = params
         let precondition: @MainActor () throws -> Void = { [weak self, weak browser] in
             guard let self, let browser, self.leaves[pane] === browser else { throw RPCFailure(code: -32022, message: "Browser pane was replaced") }
+            try operation.validateCaller()
             try self.validateAPIGuards(captured, method: method)
         }
         params = withoutAPIGuards(params)
@@ -382,17 +448,22 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }
     }
 
-    private func call(_ method: String, params: [String: JSONValue]) throws -> JSONValue {
+    private func call(_ method: String, params: [String: JSONValue], operation suppliedOperation: WorkspaceOperationContext? = nil) throws -> JSONValue {
+        guard !reconciling, !settlingNativeLayouts else { throw RPCFailure(code: APIError.conflict, message: "Workspace presentation is being reconciled") }
         try synchronizeNativeGroups()
+        drainNativeLayouts()
+        try settleDividerBeforeMutation(method)
+        let operation = suppliedOperation ?? WorkspaceOperationContext(origin: .native)
+        try operation.validateCaller()
         try validateAPIGuards(params, method: method)
         switch method {
         case "api.describe": return try describeAPI()
         case "workspace.snapshot": return try workspaceSnapshot(params)
         case "context.inspect": return try inspectContext(params)
         case "pane.inspect": return try inspectPane(targetPaneID(params))
-        case "config.patch": return try patchConfiguration(params)
+        case "config.patch": return try patchConfiguration(params, operation: operation)
         case "plugins.settings.get": return try pluginSettingsInfo(params)
-        case "plugins.settings.patch": return try patchPluginSettings(params)
+        case "plugins.settings.patch": return try patchPluginSettings(params, operation: operation)
         case "palette.list": return try listPalettes()
         case "palette.import": return try importPalette(params)
         case "version": return .object(["cliVersion": .string("0.1.0-dev"), "appVersion": .string("0.1.0-dev"), "protocolVersion": .integer(1)])
@@ -431,17 +502,26 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             guard using.isEmpty || params["force"] == .bool(true) else { throw RPCFailure(code: -32010, message: "Plugin is in use; pass --force to close its panes") }
             var next = workspace
             for pane in using { try next.close(pane) }
-            // Persist before irreversible teardown. This reconciliation only
-            // removes existing views, so it needs no new fallible resources.
-            try pluginCatalog.remove(id)
+            let transition = try WorkspaceTransition(observing: next, from: workspace, revisions: revisions, action: .pluginRemoval)
+            let registryFact = operation.publication(topic: "host.plugins.changed", payload: [
+                "type": .string(id), "registered": .bool(false), "actionKind": .string("plugins.unregister"),
+                "beforeWorkspaceRevision": .string(transition.beforeWorkspaceRevision), "workspaceRevision": .string(transition.revisions.revision)
+            ])
+            // Preflight the journal before catalog persistence, then persist before model
+            // assignment/irreversible teardown. No fallible resources follow the file write.
+            let persistence: WorkspacePersistence
+            if using.isEmpty {
+                try commitWorkspace(transition, operation: operation, additionalPublications: [registryFact], beforeCommit: { try pluginCatalog.remove(id) })
+                persistence = .notRequired
+            } else {
+                persistence = try reconcile(next, transition: transition, operation: operation, additionalPublications: [registryFact], beforeCommit: { try pluginCatalog.remove(id) })
+            }
             headerActionRevisions.removeValue(forKey: id)
-            if !using.isEmpty { try reconcile(next) }
             pluginInstances.remove(type: id)
             pluginCommands.remove(plugin: id)
             buildMenus()
             refreshSettings()
-            events.publishHost("host.plugins.changed", payload: .object(["type": .string(id), "registered": .bool(false)]))
-            return .object([:])
+            return operationResult(.object([:]), transition: transition, operation: operation, workspacePersistence: persistence, committedExternalEffect: true)
         case "context.get": return try context(params)
         case "shell.runInput":
             let pane = try targetPaneID(params)
@@ -473,11 +553,11 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             status.merge(configurationRevisionInfo()) { _, new in new }
             return .object(status)
         case "config.validate": return .object(["valid": .bool(true), "configuration": try .encoding(settings.validate())])
-        case "config.reload": return try reloadConfiguration()
+        case "config.reload": return try reloadConfiguration(operation: operation)
         case "command.run":
             guard let id = params["id"]?.string else { throw RPCFailure(code: -32602, message: "Command id is required") }
-            if let result = try runSettingsCommand(id, params: params) { return result }
-            if id == "config.reload" { return try reloadConfiguration() }
+            if let result = try runSettingsCommand(id, params: params, operation: operation) { return result }
+            if id == "config.reload" { return try reloadConfiguration(operation: operation) }
             if id == "settings.open" { showSettings(); return .object([:]) }
             if id == "command.picker" { try toggleCommandPicker(params); return .object([:]) }
             if id == "pane.copyID" {
@@ -499,37 +579,44 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 if let activate = params["activate"], case .bool = activate {} else if params["activate"] != nil { throw RPCFailure(code: -32602, message: "activate must be a boolean") }
                 var next = workspace
                 try next.focusTab(target.tab)
-                try reconcile(next)
+                let transition = try WorkspaceTransition(observing: next, from: workspace, revisions: revisions, action: .windowFocus)
+                let persistence = try reconcile(next, transition: transition, operation: operation)
                 if target.window.isMiniaturized {
                     target.window.deminiaturize(nil)
                     target.window.makeKeyAndOrderFront(nil)
                 }
                 if params["activate"] == .bool(true) { NSApp.activate() }
-                return nativeWindowInfo(target.window, tab: target.tab)
+                return operationResult(nativeWindowInfo(target.window, tab: target.tab), transition: transition, operation: operation, workspacePersistence: persistence)
             }
             if ["pane.type", "pane.split"].contains(id), !(["terminal", "browser"] + pluginCatalog.registrations.filter(\.hasPanel).map(\.id)).contains(params["type"]?.string ?? (id == "pane.split" ? "terminal" : "")) {
                 throw RPCFailure(code: -32602, message: "Unknown pane type")
             }
             try validateMutationAdmission(id, params: params)
-            var next = workspace
-            let result = try CommandRegistry.execute(id, params: params, workspace: &next)
+            let transition = try WorkspaceTransition.command(id, parameters: params, workspace: workspace, revisions: revisions)
+            let next = transition.workspace
+            let result = transition.result
             try validateMutationGeometry(id, params: params, next: next, result: result)
             let remaining = Set(next.panes.filter { pane in workspace.panes.contains(where: { $0.id == pane.id && $0.type == pane.type }) }.map(\.id))
             if params["force"] != .bool(true), terminals.contains(where: { !remaining.contains($0.key) && $0.value.needsConfirmClose }) {
                 throw RPCFailure(code: -32010, message: "The terminal may have a running process; pass --force to terminate it")
             }
+            let persistence: WorkspacePersistence
             if ["pane.title.set", "pane.title.clear"].contains(id) {
-                workspace = next
+                try commitWorkspace(transition, operation: operation)
                 updatePaneTitle(try targetPaneID(params))
-                persistWorkspace()
-            } else { try reconcile(next) }
-            return mutationResponse(id, result: result)
+                persistence = persistWorkspace()
+            } else { persistence = try reconcile(next, transition: transition, operation: operation) }
+            return operationResult(mutationResponse(id, result: result), transition: transition, operation: operation, workspacePersistence: persistence)
         case "panes.send":
             guard let text = params["text"]?.string else { throw RPCFailure(code: -32602, message: "text is required") }
             try targetTerminal(params).send(text)
             return .object([:])
         case "panes.capture": return try .encoding(TerminalOutput(targetTerminal(params).capture()))
         case "debug.inspect" where integration: return inspect()
+        case "debug.rejectNextWorkspacePublication" where integration:
+            guard params.isEmpty else { throw RPCFailure(code: -32602, message: "This fixture takes no parameters") }
+            rejectNextWorkspacePublication = true
+            return .object(["armed": .bool(true)])
         case "debug.rejectNextTerminalPreparation" where integration:
             guard params.isEmpty else { throw RPCFailure(code: -32602, message: "This fixture takes no parameters") }
             rejectNextTerminalPreparation = true
@@ -701,6 +788,25 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             let selected = group.selectedWindow
             group.insertWindow(window, at: index)
             return .object(["selectionPreserved": .bool(group.selectedWindow === selected)])
+        case "debug.nativeLayoutProbe" where integration:
+            if params["arm"] == .bool(true) {
+                let pane = try targetPaneID(params)
+                guard let container = containers[pane] else { throw RPCFailure(code: APIError.unavailable, message: "Pane container is unavailable") }
+                nativeLayoutProbe = NativeLayoutTestProbe(tab: try targetTab(params).id, pane: pane, container: container)
+                nativeLayoutProbeResult = .null
+            }
+            return nativeLayoutProbeResult
+        case "debug.windowGeometry" where integration:
+            guard case .integer(let width) = params["width"], case .integer(let height) = params["height"],
+                  (100...1600).contains(width), (100...1000).contains(height),
+                  let window = windows[try targetTab(params).id] else {
+                throw RPCFailure(code: -32602, message: "A live tab and bounded content width/height are required")
+            }
+            window.setContentSize(NSSize(width: CGFloat(width), height: CGFloat(height)))
+            window.contentView?.layoutSubtreeIfNeeded()
+            drainNativeLayouts()
+            return .object([:])
+        case "debug.dividerGesture" where integration: return try debugDividerGesture(params)
         case "debug.divider" where integration:
             guard case .number(let fraction) = params["fraction"], fraction > 0, fraction < 1,
                   let split = windows[try targetTab(params).id]?.contentViewController as? NSSplitViewController else {
@@ -824,7 +930,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }
     }
 
-    private func callFromPlugin(_ method: String, params: [String: JSONValue], pane: PaneID, view: PluginPane) async throws -> JSONValue {
+    private func callFromPlugin(_ method: String, params: [String: JSONValue], metadata: RPCMetadata?, pane: PaneID, view: PluginPane) async throws -> JSONValue {
+        guard !reconciling, !settlingNativeLayouts else { throw RPCFailure(code: APIError.conflict, message: "Workspace presentation is being reconciled") }
         guard leaves[pane] === view, let tab = workspace.tabs.first(where: { $0.layout.paneIDs.contains(pane) }) else { throw RPCFailure(code: -32022, message: "Plugin instance was replaced") }
         guard apiMethods(plugin: true).contains(method) else { throw RPCFailure(code: -32601, message: "Method is not exposed to plugins: \(method)") }
         if method == "command.run" {
@@ -841,6 +948,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             || (method == "command.run" && params["id"]?.string?.hasPrefix("plugin.") == true)
         if inheritsScope, scoped["scope"] == nil { scoped["scope"] = .string(view.instance.registration.scope.rawValue) }
         try synchronizeNativeGroups()
+        drainNativeLayouts()
+        try settleDividerBeforeMutation(method)
         if method.hasPrefix("plugins.settings.") {
             guard params["id"] == nil || params["id"] == .string(view.instance.registration.id) else { throw RPCFailure(code: APIError.forbidden, message: "Plugin settings are bound to the caller's namespace") }
             scoped["id"] = .string(view.instance.registration.id)
@@ -851,8 +960,16 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 throw RPCFailure(code: -32602, message: "This operation is bound to the calling plugin view/namespace")
             }
         }
+        let audience = try view.causationAudience(epoch: operations.epoch)
+        let operation = try operations.admit(method, metadata: metadata,
+            origin: .plugin(id: view.instance.registration.id, instance: view.instance.id, view: view.viewID), audience: audience,
+            validateCaller: { [weak self, weak view] in
+                guard let self, let view, self.leaves[pane] === view,
+                      try view.causationAudience(epoch: self.operations.epoch) == audience else { throw CancellationError() }
+                try Task.checkCancellation()
+            })
         if method.hasPrefix("plugins.settings.") {
-            do { return try call(method, params: scoped) }
+            do { return try call(method, params: scoped, operation: operation) }
             catch { throw pluginSettingsFailure(error) }
         }
         try validateAPIGuards(scoped, method: method)
@@ -862,22 +979,24 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         case "api.describe": return try describeAPI(plugin: true)
         case "workspace.snapshot": return try workspaceSnapshot(scoped)
         case "context.inspect": return try inspectContext(scoped, caller: pane, view: view)
-        case "pane.inspect": return try call(method, params: scoped)
+        case "pane.inspect": return try call(method, params: scoped, operation: operation)
         case "events.head":
             guard payload.isEmpty else { throw RPCFailure(code: -32602, message: "events.head takes no parameters") }
             return events.head
         case "events.poll":
             // Logical pane/tab instances follow their owning tab's active-terminal
             // context. Global instances observe every tab; callers may narrow filters.
-            return try await events.poll(payload, boundTab: view.instance.tab, recipientInstanceId: view.instance.id)
+            return try await events.poll(payload, audience: audience, boundTab: view.instance.tab,
+                                         validateCaller: operation.validateCaller)
         case "events.emit":
-            return try events.emit(payload, source: .plugin(type: view.instance.registration.id, instanceId: view.instance.id),
+            return try events.emit(payload, source: .plugin(type: view.instance.registration.id, instanceId: view.instance.id), operation: operation,
                 sourceTab: tab.id, sourcePane: pane, knownInstances: Set(pluginInstances.all.map(\.id)))
-        case "terminal.send", "terminal.key", "terminal.capture", "terminal.run", "terminal.wait":
-            return try await callAsync(method, params: scoped)
-        case "command.run": return try await callAsync(method, params: scoped)
+        case "terminal.send", "terminal.key", "terminal.capture", "terminal.run", "terminal.wait",
+             "web.get", "web.snapshot", "web.click", "web.fill", "web.select", "web.scroll", "web.wait":
+            return try await callAsync(method, params: scoped, operation: operation)
+        case "command.run": return try await callAsync(method, params: scoped, operation: operation)
         case "command.list": return try .encoding(availableCommands.filter { $0.contract.pluginAccessible })
-        case "workspace.get", "layout.get", "panes.list", "tabs.list": return try call(method, params: scoped)
+        case "workspace.get", "layout.get", "panes.list", "tabs.list": return try call(method, params: scoped, operation: operation)
         case "settings.get": return .object(settings.current.plugins[view.instance.registration.id] ?? [:])
         case "pane.title":
             guard let title = params["title"], title == .null || title.string != nil else { throw RPCFailure(code: -32602, message: "title must be a string or null") }
@@ -888,7 +1007,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             return view.instance.storageGet(params["key"]?.string)
         case "storage.set", "storage.delete":
             guard let key = params["key"]?.string, method == "storage.delete" || params["value"] != nil else { throw RPCFailure(code: -32602, message: "Storage key and value are required") }
-            try view.instance.storageSet(key, value: method == "storage.delete" ? nil : params["value"])
+            try view.instance.storageSet(key, value: method == "storage.delete" ? nil : params["value"], lineage: operation.lineage)
             return .null
         default: throw RPCFailure(code: -32601, message: "Method is not exposed to plugins: \(method)")
         }
@@ -975,7 +1094,15 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     /// Prepare new surfaces before committing the value model; failures leave the old tree intact.
-    private func reconcile(_ next: Workspace) throws {
+    @discardableResult
+    private func reconcile(_ next: Workspace, transition suppliedTransition: WorkspaceTransition? = nil,
+                           operation suppliedOperation: WorkspaceOperationContext? = nil,
+                           observation: WorkspaceTransition.Observation = .startup,
+                           additionalPublications: [EventPublication] = [], beforeCommit: () throws -> Void = {}) throws -> WorkspacePersistence {
+        guard !reconciling else { throw RPCFailure(code: APIError.conflict, message: "Workspace reconciliation is already in progress") }
+        let operation = suppliedOperation ?? WorkspaceOperationContext(origin: .native)
+        let transition = try suppliedTransition ?? WorkspaceTransition(observing: next, from: workspace, revisions: revisions, action: observation)
+        guard transition.workspace == next else { throw RPCFailure(code: APIError.conflict, message: "Prepared workspace does not match reconciliation") }
         leaves.values.compactMap { $0 as? BrowserPane }.forEach { $0.rememberFocus() }
         for pane in next.panes {
             if case .registered(let type) = pane.type, !pluginCatalog.registrations.contains(where: { $0.id == type && $0.hasPanel }) { throw RPCFailure(code: -32602, message: "Pane type is not registered: \(type)") }
@@ -1026,9 +1153,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 controller.onRelease = { [weak self, weak instance] in
                     if let instance { self?.pluginInstances.release(instance, pane: pane.id) }
                 }
-                controller.onCall = { [weak self, weak controller] method, params in
+                controller.onCall = { [weak self, weak controller] method, params, metadata in
                     guard let self, let controller else { throw SocketError.disconnected }
-                    return try await self.callFromPlugin(method, params: params, pane: pane.id, view: controller)
+                    return try await self.callFromPlugin(method, params: params, metadata: metadata, pane: pane.id, view: controller)
                 }
                 createdPlugins[pane.id] = controller
             }
@@ -1036,14 +1163,21 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 rejectNextTerminalPreparation = false
                 throw RPCFailure(code: APIError.unavailable, message: "Injected terminal preparation rejection")
             }
+            reconciling = true
+            // Commit the complete semantic journal before irreversible teardown. Resumed
+            // consumers cannot run until this non-suspending native reconciliation returns.
+            try commitWorkspace(transition, operation: operation, additionalPublications: additionalPublications, beforeCommit: beforeCommit)
         } catch {
+            reconciling = false
             created.values.forEach { $0.close() }
             createdPlugins.values.forEach { $0.close() }
             pluginInstances.prune(workspace: workspace)
             throw error
         }
-        reconciling = true
-        defer { reconciling = false; persistWorkspace() }
+        defer {
+            reconciling = false
+            finishPendingPaneRenames()
+        }
         let changedTabs = next.tabs.filter { rendered[$0.id] != $0.layout || renderedZoom[$0.id] != $0.zoomedPane || !replacements.isDisjoint(with: $0.layout.paneIDs) }.map(\.id)
         for id in replacements {
             terminalControl.remove(pane: id)
@@ -1057,7 +1191,6 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             leaves.removeValue(forKey: id)
         }
         for id in changedTabs { rendered.removeValue(forKey: id) }
-        workspace = next
         for (id, terminal) in created {
             terminal.onFocus = { [weak self] in self?.focused(id) }
             terminal.onCloseRequest = { [weak self, weak terminal] processAlive in
@@ -1112,10 +1245,20 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 let type = availablePaneTypes.first { $0.id == typeID }!.name
                 let container = PaneContainer(content: leaves[pane.id]!, type: type, typeID: typeID)
                 container.onClose = { [weak self] in self?.runUserCommand("pane.close", params: ["pane": .string(pane.id.description)]) }
-                container.onRename = { [weak self] title in
-                    guard let self else { return }
-                    do { try self.setManualPaneTitle(title, for: pane.id) }
-                    catch { self.present(error) }
+                container.onRename = { [weak self, weak container] title in
+                    guard let self, let container, self.containers[pane.id] === container,
+                          let current = self.workspace.panes.first(where: { $0.id == pane.id }) else { return }
+                    if self.reconciling || self.settlingNativeLayouts {
+                        // Ending an editor while reparenting/focusing/resizing is a native completion,
+                        // not a nested mutation or an occasion to block the RPC in runModal.
+                        guard title.trimmingCharacters(in: .whitespacesAndNewlines).utf8.count <= 4096 else {
+                            NSSound.beep(); return
+                        }
+                        self.pendingPaneRenames[pane.id] = PendingPaneRename(container: container, title: title, expectedManualTitle: current.manualTitle)
+                    } else {
+                        do { try self.setManualPaneTitle(title, for: pane.id) }
+                        catch { self.present(error) }
+                    }
                 }
                 container.dragHandle.canDrag = { [weak self] in
                     guard let tab = self?.workspace.tabs.first(where: { $0.layout.paneIDs.contains(pane.id) }) else { return false }
@@ -1164,9 +1307,19 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 window.delegate = self
                 window.keybindingHandler = { [weak self] event in
                     guard let self else { return false }
-                    if self.workspaceShortcuts?.performKeyEquivalent(with: event) == true { return true }
                     let bindings = self.activeKeyBindings.sorted { $0.key.description < $1.key.description }
-                    guard let binding = bindings.first(where: { $0.key.matches(event) }) else { return false }
+                    let matched = bindings.first(where: { $0.key.matches(event) })
+                    // Invocation, unlike passive menu validation, settles the pending edit
+                    // before either NSMenu or our fallback evaluates availability.
+                    if matched != nil {
+                        do { self.drainNativeLayouts(); try self.finishNativeDivider(cancelled: false) }
+                        catch { NSLog("Native shortcut settlement rejected: %@", String(describing: error)); return true }
+                    }
+                    // Exact configured chords win over NSMenu's layout/case matching.
+                    // In particular, Command-W must not select the earlier Shift-W item.
+                    guard let binding = matched else {
+                        return self.workspaceShortcuts?.performKeyEquivalent(with: event) == true
+                    }
                     if binding.value.hasPrefix("browser."), self.focusedBrowser == nil { return false }
                     if binding.value.hasPrefix("split."), self.splitUnavailableReason(binding.value, params: [:]) != nil { return false }
                     if binding.value == "tab.detachCurrent" {
@@ -1213,6 +1366,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         observeNativeTabGroups()
         createdPlugins.values.forEach { $0.activate() }
         pluginInstances.prune(workspace: workspace)
+        reconciling = false
+        // Capture this save's result before separately attributed editor completions run.
+        return persistWorkspace()
     }
 
     private func controller(for layout: Layout, tab: TabID, path: [Branch]) -> NSViewController {
@@ -1224,18 +1380,30 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             for child in [controller(for: first, tab: tab, path: path + [.first]), controller(for: second, tab: tab, path: path + [.second])] {
                 let item = NSSplitViewItem(viewController: child)
                 item.minimumThickness = PaneMoveGeometry.minimumExtent
-                // Pane geometry belongs to the split model, not the intrinsic
-                // hugging size of a web pane's address bar or status text.
-                item.holdingPriority = NSLayoutConstraint.Priority(rawValue: 251)
+                // Keep split sizing below the native window's stay-put priority. Pane
+                // chrome's optional text constraints must yield to this explicit geometry.
+                item.holdingPriority = WorkspaceSplitController.paneHoldingPriority
                 split.addSplitViewItem(item)
             }
-            split.onResize = { [weak self] fraction in
-                guard let self, !self.reconciling else { return }
-                do {
-                    try self.workspace.resize(tab: tab, path: path, fraction: fraction)
-                    self.rendered[tab] = self.workspace.tabs.first { $0.id == tab }?.layout
-                    self.persistWorkspace()
-                } catch { NSLog("Divider update rejected: %@", String(describing: error)) }
+            split.onGestureBegin = { [weak self, weak split] in
+                guard let self, let split else { return nil }
+                return self.beginNativeDivider(split, tab: tab, path: path)
+            }
+            split.onGesturePreview = { [weak self, weak split] fraction in
+                guard let self, let split else { return }
+                self.previewNativeDivider(split, fraction: fraction)
+            }
+            split.onGestureEnd = { [weak self, weak split] cancelled in
+                guard let self, let split else { return }
+                self.endNativeDivider(split, cancelled: cancelled)
+            }
+            split.onResize = { [weak self, weak split] fraction in
+                guard let self, let split else { return }
+                self.queueNativeLayout(tab: tab, source: split, path: path, fraction: fraction)
+            }
+            split.onPresentationResize = { [weak self, weak split] in
+                guard let self, let split else { return }
+                self.queueNativeLayout(tab: tab, source: split, path: path, presentationChanged: true)
             }
             return split
         }
@@ -1336,6 +1504,19 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         containers[pane]?.setTitle(title)
     }
 
+    private func finishPendingPaneRenames() {
+        guard !reconciling, !settlingNativeLayouts else { return }
+        let pending = pendingPaneRenames
+        pendingPaneRenames.removeAll()
+        guard server != nil else { return }
+        for pane in workspace.panes {
+            guard let rename = pending[pane.id], let container = rename.container,
+                  containers[pane.id] === container, pane.manualTitle == rename.expectedManualTitle else { continue }
+            do { try setManualPaneTitle(rename.title, for: pane.id) }
+            catch { NSLog("Deferred pane-title completion rejected: %@", String(describing: error)) }
+        }
+    }
+
     private func setManualPaneTitle(_ title: String, for pane: PaneID) throws {
         _ = try call("command.run", params: ["id": .string("pane.title.set"), "pane": .string(pane.description), "title": .string(title)])
     }
@@ -1343,7 +1524,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     private func focused(_ pane: PaneID) {
         guard !reconciling else { return }
         do {
-            try workspace.focus(pane)
+            var next = workspace
+            try next.focus(pane)
+            let transition = try WorkspaceTransition(observing: next, from: workspace, revisions: revisions, action: .nativeFocus)
+            try commitWorkspace(transition, operation: WorkspaceOperationContext(origin: .native))
             synchronizeTerminalFocus(pane)
             persistWorkspace()
         } catch { NSLog("Focus update rejected: %@", String(describing: error)) }
@@ -1369,10 +1553,15 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         guard !reconciling, let window = notification.object as? NSWindow,
               let id = windows.first(where: { $0.value === window })?.key else { return }
         do {
-            try workspace.focusTab(id)
             try synchronizeNativeGroups()
+            if let root = splitController(tab: id, path: []) { queueNativeLayout(tab: id, source: root, path: []) }
+            drainNativeLayouts()
+            var next = workspace
+            try next.focusTab(id)
             if commandPicker?.isRestoringFocus == true, let original = pickerReturnPane,
-               workspace.tabs.first(where: { $0.id == id })?.layout.paneIDs.contains(original) == true { try workspace.focus(original) }
+               next.tabs.first(where: { $0.id == id })?.layout.paneIDs.contains(original) == true { try next.focus(original) }
+            let transition = try WorkspaceTransition(observing: next, from: workspace, revisions: revisions, action: .nativeFocus)
+            try commitWorkspace(transition, operation: WorkspaceOperationContext(origin: .native))
             let pane = workspace.tabs.first { $0.id == id }?.focusedPane
             if commandPicker?.isRestoringFocus != true, let pane { focusResponder(pane, in: window) }
             synchronizeTerminalFocus(pane)
@@ -1382,10 +1571,14 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
 
     func synchronizeNativeGroups() throws {
         guard !reconciling else { return }
-        let previous = workspace
+        var next = workspace
         let observed = nativeGroupsWithIdentity()
-        try workspace.adoptTabGroups(observed.map(\.tabs), retaining: observed.map(\.id))
-        if workspace != previous { persistWorkspace() }
+        try next.adoptTabGroups(observed.map(\.tabs), retaining: observed.map(\.id))
+        if next != workspace {
+            let transition = try WorkspaceTransition(observing: next, from: workspace, revisions: revisions, action: .nativeTabs)
+            try commitWorkspace(transition, operation: WorkspaceOperationContext(origin: .native))
+            persistWorkspace()
+        }
         observeNativeTabGroups()
     }
 
@@ -1786,24 +1979,29 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         try saveConfigurationSource(source: source, updated: updated, refreshEditor: refreshEditor)
     }
 
-    func saveConfigurationSource(source: String, updated: String, refreshEditor: Bool = true) throws {
+    func saveConfigurationSource(source: String, updated: String, refreshEditor: Bool = true,
+                                 operation: WorkspaceOperationContext = .init(origin: .native)) throws {
         guard try configurationSource() == source else { throw RPCFailure(code: APIError.conflict, message: "Configuration source changed before save") }
         // Resolve once and create stable snapshots before changing the TOML.
         let prepared = try settings.prepare(AppConfiguration.parse(updated))
         guard try configurationSource() == source else {
             throw ConfigurationError.invalid("The config file changed outside Settings. Choose Revert before applying.")
         }
-        try FileManager.default.createDirectory(at: settings.configURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try updated.write(to: settings.configURL, atomically: true, encoding: .utf8)
-        do { _ = try reloadConfiguration(prepared: prepared) }
-        catch {
-            guard try configurationSource() == updated else {
-                throw ConfigurationError.invalid("Apply failed and the config changed outside Settings; the external edit was preserved. \(error)")
+        _ = try performSettingsOperation(operation: operation, candidate: prepared.configuration, intendedSource: updated) {
+            guard try configurationSource() == source else { throw RPCFailure(code: APIError.conflict, message: "Configuration source changed before save") }
+            try FileManager.default.createDirectory(at: settings.configURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try updated.write(to: settings.configURL, atomically: true, encoding: .utf8)
+            do { _ = try applyConfiguration(prepared: prepared) }
+            catch {
+                guard try configurationSource() == updated else {
+                    throw ConfigurationError.invalid("Apply failed and the config changed outside Settings; the external edit was preserved. \(error)")
+                }
+                try source.write(to: settings.configURL, atomically: true, encoding: .utf8)
+                throw error
             }
-            try source.write(to: settings.configURL, atomically: true, encoding: .utf8)
-            throw error
+            refreshSettings(force: refreshEditor)
+            return .object([:])
         }
-        refreshSettings(force: refreshEditor)
     }
 
     @objc private func registerPlugin() {
@@ -1905,6 +2103,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         var params = params
         params["id"] = .string(id)
         do {
+            try synchronizeNativeGroups()
+            drainNativeLayouts()
+            try finishNativeDivider(cancelled: false)
             if id.hasPrefix("plugin.") {
                 let operation = try preparePluginCommand(id, params: params, resolveWorkspace: !capturedWithoutWorkspace)
                 Task { [weak self] in
@@ -1982,6 +2183,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     private func present(_ error: any Error) {
+        guard !reconciling, !settlingNativeLayouts else {
+            NSLog("Native presentation error: %@", String(describing: error))
+            return
+        }
         let alert = NSAlert()
         alert.messageText = "The workspace could not be changed"
         alert.informativeText = String(describing: error)
@@ -2037,39 +2242,5 @@ final class WorkspaceWindow: NSWindow {
         if keybindingHandler?(event) == true { return true }
         if NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return true }
         return super.performKeyEquivalent(with: event)
-    }
-}
-
-@MainActor
-final class WorkspaceSplitController: NSSplitViewController {
-    var onResize: ((Double) -> Void)?
-    private let initialFraction: Double
-    private var initialized = false
-    private var applying = false
-    private(set) var appliedGeometry: JSONValue = .null
-
-    init(fraction: Double) { initialFraction = fraction; super.init(nibName: nil, bundle: nil) }
-    required init?(coder: NSCoder) { nil }
-
-    func applyInitialFractions() {
-        guard splitView.arrangedSubviews.count == 2 else { return }
-        let length = (splitView.isVertical ? splitView.bounds.width : splitView.bounds.height) - splitView.dividerThickness
-        guard length > 0 else { return }
-        applying = true
-        splitView.setPosition(length * initialFraction, ofDividerAt: 0)
-        view.layoutSubtreeIfNeeded()
-        appliedGeometry = .object(["length": .number(length), "fraction": .number(initialFraction), "firstWidth": .number(splitView.arrangedSubviews[0].frame.width)])
-        for child in children { (child as? WorkspaceSplitController)?.applyInitialFractions() }
-        initialized = true
-        applying = false
-    }
-
-    override func splitViewDidResizeSubviews(_ notification: Notification) {
-        super.splitViewDidResizeSubviews(notification)
-        guard initialized, !applying, let first = splitView.arrangedSubviews.first else { return }
-        let length = (splitView.isVertical ? splitView.bounds.width : splitView.bounds.height) - splitView.dividerThickness
-        let firstLength = splitView.isVertical ? first.frame.width : first.frame.height
-        guard length > 0, firstLength > 0, firstLength < length else { return }
-        onResize?(Double(firstLength / length))
     }
 }

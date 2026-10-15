@@ -53,6 +53,11 @@ final class TerminalRuns {
     /// Called only by the authenticated shell widget, after inspecting its actual ZLE buffer.
     func claimInput(pane: PaneID, sessionID: String, emptyBuffer: Bool) throws -> String {
         guard var run = pending[pane], run.sessionID == sessionID, !run.inputClaimed else { throw TerminalRunError.replaced }
+        do { try run.validateCaller() }
+        catch {
+            finish(pane: pane, id: run.id, with: .failure(error))
+            throw error
+        }
         guard emptyBuffer else {
             finish(pane: pane, id: run.id, with: .failure(TerminalRunError.editingBufferNotEmpty))
             throw TerminalRunError.editingBufferNotEmpty
@@ -70,6 +75,7 @@ final class TerminalRuns {
         sessionID: String,
         command: String,
         timeoutMilliseconds: Int = 30_000,
+        validateCaller: @escaping @MainActor () throws -> Void = {},
         send: (String) throws -> Void
     ) async throws -> TerminalRunResult {
         guard !isClosed else { throw TerminalRunError.closed }
@@ -82,6 +88,7 @@ final class TerminalRuns {
             throw TerminalRunError.invalidTimeout(timeoutMilliseconds)
         }
         try Task.checkCancellation()
+        try validateCaller()
         guard pending[pane] == nil else { throw TerminalRunError.alreadyRunning(pane) }
         guard pending.count < Self.maximumPendingRuns else {
             throw TerminalRunError.overloaded(maximumPending: Self.maximumPendingRuns)
@@ -104,7 +111,7 @@ final class TerminalRuns {
                 }
                 pending[pane] = PendingRun(
                     id: id, sessionID: sessionID, prefix: prefix, command: command, line: String(line.dropLast()),
-                    continuation: continuation, timer: timer
+                    continuation: continuation, timer: timer, validateCaller: validateCaller
                 )
                 // Register before sending: send may synchronously deliver running AND prompt.
                 do { try send(line) }
@@ -192,5 +199,6 @@ final class TerminalRuns {
         var runningSequence: Int?
         let continuation: CheckedContinuation<TerminalRunResult, Error>
         let timer: Task<Void, Never>
+        let validateCaller: @MainActor () throws -> Void
     }
 }

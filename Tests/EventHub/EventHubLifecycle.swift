@@ -9,6 +9,11 @@ struct EventHubLifecycle {
         setbuf(stdout, nil)
         do {
             try await checkReplayAndValidation()
+            try await checkPreparedCommitAndLineageSnapshot()
+            try await checkPreparedLifetimeBoundaries()
+            try await checkFailedCommitPrerequisite()
+            try await checkOversizedAtomicRetention()
+            try await checkImmediateLineageReplay()
             try await checkFilteredPublication()
             try await checkTimeoutAndRetention()
             try await checkCancellation()
@@ -72,6 +77,167 @@ struct EventHubLifecycle {
         let defaultBatch = try await defaultPoll.value
         try require(defaultBatch.events == [future], "default poll replayed old events")
         print("PASS replay, head defaults, immediate scans, cursor/filter/limit/timeout validation and rejected publication")
+    }
+
+    static func checkPreparedCommitAndLineageSnapshot() async throws {
+        let epoch = UUID()
+        let hub = try EventHub(epoch: epoch)
+        defer { hub.close() }
+        let lineage = OperationLineage()
+        let reader = Task { try await hub.pollDelivery() }
+        try await pending(hub, count: 1)
+        let start = hub.cursor
+        let prepared = try hub.prepare([EventPublication(topic: "host.first", lineage: lineage), EventPublication(topic: "host.second", lineage: lineage)])
+        try require(hub.cursor == start, "preflight published before model commit")
+        var model = 0
+        var rejectedReentrancy = false
+        try hub.commit(prepared, updatingModel: {
+            model = 1
+            do { _ = try hub.publish(topic: "host.reentrant") }
+            catch EventHubError.preparationConflict { rejectedReentrancy = true }
+            catch { }
+        })
+        try require(rejectedReentrancy, "model commit allowed nested publication")
+        // Evict before yielding to the awakened consumer: lineage must be in its delivery snapshot.
+        for _ in 0..<EventJournal.maximumRetainedEvents { try hub.publish(topic: "busy.changed") }
+        let delivered = try await reader.value
+        try require(model == 1 && delivered.batch.events.map(\.topic) == ["host.first", "host.second"], "reader saw a partial operation")
+        try require(delivered.batch.events.allSatisfy { delivered.lineages[$0.cursor] == lineage }, "delivery lost evicted private lineage")
+        let stale = try hub.prepare([EventPublication(topic: "host.stale")])
+        try hub.publish(topic: "host.intervening")
+        do {
+            try hub.commit(stale, updatingModel: { model = 2 })
+            throw Failure(message: "stale preflight committed")
+        } catch EventHubError.preparationConflict { }
+        try require(model == 1, "stale preflight assigned the model")
+        let current = try hub.prepare([EventPublication(topic: "host.current")])
+        let foreign = try EventHub(epoch: epoch)
+        defer { foreign.close() }
+        do {
+            try foreign.commit(current, updatingModel: { model = 3 })
+            throw Failure(message: "foreign hub accepted a prepared batch")
+        } catch EventHubError.preparationConflict { }
+        hub.close()
+        do {
+            try hub.commit(current, updatingModel: { model = 4 })
+            throw Failure(message: "closed hub committed")
+        } catch EventHubError.closed { }
+        try require(model == 1, "foreign/closed hub assigned model")
+        print("PASS atomic prepared model/journal commit, stale/foreign/closed admission, reentrancy and evicted-lineage delivery snapshot")
+    }
+
+    static func checkPreparedLifetimeBoundaries() async throws {
+        let epoch = UUID()
+        let hub = try EventHub(epoch: epoch)
+        defer { hub.close() }
+        var model = 0
+        let empty = try hub.prepare([])
+        try hub.commit(empty, updatingModel: { model = 1 })
+        do {
+            try hub.commit(empty, updatingModel: { model = 2 })
+            throw Failure(message: "empty prepared batch was reusable")
+        } catch EventHubError.preparationConflict { }
+        let competing = try hub.prepare([])
+        let winner = try hub.prepare([])
+        try hub.commit(winner, updatingModel: {})
+        do {
+            try hub.commit(competing, updatingModel: { model = 3 })
+            throw Failure(message: "competing empty preparation survived a commit")
+        } catch EventHubError.preparationConflict { }
+        let foreign = try EventHub(epoch: epoch)
+        defer { foreign.close() }
+        try require(hub.cursor == foreign.cursor, "owner fixture must use identical journal heads")
+        let owned = try hub.prepare([])
+        do {
+            try foreign.commit(owned, updatingModel: { model = 4 })
+            throw Failure(message: "foreign hub accepted matching-head preparation")
+        } catch EventHubError.preparationConflict { }
+        let reader = Task { try await hub.poll() }
+        try await pending(hub, count: 1)
+        do {
+            _ = try hub.prepare([EventPublication(topic: "host.too_large", payload: .string(String(repeating: "x", count: 16_384)))])
+            throw Failure(message: "oversized preparation accepted")
+        } catch is EventJournalError { }
+        try require(hub.pendingCount == 1 && model == 1, "rejected preflight changed model/readers")
+        let final = try hub.prepare([EventPublication(topic: "host.final")])
+        var blockedPrepare = false, blockedCommit = false
+        try hub.commit(final, updatingModel: {
+            do { _ = try hub.prepare([]) } catch EventHubError.preparationConflict { blockedPrepare = true } catch { }
+            do { try hub.commit(final, updatingModel: {}) } catch EventHubError.preparationConflict { blockedCommit = true } catch { }
+            hub.close() // A reentrant shutdown must wait until the model/journal boundary finishes.
+            model = 5
+        })
+        let batch = try await reader.value
+        try require(blockedPrepare && blockedCommit && model == 5 && batch.events.map(\.topic) == ["host.final"], "reentrant close interrupted the commit boundary")
+        try await expectError(EventHubError.closed) { try await hub.poll(waitMilliseconds: 0) }
+        print("PASS one-shot empty/competing preparations, identical-head owner binding, rejected preflight and deferred reentrant close")
+    }
+
+    static func checkFailedCommitPrerequisite() async throws {
+        let hub = try EventHub()
+        defer { hub.close() }
+        let cursor = hub.cursor
+        let reader = Task { try await hub.poll(after: cursor, waitMilliseconds: 1000) }
+        try await pending(hub, count: 1)
+        let prepared = try hub.prepare([EventPublication(topic: "host.changed")])
+        var assigned = false
+        do {
+            try hub.commit(prepared, preparingEffects: {
+                do {
+                    _ = try hub.publish(topic: "host.reentrant")
+                    throw Failure(message: "prerequisite allowed nested publication")
+                } catch EventHubError.preparationConflict { }
+                throw CancellationError()
+            }, updatingModel: { assigned = true })
+            throw Failure(message: "failed prerequisite committed")
+        } catch is CancellationError { }
+        try require(!assigned && hub.cursor == cursor && hub.pendingCount == 1, "failed prerequisite changed model, journal or readers")
+        do {
+            try hub.commit(prepared, updatingModel: { assigned = true })
+            throw Failure(message: "failed prerequisite could be implicitly replayed")
+        } catch EventHubError.preparationConflict { }
+        let fresh = try hub.prepare([EventPublication(topic: "host.recovered")])
+        try hub.commit(fresh, updatingModel: { assigned = true })
+        let delivered = try await reader.value
+        try require(assigned && delivered.events.map(\.topic) == ["host.recovered"], "fresh prerequisite recovery did not preserve waiting reader")
+        print("PASS failed synchronous prerequisite: no model/journal/reader effects, no implicit replay, fresh recovery")
+    }
+
+    static func checkOversizedAtomicRetention() async throws {
+        for largePayload in [false, true] {
+            let hub = try EventHub()
+            defer { hub.close() }
+            let start = hub.cursor
+            let matching = Task { try await hub.poll(after: start) }
+            let quiet = Task { try await hub.poll(after: start, filter: EventFilter(topics: ["quiet.*"])) }
+            try await pending(hub, count: 2)
+            let count = largePayload ? 150 : EventJournal.maximumRetainedEvents + 1
+            let payload: JSONValue = largePayload ? .string(String(repeating: "x", count: 15_000)) : .null
+            let prepared = try hub.prepare((0..<count).map { _ in EventPublication(topic: "busy.changed", payload: payload) })
+            try hub.commit(prepared, updatingModel: {})
+            for reader in [matching, quiet] {
+                do {
+                    _ = try await reader.value
+                    throw Failure(message: "over-retention atomic batch silently skipped unavailable history")
+                } catch EventJournalError.expiredCursor { }
+            }
+            try require(hub.pendingCount == 0 && hub.cursor != start, "atomic retention failed to release readers")
+        }
+        print("PASS explicit recovery for count/byte-expired atomic batches, including nonmatching pending readers")
+    }
+
+    static func checkImmediateLineageReplay() async throws {
+        let hub = try EventHub()
+        defer { hub.close() }
+        let start = hub.cursor
+        let firstLineage = OperationLineage(), secondLineage = OperationLineage()
+        let first = try hub.publish(topic: "host.first", lineage: firstLineage)
+        let second = try hub.publish(topic: "host.second", lineage: secondLineage)
+        let firstPage = try await hub.pollDelivery(after: start, limit: 1, waitMilliseconds: 0)
+        let secondPage = try await hub.pollDelivery(after: firstPage.batch.cursor, limit: 1, waitMilliseconds: 0)
+        try require(firstPage.batch.events == [first] && firstPage.lineages == [first.cursor: firstLineage], "first replay page lineage mismatch")
+        try require(secondPage.batch.events == [second] && secondPage.lineages == [second.cursor: secondLineage], "second replay page lineage mismatch")
+        print("PASS bounded immediate replay with distinct captured lineages across polls")
     }
 
     static let otherEpoch = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!

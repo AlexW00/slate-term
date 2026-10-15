@@ -132,6 +132,7 @@ private let inherited: [String: String] = ["SLATE_TERM_SOCKET": "/tmp/a", "SLATE
                                      "surface": .string("administrative"), "methods": .array([.string("config.patch")])])
     #expect(try APIGuards.supported(by: legacy) == APIGuards.legacyNames)
     #expect(try APIGuards.supported(by: legacy).contains("expectedWriteRevision") == false)
+    #expect(try APIGuards.supported(by: legacy).isDisjoint(with: ["expectedViewId", "expectedDocumentId"]))
     #expect(throws: RPCFailure.self) { try APIGuards.supported(by: .object(["identityGuards": .bool(true)])) }
     var modern = legacy.object!
     modern["guards"] = .array([.string("expectedInstanceId")])

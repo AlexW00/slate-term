@@ -7,12 +7,14 @@ public struct UnixClient: Sendable {
     public let path: String
     public let protocolVersion: Int
     public let timeoutSeconds: Int
-    public init(path: String, protocolVersion: Int = 1, timeoutSeconds: Int = 30) {
+    public let service: ServiceCredentials?
+    public init(path: String, protocolVersion: Int = 1, timeoutSeconds: Int = 30, service: ServiceCredentials? = nil) {
         self.path = path; self.protocolVersion = protocolVersion; self.timeoutSeconds = timeoutSeconds
+        self.service = service
     }
 
-    public func call(_ method: String, params: [String: JSONValue] = [:]) throws -> JSONValue {
-        try withSession { try $0.call(method, params: params) }
+    public func call(_ method: String, params: [String: JSONValue] = [:], metadata: RPCMetadata? = nil) throws -> JSONValue {
+        try withSession { try $0.call(method, params: params, metadata: metadata) }
     }
 
     /// Capability checks and dependent requests share the same handshaken peer. Never reconnect
@@ -33,22 +35,41 @@ public struct UnixClient: Sendable {
         try withSocketAddress(path) { address, length in
             guard connect(descriptor, address, length) == 0 else { throw SocketError.system("connect", errno) }
         }
-        _ = try Self.exchange(RPCRequest(id: .integer(1), method: "hello", params: ["protocolVersion": .integer(protocolVersion)]), descriptor)
+        var hello = service?.helloParams ?? [:]
+        hello["protocolVersion"] = .integer(protocolVersion)
+        let reply = try Self.exchange(RPCRequest(id: .integer(1), method: "hello", params: hello), descriptor)
+        try service?.validateReply(reply)
         return try body(session)
     }
 
     public final class Session {
         private var descriptor: Int32?
         private var nextID = 2
+        private var supportsMetadata: Bool?
         fileprivate init(descriptor: Int32) { self.descriptor = descriptor }
         deinit { if let descriptor { Darwin.close(descriptor) } }
 
-        public func call(_ method: String, params: [String: JSONValue] = [:]) throws -> JSONValue {
+        public func call(_ method: String, params: [String: JSONValue] = [:], metadata: RPCMetadata? = nil) throws -> JSONValue {
             guard let descriptor else { throw SocketError.disconnected }
+            if metadata != nil {
+                if supportsMetadata == nil {
+                    do { _ = try call("api.describe") }
+                    catch let failure as RPCFailure where failure.code == -32601 {
+                        throw RPCFailure(code: APIError.incompatible, message: "Host does not support request metadata")
+                    }
+                }
+                guard supportsMetadata == true else {
+                    throw RPCFailure(code: APIError.incompatible, message: "Host does not support request metadata version 1")
+                }
+            }
             guard nextID < Int.max else { close(); throw SocketError.invalidResponse }
-            let request = RPCRequest(id: .integer(nextID), method: method, params: params)
+            let request = RPCRequest(id: .integer(nextID), method: method, params: params, metadata: metadata)
             nextID += 1
-            do { return try UnixClient.exchange(request, descriptor) }
+            do {
+                let result = try UnixClient.exchange(request, descriptor)
+                if method == "api.describe" { supportsMetadata = result.object?["causation"]?.object?["version"] == .integer(1) }
+                return result
+            }
             catch let failure as RPCFailure { throw failure }
             catch { close(); throw error }
         }

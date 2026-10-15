@@ -29,16 +29,22 @@ public struct OperationLineage: Equatable, Sendable {
 public enum CausationAudience: Hashable, Sendable {
     case administrative(epoch: UUID)
     case plugin(epoch: UUID, registrationID: String, instanceID: String, viewID: UUID, documentGeneration: UUID)
+    case service(epoch: UUID, registrationID: String, recipient: ServiceEventRecipient)
 
     fileprivate var epoch: UUID {
         switch self {
-        case .administrative(let epoch), .plugin(let epoch, _, _, _, _): return epoch
+        case .administrative(let epoch), .plugin(let epoch, _, _, _, _), .service(let epoch, _, _): return epoch
         }
     }
 
     fileprivate var isBounded: Bool {
-        guard case .plugin(_, let registration, let instance, _, _) = self else { return true }
-        return boundedAdmissionIdentity(registration, maximum: 64) && boundedAdmissionIdentity(instance, maximum: 256)
+        switch self {
+        case .administrative: return true
+        case .plugin(_, let registration, let instance, _, _):
+            return boundedAdmissionIdentity(registration, maximum: 64) && boundedAdmissionIdentity(instance, maximum: 256)
+        case .service(_, let registration, _):
+            return boundedAdmissionIdentity(registration, maximum: 64)
+        }
     }
 }
 
@@ -86,9 +92,7 @@ public struct CausationReferences: Sendable {
         var token: String?
         for _ in 0..<4 {
             let candidate = makeToken()
-            if (1...64).contains(candidate.utf8.count), candidate.utf8.allSatisfy({
-                (65...90).contains($0) || (97...122).contains($0) || (48...57).contains($0) || $0 == 45 || $0 == 95
-            }), !records.contains(where: { $0.token == candidate }) { token = candidate; break }
+            if isValidCausationToken(candidate), !records.contains(where: { $0.token == candidate }) { token = candidate; break }
         }
         guard let token else { throw OperationAdmissionError.tokenUnavailable }
         if records.lazy.filter({ $0.audience == audience }).count >= maximumPerAudience,
@@ -103,7 +107,7 @@ public struct CausationReferences: Sendable {
     /// Missing, forged, expired and foreign-audience references deliberately share one error.
     public mutating func derive(from token: String, audience: CausationAudience, now: UInt64) throws -> OperationLineage {
         try expire(at: now)
-        guard token.utf8.count <= 64, audience.epoch == epoch,
+        guard isValidCausationToken(token), audience.epoch == epoch,
               let record = records.first(where: { $0.token == token && $0.audience == audience }) else {
             throw OperationAdmissionError.contextUnavailable
         }
@@ -130,7 +134,24 @@ public struct CausationReferences: Sendable {
 public enum MutationOrigin: Equatable, Sendable {
     case native, administrative, plugin(String)
 }
-public enum AdmissionAction: Sendable { case mutation, read, emergencyControl }
+public enum AdmissionAction: Sendable {
+    case mutation, read, emergencyControl, authenticatedIntegration
+
+    /// Explicit reads only: an arbitrary contributed command name never grants exemption.
+    public static func forMethod(_ method: String) -> Self {
+        // These handlers still require the private terminal-session credential. Run-input
+        // delivery belongs to an already admitted terminal.run, not a second mutation.
+        if method == "shell.update" || method == "shell.runInput" { return .authenticatedIntegration }
+        if ["service.ready", "plugins.service.stop", "plugins.service.disable"].contains(method) { return .emergencyControl }
+        let reads: Set<String> = ["version", "api.describe", "context.get", "context.inspect", "workspace.get", "workspace.snapshot",
+            "layout.get", "tabs.list", "panes.list", "pane.inspect", "window.list", "window.get", "command.list",
+            "terminal.capture", "terminal.wait", "panes.capture", "events.head", "events.poll", "settings.get", "storage.get",
+            "config.get", "config.validate", "palette.list", "plugins.list", "plugins.status", "plugins.logs", "plugins.settings.get",
+            "browser.get", "browser.snapshot", "browser.wait", "web.get", "web.snapshot", "web.wait",
+            "plugins.service.list", "plugins.service.status", "plugins.service.logs"]
+        return reads.contains(method) ? .read : .mutation
+    }
+}
 
 /// Token buckets aggregate all documents/views for a plugin ID. Global capacity also covers
 /// administrative roots. Classify/charge once at outer admission, not again during shared dispatch.

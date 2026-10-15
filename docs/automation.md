@@ -33,13 +33,51 @@ await workspace.terminal.wait({ contains: 'READY', timeoutMilliseconds: 5000 }, 
 
 A plugin defaults to its declared context. Explicit terminal IDs override its terminal history. Aborting or replacing the plugin document releases its waits; already accepted input cannot be undone. Tool-specific protocols and enriched context, including tmux integration, belong in extensions.
 
-## Browsers
+## Shared web panes
+
+`api.describe.webAutomation` advertises structured automation for browser and registered-plugin panes. The canonical RPCs are `web.get`, `.snapshot`, `.click`, `.fill`, `.select`, `.scroll`, `.wait`, and administrative `.screenshot`. Socket requests require an explicit pane; the CLI accepts `--pane` or a validated launching pane, not `--tab`/`--active` alone. These parameterized operations are not menu/picker actions.
+
+| Capability | Native menu / picker / shortcut | CLI / socket | Registered page |
+| --- | --- | --- | --- |
+| Structured `web` reads and DOM actions | No parameterless action | Yes | Yes, self or explicit pane |
+| `web.screenshot` | No parameterless action | Yes, absolute output path | Denied |
+| Direct `browser.navigate` / `browser.eval` RPCs | Navigation UI; no eval UI | Browser-only compatibility API | Not exposed directly; existing navigation commands remain compatible |
+
+```sh
+slate-term web get --pane p2
+slate-term web snapshot --pane p2
+slate-term web fill --pane p2 --selector '#name' --text 'Hello' \
+  --expected-view-id VIEW_ID --expected-document-id DOCUMENT_ID
+slate-term web click --pane p2 --ref SNAPSHOT_REF
+slate-term web screenshot --pane p2 --path /absolute/path/page.png
+```
+
+`pane.inspect` and `web.get` expose the same automation `{viewId, documentId}`. A document ID is null while unavailable; it is initialized from native document lifecycle independently of page bridge calls and is **not** a bridge credential/correlation ID. `web.get` also reports readiness, renderability, bounded URL/title, sampling time and pending work. Pane content-operation discovery uses the canonical web names; existing `browser.*` methods remain available separately.
+
+Selector-based click/fill/select and scroll without a ref require both `expectedViewId` and `expectedDocumentId`. A snapshot ref already binds its view and document; optional explicit guards must agree. Missing/partial/malformed guards fail closed. Refs are opaque: do not parse or construct them. Snapshot/wait reads may optionally carry guards. Cross-view refs, stale documents and replaced panes fail instead of retargeting. Read inspection again after a conflict; do not replay a mutation automatically.
+
+Registered pages use the same implementation:
+
+```js
+const page = await workspace.web.get(); // self by default
+await workspace.web.fill({selector: '#name', text: 'Hello',
+  expectedViewId: page.viewId, expectedDocumentId: page.documentId});
+const other = await workspace.web.snapshot({pane: 'p2'}); // explicit cross-pane target
+```
+
+Every helper accepts final `{signal, cause}` options. Cross-pane access is intentional for trusted registered controllers, not a new pane sandbox. Ordinary pages/subframes receive no bridge. Automation runs in a separate private content world; plugin origin restrictions, scoped data stores and bridge privileges stay in the plugin adapter. Browser navigation/address controls and ephemeral stores remain browser-owned.
+
+`web.get` can report an unavailable or nonrenderable target; DOM operations and screenshots require a ready, visible rendered pane and never reveal it implicitly. Zoom/hiding is not document retirement. Navigation, cached-history restoration, process exit and replacement invalidate pending work/refs. Screenshot output requires an explicit absolute local path and is socket-only. There is no `web.eval` or canonical plugin navigation API; existing administrative `browser.eval/navigate` remain browser-specific.
+
+Limits below apply to both adapters. Each view admits at most 32 logical DOM actions, including sleeping waits, and 32 outstanding platform submissions. Cancellation/timeout promptly releases callers but cannot cancel already-submitted JavaScript or snapshots: those submissions retain capacity until their callbacks or definitive process/view teardown. `pendingActions`, `pendingOperations` (caller continuations) and `pendingSubmissions` distinguish these lifetimes. An overload or uncertain response is not permission to retry a click.
+
+## Browser compatibility API
 
 ```sh
 slate-term browser navigate --pane p2 --url http://127.0.0.1:8080/
 slate-term browser snapshot --pane p2 --max-elements 128
 slate-term browser fill --pane p2 --selector '#name' --text '日本語'
-slate-term browser click --pane p2 --ref DOCUMENT:REFERENCE
+slate-term browser click --pane p2 --ref SNAPSHOT_REF
 slate-term browser select --pane p2 --selector '#choice' --value first
 slate-term browser scroll --pane p2 --y 600
 slate-term browser wait --pane p2 --selector '#result' --state visible --timeout-milliseconds 5000
@@ -50,7 +88,7 @@ RPC names match CLI actions (`browser.snapshot`, etc.). Element actions require 
 
 Snapshots return URL/title, document identity, viewport/scroll geometry, visible text, interactive element metadata and `truncated`. Elements include reference, tag/approximate role, name, enabled state, rectangle and viewport intersection, plus relevant value/checked/expanded state. Password values are omitted. This is a bounded DOM summary, **not the platform accessibility tree**. Defaults: 128 elements (configurable 1–256), 4,000 visited elements, 2,048 visited text nodes, 16,384 UTF-16 text units and a 350,000-byte element budget. Names/values are clipped to 256/512 UTF-16 units. Truncation is reported. At most 2,048 weak element references are retained; refresh the snapshot if one expires.
 
-References are document-scoped. Navigation, reload, cached-history restoration and pane replacement do not revive old references. A detached element cannot be mutated through its old reference. Helpers live in a retained private WebKit content world, not in the page's JavaScript namespace. Ordinary browser pages never receive `workspace` or the plugin bridge.
+References are view- and document-scoped. Navigation, reload, cached-history restoration and pane replacement do not revive old references. A detached element cannot be mutated through its old reference. Helpers live in a retained private WebKit content world, not in the page's JavaScript namespace. Ordinary browser pages never receive `workspace` or the plugin bridge.
 
 Click/fill/select reject hidden, disabled, inert or covered targets and scroll them into view. Fill supports text-like inputs, textareas and contenteditable elements; readonly fields are rejected. Input and change events are dispatched. Select validates every requested value before changing selection; values must uniquely identify enabled options. Up to 64 values of 4,096 UTF-8 bytes each; fill text is limited to 65,536 UTF-8 bytes.
 

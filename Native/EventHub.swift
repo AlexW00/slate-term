@@ -3,12 +3,14 @@ import SlateTermCore
 
 nonisolated enum EventHubError: Error, Equatable, Sendable, LocalizedError {
     case closed
+    case preparationConflict
     case invalidTimeout(Int)
     case overloaded(maximumPending: Int)
 
     var errorDescription: String? {
         switch self {
         case .closed: return "Event hub is closed"
+        case .preparationConflict: return "Event publication changed during preparation or commit"
         case .invalidTimeout(let milliseconds):
             return "Event poll wait must be 0...25000 milliseconds (received \(milliseconds))"
         case .overloaded(let maximumPending):
@@ -29,9 +31,54 @@ final class EventHub {
     private var journal: EventJournal
     private var pending: [UUID: PendingPoll] = [:]
     private var isClosed = false
+    private var committing = false
+    private var closeAfterCommit = false
+    private var publicationGeneration = UUID()
+    private let identity = UUID()
 
-    init(epoch: UUID = UUID()) throws {
-        journal = try EventJournal(epoch: epoch)
+    init(epoch: UUID = UUID(), reservedDeliveryBytes: Int = 0) throws {
+        journal = try EventJournal(epoch: epoch, reservedDeliveryBytes: reservedDeliveryBytes)
+    }
+
+    struct PreparedBatch {
+        fileprivate let owner: UUID
+        fileprivate let expectedCursor: String
+        fileprivate let generation: UUID
+        fileprivate let journal: EventJournal
+    }
+    struct DeliveryBatch: Sendable {
+        let batch: EventBatch
+        let lineages: [String: OperationLineage]
+    }
+
+    func prepare(_ publications: [EventPublication]) throws -> PreparedBatch {
+        guard !isClosed else { throw EventHubError.closed }
+        guard !committing else { throw EventHubError.preparationConflict }
+        var candidate = journal
+        try candidate.appendBatch(publications)
+        return PreparedBatch(owner: identity, expectedCursor: cursor, generation: publicationGeneration, journal: candidate)
+    }
+
+    /// No suspension or fallible work inside updatingModel: only assign the prepared model
+    /// and revision values. Readers resume only after all three authoritative values agree.
+    // preparingEffects is reserved for short synchronous, failure-atomic prerequisites (such
+    // as catalog replacement). It must not publish, mutate the model or spin a run loop.
+    func commit(_ prepared: PreparedBatch, preparingEffects: () throws -> Void = {}, updatingModel: () -> Void) throws {
+        guard !isClosed else { throw EventHubError.closed }
+        guard !committing, prepared.owner == identity, prepared.expectedCursor == cursor,
+              prepared.generation == publicationGeneration else { throw EventHubError.preparationConflict }
+        committing = true
+        defer {
+            committing = false
+            if closeAfterCommit { closeAfterCommit = false; close() }
+        }
+        // An admitted attempt consumes the preparation even if a prerequisite fails. The
+        // caller must freshly prepare, never implicitly replay possibly external effects.
+        publicationGeneration = UUID()
+        try preparingEffects()
+        updatingModel()
+        journal = prepared.journal
+        resumeReaders()
     }
 
     @discardableResult
@@ -41,13 +88,21 @@ final class EventHub {
         source: EventSource = .host,
         tab: TabID? = nil,
         pane: PaneID? = nil,
-        targetInstanceId: String? = nil
+        targetInstanceId: String? = nil,
+        lineage: OperationLineage? = nil
     ) throws -> WorkspaceEvent {
         guard !isClosed else { throw EventHubError.closed }
+        guard !committing else { throw EventHubError.preparationConflict }
         let event = try journal.append(
             topic: topic, payload: payload, source: source, tab: tab, pane: pane,
-            targetInstanceId: targetInstanceId
+            targetInstanceId: targetInstanceId, lineage: lineage
         )
+        publicationGeneration = UUID()
+        resumeReaders()
+        return event
+    }
+
+    private func resumeReaders() {
         for id in Array(pending.keys) {
             guard var reader = pending[id] else { continue }
             do {
@@ -57,13 +112,18 @@ final class EventHub {
                     reader.cursor = batch.cursor
                     pending[id] = reader
                 } else {
-                    finish(id, with: .success(batch))
+                    finish(id, with: .success(delivery(batch)))
                 }
             } catch {
                 finish(id, with: .failure(error))
             }
         }
-        return event
+    }
+
+    private func delivery(_ batch: EventBatch) -> DeliveryBatch {
+        DeliveryBatch(batch: batch, lineages: Dictionary(uniqueKeysWithValues: batch.events.compactMap { event in
+            journal.lineage(for: event.cursor).map { (event.cursor, $0) }
+        }))
     }
 
     func poll(
@@ -72,6 +132,11 @@ final class EventHub {
         limit: Int = 128,
         waitMilliseconds: Int = 20_000
     ) async throws -> EventBatch {
+        try await pollDelivery(after: after, filter: filter, limit: limit, waitMilliseconds: waitMilliseconds).batch
+    }
+
+    func pollDelivery(after: String? = nil, filter: EventFilter = .all, limit: Int = 128,
+                      waitMilliseconds: Int = 20_000) async throws -> DeliveryBatch {
         guard !isClosed else { throw EventHubError.closed }
         guard (0...Self.maximumWaitMilliseconds).contains(waitMilliseconds) else {
             throw EventHubError.invalidTimeout(waitMilliseconds)
@@ -79,7 +144,7 @@ final class EventHub {
         try Task.checkCancellation()
         // EventFilter validates at construction; the journal owns cursor and batch-limit validation.
         let batch = try journal.batch(after: after, filter: filter, limit: limit)
-        if !batch.events.isEmpty || waitMilliseconds == 0 { return batch }
+        if !batch.events.isEmpty || waitMilliseconds == 0 { return delivery(batch) }
         guard pending.count < Self.maximumPendingCallers else {
             throw EventHubError.overloaded(maximumPending: Self.maximumPendingCallers)
         }
@@ -111,6 +176,7 @@ final class EventHub {
 
     func close() {
         guard !isClosed else { return }
+        if committing { closeAfterCommit = true; return }
         isClosed = true
         for id in Array(pending.keys) { finish(id, with: .failure(EventHubError.closed)) }
     }
@@ -119,13 +185,13 @@ final class EventHub {
         guard let reader = pending[id] else { return }
         do {
             let batch = try journal.batch(after: reader.cursor, filter: reader.filter, limit: reader.limit)
-            finish(id, with: .success(batch))
+            finish(id, with: .success(delivery(batch)))
         } catch {
             finish(id, with: .failure(error))
         }
     }
 
-    private func finish(_ id: UUID, with result: Result<EventBatch, Error>) {
+    private func finish(_ id: UUID, with result: Result<DeliveryBatch, Error>) {
         // Remove before resuming; old deadline/cancellation tasks can never resolve a successor.
         guard let reader = pending.removeValue(forKey: id) else { return }
         reader.timer.cancel()
@@ -136,7 +202,7 @@ final class EventHub {
         var cursor: String
         let filter: EventFilter
         let limit: Int
-        let continuation: CheckedContinuation<EventBatch, Error>
+        let continuation: CheckedContinuation<DeliveryBatch, Error>
         let timer: Task<Void, Never>
     }
 }

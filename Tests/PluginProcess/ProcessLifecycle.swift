@@ -1,6 +1,13 @@
 import Darwin
 import Foundation
 
+/// Test-only exclusive transfer: after construction only the chosen release queue touches it.
+private nonisolated final class ProcessReleaseBox: @unchecked Sendable {
+    private var process: PluginProcess?
+    init(_ process: PluginProcess) { self.process = process }
+    func release() { process = nil }
+}
+
 @main
 struct ProcessLifecycle {
     @MainActor
@@ -27,6 +34,7 @@ struct ProcessLifecycle {
         try require(output.lastIOError == nil, "EOF drain used a canceled descriptor")
         var status: Int32 = 0
         try require(waitpid(output.pid, &status, WNOHANG) == -1 && errno == ECHILD, "leader reaped")
+        try require(output.cleanupFinished && output.cleanupConfirmed, "normal exit cleanup was not observed")
         await output.stop()
         output.close()
         try require(exits.count == 1, "no duplicate exit")
@@ -103,9 +111,12 @@ struct ProcessLifecycle {
         try await eventually("close ready") { !closed.stdoutTail.isEmpty }
         var closeCallbacks = 0
         closed.onExit = { _ in closeCallbacks += 1 }
+        try require(!closed.cleanupFinished && !closed.cleanupConfirmed, "live process claimed cleanup")
         closed.close()
         closed.close()
         try require(closed.state == .closed, "close state")
+        try await eventually("closed leader reap observed") { closed.cleanupFinished }
+        try require(closed.cleanupConfirmed, "closed leader cleanup not confirmed")
         try await eventually("close killed") { !isLive(closed.pid) }
         try require(closeCallbacks == 0, "closed process callbacks")
         var destroyed: PluginProcess? = try PluginProcess(executable: executable, arguments: ["ignore-term"], directory: nil, environment: [:])
@@ -116,6 +127,18 @@ struct ProcessLifecycle {
         try require(weakProcess == nil, "source retained owner")
         try await eventually("deinit killed") { !isLive(destroyedPID) }
         print("PASS synchronous close and destruction")
+
+        var transferred: PluginProcess? = try PluginProcess(executable: "/bin/sleep", arguments: ["60"], directory: nil, environment: [:])
+        let transferredPID = transferred!.pid
+        let receipt = transferred!.cleanupObservation
+        weak let weakTransferred = transferred
+        let releaseBox = ProcessReleaseBox(transferred!)
+        transferred = nil
+        try releaseWithoutMainLoop(releaseBox)
+        try require(weakTransferred == nil, "off-actor destruction was deferred")
+        try await eventually("off-actor cleanup receipt") { receipt.snapshot.finished }
+        try require(receipt.snapshot.confirmed && !isLive(transferredPID), "receipt did not survive off-actor destruction")
+        print("PASS receipt survives synchronous off-actor destruction")
 
         let reentrant = try PluginProcess(executable: "/bin/sh", arguments: ["-c", "printf ready; exec /bin/sleep 60"], directory: nil, environment: [:])
         var reentrantOutputs = 0
@@ -141,6 +164,15 @@ struct ProcessLifecycle {
         try await eventually("descriptors released") { descriptorCount() <= descriptorsBefore + 2 }
         print("PASS canceled sources release descriptors")
         print("PASS all plugin process lifecycle checks")
+    }
+
+    /// A synchronous fixture deliberately withholds the main loop while another thread
+    /// destroys its exclusively transferred owner. Production code never waits this way.
+    @MainActor
+    private static func releaseWithoutMainLoop(_ box: ProcessReleaseBox) throws {
+        let released = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .utility).async { box.release(); released.signal() }
+        try require(released.wait(timeout: .now() + 2) == .success, "off-actor destruction blocked on the main actor")
     }
 
     @MainActor

@@ -4,7 +4,9 @@ import SlateTermCore
 /// Main-document DOM operations in a private WebKit content world, never a page bridge.
 @MainActor
 enum BrowserAutomation {
-    static func prepareScript() throws -> String { try script(name: "prepare", parameters: [:], documentID: "") }
+    static func prepareScript(viewID: String) throws -> String {
+        try script(name: "prepare", parameters: ["viewId": .string(viewID)], documentID: "")
+    }
 
     static func script(for action: BrowserAction, documentID: String) throws -> String {
         try script(name: action.kind == .wait ? "probe" : action.kind.rawValue, parameters: action.parameters, documentID: documentID)
@@ -24,8 +26,9 @@ enum BrowserAutomation {
     }
     let state=globalThis.__slateBrowserAutomation;
     if(action==='prepare'){
-      if(!state){state={epoch:Array.from(crypto.getRandomValues(new Uint8Array(16)),byte=>byte.toString(16).padStart(2,'0')).join(''),next:0,ids:new WeakMap(),refs:new Map()};globalThis.__slateBrowserAutomation=state;}
-      return {documentId:state.epoch};
+      if(!state){state={viewId:args.viewId,epoch:Array.from(crypto.getRandomValues(new Uint8Array(16)),byte=>byte.toString(16).padStart(2,'0')).join(''),next:0,ids:new WeakMap(),refs:new Map()};globalThis.__slateBrowserAutomation=state;}
+      if(state.viewId!==args.viewId)throw new Error('Web view identity changed');
+      return {viewId:state.viewId,documentId:state.epoch};
     }
     if(!state||state.epoch!==epoch)throw new Error('Stale browser document; take a new snapshot');
     let clipped=false;
@@ -49,7 +52,7 @@ enum BrowserAutomation {
     const ref=element=>{
       let id=state.ids.get(element);
       if(!id||!state.refs.has(id)){
-        id=epoch+':'+(++state.next);state.ids.set(element,id);state.refs.set(id,new WeakRef(element));
+        id=state.viewId+':'+epoch+':'+(++state.next);state.ids.set(element,id);state.refs.set(id,new WeakRef(element));
         if(state.refs.size>2048)state.refs.delete(state.refs.keys().next().value);
       }
       return id;
@@ -57,7 +60,7 @@ enum BrowserAutomation {
     const target=(required=true)=>{
       let element;
       if(args.ref!==undefined){
-        if(!args.ref.startsWith(epoch+':')||!state.refs.has(args.ref))throw new Error('Stale element reference; take a new snapshot');
+        if(!args.ref.startsWith(state.viewId+':'+epoch+':')||!state.refs.has(args.ref))throw new Error('Stale element reference; take a new snapshot');
         element=state.refs.get(args.ref).deref();
         if(!element?.isConnected)element=null;
       }else if(args.selector!==undefined){
@@ -110,24 +113,24 @@ enum BrowserAutomation {
         if(parent&&!parent.closest('script,style,noscript,template')&&shown(parent))text+=clip(node.nodeValue,Math.max(0,16384-text.length))+' ';
       }
       truncated=truncated||location.href.length>8192||document.title.length>512;
-      return {url:clip(location.href,8192),title:clip(document.title,512),documentId:epoch,
+      return {url:clip(location.href,8192),title:clip(document.title,512),viewId:state.viewId,documentId:epoch,
         viewport:{width:innerWidth,height:innerHeight},scroll:{x:scrollX,y:scrollY},text:clip(text,16384),elements,truncated:truncated||clipped};
     }
     if(action==='probe'){
       const element=target(false),visible=shown(element);
       const matched={attached:!!element,detached:!element,visible,hidden:!visible}[args.state];
-      return {matched,state:args.state,documentId:epoch};
+      return {matched,state:args.state,viewId:state.viewId,documentId:epoch};
     }
     if(action==='scroll'){
       const element=target(args.ref!==undefined||args.selector!==undefined);
       (element??window).scrollBy({left:args.x,top:args.y,behavior:'instant'});
-      return {x:element?element.scrollLeft:scrollX,y:element?element.scrollTop:scrollY,documentId:epoch};
+      return {x:element?element.scrollLeft:scrollX,y:element?element.scrollTop:scrollY,viewId:state.viewId,documentId:epoch};
     }
     const element=target();
     if(action==='click'){
       if(typeof element.click!=='function')throw new Error('Element does not support click');
       actionable(element);
-      element.click();return {performed:true,documentId:epoch};
+      element.click();return {performed:true,viewId:state.viewId,documentId:epoch};
     }
     if(action==='fill'){
       if(element.readOnly)throw new Error('Element is read-only');
@@ -139,7 +142,7 @@ enum BrowserAutomation {
       element.focus({preventScroll:true});
       if(prototype)Object.getOwnPropertyDescriptor(prototype,'value').set.call(element,args.text);
       else element.textContent=args.text;
-      changed(element);return {performed:true,documentId:epoch};
+      changed(element);return {performed:true,viewId:state.viewId,documentId:epoch};
     }
     if(action==='select'){
       if(!(element instanceof HTMLSelectElement))throw new Error('Select requires a select element');
@@ -152,7 +155,7 @@ enum BrowserAutomation {
       }
       actionable(element);
       for(const option of options)option.selected=selected.has(option);
-      changed(element);return {performed:true,values:Array.from(element.selectedOptions,option=>option.value),documentId:epoch};
+      changed(element);return {performed:true,values:Array.from(element.selectedOptions,option=>option.value),viewId:state.viewId,documentId:epoch};
     }
     throw new Error('Unsupported browser action');
     """#

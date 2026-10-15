@@ -7,13 +7,14 @@ public enum APIError {
     public static let forbidden = -32052
     public static let incompatible = -32053
     public static let settingsWriteFailed = -32054
+    public static let serviceSessionUnavailable = -32059
 }
 
 public enum APIGuards {
     /// Reserved routing preconditions. Contributed commands may still define other
     /// argument names beginning with "expected"; those are not host safety guards.
     public static let legacyNames: Set<String> = ["expectedInstanceId", "expectedAnchorSessionId", "expectedWorkspaceRevision", "expectedLayoutRevision", "expectedSourceRevision"]
-    public static let names = legacyNames.union(["expectedWriteRevision"])
+    public static let names = legacyNames.union(["expectedWriteRevision", "expectedViewId", "expectedDocumentId"])
 
     public static func supported(by capabilities: JSONValue) throws -> Set<String> {
         guard let object = capabilities.object, object["identityGuards"] == .bool(true) else {
@@ -36,7 +37,7 @@ public enum APIGuards {
     }
 }
 
-public struct WorkspaceChange: Sendable {
+public struct WorkspaceChange: Equatable, Sendable {
     public let topic: String
     public let tab: TabID?
     public let pane: PaneID?
@@ -59,6 +60,7 @@ public struct WorkspaceRevisions: Sendable {
     }
 
     public func layoutRevision(_ tab: TabID) -> String? { layouts[tab] }
+    func represents(_ workspace: Workspace) -> Bool { previous == workspace }
 
     public func requireWorkspace(_ expected: String) throws {
         guard expected == revision else { throw RPCFailure(code: APIError.conflict, message: "Workspace changed; inspect again before retrying") }
