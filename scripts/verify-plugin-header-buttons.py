@@ -79,7 +79,15 @@ with tempfile.TemporaryDirectory(prefix='slate-header-buttons-', dir='/tmp') as 
                 count = len(cli('plugins', 'status', 'header-tools'))
                 rpc('debug.paneHeader', pane=pane, clickAction='plugin.header-tools.header.' + button)
                 assert len(cli('plugins', 'status', 'header-tools')) == count, 'Busy action launched a duplicate'
-                eventually('Command completes and buttons re-enable', lambda: all(a['enabled'] for a in header(pane)['headerActions']))
+                try:
+                    eventually('Command completes and buttons re-enable', lambda: all(a['enabled'] for a in header(pane)['headerActions']))
+                except AssertionError:
+                    print('HEADER_COMPLETION_DIAGNOSTIC', json.dumps({
+                        'pane': pane, 'button': button, 'header': header(pane),
+                        'commands': cli('plugins', 'status', 'header-tools'),
+                        'workspace': rpc('debug.inspect')
+                    }), flush=True)
+                    raise
                 assert rpc('workspace.get') == before, 'Header callback changed focus or layout before its script requested it'
                 assert rpc('debug.commandClipboard') is None, 'Header checks must not touch the clipboard'
 

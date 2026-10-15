@@ -214,7 +214,9 @@ with tempfile.TemporaryDirectory(prefix='slate-picker-', dir='/tmp') as temporar
             rpc('debug.key', chord='cmd+k')
             picker(query='split right')
             cli('panes', 'close', '--pane', target, '--force')
-            assert picker()['visible'] and picker()['results'] == []
+            state = picker()
+            # Global actions such as Spotlight may fuzzy-match; stale split targets must not.
+            assert state['visible'] and not any(r['id'].startswith('split.') for r in state['results']), state
             key('escape')
             # Running plugin commands update availability without reopening the picker.
             rpc('plugins.register', manifest=dict(id='busy', title='Busy Fixture', commands=[
@@ -283,7 +285,7 @@ with tempfile.TemporaryDirectory(prefix='slate-picker-', dir='/tmp') as temporar
                 cli('tabs', 'close', '--tab', tab['id'], '--force')
             cli('command', 'run', 'command.picker')
             state = picker(query='split right')
-            assert state['visible'] and state['results'] == []
+            assert state['visible'] and not any(r['id'].startswith('split.') for r in state['results']), state
             picker(query='new window')
             assert picker()['selected'] == 'window.new'
             key('return')

@@ -26,7 +26,7 @@ for oversized in [False, True]:
                 expectedLayoutRevision=app.rpc('pane.inspect', pane='p1')['layoutRevision'])
         app.rpc('debug.activate', tab='t1')
         eventually('owned editor window active', lambda: app.rpc('debug.inspect')['applicationActive'])
-        title = 'x' * 4097 if oversized else 'native completion after normalization'
+        title = 'x' * 4097 if oversized else 'unconfirmed rename during normalization'
         app.rpc('debug.paneHeader', pane='p2', beginRename=True, draft=title)
         cursor = app.rpc('events.head')['cursor']
         app.rpc('debug.nativeLayoutProbe', pane='p2', arm=True)
@@ -36,15 +36,13 @@ for oversized in [False, True]:
         assert probe['reentrantErrorCode'] == -32050, probe
         assert not app.rpc('debug.paneHeader', pane='p2')['editing']
         info = app.rpc('pane.inspect', pane='p2')
-        assert info['manualTitle'] == (None if oversized else title), info
+        # Reparenting cancels the popover draft, including invalid drafts, without an implicit save.
+        assert info['manualTitle'] is None, info
         emitted = app.rpc('events.poll', after=cursor, topics=['host.layout.resized', 'host.pane.title.changed'], waitMilliseconds=0)['events']
         resized = [e for e in emitted if e['topic'] == 'host.layout.resized']
         renamed = [e for e in emitted if e['topic'] == 'host.pane.title.changed']
         assert resized and len({e['payload']['operationId'] for e in resized}) == 1, emitted
-        assert len(renamed) == (0 if oversized else 1), emitted
-        if renamed:
-            assert renamed[0]['payload']['operationId'] != resized[0]['payload']['operationId']
-            assert renamed[0]['payload']['beforeWorkspaceRevision'] == resized[0]['payload']['workspaceRevision']
+        assert not renamed, emitted
         assert app.process.poll() is None
 
-print('PASS normalization reentrancy: geometry withholding, mutation refusal, deferred title correlation, oversized draft without modal')
+print('PASS normalization reentrancy: geometry withholding, mutation refusal, unconfirmed/oversized rename cancellation without title events or modal errors')

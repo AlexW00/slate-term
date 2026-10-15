@@ -31,9 +31,9 @@ with tempfile.TemporaryDirectory(prefix="slate-term-mutations-") as temporary:
     directory = pathlib.Path(temporary)
     shutil.copy2(ROOT / "Package.swift", directory)
     shutil.copytree(ROOT / "Sources", directory / "Sources")
-    shutil.copytree(ROOT / "Tests/SlateTermCoreTests", directory / "Tests/SlateTermCoreTests")
-    shutil.copytree(ROOT / "Tests/SlateTermIPCTests", directory / "Tests/SlateTermIPCTests")
-    shutil.copytree(ROOT / "Tests/SlateTermSettingsTests", directory / "Tests/SlateTermSettingsTests")
+    # SwiftPM validates every declared target even when --filter selects only model tests.
+    for tests in (ROOT / "Tests").glob("SlateTerm*Tests"):
+        shutil.copytree(tests, directory / "Tests" / tests.name)
     for name, path, original, broken, test in MUTANTS:
         target = directory / path
         source = target.read_text()

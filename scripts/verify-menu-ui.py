@@ -43,6 +43,17 @@ with tempfile.TemporaryDirectory(prefix='slate-menu-', dir='/tmp') as temporary:
     def rpc(method, **params):
         return cli('rpc', method, '--params', json.dumps(params))
 
+    def press(chord):
+        # Other applications can take focus between assertions on an actively used desktop.
+        # Reacquire our captured window before one key delivery; never replay a mutation.
+        tab = rpc('workspace.get')['keyTabID']
+        rpc('debug.activate', tab=tab)
+        def owns_focus():
+            state = rpc('debug.inspect')
+            return state['applicationActive'] and any(w['tabId'] == tab and w['key'] for w in state['windows'])
+        eventually('owned keyboard target', owns_focus)
+        rpc('debug.key', tab=tab, chord=chord, dispatch=True)
+
     def start(log):
         global app
         ready.unlink(missing_ok=True)
@@ -87,7 +98,9 @@ with tempfile.TemporaryDirectory(prefix='slate-menu-', dir='/tmp') as temporary:
                     if item['children']:
                         check(item['children'])
                     else:
-                        if item.get('command') in {'pane.rename', 'pane.copyID', 'appearance.auto', 'appearance.light', 'appearance.dark',
+                        if item.get('command') in {'layouts.edit', 'layouts.openWindow', 'layouts.replaceWindow',
+                                                   'layouts.captureWindow', 'layouts.launcher', 'layouts.folder',
+                                                   'pane.rename', 'pane.copyID', 'appearance.auto', 'appearance.light', 'appearance.dark',
                                                    'terminal.font.increase', 'terminal.font.decrease', 'terminal.font.reset'}:
                             assert item['key'] == '', 'This action intentionally has no default shortcut'
                             continue
@@ -100,33 +113,33 @@ with tempfile.TemporaryDirectory(prefix='slate-menu-', dir='/tmp') as temporary:
             assert any(item.get('command') == 'pane.rename' for item in workspace['children'])
             zoom = next(item for item in groups['Layout']['children'] if item.get('command') == 'pane.zoom')
             assert zoom['title'] == 'Maximize Pane', zoom
-            rpc('debug.key', chord='cmd+shift+return', dispatch=True)
+            press('cmd+shift+return')
             zoomed_tree = rpc('debug.menuTree')
             zoomed_workspace = next(item for item in zoomed_tree if item['title'] == 'Workspace')
             zoomed_layout = next(item for item in zoomed_workspace['children'] if item['title'] == 'Layout')
             assert next(item for item in zoomed_layout['children'] if item.get('command') == 'pane.zoom')['title'] == 'Restore Pane Size'
-            rpc('debug.key', chord='cmd+shift+return', dispatch=True)
-            rpc('debug.key', chord='cmd+alt+d', dispatch=True)
+            press('cmd+shift+return')
+            press('cmd+alt+d')
             layout = cli('layout', 'get')
             assert layout.get('axis') == 'horizontal' and layout.get('first') == {'kind': 'pane', 'pane': 'p2'}, (layout, rpc('debug.inspect'), rpc('config.get')['current']['keybind'])
-            rpc('debug.key', chord='cmd+alt+right', dispatch=True)
+            press('cmd+alt+right')
             assert rpc('workspace.get')['tabs'][0]['focusedPane'] == 'p1'
-            rpc('debug.key', chord='cmd+alt+left', dispatch=True)
+            press('cmd+alt+left')
             assert rpc('workspace.get')['tabs'][0]['focusedPane'] == 'p2'
-            rpc('debug.key', chord='cmd+alt+shift+d', dispatch=True)
+            press('cmd+alt+shift+d')
             assert len(cli('panes', 'list')) == 3
-            rpc('debug.key', chord='cmd+alt+down', dispatch=True)
+            press('cmd+alt+down')
             assert rpc('workspace.get')['tabs'][0]['focusedPane'] == 'p2'
-            rpc('debug.key', chord='cmd+alt+up', dispatch=True)
+            press('cmd+alt+up')
             assert rpc('workspace.get')['tabs'][0]['focusedPane'] == 'p3'
-            rpc('debug.key', chord='cmd+shift+e', dispatch=True)
+            press('cmd+shift+e')
             assert abs(cli('layout', 'get')['fraction'] - 2 / 3) < 0.001
-            rpc('debug.key', chord='cmd+shift+r', dispatch=True)
+            press('cmd+shift+r')
             for pane in ['p2', 'p3']:
                 cli('panes', 'close', '--pane', pane, '--force')
 
             detached_tab = cli('tabs', 'new')['tabId']
-            rpc('debug.key', chord='cmd+ctrl+n', dispatch=True)
+            press('cmd+ctrl+n')
             assert len(rpc('workspace.get')['groups']) == 2
             assert rpc('workspace.get')['keyTabID'] == detached_tab
             cli('tabs', 'close', '--tab', detached_tab, '--force')
@@ -134,12 +147,12 @@ with tempfile.TemporaryDirectory(prefix='slate-menu-', dir='/tmp') as temporary:
             rpc('config.reload')
             attached_tab = cli('tabs', 'new')['tabId']
             before_unbound = rpc('workspace.get')['groups']
-            rpc('debug.key', chord='cmd+ctrl+n', dispatch=True)
+            press('cmd+ctrl+n')
             assert rpc('workspace.get')['groups'] == before_unbound, 'Unbound native detach still consumed the shortcut'
             cli('tabs', 'close', '--tab', attached_tab, '--force')
             before_copy = rpc('workspace.get')
             assert rpc('debug.commandClipboard') is None
-            rpc('debug.key', chord='cmd+shift+j', dispatch=True)
+            press('cmd+shift+j')
             assert rpc('debug.commandClipboard') == 'p1'
             assert rpc('workspace.get') == before_copy
 

@@ -151,7 +151,9 @@ try:
                 assert len(cli("tabs", "list")) == 1, "A retired document request reached the host"
                 evaluate("(async()=>{window.seenEvents=[];window.stopEvents=await workspace.subscribe(event=>window.seenEvents.push(event),{topics:['test.scope'],waitMilliseconds:25000,onError:error=>window.subscriptionError=String(error)});return true})()")
                 eventually("plugin subscription is polling", lambda: rpc("events.head")["pendingPolls"] == 1)
-                rpc("events.emit", topic="test.scope", tab="t999", payload="foreign-tab")
+                foreign_tab = cli("tabs", "new")["tabId"]
+                rpc("events.emit", topic="test.scope", tab=foreign_tab, payload="foreign-tab")
+                cli("tabs", "close", "--tab", foreign_tab, "--force")
                 rpc("events.emit", topic="test.scope", payload="broadcast")
                 eventually("plugin receives its scoped event", lambda: evaluate("window.seenEvents.length===1 && window.seenEvents[0].payload==='broadcast'"))
                 evaluate("(window.stopEvents(),true)")
@@ -203,14 +205,15 @@ try:
                 assert evaluate("workspace.call('shell.update',{}).then(()=> 'unexpected',error=>error.code)") == -32040
                 evaluate("workspace.storage.set('note','保存したメモ')")
                 assert evaluate("workspace.storage.get('note')") == "保存したメモ"
-                assert cli("panes", "split", "--down", "--pane", "p2")["paneId"] == "p3"
-                cli("panes", "type", "--pane", "p3", "--type", "notes", "--force")
-                eventually("second scoped view", lambda: evaluate("window.fixtureReady===true", pane="p3"))
-                assert info()["instanceId"] == info("p3")["instanceId"], "Tab-scoped views did not share a logical instance"
-                assert info()["viewId"] != info("p3")["viewId"]
-                assert evaluate("workspace.storage.get('note')", "p3") == "保存したメモ"
+                sibling = cli("panes", "split", "--down", "--pane", "p2")["paneId"]
+                cli("panes", "type", "--pane", sibling, "--type", "notes", "--force")
+                eventually("second scoped view", lambda: evaluate("window.fixtureReady===true", pane=sibling))
+                assert info()["instanceId"] == info(sibling)["instanceId"], "Tab-scoped views did not share a logical instance"
+                assert info()["viewId"] != info(sibling)["viewId"]
+                assert evaluate("workspace.storage.get('note')", sibling) == "保存したメモ"
                 # A different tab has a different logical instance. Directed delivery
-                # crosses the tab filter but never leaks to a different recipient.
+                # crosses the tab filter but defaults to the selected recipient. Explicit
+                # observation of another tab/recipient is available to every trusted client.
                 old_panes = {pane["id"] for pane in cli("panes", "list")}
                 second_tab = cli("tabs", "new")
                 new_panes = {pane["id"] for pane in cli("panes", "list")} - old_panes
@@ -221,7 +224,8 @@ try:
                 for target in ["p2", other_pane]:
                     evaluate("(async()=>{window.directEvents=[];window.stopDirect=await workspace.subscribe(event=>window.directEvents.push(event),{topics:['test.direct'],waitMilliseconds:25000});return true})()", target)
                 eventually("two directed subscriptions", lambda: rpc("events.head")["pendingPolls"] == 2)
-                assert "scoped" in evaluate("workspace.call('events.poll',{tab:'t1',waitMilliseconds:0}).then(()=> 'unexpected',error=>String(error))", other_pane)
+                assert evaluate("workspace.call('events.poll',{tab:'t1',waitMilliseconds:0}).then(batch=>batch.events.length)", other_pane) == 0
+                before_directed = rpc("events.head")["cursor"]
                 directed = evaluate("workspace.emit('test.direct',{text:'private'},{targetInstanceId:" + json.dumps(info()["instanceId"]) + "})", other_pane)
                 eventually("directed event crosses tabs", lambda: evaluate("window.directEvents.length===1"))
                 delivered = evaluate("window.directEvents[0]")
@@ -229,6 +233,10 @@ try:
                 assert isinstance(reference, str) and 1 <= len(reference) <= 64, reference
                 assert delivered == directed, (delivered, directed)
                 assert evaluate("window.directEvents.length", other_pane) == 0
+                observed = evaluate("workspace.call('events.poll'," + json.dumps({
+                    "after": before_directed, "topics": ["test.direct"], "recipient": "all", "scope": "global", "waitMilliseconds": 0
+                }) + ")", other_pane)["events"]
+                assert len(observed) == 1 and observed[0]["cursor"] == directed["cursor"], observed
                 assert directed["source"]["instanceId"] == info(other_pane)["instanceId"] != info()["instanceId"]
                 evaluate("(window.stopDirect(),true)")
                 eventually("one subscription remains", lambda: rpc("events.head")["pendingPolls"] == 1)
@@ -305,8 +313,8 @@ try:
                 assert evaluate("workspace.storage.get('note')") == "保存したメモ"
                 failed_unregister_preserves_views()
                 assert evaluate("workspace.storage.get('note')") == "保存したメモ"
-                rpc("debug.paneHeader", pane="p3", close=True)
-                assert "p3" not in [pane["id"] for pane in cli("panes", "list")]
+                rpc("debug.paneHeader", pane=sibling, close=True)
+                assert sibling not in [pane["id"] for pane in cli("panes", "list")]
                 assert evaluate("workspace.storage.get('note')") == "保存したメモ"
                 cli("plugins", "unregister", "notes", "--force")
                 assert cli("plugins", "list") == [] and cli("plugins", "status") == []

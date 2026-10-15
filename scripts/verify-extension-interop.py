@@ -148,7 +148,10 @@ with tempfile.TemporaryDirectory(prefix='slate-extension-', dir='/tmp') as tempo
             assert result['context']['paneCount'] == 2 and result['context']['activePane'].startswith('%')
             assert 'SLATE_EXTENSION' in result['screen']
             eventually('extension-published context reaches its view', lambda: evaluate('window.received.length===1'))
-            assert evaluate('window.received[0]') == result['event']
+            delivered = evaluate('window.received[0]')
+            reference = delivered.pop('deliveryContext')
+            assert isinstance(reference, str) and 1 <= len(reference) <= 64, reference
+            assert delivered == result['event'], (delivered, result['event'])
             assert result['event']['source'] == {'kind':'client'}, 'Backend RPC must not pretend to be host telemetry'
             session = result['context']['terminalSessionId']
             subprocess.run([TMUX,'-S',str(tmux_socket),'kill-server'], check=True, capture_output=True, timeout=5)
