@@ -51,7 +51,9 @@
   --surface: color-mix(in oklab, var(--st-fg) 4%, var(--st-bg));
   --surface-raised: color-mix(in oklab, var(--st-fg) 7%, var(--st-bg));
   /* The selected segment must stand out from a --fill track. */
-  --control-selected: color-mix(in oklab, var(--st-fg) 20%, var(--st-bg));
+  --control-selected: color-mix(in oklab, var(--st-fg) 30%, var(--st-bg));
+  /* Near-white from the palette for switch knobs and light-mode primary text, like macOS. */
+  --knob: oklch(from var(--st-fg) max(l, 0.98) min(c, 0.01) h);
   --fill: color-mix(in oklab, var(--st-fg) 8%, transparent);
   --fill-hover: color-mix(in oklab, var(--st-fg) 12%, transparent);
   --fill-active: color-mix(in oklab, var(--st-fg) 17%, transparent);
@@ -126,7 +128,7 @@
   --success: oklch(from var(--st-ansi-2) clamp(0.42, l, 0.54) min(c, 0.15) h);
   --warning: oklch(from var(--st-ansi-3) clamp(0.42, l, 0.52) min(c, 0.15) h);
   --info: oklch(from var(--st-ansi-6) clamp(0.44, l, 0.56) min(c, 0.13) h);
-  --on-accent: #fff;
+  --on-accent: var(--knob);
   --shadow-popover: 0 0 0 0.5px var(--border), 0 8px 24px rgb(0 0 0 / 0.12), 0 2px 6px rgb(0 0 0 / 0.06);
 }
 
@@ -254,9 +256,13 @@ svg.st-icon {
 .st-select {
   appearance: none;
   padding-right: 24px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='10' fill='none' stroke='%23888' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 3.5 4 1l3 2.5M1 6.5 4 9l3-2.5'/%3E%3C/svg%3E");
+  /* Up and down arrows drawn with gradients, so they take the palette's text color. */
+  background-image:
+    conic-gradient(from 150deg at 50% 0, var(--text-secondary) 60deg, transparent 0),
+    conic-gradient(from -30deg at 50% 100%, var(--text-secondary) 60deg, transparent 0);
+  background-size: 7px 4px;
   background-repeat: no-repeat;
-  background-position: right 8px center;
+  background-position: right 9px top calc(50% - 3px), right 9px top calc(50% + 3px);
 }
 
 /* Search field: a field with a leading icon. */
@@ -287,7 +293,7 @@ svg.st-icon {
   position: absolute; top: 2px; left: 2px;
   width: 12px; height: 12px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--knob);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
   transition: transform 160ms var(--ease-out);
 }

@@ -30,6 +30,7 @@ final class SettingsModel: ObservableObject {
     @Published var searchURL = ""
     @Published var shortcuts: [String: String] = [:]
     @Published var plugins: [Plugin] = []
+    @Published var agentSkills: [AgentSkills.Entry] = []
     @Published var commands: [WorkspaceCommand] = CommandRegistry.commands
     @Published var error: String?
     @Published private var baseline: [String: String] = [:]
@@ -37,6 +38,9 @@ final class SettingsModel: ObservableObject {
     let configURL: URL
     var save: ((String, [String: String]) throws -> Void)?
     var registerPlugin: (() -> Void)?
+    var changeAgentSkill: ((String, Bool) -> Void)?
+    var revealAgentSkill: (() -> Void)?
+    var refreshAgentSkills: (() -> Void)?
 
     init(configURL: URL) { self.configURL = configURL }
 
@@ -160,7 +164,7 @@ final class SettingsWindowController: NSWindowController {
 }
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general = "General", appearance = "Appearance", terminal = "Terminal", browser = "Browser", shortcuts = "Keyboard Shortcuts", plugins = "Plugins"
+    case general = "General", appearance = "Appearance", terminal = "Terminal", browser = "Browser", shortcuts = "Keyboard Shortcuts", plugins = "Plugins", agents = "AI Agents"
     var id: String { rawValue }
     var symbol: String {
         switch self {
@@ -170,6 +174,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .browser: "globe"
         case .shortcuts: "keyboard"
         case .plugins: "puzzlepiece.extension"
+        case .agents: "sparkles"
         }
     }
     var color: Color {
@@ -180,6 +185,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .browser: .blue
         case .shortcuts: .purple
         case .plugins: .orange
+        case .agents: .pink
         }
     }
 }
@@ -223,6 +229,7 @@ private struct SettingsView: View {
                         case .browser: browser
                         case .shortcuts: keyboard
                         case .plugins: plugins
+                        case .agents: agents
                         }
                     }
                     .formStyle(.grouped)
@@ -427,6 +434,53 @@ private struct SettingsView: View {
                 pluginRegistrationHint
             }
         }
+    }
+
+    private var agents: some View {
+        Group {
+            Section {
+                ForEach(model.agentSkills, id: \.target.id) { entry in
+                    LabeledContent {
+                        switch entry.status {
+                        case .installed:
+                            Button("Remove") { model.changeAgentSkill?(entry.target.id, false) }
+                        case .notInstalled:
+                            Button("Install") { model.changeAgentSkill?(entry.target.id, true) }
+                        case .conflict:
+                            Text("Another skill uses this name").foregroundStyle(.secondary)
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(entry.target.name)
+                            if entry.status == .installed {
+                                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).accessibilityLabel("Installed")
+                            }
+                        }
+                        Text(entry.detected ? entry.target.detail : "\(entry.target.detail) · not set up")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Slate Terminal skill")
+                    Text("Teaches coding agents to automate Slate Terminal and build plugins. Most agents read the shared folder; Claude Code needs its own.")
+                        .font(.callout).fontWeight(.regular).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Section {
+                HStack {
+                    Spacer()
+                    Button("Open Skill Folder") { model.revealAgentSkill?() }
+                    Spacer()
+                }
+            }
+        }
+        // The skills folders are the source of truth and can change outside the app.
+        // Re-read them when this section appears and whenever the app or window regains focus.
+        .onAppear { model.refreshAgentSkills?() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in model.refreshAgentSkills?() }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in model.refreshAgentSkills?() }
     }
 
 }

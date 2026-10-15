@@ -101,11 +101,17 @@ Supported keys are `background`, `foreground`, `cursor-color`, `cursor-text`, `s
 
 Both selected palettes are validated, including the inactive mode. `slate-term config validate --file ...` resolves names and checks the files offline without importing or creating snapshots. Unknown names, paths, and invalid palette contents do not overwrite TOML when applying through Settings. On a failed reload, the live settings remain unchanged; an invalid startup configuration reports the error and falls back to defaults.
 
-The app gives Ghostty validated, app-managed color snapshots under `state/palettes`, **never a raw user palette file**: full Ghostty themes can contain commands and other non-color options. Imports and snapshots contain normalized color assignments, without source comments. These snapshots keep the last applied palette stable even if its file changes or a later reload fails. After editing a file in the config's `palettes` folder, choose **Workspace → Reload Configuration** or run `slate-term config reload`; palette files are not watched automatically. Palette changes do not restart terminal sessions.
+The app gives Ghostty validated, app-managed color snapshots under `state/palettes`, **never a raw user palette file**: full Ghostty themes can contain commands and other non-color options. Imports and snapshots contain normalized color assignments, without source comments. These snapshots keep the last applied palette stable even if its file changes or a later reload fails. After editing a file in the config's `palettes` folder, choose **Workspace → Reload Configuration** or run `slate-term config reload`; palette files are not watched automatically. Palette changes do not restart terminal sessions. A reload that changes the resolved colors publishes `host.appearance.changed` to plugins.
+
+## Browser profiles
+
+**Browser** shares one persistent website-data profile across all panes and workspaces. **Private Browser** creates a separate ephemeral store for each pane; closing or replacing it discards that store. Both use the search setting below. Workspace restoration preserves the pane kind, not the current page or back/forward history. Persistent website storage survives even when workspace restoration is disabled.
+
+The profile's opaque WebKit identifier is kept privately at `state/browser-profile.json` under the app state directory; WebKit manages the actual profile files. Separate `SLATE_TERM_STATE_DIR` fixtures use separate profiles. Do not delete the identifier to clear data: use **Workspace → Browser → Clear Browser Data…**, also available in the command bar and configurable shortcuts. A native warning explains the effects before deleting. **Clear This Site’s Data…** works on focused Browser or Private Browser HTTP(S) pages. [Automation](automation.md#browser-profiles-and-website-data) documents precise site-group scope and noninteractive CLI/API equivalents.
 
 ## Browser search
 
-`browser.search_url` is an HTTP(S) URL template containing `{query}` in its path or query. Search text is percent-encoded before substitution. The default is `https://www.google.com/search?q={query}`. Address-bar input that looks like a URL navigates directly; other input searches. Changes apply to existing browser panes.
+`browser.search_url` is an HTTP(S) URL template containing `{query}` in its path or query. Search text is percent-encoded before substitution. The default is `https://www.google.com/search?q={query}`. Address-bar input that looks like a URL navigates directly; other input searches. Local `file:///…` URLs, absolute paths (`/…`) and home-relative paths (`~/…`) open files directly, including paths with spaces or Unicode. HTML, images and videos use WebKit's native support; see [local-file navigation and read access](automation.md#browser-compatibility-api). Changes apply to existing browser panes.
 
 ## Reload and validation
 
@@ -142,7 +148,7 @@ Default navigation shortcuts:
 | Browser address bar | ⌘L | `browser.focusAddress` |
 | Browser reload | ⌘R | `browser.reload` |
 
-Browser commands apply only to the focused browser pane. Selecting a tab number that does not exist does nothing.
+Navigation and site-clearing commands apply to the focused Browser or Private Browser pane. Clear Browser Data is app-wide and does not require browser focus. Selecting a tab number that does not exist does nothing.
 
 Workspace actions are grouped into **Tabs**, **Browser**, **Split Pane**, **Focus Pane**, and **Layout** submenus. Numbered tab selection has its own submenu. The target-specific `pane.focus` and `tab.focus` commands remain available through the CLI/API rather than appearing as no-op menu items.
 

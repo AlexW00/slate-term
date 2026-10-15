@@ -87,6 +87,9 @@ try:
                 def evaluate(script, pane="p1"):
                     return rpc("browser.eval", pane=pane, script=script)
 
+                navigation = rpc("api.describe")["browserNavigation"]
+                assert navigation["localFiles"] and "file" in navigation["schemes"]
+                assert navigation["fileReadAccess"] == "containingDirectory" and not navigation["pluginBridge"]
                 pid_file = directory / "original-pid"
                 cli("panes", "send", "--pane", "p1", "--text", f"printf '%s' \"$$\" > {shlex.quote(str(pid_file))}\r")
                 eventually("original shell PID", lambda: pid_file.exists() and pid_file.read_text().strip().isdigit())
@@ -97,7 +100,7 @@ try:
                 sibling_surface = next(p["surface"] for p in rpc("debug.inspect")["panes"] if p["paneId"] == sibling)
                 menu = rpc("debug.paneTypeMenu")
                 assert next(item for item in menu if item["type"] == "terminal")["checked"]
-                rpc("debug.paneTypeMenu", select="browser", answer="switch")
+                rpc("debug.paneTypeMenu", select="private-browser", answer="switch")
                 eventually("switch terminates old shell", lambda: not alive(old_pid))
                 assert cli("layout", "get") == original_layout
                 url = f"http://127.0.0.1:{server.server_port}/"
@@ -189,13 +192,18 @@ try:
                 cli("browser", "click", "--pane", "p1", "--selector", "#go")
                 assert evaluate("document.querySelector('#result').textContent") == "日本語"
                 evaluate("localStorage.setItem('private','first');document.cookie='private=first';true")
-                cli("panes", "type", "--pane", sibling, "--type", "browser", "--force")
+                cli("panes", "type", "--pane", sibling, "--type", "private-browser", "--force")
                 rpc("browser.navigate", pane=sibling, url=url)
                 assert evaluate("localStorage.getItem('private')", sibling) is None
                 assert evaluate("document.cookie", sibling) == ""
                 cli("panes", "type", "--pane", sibling, "--type", "terminal", "--force")
                 assert cli("layout", "get") == original_layout
-                cli("rpc", "browser.navigate", "--params", json.dumps({"pane": "p1", "url": "file:///etc/passwd"}), success=False)
+                cli("rpc", "browser.navigate", "--params", json.dumps({"pane": "p1", "url": "file://remote/unsupported.html"}), success=False)
+                local_page = directory / "local page 日本語.html"
+                local_page.write_text('<!doctype html><title>Local Browser Fixture</title><h1>Local preview</h1>')
+                assert cli("browser", "navigate", "--pane", "p1", "--url", str(local_page))["title"] == "Local Browser Fixture"
+                assert evaluate("typeof workspace") == "undefined"
+                rpc("browser.navigate", pane="p1", url=url)
                 rpc("browser.screenshot", pane="p1", path=str(ROOT / "artifacts/browser-content.png"))
                 rpc("debug.screenshot", path=str(ROOT / "artifacts/browser-workspace.png"))
                 cli("panes", "focus", "--pane", "p1")
@@ -204,7 +212,7 @@ try:
                 cli("panes", "send", "--pane", "p1", "--text", f"printf '%s' \"$$\" > {shlex.quote(str(new_pid_file))}\r")
                 eventually("replacement shell works", lambda: new_pid_file.exists() and new_pid_file.read_text().strip().isdigit())
                 assert int(new_pid_file.read_text()) != old_pid
-                rpc("debug.paneTypeMenu", select="browser", answer="switch")
+                rpc("debug.paneTypeMenu", select="private-browser", answer="switch")
                 rpc("browser.navigate", pane="p1", url=url)
                 assert evaluate("localStorage.getItem('private')") is None, "Switching restored discarded browser data"
                 assert evaluate("document.cookie") == ""

@@ -151,16 +151,10 @@ public struct SavedLayoutPane: Equatable, Codable, Sendable {
                     throw invalidSavedLayout("Terminal command must be at most 16384 UTF-8 bytes without NUL")
                 }
             }
-        case "browser":
+        case "browser", "private-browser":
             try checkBuiltInKeys(["url"])
-            if let text = configuration["url"]?.string, !text.isEmpty, text != "about:blank" {
-                guard let url = URL(string: text, encodingInvalidCharacters: false),
-                      let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme),
-                      let host = url.host, !host.isEmpty, url.user == nil, url.password == nil,
-                      !text.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
-                      url.port == nil || (0...65_535).contains(url.port!) else {
-                    throw invalidSavedLayout("Browser URL must be empty, about:blank, or HTTP/HTTPS without credentials")
-                }
+            if let text = configuration["url"]?.string, !text.isEmpty {
+                _ = try BrowserURL.parse(text)
             }
         default:
             guard type.utf8.count <= 64,
@@ -208,7 +202,7 @@ private func buildSavedTree(_ layout: Layout, seed: PaneID, tab: TabID, path: [B
     switch layout {
     case .pane(let template):
         let recipe = recipes[template]!
-        let type: PaneType = recipe.type == "terminal" ? .terminal : recipe.type == "browser" ? .browser : .registered(recipe.type)
+        let type = PaneType(identifier: recipe.type)
         try workspace.setType(seed, to: type)
         try workspace.setManualTitle(recipe.title, for: seed)
         mapping[seed] = recipe

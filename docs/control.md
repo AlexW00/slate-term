@@ -35,11 +35,11 @@ See [agent API extensions](agent-api.md) for capability discovery, guarded self/
 
 [Saved layouts](saved-layouts.md) add the shared `layouts.*` recipe library and pane-targeted `layout.configuration`. File updates use `expectedSavedLayoutRevision`; replacing a whole window group requires `expectedWorkspaceRevision`. These are separate from the live `layout.get` and native `windowId` contracts.
 
-Workspace commands use `command.run` with an `id` from `command.list` and routing fields. Read operations include `workspace.get`, `tabs.list`, `panes.list`, `layout.get`, `context.get`, `config.get`, `window.list/get`, `plugins.list/status/logs`. [Guarded layout operations](layout-api.md) document the shared pane/tab commands and stable native window targeting. The CLI provides typed wrappers for workspace mutations, configuration, plugin registration, [events](events.md), and [terminal/browser automation](automation.md).
+Workspace commands use `command.run` with an `id` from `command.list` and routing fields. Read operations include `workspace.get`, `tabs.list`, `panes.list`, `layout.get`, `context.get`, `config.get`, `appearance.get`, `skills.list`, `window.list/get`, `plugins.list/status/logs`. [Guarded layout operations](layout-api.md) document the shared pane/tab commands and stable native window targeting. The CLI provides typed wrappers for workspace mutations, configuration, plugin registration, [events](events.md), and [terminal/browser automation](automation.md).
 
 Pane/tab identities (`p1`, `t1`, etc.) are stable across layout changes, but a terminal's **session** changes on replacement/restoration. Capture `sessionId` from context and provide it for delayed terminal work. Explicit CLI pane/tab options override inherited identifiers; an explicit tab suppresses an inherited pane. Event filters deliberately do not inherit those targets.
 
-Normal Browser pages and subframes have no bridge. Registered plugin main frames use the [same API](plugins.md) as CLI and service clients; differences are caller defaults, transport and lifetime, not capabilities. `shell.update` and shell run-input delivery are authenticated integration internals, not extension-owned context publication. Extensions publish their own context with custom events rather than spoofing native telemetry. Integration-only `debug.*` methods are unavailable in ordinary app launches.
+Browser and Private Browser pages and subframes have no bridge. Both modes and the noninteractive `browser.clearData` / `browser.clearSiteData` operations are documented in [browser profiles](automation.md#browser-profiles-and-website-data). Native clearing commands ask for confirmation; API calls (including `command.run`) do not. Registered plugin main frames use the [same API](plugins.md) as CLI and service clients; differences are caller defaults, transport and lifetime, not capabilities. `shell.update` and shell run-input delivery are authenticated integration internals, not extension-owned context publication. Extensions publish their own context with custom events rather than spoofing native telemetry. Integration-only `debug.*` methods are unavailable in ordinary app launches.
 
 ## Manual background services
 
@@ -59,3 +59,26 @@ Normal Browser pages and subframes have no bridge. Registered plugin main frames
 - `-32059`: service generation unavailable or public routing context does not match; no owner-discarding fallback.
 
 Other workspace, storage, shell-state and admission errors have descriptive messages. Do not automatically replay a mutation after disconnect, timeout or malformed response: it may already have taken effect. The CLI reports transport/response failures with `outcome: unknown`, not a clean rejection. Read current state and decide deliberately. Unknown shell context stays unknown; neither quiet output nor process-name sampling proves an idle prompt.
+
+## Agent skill
+
+The app ships the Slate Terminal agent skill (`skills/slate-terminal` in the repository). **Settings → AI Agents** and the **AI** menu install it for coding agents with one click. Install creates a symbolic link named `slate-terminal` in the agent's user skills folder. The link points to an app-managed copy under the app's state folder, which the app refreshes at launch while any link exists, so links survive app moves and pick up updates.
+
+| ID | Folder | Read by |
+| --- | --- | --- |
+| `agents` | `~/.agents/skills` | The shared folder: Codex, Gemini CLI, Cursor, GitHub Copilot, OpenCode, Amp and others |
+| `claude` | `~/.claude/skills` | Claude Code |
+| `codex`, `cursor`, `gemini`, `copilot` | `~/.codex/skills`, `~/.cursor/skills`, `~/.gemini/skills`, `~/.copilot/skills` | That agent only |
+| `opencode` | `~/.config/opencode/skills` | OpenCode |
+
+Install in the shared folder plus Claude Code for most setups; installing in both the shared folder and an agent's own folder can show the skill twice. An existing file, folder or foreign link named `slate-terminal` is a conflict: install and uninstall fail with `-32050` and never replace or remove it. Uninstall removes only the link.
+
+```sh
+slate-term skill list --json
+slate-term skill install --agent agents --agent claude
+slate-term skill uninstall --agent claude
+slate-term skill reveal        # command.run skills.reveal; shows the managed copy in Finder
+```
+
+`skills.list`, `skills.install {agents: [ID]}` and `skills.uninstall {agents: [ID]}` are shared API methods, so plugins and services can call them too. The command picker offers **Install Agent Skill…** (`skills.settings`) and **Open Agent Skill Folder** (`skills.reveal`). Integration runs link into `SLATE_TERM_AGENT_HOME`, or `agent-home` in the state folder, never the real home folder.
+

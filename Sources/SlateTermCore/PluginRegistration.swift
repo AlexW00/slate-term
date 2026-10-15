@@ -127,7 +127,7 @@ public struct PluginRegistration: Equatable, Codable, Sendable {
             throw invalidPlugin("A plugin needs a panel, commands or service; commands must be unique (at most 32), and process requires a panel source")
         }
         guard id.utf8.count <= 64, id.range(of: "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$", options: .regularExpression) == id.startIndex..<id.endIndex,
-              !["terminal", "browser"].contains(id), !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !["terminal", "browser", "private-browser"].contains(id), !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               title.count <= 100, !title.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
             throw invalidPlugin("Invalid or reserved plugin identity/title")
         }

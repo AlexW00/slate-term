@@ -5,7 +5,7 @@ import Testing
 @Test func automationCatalogHasOnePublicInventory() {
     let names = AutomationMethod.publicMethods.map(\.rawValue)
     #expect(Set(names).count == names.count)
-    for name in ["config.patch", "browser.eval", "web.screenshot", "plugins.service.start", "storage.get", "pane.title", "service.ready"] {
+    for name in ["config.patch", "appearance.get", "skills.list", "skills.install", "browser.eval", "web.screenshot", "plugins.service.start", "storage.get", "pane.title", "service.ready"] {
         #expect(names.contains(name))
     }
     #expect(!names.contains("shell.update"))

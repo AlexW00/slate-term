@@ -2,6 +2,7 @@ import AppKit
 import UniformTypeIdentifiers
 import WebKit
 import SlateTermCore
+import SlateTermSettings
 
 @MainActor
 final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandlerWithReply {
@@ -39,6 +40,7 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
     private var acceptsDocument = false
     private var activeDocumentID: String?
     private var retiredDocumentIDs: [String] = []
+    private var appearance: AppearanceSnapshot?
 
     func causationAudience(epoch: UUID) throws -> CausationAudience {
         guard !closed, instance.isReady, acceptsDocument, activeDocumentID != nil else { throw CancellationError() }
@@ -256,17 +258,57 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
 
     private func installBridgeScripts() {
         invalidateDocument()
+        installUserScripts()
+    }
+
+    /// Replaces the scripts for future documents without retiring the live one.
+    private func installUserScripts() {
         let controller = web.configuration.userContentController
         controller.removeAllUserScripts()
         controller.addUserScript(WKUserScript(source: bridgeScript(isolated: true), injectionTime: .atDocumentStart, forMainFrameOnly: true, in: world))
         controller.addUserScript(WKUserScript(source: bridgeScript(isolated: false), injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
+        if let appearance {
+            controller.addUserScript(WKUserScript(source: themeScript(appearance), injectionTime: .atDocumentStart, forMainFrameOnly: true, in: world))
+        }
     }
 
-    private func bridgeScript(isolated: Bool) -> String {
+    /// Sets the terminal palette as CSS variables before page scripts run, and again in the live page on change.
+    func apply(appearance snapshot: AppearanceSnapshot) {
+        guard !closed else { return }
+        appearance = snapshot
+        web.underPageBackgroundColor = NSColor(hex: snapshot.colors.background)
+        installUserScripts()
+        web.evaluateJavaScript(themeScript(snapshot), in: nil, in: world) { _ in }
+    }
+
+    private func themeScript(_ snapshot: AppearanceSnapshot) -> String {
+        let colors = snapshot.colors
+        var variables = ["--st-bg": colors.background, "--st-fg": colors.foreground, "--st-cursor": colors.cursor,
+                         "--st-selection-bg": colors.selectionBackground, "--st-selection-fg": colors.selectionForeground]
+        for (index, color) in colors.ansi.enumerated() { variables["--st-ansi-\(index)"] = color }
+        // WebKit cannot address the default "SF Mono" by name, so ui-monospace follows it.
+        let family = snapshot.fontFamily.replacingOccurrences(of: "\"", with: "").replacingOccurrences(of: "\\", with: "")
+        variables["--st-font-mono"] = "\"\(family)\", ui-monospace, Menlo, monospace"
+        // Plugin UIs read best one point below the terminal size.
+        variables["--st-font-mono-size"] = String(format: "%gpx", min(16, max(10, snapshot.fontSize - 1)))
+        let theme = JSONValue.object(["variables": .object(variables.mapValues(JSONValue.string)), "tone": .string(snapshot.tone)])
+        let encoded = String(decoding: try! JSONEncoder().encode(theme), as: UTF8.self)
+        return "(()=>{\(originGuard)const theme=\(encoded),root=document.documentElement;if(!root)return;" + #"""
+        for(const [name,value] of Object.entries(theme.variables))root.style.setProperty(name,value);
+        root.dataset.appearance=theme.tone;root.style.colorScheme=theme.tone;
+        })();
+        """#
+    }
+
+    private var originGuard: String {
         let origin = instance.origin
         let encodedHost = String(decoding: try! JSONEncoder().encode(origin.host), as: UTF8.self)
         let encodedScheme = String(decoding: try! JSONEncoder().encode(origin.scheme + ":"), as: UTF8.self)
-        let guardOrigin = "const url=new URL(location.href);if(url.protocol!==\(encodedScheme)||url.hostname!==\(encodedHost)||(Number(url.port)|| (url.protocol==='https:'?443:url.protocol==='http:'?80:0))!==\(origin.port))return;"
+        return "const url=new URL(location.href);if(url.protocol!==\(encodedScheme)||url.hostname!==\(encodedHost)||(Number(url.port)|| (url.protocol==='https:'?443:url.protocol==='http:'?80:0))!==\(origin.port))return;"
+    }
+
+    private func bridgeScript(isolated: Bool) -> String {
+        let guardOrigin = originGuard
         if isolated {
             let token = String(decoding: try! JSONEncoder().encode(bridgeToken), as: UTF8.self)
             return "(()=>{\(guardOrigin)const token=\(token);" + #"""
@@ -352,6 +394,10 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
           }),
           command:(id,params={},options={})=>call('command.run',{...params,id},options),
           settings:()=>call('settings.get'),
+          appearance:Object.freeze({
+            get:()=>call('appearance.get'),
+            onChange:(handler,options={})=>workspace.subscribe(handler,{...options,topics:['host.appearance.changed']})
+          }),
           pluginSettings:Object.freeze({get:()=>call('plugins.settings.get'),patch:(operations,expectedWriteRevision,options={})=>call('plugins.settings.patch',{operations,expectedWriteRevision},options)}),
           web:methodsFor('web.'),
           browser:methodsFor('browser.'),
@@ -434,4 +480,12 @@ private final class PluginSchemeHandler: NSObject, WKURLSchemeHandler {
         requests.removeValue(forKey: ObjectIdentifier(urlSchemeTask))?.cancel()
     }
     func close() { closed = true; requests.values.forEach { $0.cancel() }; requests.removeAll() }
+}
+
+private extension NSColor {
+    /// Parses the normalized #rrggbb values produced by TerminalPalette.
+    convenience init(hex: String) {
+        let value = Int(hex.dropFirst(), radix: 16) ?? 0
+        self.init(srgbRed: CGFloat(value >> 16) / 255, green: CGFloat((value >> 8) & 0xff) / 255, blue: CGFloat(value & 0xff) / 255, alpha: 1)
+    }
 }

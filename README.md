@@ -12,7 +12,7 @@ Implemented:
 - A six-dot grip to the left of each pane type: drag to another pane’s left/right/top/bottom edge to move the existing pane within its tab. The highlight previews its new position; Escape or an invalid drop cancels. Click the grip for an accessible destination menu. Live terminal sessions and web content are retained. Unzoom before moving; cross-tab/window moves are not supported.
 - Inactive panes are subtly dimmed; the selected pane stays undimmed even while a picker or popover is open. Window titles omit internal tab IDs.
 - A dropdown beside each pane type for type changes without replacing pane identity or layout. Switching warns that the current state is discarded; “Don’t show again” remembers your choice separately from close warnings.
-- Real WebKit browsers with navigation and trusted-client evaluation; shared guarded `web` snapshots, click/fill/select/scroll, waits and screenshots for browser/plugin panes. Plugin views retain separate origin, store and bridge privileges.
+- Real WebKit **Browser** panes share one persistent website profile across panes/restarts; **Private Browser** panes each use isolated temporary storage. Native/API commands clear all persistent website data or one browser's site group. Both modes have HTTP(S) and local-file navigation (HTML, images and supported video via `file:` URLs, absolute paths or `~/…`) and trusted-client evaluation; shared guarded `web` snapshots, click/fill/select/scroll, waits and screenshots for browser/plugin panes. Plugin views retain separate origin, store and bridge privileges.
 - Pure Swift workspace model: monotonic IDs, split/close/focus, terminal focus history, fractions, tab groups, validated JSON roundtrips.
 - Shared command registry for menus, default shortcuts, and CLI actions; a keyboard-first **⌘K command picker** with native Liquid Glass, fuzzy search, context-aware availability, and built-in/plugin commands.
 - Private per-instance Unix control socket with same-user `LOCAL_PEERCRED`, JSON-RPC handshake, bounded framing/output, and nonblocking server I/O.
@@ -29,6 +29,8 @@ The sequential whole-application suite records source/binary hashes in `artifact
 Core remains terminal-agnostic: no tmux adapter, session discovery, command parsing, or tmux runtime dependency. Extensions implement tool-specific integration using the generic bridge, managed backend, CLI/IPC, input/capture, and events. Isolated tmux fixtures verify compatibility only.
 
 See [saved layouts](docs/saved-layouts.md) for file-backed recipes, the native editor and Spotlight shortcuts, [agent identity, inspection and shared commands](docs/agent-api.md), [guarded layout/tab/window APIs](docs/layout-api.md), [trusted plugins](docs/plugins.md) for commands, panels, settings and supervision, the [command picker](docs/command-picker.md), and [workspace events](docs/events.md). Historical capability audits document [native UI/CLI layout parity](docs/layout-cli-audit.md) and [plugin integration/hooks](docs/plugin-integration-audit.md); see [implementation progress](docs/api-extension-progress.md) for delivered slices and remaining work.
+
+Coding agents can load the [Slate Terminal skill](skills/slate-terminal/SKILL.md). It covers runtime API discovery, [plugin building](skills/slate-terminal/references/building-plugins.md) and the [plugin UI kit](skills/slate-terminal/references/ui/INDEX.md); maintainer tooling for the UI kit stays in [design-system/](design-system/README.md).
 
 Pane titles follow terminal process/context information, browser document titles, and plugin document titles or `workspace.setTitle(title)`. Passing `null` restores a plugin's document title. macOS can redact process environments; authenticated zsh reports supply ownership for foreground-process sampling, while unavailable process metadata falls back to the configured shell and engine title.
 
@@ -100,6 +102,8 @@ python3 scripts/verify-app.py            # own app/storage: drive and inspect it
 python3 scripts/verify-config-cli.py     # offline validation, no running app required
 python3 scripts/verify-settings.py       # live reload, native key routing, reorder, restart/recovery
 python3 scripts/verify-shell.py          # production zsh path, isolated dotfiles, OSC 133, UTF-8 input
+bash scripts/verify-browser-data.sh
+python3 scripts/verify-browser-profiles.py
 python3 scripts/verify-browser.py
 python3 scripts/verify-context.py        # shell context and pane headers
 bash scripts/verify-pane-titles-native.sh # isolated production header layout/editing and native renders

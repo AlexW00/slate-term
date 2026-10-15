@@ -60,7 +60,7 @@ Plugin pages run inside a pane next to terminals. People glance at them while th
 
 ## Custom components
 
-When no recipe fits, build one that looks like it belongs:
+When no recipe fits, build one that looks like it belongs. First look at the existing components for inspiration, and reuse their structure, tokens, spacing, states and keyboard patterns so the new piece feels like part of the same set.
 
 1. Compose from existing controls and tokens before writing new CSS.
 2. Reuse the shapes: `--radius` for controls, `--radius-lg` for groups and `--control-height` for anything clickable.

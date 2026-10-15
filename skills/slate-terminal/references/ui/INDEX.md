@@ -10,9 +10,9 @@ It is a set of copyable files, not a package. Copy what you need into the plugin
 2. Copy [slate.css](slate.css) and [slate-theme.js](slate-theme.js) into the plugin directory unchanged.
 3. Start from [the starter page](components/templates/starter.html), or the [pane shell](components/patterns/pane-shell.html) for a blank frame.
 4. Copy the recipes you need from the table below. Each file's header says when to use it and what to avoid.
-5. For anything custom, build it from the tokens in `slate.css` and follow the guidelines.
+5. For anything custom, first study the closest existing components and reuse their structure, tokens, spacing, states and keyboard patterns. Then build it from the tokens in `slate.css` and follow the guidelines.
 
-`slate-theme.js` reads the host's `appearance.get` method and re-reads it on `host.appearance.changed`. Host support is pending; until then, pages follow the system light or dark setting with default colors.
+Inside Slate Terminal, the host injects the palette variables before page scripts run and updates them on change. `slate-theme.js` also reads `appearance.get`, follows `host.appearance.changed`, and exposes `SlateTheme.current` for canvas or chart code. Outside the host, pages follow the system light or dark setting with default colors.
 
 ## Files
 
@@ -50,7 +50,7 @@ Each file's header comment holds its full guidance.
 | --- | --- |
 | [Banner](components/patterns/banner.html) | Inline message at the top of the content for errors, warnings and important state. |
 | [Bulk selection](components/patterns/bulk-selection.html) | Multi-select list whose toolbar switches to a selection count, a few actions and Done. |
-| [Code and diff](components/patterns/code-view.html) | Monospace code with a line-number gutter, unified diff tints, hunk headers and a target line. |
+| [Code and diff](components/patterns/code-view.html) | Monospace code with a line-number gutter, unified or side-by-side diff, hunk headers and a target line. |
 | [Confirmation dialog](components/patterns/dialog.html) | Small modal for destructive or irreversible actions, using the native dialog element. |
 | [Disclosure](components/patterns/disclosure.html) | Collapsible section using native details/summary, with a rotating chevron. |
 | [Empty state](components/patterns/empty-state.html) | Centered icon, one short line and at most one action. |

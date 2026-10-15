@@ -106,7 +106,13 @@ func invalidConfigurationIsRejected(source: String) {
     #expect(try configuration.browser.addressURL(for: " example.com/path ").absoluteString == "https://example.com/path")
     #expect(try configuration.browser.addressURL(for: "http://localhost:3000/").absoluteString == "http://localhost:3000/")
     #expect(try configuration.browser.addressURL(for: "localhost:3000/").absoluteString == "https://localhost:3000/")
-    #expect(throws: (any Error).self) { try configuration.browser.addressURL(for: "file:///tmp/test") }
+    #expect(try configuration.browser.addressURL(for: "https://example.com/日本語 a").path == "/日本語 a")
+    for path in ["/tmp/Local page 日本語 #1.html", "~/Local page.html"] {
+        let expected = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+        #expect(try configuration.browser.addressURL(for: path) == expected)
+        #expect(try configuration.browser.addressURL(for: expected.absoluteString) == expected)
+    }
+    #expect(throws: (any Error).self) { try configuration.browser.addressURL(for: "file://remote/tmp/test") }
     #expect(configuration.changedKeys(from: .defaults) == ["browser.search_url"])
     #expect(configuration.restartRequired(from: .defaults).isEmpty)
     #expect(try JSONValue.encoding(configuration).object?["browser"]?.object?["search_url"] == .string(configuration.browser.searchURL))

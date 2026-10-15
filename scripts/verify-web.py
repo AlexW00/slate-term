@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""One owned window: shared browser/plugin automation, guards and privilege boundaries."""
+"""One owned app/two native tabs: shared web capture, automation and lifecycle guards."""
 import concurrent.futures
 import functools
 import http.server
 import json
+import subprocess
 import threading
-from api_fixture import AppFixture, eventually
+from api_fixture import AppFixture, ROOT, eventually
 
 HTML = '''<!doctype html><title>Shared web fixture</title>
 <input id="name" value="before"><input id="password" type="password" value="PASSWORD_SENTINEL">
@@ -95,17 +96,95 @@ with AppFixture('web-conformance') as app:
         exposure = js('workspace.call("api.describe")')
         assert exposure == app.rpc('api.describe')
         assert exposure['webAutomation']['screenshot'] is True and 'web.screenshot' in exposure['methods']
+        assert all(exposure['webAutomation'][key] for key in ['screenshotInactiveTabs', 'screenshotRequiresAttachedLayout', 'screenshotViewportOnly', 'domRequiresVisiblePane'])
         assert js('workspace.call("web.eval",{script:"1"}).then(()=>null,e=>e.code)') == -32601
         assert js('workspace.browser.eval({pane:"p1",script:"1"})') == 1
         output = app.root / 'plugin-bridge.png'
         js('workspace.web.screenshot({path:' + json.dumps(str(output)) + '})')
         assert output.read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
 
+        # Canonical capture accepts attached inactive-tab views, not DOM actions.
+        captures = ROOT / 'artifacts/web-background-captures'
+        captures.mkdir(exist_ok=True)
+        identities = {pane: app.rpc('web.get', pane=pane) for pane in ['p1', p2]}
+        source_tab = app.rpc('pane.inspect', pane=p2)['tabId']
+        app.rpc('command.run', id='tab.new')
+        active = app.rpc('context.inspect')['focusedPaneId']
+
+        def focus_state():
+            native = app.rpc('debug.inspect')
+            return dict(workspace=app.rpc('workspace.get'),
+                        windows=[(w['windowId'], w['selected'], w['key']) for w in app.rpc('window.list')['windows']],
+                        responders=[(p['paneId'], p['firstResponder'], p['terminalFocus']) for p in native['panes']])
+
+        before = focus_state()
+        native_windows = app.rpc('window.list')['windows']
+        source_window = next(w for w in native_windows if w['tabId'] == source_tab)
+        front_tab = app.rpc('pane.inspect', pane=active)['tabId']
+        front_window = next(w for w in native_windows if w['tabId'] == front_tab)
+        assert source_window['groupId'] == front_window['groupId']
+        assert not source_window['selected'] and front_window['selected'], native_windows
+        dom_visibility = []
+        assert next(p for p in app.rpc('debug.inspect')['panes'] if p['paneId'] == active)['firstResponder']
+        pixel_args = []
+        for pane in ['p1', p2]:
+            eventually('inactive capture-ready', lambda: app.rpc('web.get', pane=pane)['screenshotReady'])
+            info = app.rpc('web.get', pane=pane)
+            inspected = app.rpc('pane.inspect', pane=pane)
+            assert not inspected['visible'] and inspected['geometry'] is None
+            assert not info['renderable'] and info['documentId'] == identities[pane]['documentId']
+            guards = dict(expectedViewId=info['viewId'], expectedDocumentId=info['documentId'])
+            app.rpc('web.snapshot', pane=pane, error=-32051)
+            app.rpc('web.click', pane=pane, selector='#apply', **guards, error=-32051)
+            app.rpc('web.fill', pane=pane, selector='#name', text='hidden mutation', **guards, error=-32051)
+            app.rpc('web.wait', pane=pane, selector='#result', timeoutMilliseconds=0, error=-32051)
+            for phase, rgb in [('green', [20,190,70]), ('blue', [30,80,220])]:
+                script = '''(()=>{let p=document.getElementById('capture-check');
+                    if(!p){p=document.createElement('div');p.id='capture-check';document.body.appendChild(p)}
+                    p.style.cssText='position:fixed;inset:0;z-index:2147483647;pointer-events:none;color:white;background:rgb(%s)';
+                    p.textContent='INACTIVE %s';return document.visibilityState})()''' % (','.join(map(str,rgb)), phase)
+                visibility = app.rpc('browser.eval' if pane == 'p1' else 'debug.pluginEval', pane=pane, script=script)
+                # WebKit's page visibility signal can lag/differ from native tab
+                # selection. Assert the actual native state, without changing DOM visibility.
+                dom_visibility.append(dict(pane=pane, phase=phase, visibility=visibility))
+                assert not next(w for w in app.rpc('window.list')['windows'] if w['tabId'] == source_tab)['selected']
+                path = captures / f'{pane}-{phase}.png'
+                # CLI and registered-page requests share the canonical host operation.
+                if phase == 'green':
+                    result = app.cli('web', 'screenshot', '--pane', pane, '--path', str(path),
+                                     '--expected-view-id', info['viewId'], '--expected-document-id', info['documentId'])
+                else:
+                    result = js('await workspace.web.screenshot(' + json.dumps(dict(pane=pane, path=str(path), **guards)) + ')')
+                assert result['path'] == str(path) and result['documentId'] == info['documentId']
+                assert focus_state() == before, 'Screenshot changed tab selection/focus/workspace'
+                pixel_args.extend([str(path), *map(str,rgb)])
+            app.rpc('browser.eval' if pane == 'p1' else 'debug.pluginEval', pane=pane, script="(()=>{document.getElementById('capture-check').remove();return true})()")
+        checked = subprocess.run(['swift', str(ROOT / 'Tests/WebOperations/CheckScreenshot.swift'), *pixel_args],
+                                 text=True, capture_output=True, timeout=60)
+        assert checked.returncode == 0, checked.stderr
+        (captures / 'pixels.json').write_text(checked.stdout)
+        (captures / 'focus.json').write_text(json.dumps(dict(before=before, domVisibility=dom_visibility), indent=2))
+        app.rpc('command.run', id='tab.focus', tab=source_tab)
+        eventually('foreground restored', lambda: app.rpc('web.get', pane=p2)['renderable'])
+
+        # In-flight divider geometry is unavailable, even for attached views.
+        assert app.rpc('debug.dividerGesture', phase='begin', tab=source_tab, path=[])['active']
+        try:
+            for pane in ['p1', p2]:
+                assert not app.rpc('web.get', pane=pane)['screenshotReady']
+                app.rpc('web.screenshot', pane=pane, path=str(app.root / 'invalid-layout.png'), error=-32051)
+            assert not (app.root / 'invalid-layout.png').exists()
+        finally:
+            app.rpc('debug.dividerGesture', phase='cancel', tab=source_tab)
+
         # Hiding via existing zoom is not document retirement or permission to reveal.
         old = app.rpc('web.get', pane=p2)
         app.rpc('command.run', id='pane.zoom', pane='p1')
         assert app.rpc('web.get', pane=p2)['renderable'] is False
+        assert app.rpc('web.get', pane=p2)['screenshotReady'] is False
         app.rpc('web.snapshot', pane=p2, error=-32051)
+        app.rpc('web.screenshot', pane=p2, path=str(app.root / 'zoom-hidden.png'), error=-32051)
+        assert not (app.root / 'zoom-hidden.png').exists()
         app.rpc('command.run', id='pane.zoom', pane='p1')
         eventually('unzoom renderable', lambda: app.rpc('web.get', pane=p2)['renderable'])
         assert app.rpc('web.get', pane=p2)['documentId'] == old['documentId']
@@ -138,6 +217,9 @@ with AppFixture('web-conformance') as app:
                 pending = app.rpc('pane.inspect', pane='p1')
                 assert pending['webReady'] is False and pending['documentId'] is None, pending
                 app.rpc('web.snapshot', pane='p1', error=-32051)
+                assert not app.rpc('web.get', pane='p1')['screenshotReady']
+                app.rpc('web.screenshot', pane='p1', path=str(app.root / 'unready.png'), error=-32051)
+                assert not (app.root / 'unready.png').exists()
                 navigation_gates['/held-b'][1].set()
                 assert successor.result(timeout=5)['title'] == 'Shared web fixture'
             finally:
@@ -159,6 +241,12 @@ with AppFixture('web-conformance') as app:
         app.rpc('command.run', id='pane.type', pane=p2, type='browser', force=True)
         eventually('replacement ready', lambda: app.rpc('web.get', pane=p2)['ready'])
         app.rpc('web.snapshot', pane=p2, expectedViewId=old['viewId'], expectedDocumentId=old['documentId'], error=-32050)
+        app.rpc('web.screenshot', pane=p2, path=str(app.root / 'replaced.png'),
+                expectedViewId=old['viewId'], expectedDocumentId=old['documentId'], error=-32050)
+        assert not (app.root / 'replaced.png').exists()
+        app.rpc('command.run', id='pane.close', pane=p2, force=True)
+        app.cli('web', 'screenshot', '--pane', p2, '--path', str(app.root / 'closed.png'), error=True)
+        assert not (app.root / 'closed.png').exists()
         # Sleeping waits retain logical action slots even between platform probes.
         with concurrent.futures.ThreadPoolExecutor(max_workers=32) as requests:
             waits = [requests.submit(app.rpc, 'web.wait', pane='p1', selector='#never', timeoutMilliseconds=5000, error=-32024) for _ in range(32)]
@@ -167,7 +255,7 @@ with AppFixture('web-conformance') as app:
             for wait in waits: wait.result(timeout=8)
         assert app.rpc('browser.get', pane='p1')['pendingActions'] == 0
         app.rpc('web.wait', pane='p1', selector='#result', state='visible', timeoutMilliseconds=0)
-        print('PASS shared web: browser/plugin/CLI/page conformance, identities without bridge use, ref/selector guards, worlds/exposure, renderability, restart/BFCache/replacement, superseded navigation, retirement/cancellation and32/33 logical admission')
+        print('PASS shared web: browser/plugin/CLI/page conformance, identities without bridge use, ref/selector guards, worlds/exposure, inactive-tab pixels/focus, DOM visibility, invalid-layout/zoom/unready/closed capture rejection, restart/BFCache/replacement, superseded navigation, retirement/cancellation and32/33 logical admission')
     finally:
         for _, release in navigation_gates.values(): release.set()
         server.shutdown(); server.server_close(); worker.join(timeout=2)

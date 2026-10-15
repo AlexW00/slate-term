@@ -6,6 +6,25 @@ struct SlateTermApplication {
         let app = NSApplication.shared
         let delegate = ApplicationDelegate()
         app.delegate = delegate
+        // Window-free cleanup of a fixture-owned named store, in the same bundle namespace.
+        // Never enabled in ordinary launches; the fixture stops its app before invoking this.
+        if ProcessInfo.processInfo.environment["SLATE_TERM_INTEGRATION"] == "1",
+           CommandLine.arguments.dropFirst() == ["--remove-test-browser-profile"],
+           let root = ProcessInfo.processInfo.environment["SLATE_TERM_STATE_DIR"] {
+            app.delegate = nil
+            app.setActivationPolicy(.prohibited)
+            Task {
+                do {
+                    try await BrowserData.removeTestProfile(directory: URL(fileURLWithPath: root).appendingPathComponent("state"))
+                    exit(0)
+                } catch {
+                    fputs("Test browser profile cleanup failed: \(error)\n", stderr)
+                    exit(1)
+                }
+            }
+            app.run()
+            return
+        }
         app.setActivationPolicy(.regular)
         app.run()
         withExtendedLifetime(delegate) {}

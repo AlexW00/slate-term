@@ -1,6 +1,6 @@
 # Saved layouts
 
-Saved layouts are reusable starting recipes, not frozen sessions. They preserve tabs, split topology and fractions, pane types, manual pane names, starting folders, startup commands, browser URLs and plugin starting configuration. They do **not** copy terminal history, running processes, browser logins or plugin storage.
+Saved layouts are reusable starting recipes, not frozen sessions. They preserve tabs, split topology and fractions, pane types, manual pane names, starting folders, startup commands, browser URLs and plugin starting configuration. They do **not** copy terminal history, running processes, browser logins or plugin storage. Browser panes use the app-wide persistent profile; Private Browser panes always start with a fresh ephemeral store, even when opened from the same recipe.
 
 ## Native editor
 
@@ -54,7 +54,7 @@ Limits: 256 KiB per definition, 256 JSON files per directory, 1–8 tabs, 1–8 
 
 - Terminal directory: empty/omitted means the normal default; otherwise absolute or `~/…`. Opening preflights that the directory exists.
 - Terminal command: empty/omitted means none. Requires **zsh with automatic shell integration**. Commands are submitted only after the new shell's authenticated idle-prompt report, through the existing empty-edit-buffer-safe run protocol—not a fixed delay or blind pasted input. Failure to reach a prompt within 30 seconds is reported and never retried. Completion tracking expires after 295 seconds without stopping a long-running command. Closing/replacing a pane cancels pending startup work. Startup capacity is reserved before changing a workspace; requests exceeding the shared 32-run limit fail before replacement. `layouts startup-status` reports the live state.
-- Browser URL: empty/omitted uses New Browser; otherwise `about:blank` or HTTP(S) without credentials. Navigation starts after the workspace commits; network failures are ordinary browser failures, not a rollback of the window.
+- Browser (`browser`) and Private Browser (`private-browser`) URL: empty/omitted uses the mode's new-page screen; otherwise `about:blank`, HTTP(S) without credentials, a local `file:` URL, an absolute path or `~/…` path. Local HTML/images/videos use [native WebKit file loading](automation.md#browser-compatibility-api). Navigation starts after the workspace commits; network/file failures are ordinary browser failures, not a rollback of the window.
 - Opening validates all definitions/dependencies before creating resources. Native preparation can start shell/plugin processes; it is not a transaction over arbitrary external side effects. A successful open accepts the new workspace, not proof that every command/network request completed.
 - Normal workspace restoration remains topology restoration; it does **not** rerun saved startup commands or retain a link to the template. Edit/save a layout does not mutate already-open windows.
 

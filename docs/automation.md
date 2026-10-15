@@ -52,7 +52,7 @@ slate-term web click --pane p2 --ref SNAPSHOT_REF
 slate-term web screenshot --pane p2 --path /absolute/path/page.png
 ```
 
-`pane.inspect` and `web.get` expose the same automation `{viewId, documentId}`. A document ID is null while unavailable; it is initialized from native document lifecycle independently of page bridge calls and is **not** a bridge credential/correlation ID. `web.get` also reports readiness, renderability, bounded URL/title, sampling time and pending work. Pane content-operation discovery uses the canonical web names; existing `browser.*` methods remain available separately.
+`pane.inspect` and `web.get` expose the same automation `{viewId, documentId}`. A document ID is null while unavailable; it is initialized from native document lifecycle independently of page bridge calls and is **not** a bridge credential/correlation ID. `web.get` also reports readiness, renderability, `screenshotReady`, bounded URL/title, sampling time and pending work. `screenshotReady` is sampled capture eligibility, not visibility or a reservation; it can be true while `renderable` and `pane.inspect.visible` are false. Pane content-operation discovery uses the canonical web names; existing `browser.*` methods remain available separately.
 
 Selector-based click/fill/select and scroll without a ref require both `expectedViewId` and `expectedDocumentId`. A snapshot ref already binds its view and document; optional explicit guards must agree. Missing/partial/malformed guards fail closed. Refs are opaque: do not parse or construct them. Snapshot/wait reads may optionally carry guards. Cross-view refs, stale documents and replaced panes fail instead of retargeting. Read inspection again after a conflict; do not replay a mutation automatically.
 
@@ -65,16 +65,44 @@ await workspace.web.fill({selector: '#name', text: 'Hello',
 const other = await workspace.web.snapshot({pane: 'p2'}); // explicit cross-pane target
 ```
 
-Every helper accepts final `{signal, cause}` options. Cross-pane access is intentional for trusted registered controllers, not a new pane sandbox. Ordinary pages/subframes receive no bridge. Automation runs in a separate private content world; plugin origin restrictions, scoped data stores and bridge privileges stay in the plugin adapter. Browser navigation/address controls and ephemeral stores remain browser-owned.
+Every helper accepts final `{signal, cause}` options. Cross-pane access is intentional for trusted registered controllers, not a new pane sandbox. Ordinary pages/subframes receive no bridge. Automation runs in a separate private content world; plugin origin restrictions, scoped data stores and bridge privileges stay in the plugin adapter. Browser navigation/address controls and persistent/private stores remain browser-owned.
 
-`web.get` can report an unavailable or nonrenderable target; DOM operations and screenshots require a ready, visible rendered pane and never reveal it implicitly. Zoom/hiding is not document retirement. Navigation, cached-history restoration, process exit and replacement invalidate pending work/refs. Screenshot output requires an explicit absolute local path for every client. There is no `web.eval` or canonical plugin navigation API; `browser.eval/navigate` remain browser-specific, available to CLI, registered-page and service clients.
+`web.get` can report an unavailable or nonrenderable target. DOM operations (including `web.snapshot` and `web.wait`) still require a ready, visible rendered pane and never reveal it implicitly. `web.screenshot` also accepts a ready browser/registered-plugin pane in an **inactive native tab** when its web view remains attached to its owning window with settled layout and nonzero bounds. It captures the current web viewport without selecting a tab, changing focus, reloading or reparenting the view. On-screen visibility and geometry remain unchanged/unavailable for inactive panes. Discovery advertises `screenshotInactiveTabs`, `screenshotRequiresAttachedLayout`, `screenshotViewportOnly` and `domRequiresVisiblePane`.
+
+Zoom-detached, unready, invalid/pending-layout, minimized and ordered-out window-group targets remain unavailable (`-32051`). Bounds/layout changes during capture fail rather than write a mismatched viewport (`-32050` when still otherwise eligible). Caller/target/document checks run before submission and again before writing output. Navigation, cached-history restoration, process exit and replacement invalidate pending work/refs; zoom/hiding alone is not document retirement. Screenshot output requires an explicit absolute local path for every client. Hidden content can have throttled timers/animation; capture does not make the document behave as visible. This is not full-page or universal native/terminal capture. There is no `web.eval` or canonical plugin navigation API; `browser.eval/navigate` remain browser-specific, available to CLI, registered-page and service clients.
 
 Limits below apply to both adapters. Each view admits at most 32 logical DOM actions, including sleeping waits, and 32 outstanding platform submissions. Cancellation/timeout promptly releases callers but cannot cancel already-submitted JavaScript or snapshots: those submissions retain capacity until their callbacks or definitive process/view teardown. `pendingActions`, `pendingOperations` (caller continuations) and `pendingSubmissions` distinguish these lifetimes. An overload or uncertain response is not permission to retry a click.
+
+## Browser profiles and website data
+
+Choose **Browser** (`browser`) for one app-wide persistent profile, shared across panes/windows/workspaces and app restarts. Choose **Private Browser** (`private-browser`) for a fresh, isolated temporary store per pane. Both use the same address controls and automation APIs; neither has a plugin bridge. Plugins retain their separate stores. Trusted automation can act on signed-in Browser pages.
+
+`browser.get` adds `type` and `persistent`. Workspace snapshots and saved layouts preserve the chosen pane kind, not a browser's open document/back-forward history. Saved-layout URLs can start either kind; opening a recipe does not copy a profile. Persistent website data is independent of `layout.restore_workspace`.
+
+| Capability | Native menu / command bar / configurable shortcut | CLI / socket / registered page / service |
+| --- | --- | --- |
+| Clear Browser Data… (`browser.clearData`) | Always available; native warning, Cancel by default | No dialog; no payload arguments, clears only the persistent profile |
+| Clear This Site’s Data… (`browser.clearSiteData`) | Available on an HTTP(S) browser page, including Private Browser; captures the pane/URL before a native warning | Explicit `url` required; browser `pane` required (or a trusted caller's captured pane default) |
+
+```sh
+slate-term panes type --pane p2 --type private-browser --force
+slate-term browser clear-data
+slate-term browser clear-site-data --pane p2 --url https://example.com/path
+slate-term command run browser.clearSiteData --pane p2 --params '{"url":"https://example.com"}'
+```
+
+Canonical RPCs are `browser.clearData {}` and `browser.clearSiteData {pane,url}`. The same IDs work through `command.run`. Registered pages may use `workspace.browser.clearData({})` / `clearSiteData({pane,url})` or `workspace.call`. API invocation never opens a confirmation dialog, including through `command.run`. Unknown payload fields, invalid URLs, unsupported guards and stale targets fail closed; there is no `force` or implicit current-page URL in API calls. URLs must be absolute HTTP(S), without credentials. Optional app/workspace/layout guards use the common contract; DOM identity/session guards are not a website-store identity.
+
+Replies are `{cleared:true, scope:"all"|"site", storage:"persistent"|"private", host:string|null}`. Site clearing uses WebKit's public-suffix-list domain-grouped website records: it can remove the parent site's data and other subdomains, across HTTP/HTTPS and ports, **not just one exact origin or path**. Unrelated domain groups and other stores are preserved. Clearing a site through any Browser pane affects the shared profile; clearing through a Private Browser affects only that pane.
+
+These operations remove WebKit-managed cookies, caches and saved website storage. They do not close/reload pages, clear back/forward lists, erase live JavaScript state, or promise to reset every in-memory login/session. Open pages may recreate data; close them first when necessary. Only one clear per store is admitted at a time. Cancellation before submission prevents deletion; after WebKit accepts removal, disconnect/cancellation cannot roll it back. Discovery is under `api.describe.browserData`. `-32602` denotes invalid requests, `-32022` a closed/replaced pane and `-32020` a clear already in progress. No automatic mutation retries.
 
 ## Browser compatibility API
 
 ```sh
 slate-term browser navigate --pane p2 --url http://127.0.0.1:8080/
+slate-term browser navigate --pane p2 --url '/absolute/path/local page.html'
+slate-term browser navigate --pane p2 --url file:///absolute/path/photo.png
 slate-term browser snapshot --pane p2 --max-elements 128
 slate-term browser fill --pane p2 --selector '#name' --text '日本語'
 slate-term browser click --pane p2 --ref SNAPSHOT_REF
@@ -84,7 +112,11 @@ slate-term browser wait --pane p2 --selector '#result' --state visible --timeout
 slate-term browser screenshot --pane p2 --path /absolute/path/page.png
 ```
 
-RPC names match CLI actions (`browser.snapshot`, etc.). Element actions require exactly one unique CSS `selector` or snapshot `ref`. Ambiguous selectors fail instead of choosing the first match. Scroll's target is optional; omission scrolls the window. Distances are CSS pixels, bounded to ±10 million per axis.
+`browser.navigate` accepts HTTP(S), `about:blank`, local `file:` URLs (empty host or `localhost`), absolute paths and `~/…` paths. Native address entry and saved-layout starting locations use the same local-file rules in Browser and Private Browser; the address bar still searches ordinary text. `api.describe.browserNavigation` advertises this support to all trusted clients, including registered pages/services using the existing `workspace.browser.navigate` API. There is no new parameterless picker action: use **Focus Address Bar** (⌘L).
+
+Local HTML can load relative scripts, styles, images and media from its containing directory and descendants. Standalone images, videos and other formats display when supported by the system WebKit (for example PNG/JPEG/SVG and H.264 MP4); unsupported formats/codecs are not converted. Local HTML executes JavaScript: open only files you trust. Read access is scoped to the containing directory (or just the file for a file directly under `/`), not the filesystem root; WebKit's normal origin restrictions remain enabled. Directories are not browsable. Missing/unreadable files fail normally. Local pages never receive a plugin bridge, and plugin-origin rules are unchanged.
+
+RPC names match CLI actions (`browser.snapshot`, etc.). These legacy browser-only adapters retain their existing admission semantics; use canonical `web.*` for the shared browser/plugin eligibility and identity contract. Element actions require exactly one unique CSS `selector` or snapshot `ref`. Ambiguous selectors fail instead of choosing the first match. Scroll's target is optional; omission scrolls the window. Distances are CSS pixels, bounded to ±10 million per axis.
 
 Snapshots return URL/title, document identity, viewport/scroll geometry, visible text, interactive element metadata and `truncated`. Elements include reference, tag/approximate role, name, enabled state, rectangle and viewport intersection, plus relevant value/checked/expanded state. Password values are omitted. This is a bounded DOM summary, **not the platform accessibility tree**. Defaults: 128 elements (configurable 1–256), 4,000 visited elements, 2,048 visited text nodes, 16,384 UTF-16 text units and a 350,000-byte element budget. Names/values are clipped to 256/512 UTF-16 units. Truncation is reported. At most 2,048 weak element references are retained; refresh the snapshot if one expires.
 
@@ -99,6 +131,6 @@ Wait states: `attached`, `detached`, `visible` (default), `hidden`. Timeout is 0
 - Main-document light DOM only: no frame traversal or shadow-root selector language.
 - DOM activation/events are synthetic, not trusted hardware input. User-gesture-gated APIs and anti-automation pages may reject them.
 - Cancellation does not roll back an action or forcibly interrupt JavaScript already submitted to WebKit.
-- Browser data stores are per-pane and ephemeral; history/cookies are discarded with the pane or app, not restored from workspace JSON.
-- HTTP(S) and `about:blank` navigation only; no URL credentials, arbitrary file browsing, download manager, remote debugging port, CDP compatibility, or privileged plugin API.
-- `browser.eval --script ...` remains available for explicit page-world JavaScript. It must return a JSON-representable value; screenshots capture the visible web view, not an entire scrolling document.
+- Browser shares one persistent website store; Private Browser has a per-pane ephemeral store. Neither restores its live document/back-forward history from workspace JSON.
+- HTTP(S), `about:blank` and explicit local files only; no URL credentials, remote file hosts, directory browser, download manager, remote debugging port, CDP compatibility, or privileged plugin API.
+- `browser.eval --script ...` remains available for explicit page-world JavaScript. It must return a JSON-representable value; screenshots capture the web-view viewport, not an entire scrolling document.

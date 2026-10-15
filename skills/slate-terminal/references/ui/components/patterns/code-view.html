@@ -1,13 +1,15 @@
 <!--
 name: Code and diff
-summary: Monospace code with a line-number gutter, unified diff tints, hunk headers and a target line.
+summary: Monospace code with a line-number gutter, unified or side-by-side diff, hunk headers and a target line.
 use: Showing a file excerpt, a unified diff, or the line a search result or error points to.
 avoid: Editing code; open the file in an editor instead. Syntax highlighting that drowns out the diff colors.
-notes: Unified only; side-by-side does not fit split panes. Long lines wrap and the gutters stay aligned. Add is-plain for code without a diff.
+notes: Side-by-side needs 560px or more; narrower panes show unified and hide the switch. Long lines wrap and the gutters stay aligned. Add is-plain for code without a diff.
+script: Builds the side-by-side view from the unified lines, so the unified markup is the only source. The Unified/Split switch toggles is-split.
 -->
 <style>
   .st-code {
     --st-code-gutter: calc(4ch + 12px);
+    container: st-code / inline-size;
     font: var(--st-font-mono-size)/1.55 var(--font-mono);
     color: var(--text);
   }
@@ -51,6 +53,28 @@ notes: Unified only; side-by-side does not fit split panes. Long lines wrap and 
   .st-code-line.is-hunk b { font-weight: inherit; color: var(--info); }
   .st-code-line.is-target { background: var(--accent-tint); box-shadow: inset 2px 0 var(--accent); }
   .st-code-line.is-target .st-code-n { color: var(--accent); }
+
+  /* Side-by-side: old on the left, new on the right, one shared row per pair. */
+  .st-code-split { display: none; }
+  .st-code-pair {
+    display: grid;
+    grid-template-columns: var(--st-code-gutter) minmax(0, 1fr) var(--st-code-gutter) minmax(0, 1fr);
+  }
+  .st-code-pair > code { padding-right: var(--space-3); font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4; }
+  .st-code-pair > code:first-of-type { border-right: 1px solid var(--separator); }
+  .st-code-pair > .is-add { background: var(--success-tint); }
+  .st-code-pair > .is-del { background: var(--danger-tint); }
+  .st-code-pair > .is-empty { background: var(--surface); }
+  .st-code-pair.is-hunk { grid-template-columns: minmax(0, 1fr); padding-left: var(--st-code-gutter); background: var(--surface); color: var(--text-tertiary); }
+  .st-code-pair.is-hunk b { font-weight: inherit; color: var(--info); }
+  .st-code-pair.is-target { background: var(--accent-tint); box-shadow: inset 2px 0 var(--accent); }
+  @container st-code (min-width: 560px) {
+    .st-code.is-split .st-code-split { display: block; }
+    .st-code.is-split .st-code-unified { display: none; }
+  }
+  @container st-code (max-width: 559px) {
+    .st-code-view { display: none; }
+  }
 </style>
 
 <div class="st-code">
@@ -58,8 +82,12 @@ notes: Unified only; side-by-side does not fit split panes. Long lines wrap and 
     <!-- direction: rtl keeps the file name visible when the path truncates. -->
     <span class="st-code-path" title="Sources/Plugins/ThemeLoader.swift"><bdi>Sources/Plugins/ThemeLoader.swift</bdi></span>
     <span class="st-code-stat"><span class="is-add">+3</span><span class="is-del">−1</span></span>
+    <div class="st-segmented st-code-view" role="group" aria-label="Diff layout">
+      <button aria-pressed="true" data-layout="unified">Unified</button>
+      <button aria-pressed="false" data-layout="split">Split</button>
+    </div>
   </div>
-  <div class="st-code-body">
+  <div class="st-code-body st-code-unified">
     <div class="st-code-line is-hunk"><span class="st-code-n"></span><span class="st-code-n"></span><span class="st-code-m"></span><code><b>@@ -41,6 +41,8 @@</b> func loadTheme(named name: String)</code></div>
     <div class="st-code-line"><span class="st-code-n">41</span><span class="st-code-n">41</span><span class="st-code-m"></span><code>    let url = themesDirectory.appendingPathComponent(name)</code></div>
     <div class="st-code-line is-del"><span class="st-code-n">42</span><span class="st-code-n"></span><span class="st-code-m">-</span><code>    let data = try! Data(contentsOf: url)</code></div>
@@ -78,3 +106,59 @@ notes: Unified only; side-by-side does not fit split panes. Long lines wrap and 
     <div class="st-code-line"><span class="st-code-n">19</span><code>console.log(`ready on ${port}`);</code></div>
   </div>
 </div>
+
+<script>
+  document.querySelectorAll(".st-code:has(.st-code-view)").forEach(view => {
+    const unified = view.querySelector(".st-code-unified");
+    const split = document.createElement("div");
+    split.className = "st-code-body st-code-split";
+    unified.after(split);
+
+    const cell = (line, side) => {
+      const number = document.createElement("span");
+      number.className = "st-code-n";
+      const code = document.createElement("code");
+      if (line) {
+        number.textContent = line.querySelectorAll(".st-code-n")[side].textContent;
+        code.append(...[...line.querySelector("code").childNodes].map(node => node.cloneNode(true)));
+        if (line.classList.contains("is-add")) code.classList.add("is-add");
+        if (line.classList.contains("is-del")) code.classList.add("is-del");
+      } else code.classList.add("is-empty");
+      return [number, code];
+    };
+    const pair = (left, right, className = "") => {
+      const row = document.createElement("div");
+      row.className = `st-code-pair ${className}`;
+      row.append(...cell(left, 0), ...cell(right, 1));
+      split.append(row);
+    };
+
+    // Pair each run of removed lines with the added lines that follow it.
+    const lines = [...unified.children];
+    for (let i = 0; i < lines.length;) {
+      const line = lines[i];
+      if (line.classList.contains("is-hunk")) {
+        const row = document.createElement("div");
+        row.className = "st-code-pair is-hunk";
+        row.append(line.querySelector("code").cloneNode(true));
+        split.append(row);
+        i++;
+      } else if (line.classList.contains("is-del") || line.classList.contains("is-add")) {
+        const dels = [], adds = [];
+        while (lines[i]?.classList.contains("is-del")) dels.push(lines[i++]);
+        while (lines[i]?.classList.contains("is-add")) adds.push(lines[i++]);
+        for (let k = 0; k < Math.max(dels.length, adds.length); k++) pair(dels[k], adds[k]);
+      } else {
+        pair(line, line, line.classList.contains("is-target") ? "is-target" : "");
+        i++;
+      }
+    }
+
+    view.querySelector(".st-code-view").addEventListener("click", event => {
+      const button = event.target.closest("[data-layout]");
+      if (!button) return;
+      view.classList.toggle("is-split", button.dataset.layout === "split");
+      button.parentElement.querySelectorAll("button").forEach(other => other.setAttribute("aria-pressed", String(other === button)));
+    });
+  });
+</script>

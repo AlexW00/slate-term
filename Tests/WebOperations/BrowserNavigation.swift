@@ -44,7 +44,7 @@ struct BrowserNavigationChecks {
         }
     }
     static func delayedInitialCallbacks(startingURL: Bool) async throws {
-        let pane = BrowserPane()
+        let pane = BrowserPane(mode: .privateBrowser, dataStore: .nonPersistent())
         defer { pane.close() }
         let callbacks = NavigationCallbacks(pane)
         pane.web.navigationDelegate = callbacks
@@ -74,7 +74,7 @@ struct BrowserNavigationChecks {
         print("PASS delayed \(startingURL ? "welcome/recipe" : "welcome") callbacks preserve the explicit navigation")
     }
     static func supersession(pageInitiated: Bool) async throws {
-        let pane = BrowserPane()
+        let pane = BrowserPane(mode: .privateBrowser, dataStore: .nonPersistent())
         defer { pane.close() }
         let callbacks = NavigationCallbacks(pane)
         pane.web.navigationDelegate = callbacks
@@ -110,7 +110,7 @@ struct BrowserNavigationChecks {
         print("PASS \(pageInitiated ? "page" : "RPC") successor cancels the old caller without releasing its platform slot early")
     }
     static func cancellation() async throws {
-        let pane = BrowserPane()
+        let pane = BrowserPane(mode: .privateBrowser, dataStore: .nonPersistent())
         defer { pane.close() }
         let callbacks = NavigationCallbacks(pane)
         pane.web.navigationDelegate = callbacks
@@ -126,7 +126,7 @@ struct BrowserNavigationChecks {
         print("PASS cancelled navigation releases its caller before its platform slot")
     }
     static func inFlight(_ url: String, cancel: Bool) async throws {
-        let pane = BrowserPane()
+        let pane = BrowserPane(mode: .privateBrowser, dataStore: .nonPersistent())
         defer { pane.close() }
         let mode = cancel ? "cancel" : "supersede"
         let request = Task { try await pane.navigate(url + "held/" + mode) }
@@ -153,7 +153,7 @@ struct BrowserNavigationChecks {
     }
     static func naturalCallbacks(_ url: String) async throws {
         for _ in 0..<3 {
-            let pane = BrowserPane()
+            let pane = BrowserPane(mode: .privateBrowser, dataStore: .nonPersistent())
             defer { pane.close() }
             pane.loadViewIfNeeded()
             let result = try await pane.navigate(url)
@@ -169,9 +169,109 @@ struct BrowserNavigationChecks {
         }
         print("PASS three fresh browsers: immediate first navigation, real callback delivery, document replacement and history restoration")
     }
+    static func localFiles() async throws {
+        try await checkLocalFiles(mode: .privateBrowser, dataStore: .nonPersistent())
+        let identifier = UUID(uuidString: CommandLine.arguments[3])!
+        try await checkLocalFiles(mode: .browser, dataStore: WKWebsiteDataStore(forIdentifier: identifier))
+    }
+    static func checkLocalFiles(mode: PaneType, dataStore: WKWebsiteDataStore) async throws {
+        let fixture = FileManager.default.temporaryDirectory.appendingPathComponent("slate-local-files-\(UUID())", isDirectory: true)
+        let root = fixture.appendingPathComponent("site", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        try "window.escapedReadScope = true;".write(to: fixture.appendingPathComponent("outside.js"), atomically: true, encoding: .utf8)
+        let image = root.appendingPathComponent("image 日本語 #1.png")
+        let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 8, pixelsHigh: 8, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        try bitmap.representation(using: .png, properties: [:])!.write(to: image)
+        let video = root.appendingPathComponent("clip 日本語.mp4")
+        try FileManager.default.copyItem(at: URL(fileURLWithPath: CommandLine.arguments[2]), to: video)
+        let page = root.appendingPathComponent("local page 日本語 #1.html")
+        try "body { color: rgb(12, 34, 56); }".write(to: root.appendingPathComponent("style.css"), atomically: true, encoding: .utf8)
+        try "document.body.dataset.script = 'loaded';".write(to: root.appendingPathComponent("script.js"), atomically: true, encoding: .utf8)
+        try """
+        <!doctype html><meta charset="utf-8"><title>Local HTML Fixture</title>
+        <link rel="stylesheet" href="style.css"><body><h1>Local file</h1>
+        <img src="\(image.lastPathComponent.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)!)">
+        <video controls preload="auto" src="\(video.lastPathComponent.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)!)"></video>
+        <a id="next" href="next.html">Next</a><a id="popup" href="next.html" target="_blank">Popup</a>
+        <script src="script.js"></script><script src="../outside.js"></script>
+        """.write(to: page, atomically: true, encoding: .utf8)
+        try "<title>Local Successor</title>".write(to: root.appendingPathComponent("next.html"), atomically: true, encoding: .utf8)
+        let pane = BrowserPane(mode: mode, dataStore: dataStore)
+        defer { pane.close() }
+        pane.loadViewIfNeeded()
+        NSApplication.shared.setActivationPolicy(.accessory)
+        let window = NSWindow(contentRect: NSRect(x: 80, y: 80, width: 640, height: 480), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = pane.view
+        window.orderBack(nil) // Video source selection requires an attached, visible view.
+        defer { window.close() }
+        let result = try await pane.navigate(page.path)
+        try await eventually("local document identity") { pane.automation.documentID != nil }
+        try require(result.object?["title"] == .string("Local HTML Fixture"), "Local HTML navigation did not finish")
+        try require(try await pane.evaluate("document.body.dataset.script === 'loaded' && getComputedStyle(document.body).color === 'rgb(12, 34, 56)' && document.images[0].naturalWidth === 8") == .bool(true), "Local relative scripts/styles/images did not load")
+        try require(try await pane.evaluate("typeof workspace === 'undefined' && !window.webkit?.messageHandlers?.workspace") == .bool(true), "Local HTML received plugin privileges")
+        try require(try await pane.evaluate("typeof escapedReadScope === 'undefined'") == .bool(true), "Local HTML read outside its containing directory")
+        _ = try await pane.evaluate("const video = document.querySelector('video'); video.load(); video.play().catch(e => document.body.dataset.playError = String(e)); true")
+        do {
+            try await eventually("embedded local video decoding") {
+                try await pane.evaluate("document.querySelector('video').videoWidth === 32 && document.querySelector('video').readyState >= 2") == .bool(true)
+            }
+        } catch {
+            print("VIDEO DIAGNOSTICS", try await pane.evaluate("JSON.stringify((v => ({src:v.currentSrc,ready:v.readyState,network:v.networkState,error:v.error?.message,playError:document.body.dataset.playError,width:v.videoWidth}))(document.querySelector('video')))"))
+            throw error
+        }
+        let document = pane.automation.documentID
+        for invalid in [root.path, root.appendingPathComponent("missing.html").path] {
+            do { _ = try await pane.navigate(invalid); throw Failure(message: "Invalid file destination succeeded") }
+            catch let error as RPCFailure { try require(error.code == -32602, "Wrong missing-file error") }
+            try require(pane.automation.ready && pane.automation.documentID == document, "Rejected file navigation retired the current document")
+        }
+        _ = try await pane.evaluate("document.querySelector('#next').click(); true")
+        try await eventually("relative local link") { pane.web.title == "Local Successor" && !pane.web.isLoading }
+        try pane.performCommand("browser.back")
+        try await eventually("local history") { pane.web.title == "Local HTML Fixture" && !pane.web.isLoading }
+        _ = try await pane.evaluate("document.querySelector('#popup').click(); true")
+        try await eventually("local target blank link") { pane.web.title == "Local Successor" && !pane.web.isLoading }
+        _ = try await pane.navigate(image.absoluteString)
+        try require(try await pane.evaluate("document.images[0].naturalWidth === 8") == .bool(true), "Standalone local image did not decode")
+        _ = try await pane.navigate(video.absoluteString)
+        try await eventually("standalone local video decoding") {
+            try await pane.evaluate("document.querySelector('video')?.videoWidth === 32 && document.querySelector('video')?.readyState >= 2") == .bool(true)
+        }
+        // Exercise the real native address action as well as the shared RPC loader.
+        let toolbar = pane.view.subviews.compactMap { $0 as? NSStackView }.first!
+        let address = toolbar.arrangedSubviews.compactMap { $0 as? NSTextField }.first!
+        address.stringValue = page.path
+        NSApp.sendAction(address.action!, to: address.target, from: address)
+        try await eventually("native local address") { pane.web.title == "Local HTML Fixture" && !pane.web.isLoading }
+        try pane.performCommand("browser.reload")
+        try await eventually("local reload") { !pane.web.isLoading && pane.automation.ready }
+        let recipe = BrowserPane(mode: mode, dataStore: dataStore)
+        defer { recipe.close() }
+        recipe.loadStartingURL(page.absoluteString)
+        try await eventually("local recipe starting URL") { recipe.web.title == "Local HTML Fixture" && !recipe.web.isLoading }
+        try require(pane.info.object?["type"] == .string(mode.identifier) && pane.info.object?["persistent"] == .bool(mode == .browser), "Local navigation changed the browser mode/store")
+        print("PASS \(mode.identifier): local HTML, relative CSS/JS/image/video, standalone PNG/MP4, links/popups, history/reload, native address, recipe and bridge isolation")
+    }
     static func main() async {
         NSApplication.shared.setActivationPolicy(.prohibited)
         do {
+            if CommandLine.arguments[1] == "--remove-profile" {
+                // Run only after the owning fixture exits: AppKit/WebKit can retain
+                // closed views beyond their Swift scope, keeping a profile in use.
+                let identifier = UUID(uuidString: CommandLine.arguments[2])!
+                let store = WKWebsiteDataStore(forIdentifier: identifier)
+                defer { withExtendedLifetime(store) {} }
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+                    WKWebsiteDataStore.remove(forIdentifier: identifier) { error in
+                        if let error { continuation.resume(throwing: error) }
+                        else { continuation.resume() }
+                    }
+                }
+                print("PASS temporary persistent browser profile removed")
+                return
+            }
             try await delayedInitialCallbacks(startingURL: false)
             try await delayedInitialCallbacks(startingURL: true)
             try await supersession(pageInitiated: false)
@@ -181,6 +281,7 @@ struct BrowserNavigationChecks {
             try await inFlight(url, cancel: false)
             try await inFlight(url, cancel: true)
             try await naturalCallbacks(url)
+            try await localFiles()
         } catch {
             fputs("FAIL browser navigation: \(error)\n", stderr)
             exit(1)

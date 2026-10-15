@@ -11,12 +11,14 @@ public struct CommandContract: Codable, Sendable {
 
     public static func forCommand(_ id: String) -> Self {
         let global = id.hasPrefix("appearance.") || id.hasPrefix("terminal.font.") || id.hasPrefix("terminal.palette.")
-            || id.hasPrefix("warnings.") || id.hasPrefix("plugins.") || id.hasPrefix("window.frame.")
+            || id.hasPrefix("warnings.") || id.hasPrefix("skills.") || id.hasPrefix("plugins.") || id.hasPrefix("window.frame.")
             || ["window.focus", "window.minimize", "window.restore", "window.fullscreen.set", "tab.detachCurrent"].contains(id)
-        let independent = id.hasPrefix("layouts.") || (global && id != "tab.detachCurrent") || ["window.new", "settings.open", "config.reload", "command.picker"].contains(id)
+        let independent = id.hasPrefix("layouts.") || (global && id != "tab.detachCurrent") || ["window.new", "settings.open", "config.reload", "command.picker", "browser.clearData"].contains(id)
         let parameters: [String: String]
         let required: [String]
         switch id {
+        // Native invocation captures the current URL; API invocation requires it.
+        case "browser.clearSiteData": parameters = ["url": "absolute HTTP(S) URL, required through API"]; required = []
         case "appearance.set": parameters = ["mode": "light|dark|auto"]; required = ["mode"]
         case "terminal.font.set": parameters = ["size": "number[1,256]"]; required = ["size"]
         case "terminal.palette.set": parameters = ["slot": "light|dark", "name": "string"]; required = ["slot", "name"]

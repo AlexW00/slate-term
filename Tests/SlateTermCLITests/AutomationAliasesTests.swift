@@ -10,7 +10,7 @@ import SlateTermCore
         ("context", ContextCommand.Action.allCases.map(\.rawValue)),
         ("command", Commands.Action.allCases.map(\.rawValue)),
         ("terminal", TerminalCommand.Action.allCases.map(\.rawValue)),
-        ("browser", BrowserCommand.Action.allCases.map(\.rawValue)),
+        ("browser", BrowserCommand.Action.allCases.map { String($0.method.dropFirst("browser.".count)) }),
         ("web", WebCLI.Action.allCases.map(\.rawValue)),
         ("plugins", Plugins.Action.allCases.filter { ![.validate, .settings, .service].contains($0) }.map(\.rawValue)),
         ("events", Events.Action.allCases.map { $0 == .watch ? "poll" : $0.rawValue }),

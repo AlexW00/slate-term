@@ -14,7 +14,8 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
     case commandList = "command.list", commandRun = "command.run"
     case windowList = "window.list", windowGet = "window.get"
     case configGet = "config.get", configReload = "config.reload", configValidate = "config.validate", configPatch = "config.patch"
-    case paletteList = "palette.list", paletteImport = "palette.import"
+    case paletteList = "palette.list", paletteImport = "palette.import", appearanceGet = "appearance.get"
+    case skillsList = "skills.list", skillsInstall = "skills.install", skillsUninstall = "skills.uninstall"
     case pluginsList = "plugins.list", pluginsRegister = "plugins.register", pluginsUnregister = "plugins.unregister"
     case pluginsStatus = "plugins.status", pluginsRestart = "plugins.restart", pluginsLogs = "plugins.logs"
     case pluginSettingsGet = "plugins.settings.get", pluginSettingsPatch = "plugins.settings.patch", settingsGet = "settings.get"
@@ -24,6 +25,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
     case eventsHead = "events.head", eventsPoll = "events.poll", eventsEmit = "events.emit"
     case webGet = "web.get", webSnapshot = "web.snapshot", webClick = "web.click", webFill = "web.fill"
     case webSelect = "web.select", webScroll = "web.scroll", webWait = "web.wait", webScreenshot = "web.screenshot"
+    case browserClearData = "browser.clearData", browserClearSiteData = "browser.clearSiteData"
     case browserGet = "browser.get", browserNavigate = "browser.navigate", browserSnapshot = "browser.snapshot"
     case browserClick = "browser.click", browserFill = "browser.fill", browserSelect = "browser.select"
     case browserScroll = "browser.scroll", browserWait = "browser.wait", browserEval = "browser.eval", browserScreenshot = "browser.screenshot"
@@ -37,12 +39,12 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
         case .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsCreate, .layoutsUpdate, .layoutsWindows, .layoutsCapture, .layoutsOpen, .layoutsStartupStatus,
              .describe, .version, .contextGet, .workspaceGet, .workspaceSnapshot, .layoutGet, .tabsList, .panesList, .paneInspect,
              .commandList, .commandRun, .windowList, .windowGet, .configGet, .configReload, .configValidate, .configPatch,
-             .paletteList, .paletteImport, .pluginsList, .pluginsRegister, .pluginsUnregister, .pluginsStatus, .pluginsLogs,
+             .paletteList, .paletteImport, .appearanceGet, .skillsList, .skillsInstall, .skillsUninstall, .pluginsList, .pluginsRegister, .pluginsUnregister, .pluginsStatus, .pluginsLogs,
              .pluginSettingsGet, .pluginSettingsPatch, .panesSend, .panesCapture: .synchronous
         case .layoutConfiguration, .contextInspect, .settingsGet, .storageGet, .storageSet, .storageDelete, .paneTitle: .contextual
         case .terminalSend, .terminalKey, .terminalCapture, .terminalRun, .terminalWait: .terminal
         case .browserGet, .browserNavigate, .browserSnapshot, .browserClick, .browserFill, .browserSelect,
-             .browserScroll, .browserWait, .browserEval, .browserScreenshot: .browser
+             .browserScroll, .browserWait, .browserEval, .browserScreenshot, .browserClearData, .browserClearSiteData: .browser
         case .webGet, .webSnapshot, .webClick, .webFill, .webSelect, .webScroll, .webWait, .webScreenshot: .web
         case .eventsHead, .eventsPoll, .eventsEmit: .events
         case .pluginsRestart: .pluginRuntime
@@ -60,14 +62,14 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
         case .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsWindows, .layoutsStartupStatus, .layoutConfiguration,
              .describe, .version, .contextGet, .contextInspect, .workspaceGet, .workspaceSnapshot, .layoutGet,
              .tabsList, .panesList, .paneInspect, .commandList, .windowList, .windowGet, .configGet, .configValidate,
-             .paletteList, .pluginsList, .pluginsStatus, .pluginsLogs, .pluginSettingsGet, .settingsGet, .storageGet,
+             .paletteList, .appearanceGet, .skillsList, .pluginsList, .pluginsStatus, .pluginsLogs, .pluginSettingsGet, .settingsGet, .storageGet,
              .terminalCapture, .terminalWait, .panesCapture, .eventsHead, .eventsPoll, .webGet, .webSnapshot, .webWait,
              .browserGet, .browserSnapshot, .browserWait, .serviceList, .serviceStatus, .serviceLogs: .read
-        case .layoutsCreate, .layoutsUpdate, .layoutsCapture, .layoutsOpen, .commandRun, .configReload, .configPatch, .paletteImport, .pluginsRegister, .pluginsUnregister,
+        case .layoutsCreate, .layoutsUpdate, .layoutsCapture, .layoutsOpen, .commandRun, .configReload, .configPatch, .paletteImport, .skillsInstall, .skillsUninstall, .pluginsRegister, .pluginsUnregister,
              .pluginsRestart, .pluginSettingsPatch, .storageSet, .storageDelete, .paneTitle, .terminalSend,
              .terminalKey, .terminalRun, .panesSend, .eventsEmit, .webClick, .webFill, .webSelect, .webScroll,
              .webScreenshot, .browserNavigate, .browserClick, .browserFill, .browserSelect, .browserScroll,
-             .browserEval, .browserScreenshot, .serviceStart: .mutation
+             .browserEval, .browserScreenshot, .browserClearData, .browserClearSiteData, .serviceStart: .mutation
         }
     }
 
@@ -91,7 +93,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
         case .layoutConfiguration, .contextInspect, .layoutGet, .paneInspect, .paneTitle,
              .webGet, .webSnapshot, .webClick, .webFill, .webSelect, .webScroll, .webWait, .webScreenshot,
              .browserGet, .browserNavigate, .browserSnapshot, .browserClick, .browserFill, .browserSelect,
-             .browserScroll, .browserWait, .browserEval, .browserScreenshot, .panesSend, .panesCapture:
+             .browserScroll, .browserWait, .browserEval, .browserScreenshot, .browserClearSiteData, .panesSend, .panesCapture:
             inheritPane()
         case .terminalSend, .terminalKey, .terminalCapture, .terminalRun, .terminalWait:
             inheritPane(); inheritScope()
@@ -106,10 +108,10 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
             if params["instanceId"] == nil, !explicitTarget, let instance = defaults.instanceID { params["instanceId"] = .string(instance) }
         case .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsCreate, .layoutsUpdate, .layoutsWindows, .layoutsCapture, .layoutsOpen, .layoutsStartupStatus,
              .describe, .version, .workspaceGet, .tabsList, .panesList, .commandList, .windowList, .windowGet,
-             .configGet, .configReload, .configValidate, .configPatch, .paletteList, .paletteImport,
-             .pluginsList, .pluginsRegister, .pluginsUnregister, .pluginsStatus, .pluginsRestart, .pluginsLogs,
+             .configGet, .configReload, .configValidate, .configPatch, .paletteList, .paletteImport, .appearanceGet,
+             .skillsList, .skillsInstall, .skillsUninstall, .pluginsList, .pluginsRegister, .pluginsUnregister, .pluginsStatus, .pluginsRestart, .pluginsLogs,
              .eventsHead, .eventsPoll, .eventsEmit, .serviceStart, .serviceStop, .serviceList, .serviceStatus,
-             .serviceLogs, .serviceReady, .shellUpdate, .shellRunInput: break
+             .serviceLogs, .serviceReady, .shellUpdate, .shellRunInput, .browserClearData: break
         }
         return params
     }

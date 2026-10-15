@@ -7,7 +7,7 @@ import SlateTermSettings
 @main
 struct SlateTermCLI: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "slate-term", abstract: "Control a running Slate Terminal workspace.",
-        subcommands: [Tabs.self, Panes.self, WindowsCLI.self, TerminalCommand.self, BrowserCommand.self, WebCLI.self, Plugins.self, Events.self, ContextCommand.self, ShellCommand.self, LayoutCommand.self, SavedLayoutsCommand.self, Commands.self, ConfigCommand.self, WorkspaceCLI.self, APICLI.self, AppearanceCLI.self, PaletteCLI.self, RPC.self, Version.self, PluginWorker.self])
+        subcommands: [Tabs.self, Panes.self, WindowsCLI.self, TerminalCommand.self, BrowserCommand.self, WebCLI.self, Plugins.self, Events.self, ContextCommand.self, ShellCommand.self, LayoutCommand.self, SavedLayoutsCommand.self, Commands.self, ConfigCommand.self, WorkspaceCLI.self, APICLI.self, AppearanceCLI.self, PaletteCLI.self, SkillCLI.self, RPC.self, Version.self, PluginWorker.self])
 
     static func main() {
         do {
@@ -330,7 +330,16 @@ struct ShellCommand: ParsableCommand {
 
 struct BrowserCommand: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "browser", abstract: "Control an embedded browser pane.")
-    enum Action: String, CaseIterable, ExpressibleByArgument { case get, navigate, eval, screenshot, snapshot, click, fill, select, scroll, wait }
+    enum Action: String, CaseIterable, ExpressibleByArgument { case get, navigate, eval, screenshot, snapshot, click, fill, select, scroll, wait
+        case clearData = "clear-data", clearSiteData = "clear-site-data"
+        var method: String {
+            switch self {
+            case .clearData: "browser.clearData"
+            case .clearSiteData: "browser.clearSiteData"
+            default: "browser.\(rawValue)"
+            }
+        }
+    }
     @Argument var action: Action
     @OptionGroup var connection: Connection
     @OptionGroup var target: Target
@@ -347,7 +356,7 @@ struct BrowserCommand: ParsableCommand {
     @Option(help: "Wait state: attached, detached, visible, or hidden.") var state: String?
     @Option var timeoutMilliseconds: Int?
     func run() throws {
-        var params = try target.params(connection: connection)
+        var params = try target.params(connection: connection, inheritingTarget: action != .clearData)
         if let url { params["url"] = .string(url) }
         if let script { params["script"] = .string(script) }
         if let path { params["path"] = .string(path) }
@@ -360,7 +369,7 @@ struct BrowserCommand: ParsableCommand {
         if let maxElements { params["maxElements"] = .integer(maxElements) }
         if let state { params["state"] = .string(state) }
         if let timeoutMilliseconds { params["timeoutMilliseconds"] = .integer(timeoutMilliseconds) }
-        try connection.call("browser.\(action.rawValue)", params: params)
+        try connection.call(action.method, params: params)
     }
 }
 

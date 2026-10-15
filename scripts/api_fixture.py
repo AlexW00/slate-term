@@ -3,6 +3,8 @@ import json
 import os
 from pathlib import Path
 import signal
+import shutil
+import sys
 import socket
 import subprocess
 import tempfile
@@ -28,8 +30,7 @@ class AppFixture:
         self.workspace_source = workspace_source
 
     def __enter__(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix='slate-api-', dir='/tmp')
-        self.root = Path(self.temporary.name)
+        self.root = Path(tempfile.mkdtemp(prefix='slate-api-', dir='/tmp'))
         self.config = self.root / 'config.toml'
         self.config.write_text(self.configuration)
         if self.workspace_source is not None:
@@ -66,8 +67,22 @@ class AppFixture:
             except subprocess.TimeoutExpired:
                 os.killpg(self.process.pid, signal.SIGKILL)
                 self.process.wait(timeout=5)
-        self.log.close()
-        self.temporary.cleanup()
+        cleaned = False
+        try:
+            # Named WebKit profiles live outside the temporary state directory.
+            # Remove only this fixture's profile, after all its web views/processes exit.
+            profile = self.root / 'state/browser-profile.json'
+            if profile.exists():
+                cleanup = subprocess.run([str(APP), '--remove-test-browser-profile'], env=self.env,
+                                         stdout=self.log, stderr=self.log, timeout=20)
+                assert cleanup.returncode == 0, f'Fixture browser profile cleanup failed ({cleanup.returncode}); metadata: {self.root}'
+            cleaned = True
+        finally:
+            self.log.close()
+            if cleaned:
+                shutil.rmtree(self.root)
+            else:
+                print(f'Preserved fixture ownership metadata: {self.root}', file=sys.stderr)
 
     def rpc(self, method, *, error=None, request_metadata=None, **params):
         with socket.socket(socket.AF_UNIX) as client:

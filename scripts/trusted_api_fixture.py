@@ -1,4 +1,4 @@
-"""Three trusted clients in the caller's owned app; no extra app, activation or capture."""
+"""Three trusted clients in the caller's owned app; no extra app or activation."""
 import functools
 import http.server
 import json
@@ -106,7 +106,10 @@ def verify_trusted_api(app, service_call):
         before = app.rpc('web.get', pane=panel)
         service_call('command.run', dict(id='pane.zoom', pane='p1'))
         assert bridge('web.get')['renderable'] is False
+        assert bridge('web.get')['screenshotReady'] is False
         bridge('web.snapshot', {}, error=-32051)
+        for name, call in clients:
+            call('web.screenshot', dict(pane=panel, path=str(app.root / (name + '-zoom-hidden.png'))), error=-32051)
         service_call('command.run', dict(id='pane.zoom', pane='p1'))
         eventually('unzoom renderable', lambda: app.rpc('web.get', pane=panel)['renderable'])
         assert app.rpc('web.get', pane=panel)['documentId'] == before['documentId']
@@ -116,6 +119,21 @@ def verify_trusted_api(app, service_call):
         revision = app.rpc('pane.inspect', pane=panel)['layoutRevision']
         app.rpc('command.run', id='tab.new')
         assert bridge('pane.inspect', {'expectedLayoutRevision': revision})['paneId'] == panel
+        before = app.rpc('workspace.get')
+        for pane in [panel, browser]:
+            eventually('background capture ready', lambda: app.rpc('web.get', pane=pane)['screenshotReady'])
+            identity = app.rpc('web.get', pane=pane)
+            assert not identity['renderable'] and not app.rpc('pane.inspect', pane=pane)['visible']
+            for name, call in clients:
+                info = call('api.describe')['webAutomation']
+                assert info['screenshotInactiveTabs'] and info['domRequiresVisiblePane']
+                path = app.root / f'{name}-{pane}-background.png'
+                result = call('web.screenshot', dict(pane=pane, path=str(path),
+                    expectedViewId=identity['viewId'], expectedDocumentId=identity['documentId']))
+                assert result['path'] == str(path) and result['documentId'] == identity['documentId']
+                assert path.read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
+                call('web.snapshot', {'pane': pane}, error=-32051)
+                assert app.rpc('workspace.get') == before
         app.rpc('command.run', id='tab.focus', tab=tab)
 
         # A new document in a shared logical instance must reject an old automatic title.
@@ -129,4 +147,4 @@ def verify_trusted_api(app, service_call):
         server.shutdown()
         server.server_close()
         thread.join(timeout=3)
-    print('PASS three-client shared discovery/dispatch, namespace writes, storage, document titles, event recipients, browser/terminal control, inactive-tab guards, ordinary-page/subframe boundary and zoom')
+    print('PASS three-client shared discovery/dispatch, namespace writes, storage, document titles, event recipients, browser/terminal control, inactive-tab capture/guards, DOM visibility, ordinary-page/subframe boundary and zoom')

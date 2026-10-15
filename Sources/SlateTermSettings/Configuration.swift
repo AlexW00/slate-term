@@ -112,17 +112,13 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
         public func addressURL(for text: String) throws -> URL {
             let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !value.isEmpty else { throw ConfigurationError.invalid("Enter a URL or search term") }
-            let hasScheme = value.contains("://") || value.hasPrefix("about:")
+            let hasScheme = value.contains("://") || value.hasPrefix("about:") || value.lowercased().hasPrefix("file:")
+            if value.hasPrefix("/") || value.hasPrefix("~/") { return try BrowserURL.parse(value) }
             let host = value.split(separator: "/", maxSplits: 1).first.map(String.init) ?? value
             let looksLikeAddress = !value.contains(where: { $0.isWhitespace }) &&
                 (host.contains(".") || host == "localhost" || host.hasPrefix("localhost:") || host.hasPrefix("["))
             if hasScheme || looksLikeAddress {
-                guard let url = URL(string: hasScheme ? value : "https://" + value),
-                      url.absoluteString == "about:blank" ||
-                      (["http", "https"].contains(url.scheme?.lowercased() ?? "") && url.host != nil && url.user == nil && url.password == nil) else {
-                    throw ConfigurationError.invalid("Use an HTTP or HTTPS URL")
-                }
-                return url
+                return try BrowserURL.parse(value, assumingHTTPS: true)
             }
             let unreserved = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~")
             guard let query = value.addingPercentEncoding(withAllowedCharacters: unreserved),

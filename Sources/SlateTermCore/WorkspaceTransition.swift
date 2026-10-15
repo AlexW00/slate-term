@@ -172,7 +172,7 @@ public struct WorkspaceTransition: Sendable {
         })
     }
     private static func typeName(_ type: PaneType) -> String {
-        switch type { case .terminal: "terminal"; case .browser: "browser"; case .registered(let id): id }
+        type.identifier
     }
     private static func staleRevisionLedger() -> RPCFailure {
         RPCFailure(code: APIError.conflict, message: "Workspace and revision ledger disagree; commit native observations before preparing another operation")

@@ -13,7 +13,28 @@ public enum WorkspaceError: Error, Equatable, Sendable {
 public enum PaneType: Equatable, Codable, Sendable {
     case terminal
     case browser
+    case privateBrowser
     case registered(String)
+
+    public init(identifier: String) {
+        switch identifier {
+        case "terminal": self = .terminal
+        case "browser": self = .browser
+        case "private-browser": self = .privateBrowser
+        default: self = .registered(identifier)
+        }
+    }
+
+    public var identifier: String {
+        switch self {
+        case .terminal: "terminal"
+        case .browser: "browser"
+        case .privateBrowser: "private-browser"
+        case .registered(let id): id
+        }
+    }
+
+    public var isBrowser: Bool { self == .browser || self == .privateBrowser }
 }
 
 public enum PaneSplitFocus: String, Codable, Sendable { case new, preserve }

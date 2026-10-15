@@ -1,7 +1,7 @@
 /*
  * Keeps a plugin page in sync with the Slate Terminal palette.
- * Load it in <head> before slate.css so the light or dark default paints first.
- * The terminal palette follows a moment later, once the host answers:
+ * Load it in <head> before slate.css. Inside Slate Terminal the host has already
+ * injected the palette variables; elsewhere the light or dark default paints first:
  *   <script src="slate-theme.js"></script>
  *
  * It writes the --st-* palette variables and data-appearance on <html>.
@@ -68,8 +68,9 @@
     return;
   }
 
-  // Avoid a flash of the fallback appearance while the first read is in flight.
-  if (matchMedia("(prefers-color-scheme: light)").matches) root.dataset.appearance = "light";
+  // The host injects the palette before page scripts run. Without injection,
+  // guess from the system to avoid a flash while the first read is in flight.
+  if (!root.dataset.appearance && matchMedia("(prefers-color-scheme: light)").matches) root.dataset.appearance = "light";
 
   const read = () => workspace.call("appearance.get").then(apply);
   // Subscribe before the first read so a change between them is not lost.

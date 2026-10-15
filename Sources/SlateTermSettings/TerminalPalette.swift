@@ -67,6 +67,12 @@ public struct ResolvedTerminalPalettes: Sendable {
     fileprivate let light: ResolvedTerminalPalette
     fileprivate let dark: ResolvedTerminalPalette
 
+    /// Colors of the light or dark slot. Bundled themes are read from the app's
+    /// trusted theme directory; custom palettes were parsed when resolved.
+    public func colors(dark: Bool, bundledDirectory: URL) throws -> TerminalColors {
+        try (dark ? self.dark : light).colors(bundledDirectory: bundledDirectory)
+    }
+
     func engineValue(directory: URL, bundledDirectory: URL) throws -> String {
         "light:\(try light.engineValue(directory: directory, bundledDirectory: bundledDirectory)),dark:\(try dark.engineValue(directory: directory, bundledDirectory: bundledDirectory))"
     }
@@ -82,6 +88,13 @@ extension AppConfiguration.Terminal {
 private enum ResolvedTerminalPalette: Sendable {
     case bundled(AppConfiguration.BundledTerminalTheme)
     case custom(TerminalPalette)
+
+    func colors(bundledDirectory: URL) throws -> TerminalColors {
+        switch self {
+        case .bundled(let theme): try TerminalPalette.load(from: bundledDirectory.appendingPathComponent(theme.rawValue)).colors
+        case .custom(let palette): palette.colors
+        }
+    }
 
     func engineValue(directory: URL, bundledDirectory: URL) throws -> String {
         let file: URL
@@ -116,7 +129,11 @@ private enum ResolvedTerminalPalette: Sendable {
 /// parses and normalizes values; raw file contents never reach the engine.
 public struct TerminalPalette: Equatable, Sendable {
     public let source: String
-    private init(source: String) { self.source = source }
+    public let colors: TerminalColors
+    private init(source: String, colors: TerminalColors) {
+        self.source = source
+        self.colors = colors
+    }
     private static let maximumBytes = 65_536
     private static let colorKeys: Set<String> = [
         "background", "foreground", "cursor-color", "cursor-text", "selection-background", "selection-foreground",
@@ -175,6 +192,6 @@ public struct TerminalPalette: Equatable, Sendable {
         }
         return TerminalPalette(source: colors.keys.sorted().map { key in
             key + (key.hasPrefix("palette = ") ? "=" : " = ") + colors[key]!
-        }.joined(separator: "\n") + "\n")
+        }.joined(separator: "\n") + "\n", colors: TerminalColors(colors))
     }
 }

@@ -39,7 +39,7 @@ struct ServiceSessionTests {
                 try ServiceIdentity(appInstanceID: "app", pluginID: "example.worker", serviceID: invalid, generation: "g")
             }
         }
-        for invalid in ["terminal", "browser", "Bad", "a..b", String(repeating: "a", count: 65)] {
+        for invalid in ["terminal", "browser", "private-browser", "Bad", "a..b", String(repeating: "a", count: 65)] {
             #expect(throws: RPCFailure.self) {
                 try ServiceIdentity(appInstanceID: "app", pluginID: invalid, serviceID: "service", generation: "g")
             }

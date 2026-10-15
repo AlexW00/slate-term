@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One owned app; manual services via production CLI/API. No activation, clicks or screenshots."""
+"""One owned app; service/API parity including web captures. No activation, clicks or desktop screenshots."""
 import concurrent.futures
 import json
 import os

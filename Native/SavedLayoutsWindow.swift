@@ -340,7 +340,7 @@ private struct SavedLayoutMap: View {
             let active = id == selected
             return AnyView(Button { select(id) } label: {
                 VStack(spacing: 8) {
-                    Image(systemName: pane?.type == "terminal" ? "terminal" : pane?.type == "browser" ? "globe" : "puzzlepiece.extension")
+                    Image(systemName: pane?.type == "terminal" ? "terminal" : ["browser", "private-browser"].contains(pane?.type ?? "") ? "globe" : "puzzlepiece.extension")
                         .font(.system(size: 20, weight: .regular)).foregroundStyle(active ? Color.accentColor : .secondary)
                     Text(pane?.title.isEmpty == false ? pane!.title : type?.title ?? pane?.type ?? "Pane")
                         .font(.system(size: 12, weight: .medium)).lineLimit(2).multilineTextAlignment(.center)

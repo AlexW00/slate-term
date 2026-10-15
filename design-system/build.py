@@ -3,6 +3,10 @@
 
 Usage: python3 design-system/build.py [--check]
 
+The agent-facing files live in the skill, skills/slate-terminal/references/ui/.
+This script reads recipes, slate.css and slate-theme.js from there, rewrites the
+table in that INDEX.md, and writes gallery.html next to this script.
+
 Component recipes are the source of truth. Each starts with a metadata comment:
 
     <!--
@@ -27,6 +31,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+REPO = ROOT.parent
+UI = REPO / "skills" / "slate-terminal" / "references" / "ui"
 CATEGORIES = [("controls", "Controls"), ("patterns", "Patterns"), ("templates", "Templates")]
 INDEX_START = "<!-- components:start -->"
 INDEX_END = "<!-- components:end -->"
@@ -49,7 +55,7 @@ def parse_component(path):
         if required not in meta:
             raise SystemExit(f"{path}: missing {required}")
     meta["body"] = source[match.end():].strip() + "\n"
-    meta["path"] = path.relative_to(ROOT).as_posix()
+    meta["path"] = path.relative_to(UI).as_posix()
     meta["id"] = path.stem
     return meta
 
@@ -57,7 +63,7 @@ def parse_component(path):
 def load_components():
     groups = []
     for folder, title in CATEGORIES:
-        directory = ROOT / "components" / folder
+        directory = UI / "components" / folder
         if directory.is_dir():
             items = [parse_component(path) for path in sorted(directory.glob("*.html"))]
             groups.append((folder, title, items))
@@ -74,7 +80,7 @@ def index_table(groups):
 
 
 def updated_index(groups):
-    path = ROOT / "INDEX.md"
+    path = UI / "INDEX.md"
     text = path.read_text(encoding="utf-8")
     start, end = text.index(INDEX_START) + len(INDEX_START), text.index(INDEX_END)
     return path, text[:start] + "\n" + index_table(groups) + text[end:]
@@ -83,7 +89,7 @@ def updated_index(groups):
 def gallery(groups):
     template = (ROOT / "preview" / "gallery.template.html").read_text(encoding="utf-8")
     data = {
-        "setup": {name: (ROOT / name).read_text(encoding="utf-8") for name in ("slate.css", "slate-theme.js")},
+        "setup": {name: (UI / name).read_text(encoding="utf-8") for name in ("slate.css", "slate-theme.js")},
         "palettes": json.loads((ROOT / "preview" / "palettes.json").read_text(encoding="utf-8")),
         "groups": [
             {"id": folder, "title": title, "items": items}
@@ -93,7 +99,7 @@ def gallery(groups):
     # Escape "</" and "<!--" so recipe markup cannot close or confuse the inline script element.
     payload = json.dumps(data).replace("</", "<\\/").replace("<!--", "<\\u0021--")
     replacements = {
-        "/*@slate.css@*/": (ROOT / "slate.css").read_text(encoding="utf-8"),
+        "/*@slate.css@*/": (UI / "slate.css").read_text(encoding="utf-8"),
         "/*@data@*/null": payload,
         "<!--@count@-->": html.escape(str(sum(len(items) for _, _, items in groups))),
     }
@@ -111,12 +117,12 @@ def main():
     stale = [path for path, text in outputs if not path.exists() or path.read_text(encoding="utf-8") != text]
     if check:
         for path in stale:
-            print(f"out of date: {path.relative_to(ROOT)}")
+            print(f"out of date: {path.relative_to(REPO)}")
         sys.exit(1 if stale else 0)
     for path, text in outputs:
         path.write_text(text, encoding="utf-8")
     count = sum(len(items) for _, _, items in groups)
-    print(f"built gallery.html and INDEX.md from {count} components")
+    print(f"built {(ROOT / 'gallery.html').relative_to(REPO)} and {(UI / 'INDEX.md').relative_to(REPO)} from {count} components")
 
 
 if __name__ == "__main__":

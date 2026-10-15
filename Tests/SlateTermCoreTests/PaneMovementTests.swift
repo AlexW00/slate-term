@@ -39,7 +39,7 @@ func movingPaneUsesExistingIdentityAndRequestedEdge(direction: Direction) throws
     #expect(try Workspace.restore(workspace.encoded()) == workspace)
 }
 
-@Test(arguments: [PaneType.browser, .registered("notes")])
+@Test(arguments: [PaneType.browser, .privateBrowser, .registered("notes")])
 func movingNonTerminalPreservesTerminalHistory(type: PaneType) throws {
     var workspace = Workspace()
     let terminal = try workspace.split(PaneID(1), direction: .right)

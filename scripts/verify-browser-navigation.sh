@@ -14,7 +14,9 @@ import http.server
 import subprocess
 import sys
 import threading
+import uuid
 
+profile = str(uuid.uuid4())
 release = threading.Event()
 started = {mode: threading.Event() for mode in ['cancel', 'supersede']}
 
@@ -44,11 +46,14 @@ class Fixture(http.server.BaseHTTPRequestHandler):
 with http.server.ThreadingHTTPServer(('127.0.0.1', 0), Fixture) as server:
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        sys.exit(subprocess.run([sys.argv[1], f'http://127.0.0.1:{server.server_port}/'], timeout=60).returncode)
+        sys.exit(subprocess.run([sys.argv[1], f'http://127.0.0.1:{server.server_port}/', 'Tests/WebOperations/Fixtures/local-video.mp4', profile], timeout=60).returncode)
     except subprocess.TimeoutExpired:
         print('FAIL browser navigation: deadline exceeded', file=sys.stderr)
         sys.exit(1)
     finally:
         release.set()
         server.shutdown()
+        cleanup = subprocess.run([sys.argv[1], '--remove-profile', profile], timeout=15)
+        if cleanup.returncode:
+            sys.exit(cleanup.returncode)
 PY

@@ -93,7 +93,7 @@ script: Click selects, Command-click toggles, Shift-click and Shift-arrows exten
 </div>
 
 <script>
-  document.querySelectorAll(".st-bulk").forEach(root => {
+  document.querySelectorAll(".st-bulk").forEach((root, listIndex) => {
     const list = root.querySelector(".st-bulk-list");
     const browse = root.querySelector("[data-mode=browse]");
     const selecting = root.querySelector("[data-mode=select]");
@@ -101,6 +101,7 @@ script: Click selects, Command-click toggles, Shift-click and Shift-arrows exten
     const rows = () => [...list.querySelectorAll("[role=option]")];
     const chosen = () => rows().filter(row => row.getAttribute("aria-selected") === "true");
     // The anchor is where a Shift range starts; the cursor is the row keys move.
+    rows().forEach((row, index) => row.id ||= `st-bulk-${listIndex}-${index}`);
     let anchor = rows().findIndex(row => row.getAttribute("aria-selected") === "true");
     let cursor = rows().findLastIndex(row => row.getAttribute("aria-selected") === "true");
 
@@ -110,6 +111,9 @@ script: Click selects, Command-click toggles, Shift-click and Shift-arrows exten
       selecting.hidden = n === 0;
       count.textContent = `${n} selected`;
       rows().forEach((row, i) => row.classList.toggle("is-cursor", i === cursor));
+      // Focus stays on the list, so point assistive tech at the cursor row.
+      if (cursor >= 0) list.setAttribute("aria-activedescendant", rows()[cursor].id);
+      else list.removeAttribute("aria-activedescendant");
     };
     const setRange = (from, to, additive) => {
       const [low, high] = from < to ? [from, to] : [to, from];
@@ -152,8 +156,15 @@ script: Click selects, Command-click toggles, Shift-click and Shift-arrows exten
       } else if (event.key === "a" && event.metaKey) {
         setRange(0, last, false);
         render();
-      } else if (event.key === "Escape") clear();
-      else return;
+      } else return;
+      event.preventDefault();
+    });
+
+    // Escape clears the selection from anywhere in the list or the toolbar.
+    root.addEventListener("keydown", event => {
+      if (event.key !== "Escape" || chosen().length === 0) return;
+      clear();
+      list.focus();
       event.preventDefault();
     });
 

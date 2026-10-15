@@ -3,15 +3,17 @@ import WebKit
 import SlateTermCore
 import SlateTermSettings
 
-/// Browser content owns a fresh ephemeral store and never installs a plugin bridge.
+/// Both browser modes remain ordinary web content and never install a plugin bridge.
 @MainActor
 final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, NSTextFieldDelegate {
     var browserConfiguration = AppConfiguration.defaults.browser
     let web: WKWebView
+    let mode: PaneType
+    private var newPageTitle: String { mode == .privateBrowser ? "New Private Browser" : "New Browser" }
     lazy var automation = WebPaneAutomation(web: web)
     var onFocus: (() -> Void)?
     var onTitleChange: (() -> Void)?
-    var paneTitle: String { web.title.flatMap { $0.isEmpty ? nil : $0 } ?? web.url?.host ?? "New Browser" }
+    var paneTitle: String { web.title.flatMap { $0.isEmpty ? nil : $0 } ?? (web.url?.isFileURL == true ? web.url?.lastPathComponent : web.url?.host) ?? newPageTitle }
     private let address = LiteralTextField()
     private let status = NSTextField(labelWithString: "")
     private let back = NSButton(title: "Back", target: nil, action: nil)
@@ -26,9 +28,11 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
     private var closed = false
     private var resumeAddressEditing = false
 
-    init() {
+    init(mode: PaneType, dataStore: WKWebsiteDataStore) {
+        precondition(mode.isBrowser && dataStore.isPersistent == (mode == .browser))
+        self.mode = mode
         let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .nonPersistent()
+        configuration.websiteDataStore = dataStore
         web = WKWebView(frame: .zero, configuration: configuration)
         super.init(nibName: nil, bundle: nil)
         web.navigationDelegate = self
@@ -81,7 +85,7 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
                         web.observe(\.isLoading) { [weak self] _, _ in MainActor.assumeIsolated { self?.updateControls() } }]
         updateControls()
         startNavigation {
-            web.loadHTMLString("<!doctype html><meta name='color-scheme' content='light dark'><title>New Browser</title><style>body{font:16px system-ui;padding:48px;max-width:600px;margin:auto}h1{font-size:26px}</style><h1>New Browser</h1><p>Search or enter a URL in the address bar to browse.</p>", baseURL: nil)
+            web.loadHTMLString("<!doctype html><meta name='color-scheme' content='light dark'><title>\(newPageTitle)</title><style>body{font:16px system-ui;padding:48px;max-width:600px;margin:auto}h1{font-size:26px}</style><h1>\(newPageTitle)</h1><p>Search or enter a URL in the address bar to browse.</p>", baseURL: nil)
         }
     }
 
@@ -90,7 +94,9 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
     /// The recipe boundary has already checked this URL; do not interpret it as a search.
     func loadStartingURL(_ url: String) {
         loadViewIfNeeded()
-        startNavigation { web.load(URLRequest(url: URL(string: url)!)) }
+        do { let location = try Self.checkedLocation(BrowserURL.parse(url)); startNavigation { load(location) } }
+        catch let error as RPCFailure { status.stringValue = error.message }
+        catch { status.stringValue = String(describing: error) }
     }
 
     func close() {
@@ -152,7 +158,8 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
     @objc private func goForward() { startNavigation { web.goForward() } }
     @objc private func reloadPage() { startNavigation { web.reload() } }
     @objc private func openAddress() {
-        do { let url = try browserConfiguration.addressURL(for: address.stringValue); startNavigation { web.load(URLRequest(url: url)) }; view.window?.makeFirstResponder(web) }
+        do { let url = try Self.checkedLocation(browserConfiguration.addressURL(for: address.stringValue)); startNavigation { load(url) }; view.window?.makeFirstResponder(web) }
+        catch let error as RPCFailure { status.stringValue = error.message }
         catch { status.stringValue = String(describing: error) }
     }
     private func updateControls() {
@@ -161,17 +168,27 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
         forward.isEnabled = web.canGoForward
         status.stringValue = web.isLoading ? "Loading…" : (web.url?.host ?? "")
     }
-    static func url(_ text: String) throws -> URL {
-        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalized = value.contains("://") || value.hasPrefix("about:") ? value : "https://" + value
-        guard let url = URL(string: normalized), allowed(url) else { throw RPCFailure(code: -32602, message: "Use an HTTP or HTTPS URL") }
+    private static func checkedLocation(_ url: URL) throws -> URL {
+        if url.isFileURL {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), !isDirectory.boolValue else {
+                throw RPCFailure(code: -32602, message: "Choose an existing local file, not a directory")
+            }
+        }
         return url
     }
-    private static func allowed(_ url: URL) -> Bool {
-        url.absoluteString == "about:blank" || (["http", "https"].contains(url.scheme?.lowercased() ?? "") && url.host != nil && url.user == nil && url.password == nil)
+    private func load(_ url: URL) -> WKNavigation? {
+        if url.isFileURL {
+            // Relative assets may be read below this directory, not the whole filesystem.
+            // A file directly under / gets access to itself only.
+            let directory = url.deletingLastPathComponent()
+            return web.loadFileURL(url, allowingReadAccessTo: directory.path == "/" ? url : directory)
+        }
+        return web.load(URLRequest(url: url))
     }
+    static func url(_ text: String) throws -> URL { try BrowserURL.parse(text, assumingHTTPS: true) }
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        guard let url = navigationAction.request.url, Self.allowed(url) else {
+        guard let url = navigationAction.request.url, BrowserURL.allows(url) else {
             decisionHandler(.cancel)
             status.stringValue = "Navigation scheme is not allowed"
             return
@@ -179,7 +196,11 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
         decisionHandler(.allow)
     }
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if let url = navigationAction.request.url, Self.allowed(url) { startNavigation { web.load(navigationAction.request) } }
+        if let url = navigationAction.request.url, BrowserURL.allows(url),
+           !url.isFileURL || navigationAction.sourceFrame.request.url?.isFileURL == true {
+            // Page popups reuse WebKit's existing read grant, never acquire a new one.
+            startNavigation { web.load(navigationAction.request) }
+        }
         return nil
     }
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
@@ -222,6 +243,13 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
         updateControls()
     }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {
+        let failure = error as NSError
+        if failure.domain == "WebKitErrorDomain", failure.code == 204, webView.url?.isFileURL == true {
+            // A committed built-in media document reports legacy "Plug-in handled load"
+            // instead of didFinish. Treating it as failure would stop valid playback.
+            self.webView(webView, didFinish: navigation)
+            return
+        }
         navigationFailed(navigation, error: error)
         if navigation === currentNavigation { automation.invalidate() }
     }
@@ -247,12 +275,12 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
     }
     var info: JSONValue {
         var fields = automation.info
-        fields.merge(["url": .string(web.url?.absoluteString ?? "about:blank"), "title": .string(web.title ?? ""), "loading": .bool(web.isLoading)]) { _, new in new }
+        fields.merge(["url": .string(web.url?.absoluteString ?? "about:blank"), "title": .string(web.title ?? ""), "loading": .bool(web.isLoading), "type": .string(mode.identifier), "persistent": .bool(web.configuration.websiteDataStore.isPersistent)]) { _, new in new }
         return .object(fields)
     }
 
     func navigate(_ value: String, beforeSubmission: @escaping @MainActor () throws -> Void = {}) async throws -> JSONValue {
-        let url = try Self.url(value)
+        let url = try Self.checkedLocation(Self.url(value))
         guard !closed else { throw RPCFailure(code: -32022, message: "Browser pane is closed") }
         return try await automation.perform(timeoutMilliseconds: 15_000, beforeSubmission: beforeSubmission, onComplete: { [weak self] result in
             guard let self, self.navigationOperation != nil else { return }
@@ -262,7 +290,7 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
             self.cancelPendingNavigation()
             self.navigationOperation = id
             self.automation.invalidate(except: id)
-            guard let navigation = self.web.load(URLRequest(url: url)) else {
+            guard let navigation = self.load(url) else {
                 self.automation.complete(id, .failure(RPCFailure(code: APIError.unavailable, message: "Navigation could not start")))
                 return
             }

@@ -24,6 +24,11 @@ final class ApplicationSettings {
     private let useIsolatedShell: Bool
     private let launchConfiguration: AppConfiguration
     private(set) var current: AppConfiguration
+    /// The palettes the terminal engine was last configured with; appearance.get reads these.
+    private(set) var appliedPalettes: ResolvedTerminalPalettes
+    let bundledPaletteDirectory = Bundle.main.resourceURL!.appendingPathComponent("ghostty/themes")
+    /// Home folder whose agent skill folders receive links. Integration runs never use the real home.
+    let agentHome: URL
     private(set) var error: String?
     private(set) var workspaceError: String?
     private(set) var savingSuspended = false
@@ -39,6 +44,8 @@ final class ApplicationSettings {
             ?? (integration ? base.appendingPathComponent("config/config.toml")
                 : FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config/slate-term/config.toml"))
         paletteDirectory = configURL.deletingLastPathComponent().appendingPathComponent("palettes")
+        agentHome = integration ? URL(fileURLWithPath: environment["SLATE_TERM_AGENT_HOME"] ?? base.appendingPathComponent("agent-home").path)
+            : FileManager.default.homeDirectoryForCurrentUser
         store = try WorkspaceStore(directory: base.appendingPathComponent("state"))
         closeWarningStore = try PrivateJSONStore(url: base.appendingPathComponent("state/suppress-close-warning.json"), maximumBytes: 128)
         do { suppressCloseWarning = try closeWarningStore.load(Bool.self) ?? false }
@@ -61,6 +68,7 @@ final class ApplicationSettings {
             configuration = candidate
         } catch { self.error = String(describing: error) }
         current = configuration
+        appliedPalettes = palettes
         launchConfiguration = configuration
         try engineConfiguration(configuration, palettes: palettes).write(to: engineURL, atomically: true, encoding: .utf8)
     }
@@ -125,13 +133,14 @@ final class ApplicationSettings {
 
     struct PreparedConfiguration {
         let configuration: AppConfiguration
+        let palettes: ResolvedTerminalPalettes
         let engineSource: String
     }
 
     func prepare(_ configuration: AppConfiguration) throws -> PreparedConfiguration {
         try configuration.validateShellExecutable()
         let palettes = try configuration.terminal.resolvePalettes(directory: paletteDirectory)
-        return try PreparedConfiguration(configuration: configuration, engineSource: engineConfiguration(configuration, palettes: palettes))
+        return try PreparedConfiguration(configuration: configuration, palettes: palettes, engineSource: engineConfiguration(configuration, palettes: palettes))
     }
 
     func reload(prepared: PreparedConfiguration? = nil, apply: (URL) throws -> Void) throws -> JSONValue {
@@ -146,6 +155,7 @@ final class ApplicationSettings {
                 throw error
             }
             current = next.configuration
+            appliedPalettes = next.palettes
             error = nil
             return .object(["changed": .array(changed.map(JSONValue.string)),
                             "restartRequired": .array(current.restartRequired(from: launchConfiguration).map(JSONValue.string))])
@@ -182,7 +192,7 @@ final class ApplicationSettings {
         shell-integration = \(configuration.terminal.shellIntegration == .off || useIsolatedShell ? "none" : "detect")
         \(try configuration.terminal.renderingConfiguration(palettes: palettes,
             directory: engineURL.deletingLastPathComponent().appendingPathComponent("palettes"),
-            bundledDirectory: Bundle.main.resourceURL!.appendingPathComponent("ghostty/themes")))
+            bundledDirectory: bundledPaletteDirectory))
 
         """
     }

@@ -46,7 +46,7 @@ public enum WorkspaceMutationCommand {
             guard ["pane", "root"].contains(target) else { throw invalid("target must be pane or root") }
             let typeName = try string("type", default: "terminal")
             guard !typeName.isEmpty else { throw invalid("type must not be empty") }
-            let type: PaneType = typeName == "terminal" ? .terminal : typeName == "browser" ? .browser : .registered(typeName)
+            let type = PaneType(identifier: typeName)
             guard let focus = try PaneSplitFocus(rawValue: string("focus", default: "new")) else { throw invalid("focus must be new or preserve") }
             let fraction = try number("newPaneFraction", default: 0.5)
             let created = try target == "root"

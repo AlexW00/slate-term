@@ -82,7 +82,8 @@ with tempfile.TemporaryDirectory(prefix='slate-picker-', dir='/tmp') as temporar
             assert state['attachedToSource'] and state['insideSource'] and abs(state['centerOffsetX']) < .5 and abs(state['centerOffsetY']) < .5, state
             assert state['executeLabel'] == 'Execute Command'
             assert all(r['enabled'] for r in state['results'])
-            assert not any(r['id'].startswith('browser.') or r['id'] == 'tab.select8' for r in state['results'])
+            assert not any((r['id'].startswith('browser.') and r['id'] != 'browser.clearData') or r['id'] == 'tab.select8' for r in state['results'])
+            assert any(r['id'] == 'browser.clearData' and r['enabled'] for r in state['results'])
             assert any(r['id'] == 'plugin.project-tools.inspect' for r in state['results'])
             assert not any(r['id'] in ['command.picker', 'pane.type', 'pane.focus', 'tab.focus'] for r in state['results'])
             capture('command-picker-dark.png')

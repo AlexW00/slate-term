@@ -102,9 +102,11 @@ import SlateTermCore
         ] {
             value = .blank(); value.tabs[0].panes[0].configuration = configuration; cases.append(value)
         }
-        for url in ["file:///tmp/x", "https://user:password@example.com", "https://", "not a url"] {
-            value = .blank(); value.tabs[0].panes[0].type = "browser"
-            value.tabs[0].panes[0].configuration = ["url": .string(url)]; cases.append(value)
+        for type in ["browser", "private-browser"] {
+            for url in ["file://remote/tmp/x", "https://user:password@example.com", "https://", "not a url"] {
+                value = .blank(); value.tabs[0].panes[0].type = type
+                value.tabs[0].panes[0].configuration = ["url": .string(url)]; cases.append(value)
+            }
         }
         value = .blank(); value.tabs[0].panes[0].type = "Invalid_plugin"; cases.append(value)
         for fraction in [0.09, 0.91, Double.nan, Double.infinity] {
@@ -116,10 +118,13 @@ import SlateTermCore
         value = .blank()
         value.tabs[0].panes[0].configuration = ["directory": .string("~/src"), "command": .string(String(repeating: "é", count: 8192))]
         #expect(try value.validated() == value)
-        for url in ["", "about:blank", "https://example.com/path?q=hello", "http://localhost:8080"] {
-            value = .blank(); value.tabs[0].panes[0].type = "browser"
-            value.tabs[0].panes[0].configuration = ["url": .string(url)]
-            #expect(try value.validated() == value)
+        for type in ["browser", "private-browser"] {
+            for url in ["", "about:blank", "https://example.com/path?q=hello", "http://localhost:8080", "file:///tmp/page.html", "/tmp/local page.html", "~/Movies/clip.mp4"] {
+                value = .blank(); value.tabs[0].panes[0].type = type
+                value.tabs[0].panes[0].configuration = ["url": .string(url)]
+                #expect(try value.validated() == value)
+                #expect(value.problems(types: SavedLayoutPaneType.available(plugins: [])).isEmpty)
+            }
         }
         #expect(throws: RPCFailure.self) { try SavedLayoutDefinition.parse(Data(repeating: 32, count: 262_145)) }
     }

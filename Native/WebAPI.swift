@@ -20,6 +20,30 @@ extension WorkspaceHost {
             && !automation.web.isHiddenOrHasHiddenAncestor
     }
 
+    /// Capture eligibility is not on-screen visibility. Native tab selection may
+    /// hide an otherwise attached, laid-out WKWebView; zoom-detached panes remain unavailable.
+    func webScreenshotReady(_ pane: PaneID, automation: WebPaneAutomation) -> Bool {
+        guard automation.ready, automation.documentID != nil,
+              let tab = workspace.tabs.first(where: { $0.layout.paneIDs.contains(pane) }),
+              let window = windows[tab.id], let root = window.contentView, let container = containers[pane]?.view,
+              (tab.zoomedPane == nil || tab.zoomedPane == pane),
+              rendered[tab.id] == tab.layout, renderedZoom[tab.id] == tab.zoomedPane,
+              !nativeGeometryUnavailable(tab.id), !window.isMiniaturized,
+              container.window === window, automation.web.window === window,
+              (container === root || container.isDescendant(of: root)), automation.web.isDescendant(of: container),
+              !root.needsLayout, !container.needsLayout, !automation.web.needsLayout,
+              !automation.web.isHiddenOrHasHiddenAncestor else { return false }
+        // Allow an inactive tab, not an ordered-out/minimized window group.
+        let displayed = window.tabGroup?.selectedWindow ?? window
+        guard displayed.isVisible, !displayed.isMiniaturized else { return false }
+        let bounds = automation.web.bounds
+        guard bounds.origin.x.isFinite, bounds.origin.y.isFinite,
+              bounds.width.isFinite, bounds.height.isFinite, bounds.width > 0, bounds.height > 0 else { return false }
+        if let plugin = leaves[pane] as? PluginPane,
+           !plugin.instance.isReady || plugin.web.url.map({ plugin.instance.origin.matches($0) }) != true { return false }
+        return true
+    }
+
     func callWeb(_ method: String, params: [String: JSONValue], operation: WorkspaceOperationContext) async throws -> JSONValue {
         guard AutomationMethod(rawValue: method)?.family == .web else {
             throw RPCFailure(code: -32601, message: "Unknown web method")
@@ -29,7 +53,11 @@ extension WorkspaceHost {
         guard let controller = leaves[pane], let automation = webAutomation(for: pane) else {
             throw RPCFailure(code: APIError.unavailable, message: "Target pane does not support web automation")
         }
-        let captured = params.merging(["tab": .string(try workspace.resolvedTab(pane: pane).id.description)]) { _, new in new }
+        let tab = try workspace.resolvedTab(pane: pane).id
+        let captured = params.merging(["tab": .string(tab.description)]) { _, new in new }
+        let screenshot = method == "web.screenshot"
+        let captureBounds = automation.web.bounds
+        let captureLayoutRevision = revisions.layoutRevision(tab)
         let validate: @MainActor () throws -> Void = { [weak self, weak controller, weak automation] in
             try Task.checkCancellation()
             guard let self, let controller, let automation, self.leaves[pane] === controller,
@@ -38,7 +66,14 @@ extension WorkspaceHost {
             }
             try operation.validateCaller()
             try self.validateAPIGuards(captured, method: method)
-            if method != "web.get" {
+            if screenshot {
+                guard self.webScreenshotReady(pane, automation: automation) else {
+                    throw RPCFailure(code: APIError.unavailable, message: "Web document is not ready for an attached viewport screenshot")
+                }
+                guard automation.web.bounds == captureBounds, self.revisions.layoutRevision(tab) == captureLayoutRevision else {
+                    throw RPCFailure(code: APIError.conflict, message: "Web screenshot layout changed; inspect again")
+                }
+            } else if method != "web.get" {
                 guard automation.ready, automation.documentID != nil, try self.webRenderable(pane, automation: automation) else {
                     throw RPCFailure(code: APIError.unavailable, message: "Web document is not ready and renderable")
                 }
@@ -57,6 +92,7 @@ extension WorkspaceHost {
             info["title"] = .string(String(String.UnicodeScalarView(title.unicodeScalars.prefix(512))))
             info["truncated"] = .bool(!url.unicodeScalars.dropFirst(8192).isEmpty || !title.unicodeScalars.dropFirst(512).isEmpty)
             info["renderable"] = .bool(try webRenderable(pane, automation: automation))
+            info["screenshotReady"] = .bool(webScreenshotReady(pane, automation: automation))
             result = .object(info)
         case "web.screenshot":
             guard Set(input.keys).isSubset(of: ["pane", "tab", "path"]), let path = input["path"]?.string,

@@ -29,3 +29,9 @@
 - Add applicable integration gates to `scripts/verify-all.sh` and its verification manifest. Run GUI gates sequentially. A baseline pass does not verify changed source; inspect actual outputs and the source/binary manifest.
 - Read relevant `docs/control.md`, `docs/automation.md`, `docs/events.md`, `docs/plugins.md` and configuration documentation before changing their contracts. Track broad work in `docs/api-extension-progress.md`; distinguish implemented, tested, deferred and blocked work honestly.
 - Preserve unrelated changes. No push/deploy or destructive operations without explicit authorization.
+
+## Plugins and plugin UI
+
+- When building or changing a plugin, an example plugin, or any plugin pane UI in this repository, read `skills/slate-terminal/SKILL.md` first and follow its references: `references/building-plugins.md` for plugin structure and `references/ui/INDEX.md` for the UI design system.
+- Plugin pages use the design system by default: `slate.css` and `slate-theme.js` from `references/ui/`, recipes from its components, and palette tokens instead of hard-coded colors. Explicit user design instructions take precedence.
+- When a plugin needs a component the design system lacks, add it as a recipe in `references/ui/components/` and run `python3 design-system/build.py`, rather than styling it only inside the plugin.

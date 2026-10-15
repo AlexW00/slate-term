@@ -12,7 +12,7 @@ public struct ServiceIdentity: Equatable, Sendable, Encodable {
         guard [appInstanceID, serviceID, generation].allSatisfy(Self.opaque),
               pluginID.utf8.count <= 64,
               pluginID.range(of: "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$", options: .regularExpression) == pluginID.startIndex..<pluginID.endIndex,
-              !["terminal", "browser"].contains(pluginID) else { throw unavailableServiceSession() }
+              !["terminal", "browser", "private-browser"].contains(pluginID) else { throw unavailableServiceSession() }
         self.appInstanceID = appInstanceID; self.pluginID = pluginID
         self.serviceID = serviceID; self.generation = generation
     }

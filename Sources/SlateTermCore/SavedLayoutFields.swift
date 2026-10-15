@@ -46,9 +46,9 @@ public struct SavedLayoutField: Equatable, Codable, Sendable, Identifiable {
         if text.isEmpty { return required ? "\(label) is required" : nil }
         if kind == .choice, !options.contains(text) { return "Choose a valid \(label)" }
         if kind == .directory, !text.hasPrefix("/"), !text.hasPrefix("~/") { return "\(label) must be an absolute path or start with ~/" }
-        if kind == .url, text != "about:blank" {
-            guard let url = URL(string: text, encodingInvalidCharacters: false), ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
-                  url.host?.isEmpty == false, url.user == nil, url.password == nil else { return "\(label) must be an HTTP or HTTPS URL without credentials" }
+        if kind == .url {
+            do { _ = try BrowserURL.parse(text) }
+            catch { return "\(label) must be an HTTP/HTTPS URL without credentials, about:blank, or a local file URL or absolute path" }
         }
         return nil
     }
@@ -65,7 +65,8 @@ public struct SavedLayoutPaneType: Codable, Sendable, Identifiable {
         [Self(id: "terminal", title: "Terminal", fields: [
             .init(id: "directory", label: "Starting Folder", kind: .directory),
             .init(id: "command", label: "Startup Command", kind: .multiline)
-        ]), Self(id: "browser", title: "Browser", fields: [.init(id: "url", label: "Starting URL", kind: .url)])]
+        ]), Self(id: "browser", title: "Browser", fields: [.init(id: "url", label: "Starting URL", kind: .url)]),
+            Self(id: "private-browser", title: "Private Browser", fields: [.init(id: "url", label: "Starting URL", kind: .url)])]
         + plugins.filter(\.hasPanel).map { Self(id: $0.id, title: $0.title, fields: $0.layoutFields) }
     }
 }

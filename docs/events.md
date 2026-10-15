@@ -94,6 +94,7 @@ Automation admission allows 10 mutations/second with a burst of 20 per plugin ID
 - `host.workspace.changed`: model/layout/focus/native-tab changes; read `workspace.get`/`context.get` for current state.
 - `host.context.changed`: authenticated shell reports or terminal-engine metadata changes. Includes session/sequence identifiers, not the command text; read context for details.
 - `host.plugins.changed`: successful registration/unregistration.
+- `host.appearance.changed`: the resolved terminal colors, light/dark slot or terminal font changed, including a macOS light/dark flip in Auto mode. Payload `{revision, tone, slot}`; read `appearance.get` for values. Published once per effective change; no-op applies publish nothing.
 - `host.plugin.state.changed`: panel backend state, instance ID and type.
 - `host.service.state.changed`: separate manual background-service state, public registration/runtime/generation identity, operation attribution and current workspace revision. See [manual services](background-services.md).
 - `host.plugin.storage.changed`: changed key, directed to the owning logical instance after successful persistence.

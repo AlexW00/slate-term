@@ -1,4 +1,5 @@
 import AppKit
+import WebKit
 import UniformTypeIdentifiers
 import SlateTermCore
 import SlateTermIPC
@@ -17,6 +18,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     var pluginSettingsRecipients: [(id: String, plugin: String)] {
         pluginInstances.all.map { (id: $0.id, plugin: $0.registration.id) }
     }
+    private let browserData: BrowserData
     private let pluginInstances: PluginInstances
     private let pluginCommands = PluginCommands()
     var serviceSettingsRecipients: [(plugin: String, target: ServiceEventRecipient)] { backgroundServices.recipients }
@@ -99,6 +101,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     var appliedConfigurationRevision = UUID().uuidString
     private var configurationWatcher: ConfigurationWatcher?
     private var appearanceObservation: NSKeyValueObservation?
+    var appearanceRefreshScheduled = false
+    var publishedAppearanceRevision: String?
     private var settingsWindow: SettingsWindowController?
     private let savedLayouts: SavedLayouts
     private let layoutStartup = LayoutStartup()
@@ -114,7 +118,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         testPasteboard = board
         return board
     }
-    private var settingsModel: SettingsModel?
+    var settingsModel: SettingsModel?
     private var statusMenuItem: NSMenuItem?
     private var workspaceShortcuts: NSMenu?
     private var testConfirmationHandler: ((NSAlert) -> Void)?
@@ -143,6 +147,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         events = try EventControl(epoch: epoch, operations: operations)
         let settings = try ApplicationSettings(environment: environment, integration: integration)
         self.settings = settings
+        browserData = try BrowserData(directory: settings.base.appendingPathComponent("state"))
         savedLayouts = SavedLayouts(directory: settings.configURL.deletingLastPathComponent().appendingPathComponent("layouts"))
         let catalog = try PluginCatalog(directory: settings.base.appendingPathComponent("state"))
         pluginCatalog = catalog
@@ -233,6 +238,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         timer.setEventHandler { [weak self] in MainActor.assumeIsolated { self?.refreshTerminalTitles() } }
         timer.resume()
         titleTimer = timer
+        // Installed agent links point at the managed copy; refresh it to this app version's skill.
+        do { try agentSkills.refreshIfInstalled() }
+        catch { NSLog("Could not refresh the agent skill: %@", String(describing: error)) }
         appearanceObservation = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
             MainActor.assumeIsolated { self?.updateTerminalAppearance() }
         }
@@ -339,6 +347,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     private func updateTerminalAppearance() {
         let dark = NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
         runtime.setColorScheme(dark: dark, terminals: Array(terminals.values))
+        // Also runs after every settings apply, so palette and font changes refresh here too.
+        scheduleAppearanceRefresh()
     }
 
     @discardableResult
@@ -496,6 +506,12 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             let invoke = try preparePluginCommand(id, params: params, operation: operation)
             return try await invoke()
         }
+        let browserDataCommand = method == "command.run" ? params["id"]?.string : method
+        if let id = browserDataCommand, ["browser.clearData", "browser.clearSiteData"].contains(id) {
+            var payload = params
+            if method == "command.run" { payload.removeValue(forKey: "id") }
+            return try await prepareBrowserDataClear(id, params: payload, operation: operation)()
+        }
         if contract?.family == .terminal {
             let pane = try terminalPane(params)
             var input = withoutAPIGuards(params)
@@ -574,6 +590,30 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }
     }
 
+    private func prepareBrowserDataClear(_ id: String, params: [String: JSONValue],
+                                         operation: WorkspaceOperationContext) throws -> () async throws -> JSONValue {
+        try validateAPIGuards(params, method: id)
+        let payload = withoutAPIGuards(params)
+        let request = try BrowserDataRequest(kind: id == "browser.clearData" ? .all : .site, params: payload)
+        let pane = request.host == nil ? nil : try targetPaneID(payload)
+        let browser = pane.flatMap { leaves[$0] as? BrowserPane }
+        if pane != nil && browser == nil { throw RPCFailure(code: -32602, message: "Target pane is not a browser") }
+        let store = browser?.web.configuration.websiteDataStore ?? browserData.persistent
+        return { [weak self, weak browser] in
+            guard let self else { throw CancellationError() }
+            return try await self.browserData.clear(request, store: store) { [weak self, weak browser] in
+                guard let self, self.server != nil else { throw CancellationError() }
+                if let pane {
+                    guard let browser, self.leaves[pane] === browser else {
+                        throw RPCFailure(code: -32022, message: "Browser pane was closed or replaced")
+                    }
+                }
+                try operation.validateCaller()
+                try self.validateAPIGuards(params, method: id)
+            }
+        }
+    }
+
     private func call(_ method: String, params: [String: JSONValue], operation suppliedOperation: WorkspaceOperationContext? = nil) throws -> JSONValue {
         guard !reconciling, !settlingNativeLayouts else { throw RPCFailure(code: APIError.conflict, message: "Workspace presentation is being reconciled") }
         try synchronizeNativeGroups()
@@ -598,6 +638,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         case .pluginSettingsGet: return try pluginSettingsInfo(params)
         case .pluginSettingsPatch: return try patchPluginSettings(params, operation: operation)
         case .paletteList: return try listPalettes()
+        case .appearanceGet: return try appearanceInfo(params)
+        case .skillsList: return try listAgentSkills(params)
+        case .skillsInstall: return try changeAgentSkills(params, install: true)
+        case .skillsUninstall: return try changeAgentSkills(params, install: false)
         case .paletteImport: return try importPalette(params)
         case .version: return .object(["cliVersion": .string("0.1.0-dev"), "appVersion": .string("0.1.0-dev"), "protocolVersion": .integer(1)])
         case .windowList: return try nativeWindowsInfo(params)
@@ -695,6 +739,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             if let result = try runSettingsCommand(id, params: params, operation: operation) { return result }
             if id == "config.reload" { return try reloadConfiguration(operation: operation) }
             if id == "settings.open" { showSettings(); return .object([:]) }
+            if id == "skills.settings" { showSettings(section: .agents); return .object([:]) }
+            if id == "skills.reveal" { return try revealAgentSkill() }
             if id.hasPrefix("layouts.") { try savedLayouts.perform(id, operation: operation); return .object([:]) }
             if id == "command.picker" { try toggleCommandPicker(params); return .object([:]) }
             if id == "pane.rename" {
@@ -734,7 +780,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 if params["activate"] == .bool(true) { NSApp.activate() }
                 return operationResult(nativeWindowInfo(target.window, tab: target.tab), transition: transition, operation: operation, workspacePersistence: persistence)
             }
-            if ["pane.type", "pane.split"].contains(id), !(["terminal", "browser"] + pluginCatalog.registrations.filter(\.hasPanel).map(\.id)).contains(params["type"]?.string ?? (id == "pane.split" ? "terminal" : "")) {
+            if ["pane.type", "pane.split"].contains(id), !(["terminal", "browser", "private-browser"] + pluginCatalog.registrations.filter(\.hasPanel).map(\.id)).contains(params["type"]?.string ?? (id == "pane.split" ? "terminal" : "")) {
                 throw RPCFailure(code: -32602, message: "Unknown pane type")
             }
             try validateMutationAdmission(id, params: params)
@@ -763,7 +809,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
              .eventsHead, .eventsPoll, .eventsEmit, .pluginsRestart,
              .webGet, .webSnapshot, .webClick, .webFill, .webSelect, .webScroll, .webWait, .webScreenshot,
              .browserGet, .browserNavigate, .browserSnapshot, .browserClick, .browserFill, .browserSelect,
-             .browserScroll, .browserWait, .browserEval, .browserScreenshot,
+             .browserScroll, .browserWait, .browserEval, .browserScreenshot, .browserClearData, .browserClearSiteData,
              .serviceStart, .serviceStop, .serviceList, .serviceStatus, .serviceLogs, .serviceReady:
             throw RPCFailure(code: -32603, message: "This API operation requires the shared asynchronous entry")
         }
@@ -792,6 +838,20 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 })
             }
             return NSApp.mainMenu.map(entries) ?? .array([])
+        case "debug.browserDataConfirmation" where integration:
+            let id = params["id"]?.string ?? "browser.clearData"
+            guard ["browser.clearData", "browser.clearSiteData"].contains(id) else { throw RPCFailure(code: -32602, message: "Expected a browser data command") }
+            var shown: JSONValue = .null
+            testConfirmationHandler = { alert in
+                shown = .object(["message": .string(alert.messageText), "explanation": .string(alert.informativeText),
+                                 "warning": .bool(alert.alertStyle == .warning)])
+                if let path = params["screenshot"]?.string { try? Self.captureWindow(alert.window.windowNumber, path: path) }
+                if let focus = params["focusPane"] { _ = try? self.call("command.run", params: ["id": .string("pane.focus"), "pane": focus]) }
+                alert.buttons[params["answer"] == .string("clear") ? 1 : 0].performClick(nil)
+            }
+            defer { testConfirmationHandler = nil }
+            runUserCommand(id, params: params["pane"].map { ["pane": $0] } ?? [:])
+            return shown
         case "debug.closeConfirmation" where integration:
             let answer = params["answer"]?.string ?? "cancel"
             testConfirmationHandler = { alert in
@@ -1010,7 +1070,13 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                             "dirty": .bool(model.isDirty), "conflict": .bool(model.conflict), "error": model.error.map(JSONValue.string) ?? .null,
                             "file": model.selection.map(JSONValue.string) ?? .null, "definition": try model.definition.map(JSONValue.encoding) ?? .null])
         case "debug.settings" where integration:
-            if params["inspectOnly"] == .bool(true) { return .object(["visible": .bool(settingsWindow?.window?.isVisible == true)]) }
+            if params["inspectOnly"] == .bool(true) {
+                // Switching sections here skips showSettings, so only the view's own refresh runs.
+                if let section = params["section"]?.string { settingsModel?.selection = SettingsSection(rawValue: section) }
+                let skills = (settingsModel?.agentSkills ?? []).map { ($0.target.id, JSONValue.string($0.status.rawValue)) }
+                return .object(["visible": .bool(settingsWindow?.window?.isVisible == true),
+                                "agentSkills": .object(Dictionary(uniqueKeysWithValues: skills))])
+            }
             showSettings()
             guard let model = settingsModel else { throw RPCFailure(code: -32000, message: "Settings unavailable") }
             if let section = params["section"]?.string { model.selection = SettingsSection(rawValue: section) }
@@ -1215,7 +1281,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     private func paneTypeName(_ type: PaneType) -> String {
-        switch type { case .terminal: "terminal"; case .browser: "browser"; case .registered(let id): id }
+        type.identifier
     }
 
     private func layoutWindowID(_ group: GroupID) -> String { instanceID + "/" + group.description }
@@ -1247,7 +1313,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 if pane.type == .terminal {
                     configuration["directory"] = directories ? (shellSessions[id]?.report?.workingDirectory ?? terminals[id]?.context.workingDirectory).map(JSONValue.string) : nil
                     if !commands { configuration.removeValue(forKey: "command") }
-                } else if pane.type == .browser {
+                } else if pane.type.isBrowser {
                     configuration["url"] = urls ? (leaves[id] as? BrowserPane)?.currentURL.map(JSONValue.string) : nil
                 }
                 return SavedLayoutPane(id: id, type: type, title: pane.manualTitle ?? "", configuration: configuration)
@@ -1465,6 +1531,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 let tab = next.tabs.first { $0.layout.paneIDs.contains(pane.id) }!
                 let instance = try pluginInstances.acquire(registration, pane: pane.id, tab: tab.id)
                 let controller = PluginPane(instance: instance, paneID: pane.id)
+                if let appearance = try? appearanceSnapshot() { controller.apply(appearance: appearance) }
                 controller.onFocus = { [weak self] in self?.focused(pane.id) }
                 controller.onRelease = { [weak self, weak instance] in
                     if let instance { self?.pluginInstances.release(instance, pane: pane.id) }
@@ -1532,8 +1599,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             controller.onTitleChange = { [weak self] in self?.updatePaneTitle(id) }
             leaves[id] = controller
         }
-        for pane in next.panes where leaves[pane.id] == nil && pane.type == .browser {
-            let browser = BrowserPane()
+        for pane in next.panes where leaves[pane.id] == nil && pane.type.isBrowser {
+            let browser = BrowserPane(mode: pane.type, dataStore: browserData.store(for: pane.type))
             browser.browserConfiguration = settings.current.browser
             browser.onFocus = { [weak self] in self?.focused(pane.id) }
             browser.onTitleChange = { [weak self] in self?.updatePaneTitle(pane.id) }
@@ -1564,6 +1631,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 switch pane.type {
                 case .terminal: typeID = "terminal"
                 case .browser: typeID = "browser"
+                case .privateBrowser: typeID = "private-browser"
                 case .registered(let id): typeID = id
                 }
                 let type = availablePaneTypes.first { $0.id == typeID }!.name
@@ -1644,7 +1712,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                     guard let binding = matched else {
                         return self.workspaceShortcuts?.performKeyEquivalent(with: event) == true
                     }
-                    if binding.value.hasPrefix("browser."), self.focusedBrowser == nil { return false }
+                    if binding.value.hasPrefix("browser."), binding.value != "browser.clearData", self.focusedBrowser == nil { return false }
                     if binding.value.hasPrefix("split."), self.splitUnavailableReason(binding.value, params: [:]) != nil { return false }
                     if binding.value == "tab.detachCurrent" {
                         guard let keyTab = self.workspace.keyTabID,
@@ -2047,7 +2115,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         workspaceMenu.addItem(.separator())
         for (title, commands) in [
             ("Tabs", ["tab.new", "tab.close", "tab.previous", "tab.next"]),
-            ("Browser", ["browser.back", "browser.forward", "browser.focusAddress", "browser.reload"]),
+            ("Browser", ["browser.back", "browser.forward", "browser.focusAddress", "browser.reload", "browser.clearSiteData", "browser.clearData"]),
             ("Split Pane", ["split.left", "split.right", "split.up", "split.down"]),
             ("Focus Pane", ["focus.left", "focus.right", "focus.up", "focus.down"]),
             ("Layout", ["pane.zoom", "layout.equalize"]),
@@ -2088,6 +2156,11 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
         editItem.submenu = editMenu
         menu.insertItem(editItem, at: 1)
+        let aiMenu = NSMenu(title: "AI")
+        addCommands(["skills.settings", "skills.reveal"], to: aiMenu)
+        let aiItem = NSMenuItem(title: "AI", action: nil, keyEquivalent: "")
+        aiItem.submenu = aiMenu
+        menu.addItem(aiItem)
         let windowMenu = NSMenu(title: "Window")
         addCommands(["tab.previous", "tab.next"], to: windowMenu)
         addCommands(["tab.detachCurrent"], to: windowMenu)
@@ -2165,6 +2238,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             switch pane.type {
             case .terminal: type = "terminal"
             case .browser: type = "browser"
+            case .privateBrowser: type = "private-browser"
             case .registered(let id): type = id
             }
             let actions = pluginCatalog.registrations.flatMap { registration in
@@ -2220,6 +2294,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 case let id where id.hasPrefix("layouts."): detail = "Saved Layouts"; symbol = "rectangle.split.2x2"; keywords = "recipe template save launch spotlight"
                 case "settings.open": detail = "Application"; symbol = "gearshape"; keywords = "preferences configuration"
                 case "config.reload": detail = "Application"; symbol = "arrow.clockwise"; keywords = "settings refresh"
+                case "skills.settings": detail = "AI"; symbol = "sparkles"; keywords = "agent skill claude codex install"
+                case "skills.reveal": detail = "AI"; symbol = "folder"; keywords = "agent skill finder show"
                 case "window.new": symbol = "macwindow.badge.plus"; keywords = "create"
                 case "tab.new": symbol = "plus.square"; keywords = "create"
                 case "tab.close", "pane.close": symbol = "xmark.square"; keywords = "remove close"
@@ -2244,7 +2320,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 if !command.contract.workspaceIndependent {
                     if missingTarget { unavailable = "The original workspace target was closed" }
                     else if tab == nil && command.id != "tab.new" { unavailable = "Open a workspace to use this command" }
-                    else if command.id.hasPrefix("browser."), pane?.type != .browser { unavailable = "Focus a browser pane to use this command" }
+                    else if command.id.hasPrefix("browser."), pane?.type.isBrowser != true { unavailable = "Focus a browser pane to use this command" }
+                    else if command.id == "browser.clearSiteData", let pane,
+                            (leaves[pane.id] as? BrowserPane)?.currentURL.flatMap({ try? BrowserDataRequest.siteHost($0) }) == nil { unavailable = "Open an HTTP or HTTPS site to clear its data" }
                     else if command.id == "pane.title.clear", pane?.manualTitle == nil { unavailable = "This pane has no manual title" }
                     else if command.id == "pane.rename", let pane, containers[pane.id]?.view.window?.isVisible != true { unavailable = "Rename requires a visible pane" }
                     else if command.id == "tab.detachCurrent", let tab,
@@ -2262,7 +2340,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }
     }
 
-    @objc private func showSettings() {
+    @objc private func showSettings() { showSettings(section: nil) }
+
+    func showSettings(section: SettingsSection?) {
         if settingsWindow == nil {
             let model = SettingsModel(configURL: settings.configURL)
             settingsModel = model
@@ -2271,9 +2351,20 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 try self.saveSettings(source: source, changes: changes)
             }
             model.registerPlugin = { [weak self] in self?.registerPlugin() }
+            model.changeAgentSkill = { [weak self] id, install in
+                guard let self else { return }
+                do { _ = try self.changeAgentSkills(["agents": .array([.string(id)])], install: install) }
+                catch { self.settingsModel?.error = (error as? RPCFailure)?.message ?? String(describing: error) }
+            }
+            model.refreshAgentSkills = { [weak self] in self?.refreshAgentSkillsSettings() }
+            model.revealAgentSkill = { [weak self] in
+                do { _ = try self?.revealAgentSkill() }
+                catch { self?.settingsModel?.error = (error as? RPCFailure)?.message ?? String(describing: error) }
+            }
             settingsWindow = SettingsWindowController(model: model) { [weak self] in self?.refreshSettings(force: true) }
         }
         refreshSettings()
+        if let section { settingsModel?.selection = section }
         settingsWindow?.showWindow(nil)
         settingsWindow?.window?.makeKeyAndOrderFront(nil)
     }
@@ -2292,6 +2383,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             let editable = (try? AppConfiguration.parse(source)) ?? settings.current
             model.load(editable, source: source, error: settings.error, force: force)
         } catch { model.error = String(describing: error) }
+        model.agentSkills = agentSkills.entries()
         model.commands = pluginCatalog.registrations.flatMap(\.workspaceCommands) + CommandRegistry.commands
             + unavailableCommands.map { .init(id: $0, title: "\($0) (Unavailable)", key: "", shift: false) }
         model.plugins = pluginCatalog.registrations.map { registration in
@@ -2359,13 +2451,13 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     private var availablePaneTypes: [(name: String, id: String)] {
-        [("Terminal", "terminal"), ("Browser", "browser")] + pluginCatalog.registrations.filter(\.hasPanel).map { ($0.title, $0.id) }
+        [("Terminal", "terminal"), ("Browser", "browser"), ("Private Browser", "private-browser")] + pluginCatalog.registrations.filter(\.hasPanel).map { ($0.title, $0.id) }
     }
 
     private func changePaneType(_ pane: PaneID, to type: String) {
         guard let content = leaves[pane], let choice = availablePaneTypes.first(where: { $0.id == type }),
               let current = workspace.panes.first(where: { $0.id == pane }) else { return }
-        let nextType: PaneType = type == "terminal" ? .terminal : type == "browser" ? .browser : .registered(type)
+        let nextType = PaneType(identifier: type)
         guard current.type != nextType else { return }
         do {
             if !settings.suppressTypeWarning {
@@ -2408,6 +2500,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }
         if id.map({ CommandContract.forCommand($0).workspaceIndependent }) == true || id == "tab.new" || id?.hasPrefix("plugin.") == true { return true }
         guard NSApp.keyWindow is WorkspaceWindow else { return false }
+        if id == "browser.clearSiteData" { return focusedBrowser?.currentURL.flatMap { try? BrowserDataRequest.siteHost($0) } != nil }
         if id?.hasPrefix("browser.") == true { return focusedBrowser != nil }
         if let id, id.hasPrefix("split.") { return splitUnavailableReason(id, params: [:]) == nil }
         if id == "tab.detachCurrent", let tab = try? targetTab([:]) { return (workspace.groups.first { $0.tabs.contains(tab.id) }?.tabs.count ?? 0) > 1 }
@@ -2428,6 +2521,33 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             try synchronizeNativeGroups()
             drainNativeLayouts()
             try finishNativeDivider(cancelled: false)
+            if ["browser.clearData", "browser.clearSiteData"].contains(id) {
+                if id == "browser.clearSiteData" {
+                    let pane = try targetPaneID(params)
+                    params["pane"] = .string(pane.description)
+                    guard let browser = leaves[pane] as? BrowserPane, let url = browser.currentURL else {
+                        throw RPCFailure(code: -32602, message: "Open a browser site first")
+                    }
+                    params["url"] = .string(url)
+                }
+                // Freeze the store, URL, pane and guards before the modal's nested event loop.
+                var payload = params
+                payload.removeValue(forKey: "id")
+                let clear = try prepareBrowserDataClear(id, params: payload, operation: .init(origin: .native))
+                let alert = NSAlert()
+                alert.alertStyle = .warning
+                alert.messageText = id == "browser.clearData" ? "Clear Browser Data?" : "Clear This Site’s Data?"
+                let target = id == "browser.clearData" ? "all sites in the shared Browser profile" : "the site group for \(try BrowserDataRequest.siteHost(params["url"]!.string!)) in this browser’s profile (including any parent domain and other subdomains grouped by WebKit)"
+                alert.informativeText = "This removes cookies, caches and saved website storage for \(target). You may be signed out and lose offline website data.\n\nPrivate Browser panes are separate from the shared profile. Open pages are not closed or reloaded and may save data again. This cannot be undone."
+                alert.addButton(withTitle: "Cancel")
+                alert.addButton(withTitle: "Clear Data")
+                guard runConfirmationAlert(alert) == .alertSecondButtonReturn else { return }
+                Task { [weak self] in
+                    do { _ = try await clear() }
+                    catch { if self?.server != nil { self?.present(error) } }
+                }
+                return
+            }
             if id.hasPrefix("plugin.") {
                 let operation = try preparePluginCommand(id, params: params, resolveWorkspace: !capturedWithoutWorkspace)
                 Task { [weak self] in

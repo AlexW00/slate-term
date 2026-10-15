@@ -1,6 +1,6 @@
 # Slate plugin UI (maintainers)
 
-Agents start at [INDEX.md](INDEX.md). This file covers viewing, editing and packaging.
+The design system's agent-facing files live in the Slate Terminal skill at [`skills/slate-terminal/references/ui/`](../skills/slate-terminal/references/ui/INDEX.md). That folder is the source of truth; agents read it directly. This folder holds only maintainer tooling: `build.py`, `preview/` and the generated `gallery.html`.
 
 ## View
 
@@ -20,13 +20,13 @@ When the host implements `appearance.get`, the palette menu gains a **Terminal (
 
 ## Edit
 
-- Recipes live in `components/{controls,patterns,templates}/*.html`. Each starts with a metadata comment; `build.py` documents the fields.
-- After any change, run `python3 build.py`. It regenerates `gallery.html` and the component table in `INDEX.md`. `python3 build.py --check` fails when either is stale.
+- Recipes live in `skills/slate-terminal/references/ui/components/{controls,patterns,templates}/*.html`, next to `slate.css`, `slate-theme.js`, `guidelines.md` and `INDEX.md`. Each recipe starts with a metadata comment; `build.py` documents the fields.
+- After any change, run `python3 design-system/build.py` from the repository root (or `python3 build.py` here). It regenerates `gallery.html` in this folder and the component table in the skill's `INDEX.md`. Add `--check` to fail when either is stale.
 - `preview/palettes.json` holds the bundled palettes for the gallery, extracted from the Ghostty theme files.
 - Keep recipes copyable: tokens from `slate.css` only, no external assets, no build step, and inline SVG icons.
 
-## Package into the skill
+## Skill packaging
 
-Copy this folder into the future Slate Terminal skill as `references/design-system/`, without `build.py`, `preview/`, `gallery.html` and this README. Agents read the recipe files, not the gallery. The skill's `SKILL.md` should point at `references/design-system/INDEX.md` for any panel UI work.
+There is no copy step. The skill folder is the source, and `SKILL.md` routes panel UI work to `references/ui/INDEX.md`. Agents read the recipe files, not the gallery, so the gallery and this tooling stay out of the skill.
 
 The host-side theme contract is in [../docs/theme-api.md](../docs/theme-api.md).

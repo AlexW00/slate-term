@@ -40,12 +40,16 @@ run palettes python3 scripts/verify-palettes.py
 run menu-ui python3 scripts/verify-menu-ui.py
 run shell python3 scripts/verify-shell.py
 run web-operations bash scripts/verify-web-operations.sh
+run browser-data bash scripts/verify-browser-data.sh
 run browser-navigation bash scripts/verify-browser-navigation.sh
+run browser-profiles python3 scripts/verify-browser-profiles.py
 run browser python3 scripts/verify-browser.py
 run web python3 scripts/verify-web.py
 run context python3 scripts/verify-context.py
 run api-context python3 scripts/verify-api-context.py
 run api-settings python3 scripts/verify-api-settings.py
+run theme-api python3 scripts/verify-theme-api.py
+run agent-skills python3 scripts/verify-agent-skills.py
 run api-negotiation python3 scripts/verify-api-negotiation.py
 run service-session python3 scripts/verify-service-session.py
 run service-commands bash scripts/verify-service-commands.sh

@@ -84,14 +84,29 @@ extension WorkspaceHost {
             "apiVersion": .integer(1), "appInstanceId": .string(instanceID), "identityGuards": .bool(true),
             "workspaceRevisions": .bool(true), "surface": .string("trusted"),
             "webAutomation": .object([
-                "version": .integer(1), "paneKinds": .array([.string("browser"), .string("registeredPlugin")]),
+                "version": .integer(1), "paneKinds": .array([.string("browser"), .string("private-browser"), .string("registeredPlugin")]),
                 "identity": .array([.string("viewId"), .string("documentId")]),
                 "selectorMutationGuardsRequired": .bool(true), "mainDocumentOnly": .bool(true),
                 "pendingActionsPerView": .integer(32), "pendingWebKitOperationsPerView": .integer(32), "resultByteLimit": .integer(900_000),
-                "screenshot": .bool(true), "pluginEvaluation": .bool(false)
+                "screenshot": .bool(true), "screenshotInactiveTabs": .bool(true),
+                "screenshotRequiresAttachedLayout": .bool(true), "screenshotViewportOnly": .bool(true),
+                "domRequiresVisiblePane": .bool(true), "pluginEvaluation": .bool(false)
+            ]),
+            "browserData": .object([
+                "version": .integer(1), "persistentProfile": .string("appWide"), "privateProfile": .string("perPaneEphemeral"),
+                "clearAllMethod": .string("browser.clearData"), "clearSiteMethod": .string("browser.clearSiteData"),
+                "siteRequired": .array([.string("pane"), .string("url")]), "siteGranularity": .string("webkitDomainGroupIncludingSubdomains"),
+                "apiConfirmation": .bool(false), "nativeConfirmation": .bool(true),
+                "resultFields": .array(["cleared", "scope", "storage", "host"].map(JSONValue.string))
+            ]),
+            "browserNavigation": .object([
+                "schemes": .array(["http", "https", "about", "file"].map(JSONValue.string)),
+                "aboutBlankOnly": .bool(true), "localFiles": .bool(true), "absolutePaths": .bool(true),
+                "fileReadAccess": .string("containingDirectory"), "pluginBridge": .bool(false)
             ]),
             "causation": OperationControl.descriptor,
             "backgroundServices": Self.serviceDescriptor,
+            "appearance": Self.appearanceDescriptor,
             "settingsLifecycle": .object([
                 "version": .integer(1), "scope": .string("configurationSourceAndApplied"),
                 "topics": .array(["host.settings.source.changed", "host.settings.changed", "host.plugin.settings.changed", "host.settings.failed"].map(JSONValue.string)),
@@ -205,7 +220,7 @@ extension WorkspaceHost {
             throw WorkspaceError.paneNotFound(id)
         }
         let type: String
-        switch pane.type { case .terminal: type = "terminal"; case .browser: type = "browser"; case .registered(let name): type = name }
+        type = pane.type.identifier
         let container = containers[id]
         var geometry: JSONValue = .null
         var geometryState = "unavailable"

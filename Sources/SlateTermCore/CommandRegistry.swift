@@ -86,6 +86,8 @@ public enum CommandRegistry {
         .init(id: "browser.forward", title: "Go Forward", key: "]", shift: false),
         .init(id: "browser.focusAddress", title: "Focus Address Bar", key: "l", shift: false),
         .init(id: "browser.reload", title: "Reload Page", key: "r", shift: false),
+        .init(id: "browser.clearData", title: "Clear Browser Data…", key: "", shift: false),
+        .init(id: "browser.clearSiteData", title: "Clear This Site’s Data…", key: "", shift: false),
         .init(id: "config.reload", title: "Reload Configuration", key: "r", shift: true),
         .init(id: "appearance.set", title: "Set Appearance", key: "", shift: false),
         .init(id: "appearance.light", title: "Use Light Appearance", key: "", shift: false),
@@ -98,6 +100,8 @@ public enum CommandRegistry {
         .init(id: "terminal.font.reset", title: "Reset Application Terminal Font Size", key: "", shift: false),
         .init(id: "warnings.close.reset", title: "Re-enable Close Warnings", key: "", shift: false),
         .init(id: "warnings.type.reset", title: "Re-enable Pane Type Warnings", key: "", shift: false),
+        .init(id: "skills.settings", title: "Install Agent Skill…", key: "", shift: false),
+        .init(id: "skills.reveal", title: "Open Agent Skill Folder", key: "", shift: false),
     ]
 
     public static func execute(_ id: String, params: [String: JSONValue], workspace: inout Workspace) throws -> JSONValue {
@@ -141,7 +145,7 @@ public enum CommandRegistry {
             guard let value = params["type"] else { throw RPCFailure(code: -32602, message: "type is required") }
             let name = try requireString(value, name: "type")
             guard !name.isEmpty else { throw RPCFailure(code: -32602, message: "type must not be empty") }
-            let type: PaneType = name == "terminal" ? .terminal : name == "browser" ? .browser : .registered(name)
+            let type = PaneType(identifier: name)
             try workspace.setType(pane(), to: type)
         case "pane.close":
             let target = try pane()
