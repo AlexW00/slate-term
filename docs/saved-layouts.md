@@ -1,11 +1,12 @@
 # Saved layouts
 
-Saved layouts are reusable starting recipes, not frozen sessions. They preserve tabs, split topology and fractions, pane types, manual pane names, starting folders, startup commands, browser URLs and plugin starting configuration. They do **not** copy terminal history, running processes, browser logins or plugin storage. Browser panes use the app-wide persistent profile; Private Browser panes always start with a fresh ephemeral store, even when opened from the same recipe.
+Saved layouts are reusable starting recipes, not frozen sessions. They preserve tabs, split topology and fractions, pane types, manual pane names, per-pane bar visibility, starting folders, startup commands, browser URLs and plugin starting configuration. They do **not** copy terminal history, running processes, browser logins or plugin storage. Browser panes use the app-wide persistent profile; Private Browser panes always start with a fresh ephemeral store, even when opened from the same recipe.
 
 ## Native editor
 
 Use **Workspace → Edit Saved Layouts…**, or Search Commands (⌘K). The editor uses native macOS controls and follows the application's appearance. Select a layout in the sidebar, a pane in the arrangement, and edit its type-specific settings in the inspector.
 
+- **Show pane bar** in the Pane inspector controls the selected pane's native header. It defaults on; the arrangement marks panes whose bar is hidden. This is slot chrome, not plugin starting configuration. Changing type preserves it. Recover a live hidden bar through Workspace → Show Pane Bar or Search Commands.
 - **Split Right / Split Below** add a terminal pane.
 - **Remove Pane** removes the selected leaf and collapses its parent split. It cannot remove a tab's last pane. The tab menu can add/remove tabs instead.
 - **Revert / Save Changes** apply to the selected layout. Drafts survive selection changes and closing/reopening the editor during the same app session. Quit offers Save All / Discard / Cancel for all dirty drafts; failed saves prevent termination.
@@ -45,6 +46,8 @@ Example:
   }]
 }
 ```
+
+Each pane recipe accepts optional `"headerVisible": true|false` alongside `id`, `type`, `title` and `configuration`. Omitted means shown; null, numbers and strings are rejected. Capture records the live pane setting and opening applies it to fresh runtime slots. This is an additive version-1 field: older recipes remain readable, but older Slate builds with strict structural validation cannot read files containing the new field. Remove it before downgrading (the old build always shows bars).
 
 `horizontal` means left/right; `vertical` means top/bottom. The fraction always describes the first child. Template pane IDs are unique across the definition; opening allocates fresh runtime pane/tab/group IDs using the workspace's monotonic counters. Template tab names label the editor; live native tab titles continue to follow the existing workspace title policy.
 

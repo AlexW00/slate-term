@@ -70,6 +70,7 @@ run command-lifecycle python3 scripts/verify-command-lifecycle.py
 run settings-lifecycle python3 scripts/verify-settings-lifecycle.py
 run workspace-persistence python3 scripts/verify-workspace-persistence.py
 run pane-titles python3 scripts/verify-pane-titles.py
+run pane-headers python3 scripts/verify-pane-headers.py
 run pane-movement python3 scripts/verify-pane-movement.py
 run plugins python3 scripts/verify-plugins.py
 run plugin-services python3 scripts/verify-plugin-services.py

@@ -126,6 +126,12 @@ extension WorkspaceHost {
                 "workspacePersistence": .array(WorkspacePersistence.allCases.map { .string($0.rawValue) }),
                 "nativeDividerCoalescing": .bool(false)
             ]),
+            "paneHeader": .object([
+                "version": .integer(1), "stateField": .string("headerVisible"),
+                "commands": .array(["pane.header.show", "pane.header.hide", "pane.header.toggle"].map(JSONValue.string)),
+                "eventTopic": .string("host.pane.header.changed"), "defaultVisible": .bool(true),
+                "persisted": .bool(true), "savedLayoutOption": .bool(true), "changesLayoutRevision": .bool(false)
+            ]),
             "savedLayouts": .object([
                 "version": .integer(1), "targetKind": .string("windowGroup"),
                 "targetDiscovery": .string("layouts.windows"), "replacementGuard": .string("expectedWorkspaceRevision"),
@@ -240,6 +246,7 @@ extension WorkspaceHost {
         var result: [String: JSONValue] = [
             "paneId": .string(id.description), "type": .string(type), "tabId": .string(tab.id.description),
             "groupId": workspace.groups.first { $0.tabs.contains(tab.id) }.map { .string($0.id.description) } ?? .null,
+            "headerVisible": .bool(pane.headerVisible),
             "manualTitle": pane.manualTitle.map { .string(String($0.prefix(512))) } ?? .null,
             "manualTitleTruncated": .bool((pane.manualTitle?.count ?? 0) > 512),
             "windowId": windows[tab.id].map { .string($0.identity) } ?? .null,

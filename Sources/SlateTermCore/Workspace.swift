@@ -43,6 +43,22 @@ public struct Pane: Equatable, Codable, Sendable, Identifiable {
     public let id: PaneID
     public internal(set) var type: PaneType
     public internal(set) var manualTitle: String? = nil
+    /// Native pane chrome belongs to the slot, not its terminal or web document.
+    public internal(set) var headerVisible: Bool = true
+
+    init(id: PaneID, type: PaneType) {
+        self.id = id
+        self.type = type
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, type, manualTitle, headerVisible }
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(PaneID.self, forKey: .id)
+        type = try values.decode(PaneType.self, forKey: .type)
+        manualTitle = try values.decodeIfPresent(String.self, forKey: .manualTitle)
+        headerVisible = values.contains(.headerVisible) ? try values.decode(Bool.self, forKey: .headerVisible) : true
+    }
 }
 
 public struct Tab: Equatable, Codable, Sendable, Identifiable {
@@ -168,6 +184,11 @@ public struct Workspace: Equatable, Sendable {
         let text = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard text.utf8.count <= 4096 else { throw WorkspaceError.invalidLayout("Manual titles must not exceed 4096 UTF-8 bytes") }
         panes[index].manualTitle = text.isEmpty ? nil : text
+    }
+
+    public mutating func setHeaderVisible(_ visible: Bool, for pane: PaneID) throws {
+        guard let index = panes.firstIndex(where: { $0.id == pane }) else { throw WorkspaceError.paneNotFound(pane) }
+        panes[index].headerVisible = visible
     }
 
     public mutating func close(_ pane: PaneID) throws {

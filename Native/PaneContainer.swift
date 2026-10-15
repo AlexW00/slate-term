@@ -31,6 +31,8 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
     var moveMenu: (() -> NSMenu)?
     var dropView: PaneDropView { view as! PaneDropView }
     private let header = PaneHeaderView()
+    private lazy var headerHeight = header.heightAnchor.constraint(equalToConstant: 28)
+    private(set) var headerVisible = true
     private var latestTitle = ""
     private var renameTitle = ""
     private var renamePopover: NSPopover?
@@ -120,7 +122,7 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
         titleTrailingLimit.priority = .init(250)
         NSLayoutConstraint.activate([
             preferredTitleWidth, titleLeadingLimit, titleTrailingLimit,
-            header.topAnchor.constraint(equalTo: view.topAnchor), header.leadingAnchor.constraint(equalTo: view.leadingAnchor), header.trailingAnchor.constraint(equalTo: view.trailingAnchor), header.heightAnchor.constraint(equalToConstant: 28),
+            header.topAnchor.constraint(equalTo: view.topAnchor), header.leadingAnchor.constraint(equalTo: view.leadingAnchor), header.trailingAnchor.constraint(equalTo: view.trailingAnchor), headerHeight,
             dragHandle.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 3), dragHandle.centerYAnchor.constraint(equalTo: header.centerYAnchor), dragHandle.widthAnchor.constraint(equalToConstant: 20), dragHandle.heightAnchor.constraint(equalToConstant: 22),
             typeButton.leadingAnchor.constraint(equalTo: dragHandle.trailingAnchor, constant: 3), typeButton.centerYAnchor.constraint(equalTo: header.centerYAnchor), typeButton.widthAnchor.constraint(lessThanOrEqualTo: header.widthAnchor, multiplier: 0.35),
             titleField.centerXAnchor.constraint(equalTo: header.centerXAnchor), titleField.centerYAnchor.constraint(equalTo: header.centerYAnchor),
@@ -129,6 +131,18 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
             closeButton.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -5), closeButton.centerYAnchor.constraint(equalTo: header.centerYAnchor), closeButton.widthAnchor.constraint(equalToConstant: 22), closeButton.heightAnchor.constraint(equalToConstant: 22),
             content.view.topAnchor.constraint(equalTo: header.bottomAnchor), content.view.leadingAnchor.constraint(equalTo: view.leadingAnchor), content.view.trailingAnchor.constraint(equalTo: view.trailingAnchor), content.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
+    }
+
+    func setHeaderVisible(_ visible: Bool) {
+        _ = view
+        guard headerVisible != visible else { return }
+        // Closing an anchored editor cancels its draft; visibility is not a rename.
+        if !visible { renamePopover?.close() }
+        headerVisible = visible
+        header.isHidden = !visible
+        headerHeight.constant = visible ? 28 : 0
+        view.needsLayout = true
+        view.layoutSubtreeIfNeeded()
     }
 
     func setTitle(_ title: String) {
@@ -156,7 +170,7 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
     }
 
     func showRenamePopover() {
-        guard view.window != nil else { return }
+        guard headerVisible, view.window != nil else { return }
         if renamePopover?.isShown == true { renameField.selectText(nil); return }
         onFocus?()
         editingOriginal = renameTitle
@@ -246,10 +260,12 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
     }
     func presentMoveMenu(_ menu: NSMenu) {
         // Keep the responder intact: dismissing the menu must not disable terminal input.
+        guard headerVisible else { return }
         menu.popUp(positioning: nil, at: .zero, in: dragHandle)
     }
     @objc private func showTypeMenu() { presentTypeMenu(makeTypeMenu()) }
     func presentTypeMenu(_ menu: NSMenu) {
+        guard headerVisible else { return }
         view.window?.makeFirstResponder(nil)
         menu.popUp(positioning: nil, at: .zero, in: typeButton)
     }
@@ -309,7 +325,7 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
         performHeaderAction(id: token.id, revision: token.revision)
     }
     private func performHeaderAction(id: String?, revision: UUID) {
-        guard let action = headerActions.first(where: { $0.id == id && $0.revision == revision }), action.enabled else { return }
+        guard headerVisible, let action = headerActions.first(where: { $0.id == id && $0.revision == revision }), action.enabled else { return }
         action.perform()
     }
     func headerActionMenu() -> NSMenu {
@@ -369,6 +385,7 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
         // Constraints use alignment rects; NSTextField's frame has two-point side outsets.
         let titleRect = titleField.alignmentRect(forFrame: titleField.frame)
         return .object(["type": .string(typeName), "title": .string(latestTitle), "height": .number(header.bounds.height),
+                 "headerVisible": .bool(headerVisible), "contentHeight": .number(content.view.bounds.height),
                  "headerWidth": .number(header.bounds.width), "titleCenterX": .number(titleRect.midX),
                  "titleLeadingX": .number(titleRect.minX), "titleTrailingX": .number(titleRect.maxX),
                  "typeTrailingX": .number(typeButton.frame.maxX), "actionsLeadingX": .number(actionStrip.frame.minX),
@@ -377,10 +394,10 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
                  "active": .bool(isActive), "dimmed": .bool(!inactiveShade.isHidden),
                  "renameWindowNumber": renameField.window.map { .integer($0.windowNumber) } ?? .null,
                  "headerActions": .array(headerActions.map { .object(["id": .string($0.id), "enabled": .bool($0.enabled)]) }),
-                 "visibleHeaderActions": .array(actionStrip.arrangedSubviews.compactMap { $0.identifier?.rawValue }.map(JSONValue.string)),
+                 "visibleHeaderActions": .array(headerVisible ? actionStrip.arrangedSubviews.compactMap { $0.identifier?.rawValue }.map(JSONValue.string) : []),
                  "actionsBeforeClose": .bool(actionStrip.frame.maxX <= closeButton.frame.minX),
-                 "dragHandleVisible": .bool(dragHandle.frame.minX >= 0 && dragHandle.frame.maxX <= typeButton.frame.minX && !dragHandle.isHidden),
-                 "closeVisible": .bool(closeButton.frame.minX >= 0 && closeButton.frame.maxX <= header.bounds.width && !closeButton.isHidden), "attached": .bool(header.window != nil)])
+                 "dragHandleVisible": .bool(dragHandle.frame.minX >= 0 && dragHandle.frame.maxX <= typeButton.frame.minX && !dragHandle.isHiddenOrHasHiddenAncestor),
+                 "closeVisible": .bool(closeButton.frame.minX >= 0 && closeButton.frame.maxX <= header.bounds.width && !closeButton.isHiddenOrHasHiddenAncestor), "attached": .bool(header.window != nil)])
     }
 }
 

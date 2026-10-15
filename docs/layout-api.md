@@ -13,7 +13,8 @@ Use `command.run` with an explicit `id` and ordinary `pane`/`tab` targeting:
 | `layout.resize` | `path`: array of first/second branches; `firstChildFraction` | `expectedLayoutRevision` |
 | `pane.title.set` | `title`: string | Optional ordinary identity/revision guards |
 | `pane.title.clear` | None | Optional ordinary identity/revision guards |
-| `pane.rename` | None; ordinary `pane`/`tab` target | A visible, non-minimized pane |
+| `pane.rename` | None; ordinary `pane`/`tab` target | A visible, non-minimized pane with its bar shown |
+| `pane.header.show` / `.hide` / `.toggle` | None; ordinary `pane`/`tab` target | Optional ordinary identity/revision guards |
 
 Fractions must be finite and strictly between zero and one. A split fraction always describes the **new pane**, regardless of direction; resize describes the **first child**, excluding the divider. `target: root` wraps the complete tab layout. Types are validated before native preparation: a browser/plugin split does not first create a terminal. Model allocation, topology and type are committed together. Failures do not imply rollback of arbitrary shell startup or other external side effects.
 
@@ -36,6 +37,20 @@ slate-term panes clear-title --pane p1
 ```
 
 A plain `panes split --right` continues to call its legacy alias. Supplying type/root/fraction/focus options selects the guarded atomic operation.
+
+## Pane bar visibility
+
+```sh
+slate-term panes hide-header --pane p1
+slate-term panes show-header --pane p1
+slate-term panes toggle-header --pane p1
+```
+
+These aliases call `command.run` IDs `pane.header.hide`, `.show` and `.toggle`. All trusted clients use the same targeting, validation and dispatch. An explicit or inherited stale target fails; it never redirects to focus. Supported optional guards are `expectedInstanceId`, `expectedAnchorSessionId`, `expectedWorkspaceRevision` and `expectedLayoutRevision`. Unsupported document/configuration guards fail closed. Replies include `paneId`, `tabId`, `headerVisible`, path/layout revision and standard commit fields. Show/hide are idempotent; toggle is not retry-safe. Repeated no-ops emit no event or revision. A real change emits `host.pane.header.changed` with resulting state and advances only the workspace revision, not the layout revision.
+
+Read `headerVisible` through `pane.inspect`, `workspace.snapshot`, `panes.list` or `workspace.get`. This is the persisted **requested** bar state, independent of whether the pane is currently rendered (background tab, zoom or minimized window). Hiding removes the entire 28-point native header and gives its height to retained content; it does not hide the pane, change layout fractions/focus, recreate content, or change browser address/native tab bars. State follows the slot through moves, zoom/restore and type replacement. New panes default shown. Old snapshots and recipes default shown when the field is absent.
+
+Show/Hide/Toggle Pane Bar remain available through the Workspace menu, command picker and configurable shortcuts (no default binding). Show the bar before using native rename/type/drag controls. Hiding cancels an open rename draft without saving; `pane.rename` refuses a hidden bar instead of revealing it. Programmatic title changes and registered plugin commands remain available. Saved-layout capture records current state, and the editor exposes **Show pane bar** per pane.
 
 ## Tab groups
 
@@ -77,6 +92,9 @@ await workspace.panes.move('p1', 'down', {pane: 'p2', expectedLayoutRevision});
 await workspace.layout.resize(['first'], 0.6, {expectedLayoutRevision});
 await workspace.panes.setTitle('Build output');
 await workspace.panes.clearTitle();
+await workspace.panes.hideHeader();
+await workspace.panes.showHeader({pane: 'p2'});
+await workspace.panes.toggleHeader();
 await workspace.tabs.reorder(0, {expectedWorkspaceRevision});
 await workspace.tabs.move('w1', {index: 1, expectedWorkspaceRevision});
 await workspace.tabs.detach({expectedWorkspaceRevision});

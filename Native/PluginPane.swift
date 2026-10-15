@@ -384,7 +384,10 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
             split:(params,options={})=>call('command.run',{...params,id:'pane.split'},options),
             move:(target,direction,params={},options={})=>call('command.run',{...params,id:'pane.move',target,direction},options),
             setTitle:(title,params={},options={})=>call('command.run',{...params,id:'pane.title.set',title},options),
-            clearTitle:(params={},options={})=>call('command.run',{...params,id:'pane.title.clear'},options)
+            clearTitle:(params={},options={})=>call('command.run',{...params,id:'pane.title.clear'},options),
+            showHeader:(params={},options={})=>call('command.run',{...params,id:'pane.header.show'},options),
+            hideHeader:(params={},options={})=>call('command.run',{...params,id:'pane.header.hide'},options),
+            toggleHeader:(params={},options={})=>call('command.run',{...params,id:'pane.header.toggle'},options)
           }),
           layout:Object.freeze({get:(params={})=>call('layout.get',params),resize:(path,firstChildFraction,params={},options={})=>call('command.run',{...params,id:'layout.resize',path,firstChildFraction},options)}),
           tabs:Object.freeze({

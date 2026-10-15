@@ -270,6 +270,9 @@ private struct SavedLayoutsView: View {
             if let pane = model.pane {
                 Section("Pane") {
                     TextField("Name", text: Binding(get: { model.pane?.title ?? "" }, set: { value in model.changePane { $0.title = value } }), prompt: Text("Automatic"))
+                    Toggle("Show pane bar", isOn: Binding(get: { model.pane?.headerVisible ?? true },
+                                                          set: { value in model.changePane { $0.headerVisible = value } }))
+                        .help("Show it again from Workspace → Show Pane Bar or Search Commands.")
                     Picker("Type", selection: Binding(get: { model.pane?.type ?? "terminal" }, set: model.setType)) {
                         ForEach(model.types) { type in Text(type.title).tag(type.id) }
                         if !model.types.contains(where: { $0.id == pane.type }) { Text("\(pane.type) (Missing)").tag(pane.type) }
@@ -344,6 +347,9 @@ private struct SavedLayoutMap: View {
                         .font(.system(size: 20, weight: .regular)).foregroundStyle(active ? Color.accentColor : .secondary)
                     Text(pane?.title.isEmpty == false ? pane!.title : type?.title ?? pane?.type ?? "Pane")
                         .font(.system(size: 12, weight: .medium)).lineLimit(2).multilineTextAlignment(.center)
+                    if pane?.headerVisible == false {
+                        Text("Bar hidden").font(.caption2).foregroundStyle(.secondary)
+                    }
                     if type == nil { Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange).accessibilityLabel("Plugin unavailable") }
                 }.padding(8).frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(active ? Color.accentColor.opacity(0.09) : Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))

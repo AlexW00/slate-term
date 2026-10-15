@@ -745,9 +745,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             if id == "command.picker" { try toggleCommandPicker(params); return .object([:]) }
             if id == "pane.rename" {
                 let pane = try targetPaneID(params)
-                guard let container = containers[pane], let window = container.view.window,
+                guard let container = containers[pane], container.headerVisible, let window = container.view.window,
                       window.isVisible, !window.isMiniaturized else {
-                    throw RPCFailure(code: -32602, message: "Rename requires a visible pane")
+                    throw RPCFailure(code: -32602, message: "Rename requires a visible pane bar; show the pane bar first")
                 }
                 container.showRenamePopover()
                 return .object(["paneId": .string(pane.description)])
@@ -793,9 +793,13 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 throw RPCFailure(code: -32010, message: "The terminal may have a running process; pass --force to terminate it")
             }
             let persistence: WorkspacePersistence
-            if ["pane.title.set", "pane.title.clear"].contains(id) {
+            if ["pane.title.set", "pane.title.clear", "pane.header.show", "pane.header.hide", "pane.header.toggle"].contains(id) {
                 try commitWorkspace(transition, operation: operation)
-                updatePaneTitle(try targetPaneID(params))
+                let pane = try targetPaneID(params)
+                updatePaneTitle(pane)
+                if let model = workspace.panes.first(where: { $0.id == pane }) {
+                    containers[pane]?.setHeaderVisible(model.headerVisible)
+                }
                 persistence = persistWorkspace()
             } else { persistence = try reconcile(next, transition: transition, operation: operation) }
             return operationResult(mutationResponse(id, result: result), transition: transition, operation: operation, workspacePersistence: persistence)
@@ -1054,6 +1058,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             if let pane = params["pane"]?.string { model.selectedPane = try PaneID(parsing: pane) }
             if let title = params["title"]?.string { model.changePane { $0.title = title } }
             if let fields = params["configuration"]?.object { model.changePane { $0.configuration = fields } }
+            if case .bool(let visible) = params["headerVisible"] { model.changePane { $0.headerVisible = visible } }
             if params["split"] == .string("right") { model.split(.horizontal) }
             if params["split"] == .string("below") { model.split(.vertical) }
             if params["remove"] == .bool(true) { model.removePane() }
@@ -1316,7 +1321,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 } else if pane.type.isBrowser {
                     configuration["url"] = urls ? (leaves[id] as? BrowserPane)?.currentURL.map(JSONValue.string) : nil
                 }
-                return SavedLayoutPane(id: id, type: type, title: pane.manualTitle ?? "", configuration: configuration)
+                return SavedLayoutPane(id: id, type: type, title: pane.manualTitle ?? "", headerVisible: pane.headerVisible, configuration: configuration)
             }
             return SavedLayoutTab(name: "Tab \(group.tabs.firstIndex(of: tabID)! + 1)", layout: tab.layout, panes: panes)
         }
@@ -1677,6 +1682,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 }
                 containers[pane.id] = container
             }
+            containers[pane.id]?.setHeaderVisible(pane.headerVisible)
             updatePaneTitle(pane.id)
         }
         refreshHeaderActions()
@@ -2135,6 +2141,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             group.submenu = submenu
         }
         workspaceMenu.addItem(.separator())
+        addCommands(["pane.header.show", "pane.header.hide", "pane.header.toggle"], to: workspaceMenu)
+        workspaceMenu.addItem(.separator())
         addCommands(["pane.rename", "pane.copyID", "pane.close"], to: workspaceMenu)
         workspaceMenu.addItem(.separator())
         addCommands(["config.reload"], to: workspaceMenu)
@@ -2300,6 +2308,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 case "tab.new": symbol = "plus.square"; keywords = "create"
                 case "tab.close", "pane.close": symbol = "xmark.square"; keywords = "remove close"
                 case "pane.copyID": symbol = "doc.on.doc"; keywords = "clipboard panel identifier"
+                case "pane.header.show", "pane.header.hide", "pane.header.toggle":
+                    symbol = "rectangle.topthird.inset.filled"; keywords = "panel header chrome title bar show hide toggle"
                 case "pane.rename": symbol = "pencil"; keywords = "name title panel"
                 case "pane.title.clear": symbol = "textformat"; keywords = "reset rename manual title"
                 case "tab.detachCurrent": detail = "Tabs"; symbol = "macwindow"; keywords = "detach move new window"
@@ -2324,6 +2334,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                     else if command.id == "browser.clearSiteData", let pane,
                             (leaves[pane.id] as? BrowserPane)?.currentURL.flatMap({ try? BrowserDataRequest.siteHost($0) }) == nil { unavailable = "Open an HTTP or HTTPS site to clear its data" }
                     else if command.id == "pane.title.clear", pane?.manualTitle == nil { unavailable = "This pane has no manual title" }
+                    else if command.id == "pane.rename", let pane, !pane.headerVisible { unavailable = "Show the pane bar to rename it" }
                     else if command.id == "pane.rename", let pane, containers[pane.id]?.view.window?.isVisible != true { unavailable = "Rename requires a visible pane" }
                     else if command.id == "tab.detachCurrent", let tab,
                             workspace.groups.first(where: { $0.tabs.contains(tab.id) })?.tabs.count == 1 { unavailable = "This tab already has its own window" }
@@ -2504,6 +2515,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         if id?.hasPrefix("browser.") == true { return focusedBrowser != nil }
         if let id, id.hasPrefix("split.") { return splitUnavailableReason(id, params: [:]) == nil }
         if id == "tab.detachCurrent", let tab = try? targetTab([:]) { return (workspace.groups.first { $0.tabs.contains(tab.id) }?.tabs.count ?? 0) > 1 }
+        if id == "pane.rename", let pane = try? targetPaneID([:]) { return workspace.panes.first { $0.id == pane }?.headerVisible == true }
         if id == "pane.title.clear", let pane = try? targetPaneID([:]) { return workspace.panes.first { $0.id == pane }?.manualTitle != nil }
         return true
     }

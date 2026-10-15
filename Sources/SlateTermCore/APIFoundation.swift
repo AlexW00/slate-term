@@ -104,6 +104,7 @@ public struct WorkspaceRevisions: Sendable {
             guard let old = oldPanes[pane.id] else { append("host.pane.created", tab: tab, pane: pane.id); continue }
             if old.type != pane.type { append("host.pane.type.changed", tab: tab, pane: pane.id) }
             if old.manualTitle != pane.manualTitle { append("host.pane.title.changed", tab: tab, pane: pane.id) }
+            if old.headerVisible != pane.headerVisible { append("host.pane.header.changed", tab: tab, pane: pane.id) }
         }
         for tab in workspace.tabs {
             guard let old = oldTabs[tab.id] else { continue }

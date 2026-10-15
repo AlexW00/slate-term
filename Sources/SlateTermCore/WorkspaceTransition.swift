@@ -99,12 +99,13 @@ public struct WorkspaceTransition: Sendable {
         }
         let panes = Dictionary(uniqueKeysWithValues: next.panes.map { ($0.id, $0) })
         // Closures precede owning-tab closure; creation reverses that dependency.
-        for topic in ["host.pane.closed", "host.tab.closed", "host.tab.created", "host.pane.created", "host.pane.type.changed", "host.pane.title.changed"] {
+        for topic in ["host.pane.closed", "host.tab.closed", "host.tab.created", "host.pane.created", "host.pane.type.changed", "host.pane.title.changed", "host.pane.header.changed"] {
             for fact in compatibility where fact.topic == topic {
                 var extra: [String: JSONValue] = [:]
                 if let pane = fact.pane.flatMap({ panes[$0] }) {
                     if topic == "host.pane.created" || topic == "host.pane.type.changed" { extra["type"] = .string(Self.typeName(pane.type)) }
                     if topic == "host.pane.title.changed" { extra["hasManualTitle"] = .bool(pane.manualTitle != nil) }
+                    if topic == "host.pane.header.changed" { extra["headerVisible"] = .bool(pane.headerVisible) }
                     if topic == "host.pane.created", let split, split.pane == pane.id {
                         extra.merge(["anchor": .string(split.anchor.description), "targetKind": .string(split.target),
                                      "direction": .string(split.direction), "newPaneFraction": .number(split.fraction),

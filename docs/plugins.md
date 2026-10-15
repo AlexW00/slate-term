@@ -246,6 +246,8 @@ await workspace.setTitle(null); // use document.title again
 
 An explicit plugin title is limited to 512 UTF-8 bytes and resets on a new document. Each view has its own title, even when it shares a tab/global instance. A user can override it by clicking the header title or invoking `pane.rename` to open an anchored popover (Return/Rename saves; Escape, Cancel, or clicking outside cancels). Manual names persist with the workspace and take priority over both document and plugin titles. `workspace.panes.setTitle(title, params)` / `clearTitle(params)` set/clear this manual override; unlike `workspace.setTitle`, they are not automatic per-document title updates. Plugin updates are still accepted; clearing the manual name reveals the latest automatic title. Close uses the normal pane-close command; it does not implicitly close sibling panes.
 
+Pane bar visibility is slot state, independently of document titles. Use `workspace.panes.hideHeader(params, options)`, `showHeader(params, options)` or `toggleHeader(params, options)` (normal `{pane, tab, expectedInstanceId, expectedAnchorSessionId, expectedWorkspaceRevision, expectedLayoutRevision}` targeting/guards; final `{signal, cause}`). These call shared `pane.header.*` commands, available identically through CLI/services. Hiding removes contributed header buttons too; their commands remain accessible through the picker/menu/shortcuts. It does not retire or navigate the document. Read `pane.inspect.headerVisible` for state. Show the bar before using native rename/type/drag controls; programmatic manual title changes remain available while hidden.
+
 ### Events and cancellation
 
 ```js

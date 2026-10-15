@@ -189,6 +189,32 @@ struct PaneTitlesGate {
         left.setHeaderActions([])
         try check(left)
         try require(left.info.object!["visibleHeaderActions"] == .array([]), "Removed contributions remain visible")
-        print("PASS production pane header: centered titles, safe bounds at 250/500/750 points and collapse at 80, Unicode/live titles, commit/cancel/blur, command-backed buttons/overflow/disabled actions/removal and native renders")
+        let retainedContent = left.content.view
+        let shownHeight = retainedContent.bounds.height
+        let retainedFrame = left.view.frame
+        var renamed = false
+        left.onRename = { _ in renamed = true }
+        try left.editTitleForTesting("Must be discarded", finish: nil)
+        left.setHeaderVisible(false)
+        settle()
+        try require(left.info.object!["editing"] == .bool(false) && !renamed, "Hiding must cancel rename without committing")
+        left.showRenamePopover()
+        try require(left.info.object!["editing"] == .bool(false), "Hidden title must not anchor a popover")
+        try require(left.content.view === retainedContent && left.view.frame == retainedFrame, "Visibility must retain content and outer geometry")
+        try require(abs(retainedContent.bounds.height - shownHeight - 28) < 0.5, "Hidden bar must reclaim 28 points")
+        try require(left.info.object!["height"] == .number(0), "Hidden header retained height")
+        try require(left.info.object!["closeVisible"] == .bool(false) && left.info.object!["dragHandleVisible"] == .bool(false), "Hidden controls stayed visible")
+        for (name, appearance) in [("hidden-light", NSAppearance.Name.aqua), ("hidden-dark", .darkAqua)] {
+            window.appearance = NSAppearance(named: appearance)
+            try capture(name)
+        }
+        leftWidth.constant = 80
+        settle()
+        try require(left.content.view.bounds.width == 80, "Hidden minimum-width content changed")
+        leftWidth.constant = 500
+        left.setHeaderVisible(true)
+        try check(left)
+        try require(abs(retainedContent.bounds.height - shownHeight) < 0.5, "Showing failed to restore header height")
+        print("PASS production pane header: centered titles, safe bounds, Unicode/live titles, commit/cancel/blur, command-backed buttons, hidden height reclamation/content retention/rename cancellation and native renders")
     }
 }

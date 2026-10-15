@@ -4,6 +4,7 @@ import Foundation
 /// renderable minimum geometry, registered content availability and resource preparation.
 public enum WorkspaceMutationCommand {
     public static let ids: Set<String> = ["pane.split", "pane.move", "layout.resize", "pane.title.set", "pane.title.clear",
+                                         "pane.header.show", "pane.header.hide", "pane.header.toggle",
                                          "tab.reorder", "tab.detach", "tab.move", "tab.detachCurrent"]
     public static let layoutGuarded: Set<String> = ["pane.split", "pane.move", "layout.resize"]
     public static let workspaceGuarded: Set<String> = ["tab.reorder", "tab.detach", "tab.move"]
@@ -66,6 +67,11 @@ public enum WorkspaceMutationCommand {
                 return branch
             }
             try next.resize(tab: tab.id, path: path, fraction: number("firstChildFraction"))
+        case "pane.header.show", "pane.header.hide", "pane.header.toggle":
+            let visible = id == "pane.header.toggle" ? !next.panes.first { $0.id == targetPane }!.headerVisible : id == "pane.header.show"
+            try next.setHeaderVisible(visible, for: targetPane)
+            result["paneId"] = .string(targetPane.description)
+            result["headerVisible"] = .bool(visible)
         case "pane.title.set", "pane.title.clear":
             try next.setManualTitle(id == "pane.title.clear" ? "" : string("title"), for: targetPane)
             result["paneId"] = .string(targetPane.description)

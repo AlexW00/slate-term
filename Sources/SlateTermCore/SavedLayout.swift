@@ -127,12 +127,14 @@ public struct SavedLayoutPane: Equatable, Codable, Sendable {
     public var id: PaneID
     public var type: String
     public var title: String
+    public var headerVisible: Bool
     public var configuration: [String: JSONValue]
 
-    public init(id: PaneID, type: String = "terminal", title: String = "", configuration: [String: JSONValue] = [:]) {
+    public init(id: PaneID, type: String = "terminal", title: String = "", headerVisible: Bool = true, configuration: [String: JSONValue] = [:]) {
         self.id = id
         self.type = type
         self.title = title
+        self.headerVisible = headerVisible
         self.configuration = configuration
     }
 
@@ -172,13 +174,14 @@ public struct SavedLayoutPane: Equatable, Codable, Sendable {
         }
     }
 
-    private enum CodingKeys: String, CodingKey { case id, type, title, configuration }
+    private enum CodingKeys: String, CodingKey { case id, type, title, headerVisible, configuration }
     public init(from decoder: any Decoder) throws {
-        try requireSavedKeys(decoder, allowed: ["id", "type", "title", "configuration"])
+        try requireSavedKeys(decoder, allowed: ["id", "type", "title", "headerVisible", "configuration"])
         let values = try decoder.container(keyedBy: CodingKeys.self)
         id = try values.decode(PaneID.self, forKey: .id)
         type = try values.decode(String.self, forKey: .type)
         title = values.contains(.title) ? try values.decode(String.self, forKey: .title) : ""
+        headerVisible = values.contains(.headerVisible) ? try values.decode(Bool.self, forKey: .headerVisible) : true
         configuration = values.contains(.configuration) ? try values.decode([String: JSONValue].self, forKey: .configuration) : [:]
     }
 }
@@ -205,6 +208,7 @@ private func buildSavedTree(_ layout: Layout, seed: PaneID, tab: TabID, path: [B
         let type = PaneType(identifier: recipe.type)
         try workspace.setType(seed, to: type)
         try workspace.setManualTitle(recipe.title, for: seed)
+        try workspace.setHeaderVisible(recipe.headerVisible, for: seed)
         mapping[seed] = recipe
     case .split(let axis, let fraction, let first, let second):
         let other = try workspace.split(seed, direction: axis == .horizontal ? .right : .down)

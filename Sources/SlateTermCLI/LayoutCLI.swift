@@ -37,6 +37,7 @@ struct Panes: ParsableCommand {
     enum Action: String, ExpressibleByArgument {
         case list, inspect, split, move, close, focus, send, capture, type
         case setTitle = "set-title", clearTitle = "clear-title"
+        case showHeader = "show-header", hideHeader = "hide-header", toggleHeader = "toggle-header"
     }
     @Argument var action: Action
     @OptionGroup var connection: Connection
@@ -103,6 +104,10 @@ struct Panes: ParsableCommand {
                 guard let title else { throw ValidationError("set-title requires --title") }
                 params["title"] = .string(title)
             }
+            try connection.call("command.run", params: params)
+        case .showHeader, .hideHeader, .toggleHeader:
+            let id = action == .showHeader ? "pane.header.show" : action == .hideHeader ? "pane.header.hide" : "pane.header.toggle"
+            params["id"] = .string(id)
             try connection.call("command.run", params: params)
         case .close, .focus:
             params["id"] = .string("pane.\(action.rawValue)")
