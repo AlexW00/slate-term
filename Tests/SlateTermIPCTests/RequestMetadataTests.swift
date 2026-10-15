@@ -78,8 +78,8 @@ private let causationDescriptor = JSONValue.object(["causation": .object(["versi
     }
     defer { server?.close(); server = nil }
     let path = try #require(server?.path)
-    try await Task.detached {
-        #expect(throws: SocketError.self) {
+    await Task.detached {
+        _ = #expect(throws: SocketError.self) {
             try UnixClient(path: path).call("mutate", metadata: RPCMetadata(cause: "opaque"))
         }
     }.value

@@ -37,7 +37,7 @@ private func serviceIdentity(generation: String = "g1") throws -> ServiceIdentit
     defer { server.close() }
     let path = server.path, identity = try serviceIdentity()
     await Task.detached {
-        #expect(throws: RPCFailure.self) { try UnixClient(path: path, service: identity).call("mutate") }
+        _ = #expect(throws: RPCFailure.self) { try UnixClient(path: path, service: identity).call("mutate") }
     }.value
     #expect(calls == 0)
 }
@@ -51,7 +51,7 @@ private func serviceIdentity(generation: String = "g1") throws -> ServiceIdentit
     defer { server.close() }
     let path = server.path
     await Task.detached {
-        #expect(throws: RPCFailure.self) { try UnixClient(path: path, service: foreign).call("mutate") }
+        _ = #expect(throws: RPCFailure.self) { try UnixClient(path: path, service: foreign).call("mutate") }
     }.value
     #expect(calls == 0)
 }

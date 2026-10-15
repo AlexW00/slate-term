@@ -2,6 +2,14 @@
 
 The expanded end-to-end gate is `bash scripts/verify-all.sh`. It runs every check below sequentially, records each successful step in `artifacts/verification-checks.txt`, and writes `artifacts/verification.json` **only after all steps pass**. The manifest includes source and app/CLI binary SHA-256 hashes. Source changes during the run invalidate completion. A stale manifest does not certify newer edits.
 
+## Build diagnostics and literal text checking
+
+The warning-cleanup worktree records its native build and Swift test results in `artifacts/warnings-verified-build-driver.log`, `artifacts/app-build.log`, and `artifacts/warnings-verified-swift-tests.log`; these focused checks do not certify the full suite.
+
+Eight captured Hang Risk reports share UUID-matched system frames through `NSConditionLock`, AppKit's data-detector scanner, pending text checking, and `NSTextView.resignFirstResponder`. The command query, pane rename, and browser address fields now disable automatic text checking while setting up their shared field editor. No global preferences or WebKit page editors are changed. Old app-frame UUIDs no longer match the current binary, so the exact originating controls remain unconfirmed; the mitigation is not a long-use hang-free guarantee.
+
+`bash scripts/verify-text-checking.sh` exercises actual editing and focus resignation without showing windows. It explicitly enables inherited data/link detection first, then requires the literal field/search controls to disable checking before editing and commit Unicode input unchanged. Removing the policy makes this regression fail. The native pane-title fixture also waits for real queued outside-click dispatch rather than assuming immediate popover dismissal.
+
 ## Latest picker and header-button revision
 
 The complete sequential suite passed on **2026-10-14 at 13:36:08 UTC**: **37 gates**, including **120 Swift tests** (70 core, 8 IPC, 42 settings). Evidence: `artifacts/header-buttons-full-suite.log`, `artifacts/header-buttons-final-targeted.log`, and `artifacts/verification.json`. All recorded source and executable hashes matched the working tree/binaries when rechecked after completion.
@@ -39,6 +47,7 @@ The menu/close-warning work has its own native gate, `python3 scripts/verify-men
 | `build-ghostty.sh` | Pinned full Ghostty engine and checksum-verified local Zig toolchain |
 | `verify-model.sh` | Workspace topology/IDs/focus/zoom/equalization, protocol, actual sockets, shell/event/browser input contracts, TOML/watchers, private state/catalog/storage |
 | `verify-model-mutations.py` | Deliberate regressions rejected by assertions |
+| `verify-text-checking.sh` | Headless shared field-editor reuse, inherited detector flags disabled before editing, Unicode input preserved on focus resignation |
 | `verify-terminal-keys.sh` | 74 physical SDK mappings × 8 modifier sets, parsing and byte bounds |
 | `verify-terminal-runs.sh` | Unique command markers, quoting, one-shot shell input claims, draft refusal, sequences, UTF-8 output bounds, deadlines/cancellation/replacement/capacity |
 | `verify-event-hub.sh` | Real suspension, replay/filtering, cursor advancement, cancellation, close, overload and deadline races |

@@ -19,6 +19,7 @@ run plugin-process bash scripts/verify-plugin-process.sh
 run plugin-listener bash scripts/verify-plugin-listener.sh
 run process-titles bash scripts/verify-process-titles.sh
 run pane-movement-native bash scripts/verify-pane-movement-native.sh
+run text-checking bash scripts/verify-text-checking.sh
 run pane-titles-native bash scripts/verify-pane-titles-native.sh
 run dividers-native bash scripts/verify-dividers-native.sh
 # GUI gates are deliberately sequential and own their windows/state/processes.

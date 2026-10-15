@@ -11,7 +11,7 @@ struct PluginWorker: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "_plugin-worker", shouldDisplay: false)
     @Option var parentPid: Int32
     @Option var exitStatusFile: String?
-    @Argument(parsing: .unconditionalRemaining) var command: [String] = []
+    @Argument(parsing: .captureForPassthrough) var command: [String] = []
 
     func run() throws {
         guard parentPid > 1, getppid() == parentPid, getpgrp() == getpid(),

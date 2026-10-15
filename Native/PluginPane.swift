@@ -238,7 +238,7 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
     /// Integration-only caller in WorkspaceHost; never part of the page bridge.
     func evaluateForTesting(_ source: String) async throws -> JSONValue {
         let value = try await web.callAsyncJavaScript("return await (\(source));", arguments: [:], in: nil, contentWorld: .page)
-        let data = try JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed])
+        let data = try JSONSerialization.data(withJSONObject: value ?? NSNull(), options: [.fragmentsAllowed])
         return try JSONDecoder().decode(JSONValue.self, from: data)
     }
 

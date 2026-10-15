@@ -135,7 +135,15 @@ struct PaneTitlesGate {
         try require(left.info.object!["title"] == .string("Live title update"), "Cancel lost live title")
         try left.editTitleForTesting("Committed", finish: "commit")
         try require(left.info.object!["title"] == .string("Committed"), "Commit failed")
-        try left.editTitleForTesting("Discarded on blur", finish: "blur")
+        try left.editTitleForTesting("Discarded on blur", finish: "outsideClick")
+        // This standalone fixture must dispatch the posted outside click before observing dismissal.
+        let dismissalDeadline = Date().addingTimeInterval(2)
+        while left.info.object!["editing"] == .bool(true), Date() < dismissalDeadline {
+            if let event = app.nextEvent(matching: .any, until: Date().addingTimeInterval(0.01), inMode: .default, dequeue: true) {
+                app.sendEvent(event)
+            }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
         try require(left.info.object!["title"] == .string("Committed"), "Outside dismissal must cancel")
         try require(left.info.object!["editing"] == .bool(false), "Dismissed popover stayed open")
         left.setTitle("")

@@ -12,7 +12,7 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
     var onFocus: (() -> Void)?
     var onTitleChange: (() -> Void)?
     var paneTitle: String { web.title.flatMap { $0.isEmpty ? nil : $0 } ?? web.url?.host ?? "New Browser" }
-    private let address = NSTextField()
+    private let address = LiteralTextField()
     private let status = NSTextField(labelWithString: "")
     private let back = NSButton(title: "Back", target: nil, action: nil)
     private let forward = NSButton(title: "Forward", target: nil, action: nil)

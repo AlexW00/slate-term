@@ -212,7 +212,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         if integration {
             // Owned integration windows must not execute the user's typing.
             integrationKeyboardMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [weak self] event in
-                MainActor.assumeIsolated { self?.dispatchingTestKey == true ? event : nil }
+                MainActor.assumeIsolated { self?.dispatchingTestKey == true } ? event : nil
             }
         }
         let environment = ProcessInfo.processInfo.environment
@@ -825,19 +825,20 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             let popupMenu = preview.copy() as! NSMenu
             var captureError: (any Error)?
             var captured = false
+            let captureMenu: @MainActor @Sendable () -> Void = {
+                defer { popupMenu.cancelTracking() }
+                do {
+                    let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+                    guard let popup = windows.first(where: { ($0[kCGWindowOwnerPID as String] as? Int32) == getpid() && ($0[kCGWindowLayer as String] as? Int ?? 0) > 0 }),
+                          let number = popup[kCGWindowNumber as String] as? Int else {
+                        throw RPCFailure(code: -32000, message: "Owned menu window not found")
+                    }
+                    try Self.captureWindow(number, path: path)
+                    captured = true
+                } catch { captureError = error }
+            }
             let timer = Timer(timeInterval: 0.3, repeats: false) { _ in
-                MainActor.assumeIsolated {
-                    defer { popupMenu.cancelTracking() }
-                    do {
-                        let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
-                        guard let popup = windows.first(where: { ($0[kCGWindowOwnerPID as String] as? Int32) == getpid() && ($0[kCGWindowLayer as String] as? Int ?? 0) > 0 }),
-                              let number = popup[kCGWindowNumber as String] as? Int else {
-                            throw RPCFailure(code: -32000, message: "Owned menu window not found")
-                        }
-                        try Self.captureWindow(number, path: path)
-                        captured = true
-                    } catch { captureError = error }
-                }
+                MainActor.assumeIsolated { captureMenu() }
             }
             RunLoop.main.add(timer, forMode: .common)
             defer { timer.invalidate() }
@@ -2081,7 +2082,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         item.submenu = workspaceMenu
         menu.addItem(item)
         let editMenu = NSMenu(title: "Edit")
-        for (title, action, key) in [("Copy", Selector(("copy:")), "c"), ("Paste", Selector(("paste:")), "v"), ("Select All", Selector(("selectAll:")), "a")] {
+        for (title, action, key) in [("Copy", #selector(NSText.copy(_:)), "c"), ("Paste", #selector(NSText.paste(_:)), "v"), ("Select All", #selector(NSText.selectAll(_:)), "a")] {
             editMenu.addItem(withTitle: title, action: action, keyEquivalent: key)
         }
         let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")

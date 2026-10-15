@@ -12,7 +12,7 @@ struct PickerCommand {
 /// stacked translucent rows. Opening/search/navigation are deliberately instant.
 @MainActor
 final class CommandPicker: NSWindowController, NSWindowDelegate, NSSearchFieldDelegate, NSTableViewDataSource, NSTableViewDelegate {
-    private let search = NSSearchField()
+    private let search = LiteralSearchField()
     private let table = NSTableView()
     private let scroll = NSScrollView()
     private let count = NSTextField(labelWithString: "")

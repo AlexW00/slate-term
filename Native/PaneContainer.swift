@@ -34,7 +34,7 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
     private var latestTitle = ""
     private var renameTitle = ""
     private var renamePopover: NSPopover?
-    private let renameField = NSTextField(string: "")
+    private let renameField = LiteralTextField(string: "")
     private var editingOriginal: String?
     private let inactiveShade = PaneInactiveShade()
     private var isActive = true
