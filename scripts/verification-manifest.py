@@ -14,8 +14,8 @@ def digest(path):
 
 def sources():
     paths = []
-    for directory in ['Sources', 'Native', 'Tests', 'scripts', 'slate-term']:
-        paths.extend(p for p in (root / directory).rglob('*') if p.is_file() and p.suffix in ['.swift', '.sh', '.py', '.plist', '.json', '.mp4'])
+    for directory in ['Sources', 'Native', 'Tests', 'scripts', 'slate-term', 'skills']:
+        paths.extend(p for p in (root / directory).rglob('*') if p.is_file() and p.suffix in ['.swift', '.sh', '.py', '.js', '.cjs', '.plist', '.json', '.mp4'])
     paths += [root / 'Package.swift', root / 'Package.resolved', root / 'AppInfo.plist', root / 'slate-term.xcodeproj/project.pbxproj',
               root / 'slate-term.xcodeproj/xcshareddata/xcschemes/SlateTermApp.xcscheme']
     return {str(p.relative_to(root)): digest(p) for p in sorted(paths)}

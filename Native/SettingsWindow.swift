@@ -6,7 +6,7 @@ import SlateTermSettings
 
 @MainActor
 final class SettingsModel: ObservableObject {
-    struct Plugin: Identifiable {
+    struct Plugin: Identifiable, Equatable {
         let id: String
         enum Indicator {
             case disabled, idle, busy, ready, failed

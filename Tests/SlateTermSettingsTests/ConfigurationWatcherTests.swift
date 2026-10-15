@@ -45,6 +45,26 @@ import Testing
     #expect(changes == 1)
 }
 
+@Test @MainActor func acknowledgedOwnWritesDoNotReloadButSupersedingEditsStillDo() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("slate-watch-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let file = directory.appendingPathComponent("config.toml")
+    var observed: [String] = []
+    let watcher = try ConfigurationWatcher(url: file) { observed.append((try? String(contentsOf: file, encoding: .utf8)) ?? "missing") }
+    defer { watcher.close() }
+    try "own".write(to: file, atomically: true, encoding: .utf8)
+    watcher.acknowledgeAppliedContents(Data("own".utf8))
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(observed.isEmpty)
+    try "external".write(to: file, atomically: true, encoding: .utf8)
+    watcher.acknowledgeAppliedContents(Data("own".utf8))
+    try await waitFor { observed == ["external"] }
+    try "next own".write(to: file, atomically: true, encoding: .utf8)
+    watcher.acknowledgeAppliedContents(Data("next own".utf8))
+    try "later external".write(to: file, atomically: true, encoding: .utf8)
+    try await waitFor { observed == ["external", "later external"] }
+}
+
 @MainActor private func waitFor(_ condition: () -> Bool) async throws {
     let deadline = ContinuousClock.now + .seconds(5)
     while !condition() {

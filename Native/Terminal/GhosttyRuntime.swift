@@ -6,6 +6,7 @@ import GhosttyKit
 final class GhosttyRuntime {
     private(set) var app: ghostty_app_t?
     private var config: ghostty_config_t?
+    private var colorScheme: ghostty_color_scheme_e?
     private var keyboardObserver: (any NSObjectProtocol)?
     private static weak var current: GhosttyRuntime?
     private static var initialized = false
@@ -137,8 +138,15 @@ final class GhosttyRuntime {
     func setColorScheme(dark: Bool, terminals: [TerminalView]) {
         guard let app, let config else { return }
         let scheme = dark ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT
-        ghostty_app_set_color_scheme(app, scheme)
-        for terminal in terminals { terminal.setColorScheme(scheme) }
+        var changed = colorScheme != scheme
+        if changed {
+            colorScheme = scheme
+            ghostty_app_set_color_scheme(app, scheme)
+        }
+        for terminal in terminals {
+            if terminal.setColorScheme(scheme) { changed = true }
+        }
+        guard changed else { return }
         // Color-scheme setters request a soft reload from the embedder. Apply
         // our retained configuration after updating every conditional state.
         ghostty_app_update_config(app, config)

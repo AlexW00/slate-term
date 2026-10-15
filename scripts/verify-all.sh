@@ -15,6 +15,7 @@ run mutations python3 scripts/verify-model-mutations.py
 run terminal-keys bash scripts/verify-terminal-keys.sh
 run terminal-runs bash scripts/verify-terminal-runs.sh
 run event-hub bash scripts/verify-event-hub.sh
+run event-efficiency bash scripts/verify-event-efficiency.sh
 run plugin-process bash scripts/verify-plugin-process.sh
 run plugin-listener bash scripts/verify-plugin-listener.sh
 run process-titles bash scripts/verify-process-titles.sh

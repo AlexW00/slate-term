@@ -71,15 +71,14 @@ final class EventControl {
                 waitMilliseconds: Self.integer("waitMilliseconds", in: params, default: 20_000))
             try Task.checkCancellation()
             try validateCaller()
-            var batch = try JSONValue.encoding(delivery.batch).object!
-            batch["events"] = .array(try delivery.batch.events.map { event in
+            let events = try delivery.batch.events.map { event in
                 var fields = try JSONValue.encoding(event).object!
                 if let lineage = delivery.lineages[event.cursor] {
                     fields["deliveryContext"] = .string(try operations.deliveryContext(cursor: event.cursor, lineage: lineage, audience: audience))
                 }
-                return .object(fields)
-            })
-            return .object(batch)
+                return JSONValue.object(fields)
+            }
+            return .object(["cursor": .string(delivery.batch.cursor), "events": .array(events)])
         } catch { throw Self.failure(error) }
     }
 

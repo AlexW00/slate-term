@@ -18,6 +18,7 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
     var paneTitle: String { customTitle ?? web.title.flatMap { $0.isEmpty ? nil : $0 } ?? instance.registration.title }
     func setPaneTitle(_ title: String?) throws {
         guard title == nil || title!.utf8.count <= 512 else { throw RPCFailure(code: -32602, message: "Pane title exceeds 512 UTF-8 bytes") }
+        guard customTitle != title else { return }
         customTitle = title
         onTitleChange?()
     }
@@ -260,7 +261,7 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
 
     /// Sets the terminal palette as CSS variables before page scripts run, and again in the live page on change.
     func apply(appearance snapshot: AppearanceSnapshot) {
-        guard !closed else { return }
+        guard !closed, appearance?.revision != snapshot.revision else { return }
         appearance = snapshot
         web.underPageBackgroundColor = NSColor(hex: snapshot.colors.background)
         installUserScripts()

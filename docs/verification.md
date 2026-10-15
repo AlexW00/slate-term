@@ -51,6 +51,7 @@ The menu/close-warning work has its own native gate, `python3 scripts/verify-men
 | `verify-terminal-keys.sh` | 74 physical SDK mappings × 8 modifier sets, parsing and byte bounds |
 | `verify-terminal-runs.sh` | Unique command markers, quoting, one-shot shell input claims, draft refusal, sequences, UTF-8 output bounds, deadlines/cancellation/replacement/capacity |
 | `verify-event-hub.sh` | Real suspension, replay/filtering, cursor advancement, cancellation, close, overload and deadline races |
+| `verify-event-efficiency.sh` | Window-free real storage/configuration/libghostty metadata checks; no-op suppression, completion preservation, engine rollback/custom palette reload; Node theme single-flight/trailing refresh and failure recovery |
 | `verify-plugin-process.sh` | Actual executable/cwd/environment, bounded logs, exit/reaping, TERM/KILL and owned-group cleanup |
 | `verify-plugin-listener.sh` | Real socket/process-group ownership and rejection of unrelated listeners |
 | `verify-process-titles.sh` | Kernel-only process attribution against real owned PTYs and foreground jobs |

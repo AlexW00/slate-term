@@ -154,7 +154,12 @@ public struct WorkspaceTransition: Sendable {
         for fact in compatibility where ["host.layout.changed", "host.focus.changed", "host.tabs.changed"].contains(fact.topic) {
             append(fact.topic, tab: fact.tab, pane: fact.pane)
         }
-        append("host.workspace.changed", extra: ["keyTabId": next.keyTabID.map { .string($0.description) } ?? .null])
+        // A local mutation must not invalidate every tab's derived context. Group/key-tab
+        // changes still affect workspace-wide readers, including global context followers.
+        let affectedTabs = Set(facts.compactMap(\.tab))
+        let localTab = previous.groups == next.groups && previous.keyTabID == next.keyTabID && affectedTabs.count == 1
+            ? affectedTabs.first : nil
+        append("host.workspace.changed", tab: localTab, extra: ["keyTabId": next.keyTabID.map { .string($0.description) } ?? .null])
         changes = facts
     }
 

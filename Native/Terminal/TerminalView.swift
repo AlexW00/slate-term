@@ -18,7 +18,8 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
         var secureInput: Bool?
     }
     private(set) var context = Context()
-    var onContextChange: ((Context) -> Void)?
+    enum ContextChange { case title, workingDirectory, commandFinished }
+    var onContextChange: ((Context, ContextChange) -> Void)?
     struct ClipboardConfirmation {
         enum Kind { case read, write, paste }
         let kind: Kind
@@ -39,6 +40,7 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
     var hasSelection: Bool { surface.map { ghostty_surface_has_selection($0) } ?? false }
     private let runtime: GhosttyRuntime
     private var surface: ghostty_surface_t?
+    private var colorScheme: ghostty_color_scheme_e?
     // The pinned engine creates surfaces focused; track every forwarded focus update.
     private(set) var hasTerminalFocus = true
     var surfaceIdentity: UInt { surface.map { UInt(bitPattern: $0) } ?? 0 }
@@ -143,8 +145,12 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
         ghostty_surface_refresh(surface)
     }
 
-    func setColorScheme(_ scheme: ghostty_color_scheme_e) {
-        if let surface { ghostty_surface_set_color_scheme(surface, scheme) }
+    @discardableResult
+    func setColorScheme(_ scheme: ghostty_color_scheme_e) -> Bool {
+        guard let surface, colorScheme != scheme else { return false }
+        colorScheme = scheme
+        ghostty_surface_set_color_scheme(surface, scheme)
+        return true
     }
 
     func setFocused(_ focused: Bool) {
@@ -479,12 +485,17 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
     func handleAction(_ action: ghostty_action_s) -> Bool {
         // Initial metadata may arrive from inside surface_new, before it returns.
         guard !isClosed else { return false }
+        let previous = context
+        let change: ContextChange
         switch action.tag {
         case GHOSTTY_ACTION_SET_TITLE:
+            change = .title
             context.title = action.action.set_title.title.map { String(cString: $0) }
         case GHOSTTY_ACTION_PWD:
+            change = .workingDirectory
             context.workingDirectory = action.action.pwd.pwd.map { String(cString: $0) }
         case GHOSTTY_ACTION_COMMAND_FINISHED:
+            change = .commandFinished
             let command = action.action.command_finished
             context.lastCommand = Context.Command(exitCode: command.exit_code < 0 ? nil : Int(command.exit_code), durationNanoseconds: command.duration)
         case GHOSTTY_ACTION_SECURE_INPUT:
@@ -494,17 +505,20 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
             default: context.secureInput = !(context.secureInput ?? false)
             }
             runtime.requestSecureInput(hasTerminalFocus && context.secureInput == true, for: self)
+            return true // Secure-input ownership is not exposed by context.get.
         case GHOSTTY_ACTION_COPY_TITLE_TO_CLIPBOARD:
             guard let title = context.title else { return false }
             runtime.clipboard.clearContents()
             return runtime.clipboard.setString(title, forType: .string)
         default: return false
         }
+        // Completion is a lifecycle fact even when two commands have identical results.
+        guard context != previous || action.tag == GHOSTTY_ACTION_COMMAND_FINISHED else { return true }
         // Never let a host close/free the C surface from inside an engine callback.
         let snapshot = context
         DispatchQueue.main.async { [weak self] in
             guard let self, self.surface != nil else { return }
-            self.onContextChange?(snapshot)
+            self.onContextChange?(snapshot, change)
         }
         return true
     }

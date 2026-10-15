@@ -50,7 +50,10 @@
     root.dataset.appearance = theme.tone;
     root.style.colorScheme = theme.tone;
     api.current = theme;
-    listeners.forEach(listener => listener(theme));
+    listeners.forEach(listener => {
+      try { listener(theme); }
+      catch (error) { console.error("SlateTheme listener failed", error); }
+    });
   }
 
   // Outside the host, or before appearance.get exists: follow the system.
@@ -72,29 +75,83 @@
   // guess from the system to avoid a flash while the first read is in flight.
   if (!root.dataset.appearance && matchMedia("(prefers-color-scheme: light)").matches) root.dataset.appearance = "light";
 
-  const read = () => workspace.call("appearance.get").then(apply);
-  // Subscribe before the first read so a change between them is not lost.
-  // Events are notifications, so each one triggers a fresh authoritative read.
-  // The subscription stops after an error, so re-read and subscribe again with a growing delay.
+  let active = true;
+  let generation = 0;
+  let reading = null;
+  let readAgain = false;
+  let stopSubscription = null;
+  let retryTimer = 0;
   let retryDelay = 1000;
+  function read() {
+    if (!active) return Promise.resolve();
+    if (reading) { readAgain = true; return reading; }
+    const started = generation;
+    reading = Promise.resolve().then(() => {
+      if (active && generation === started) return workspace.call("appearance.get");
+    }).then(theme => {
+      if (active && generation === started && !readAgain && theme) apply(theme);
+    }).finally(() => {
+      if (generation !== started) return;
+      reading = null;
+      if (readAgain) {
+        readAgain = false;
+        read().catch(() => {});
+      }
+    });
+    return reading;
+  }
+  // Subscribe before reading; merge invalidations without applying superseded results.
   function follow() {
-    // onError and a rejected promise can both report one failure; retry once per attempt.
+    if (!active) return;
+    const started = generation;
     let failed = false;
-    const fail = () => { if (!failed) { failed = true; retry(); } };
+    // onError and a rejected promise can both report one failure.
+    const fail = () => {
+      if (!failed && active && generation === started) {
+        failed = true;
+        stopSubscription?.();
+        stopSubscription = null;
+        retry();
+      }
+    };
     try {
-      Promise.resolve(workspace.subscribe(() => { retryDelay = 1000; read().catch(() => {}); }, {
-        topics: ["host.appearance.changed"],
-        onError: fail,
-      })).catch(fail);
+      Promise.resolve(workspace.subscribe(() => {
+        if (!active || generation !== started) return;
+        retryDelay = 1000;
+        read().catch(() => {});
+      }, { topics: ["host.appearance.changed"], onError: fail })).then(stop => {
+        if (!active || generation !== started || failed) stop();
+        else stopSubscription = stop;
+      }).catch(fail);
     } catch {
       fail();
     }
   }
   function retry() {
+    if (!active) return;
     read().catch(() => {});
-    setTimeout(follow, retryDelay);
+    clearTimeout(retryTimer);
+    retryTimer = setTimeout(start, retryDelay);
     retryDelay = Math.min(retryDelay * 2, 30000);
   }
-  follow();
-  read().catch(followSystem);
+  function start() {
+    follow();
+    read().catch(() => {}); // Retain the host-injected palette on transient read failure.
+  }
+  window.addEventListener("pagehide", () => {
+    active = false;
+    generation++;
+    reading = null;
+    readAgain = false;
+    clearTimeout(retryTimer);
+    stopSubscription?.();
+    stopSubscription = null;
+  });
+  window.addEventListener("pageshow", event => {
+    if (!event.persisted || active) return;
+    active = true;
+    retryDelay = 1000;
+    start();
+  });
+  start();
 })();

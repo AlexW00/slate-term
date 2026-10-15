@@ -111,7 +111,8 @@ public struct EventJournal: Sendable {
     /// before yielding, because another publication may evict its retained record.
     public func lineage(for cursor: String) -> OperationLineage? {
         guard let parsed = try? EventCursor(parsing: cursor), parsed.epoch == epoch else { return nil }
-        return retained.first { $0.event.sequence == parsed.sequence }?.lineage
+        guard let first = retained.first?.event.sequence, parsed.sequence >= first, parsed.sequence <= sequence else { return nil }
+        return retained[Int(parsed.sequence - first)].lineage
     }
 
     /// Nil starts at the current head; an explicit epoch:0 requests replay, subject to retention.
@@ -130,7 +131,10 @@ public struct EventJournal: Sendable {
         let envelopeBytes = try JSONEncoder().encode(EventBatch(
             cursor: EventCursor(epoch: epoch, sequence: UInt64.max).description, events: []
         )).count
-        for stored in retained where stored.event.sequence > after {
+        // Retained sequences are contiguous; validated cursors are never older than
+        // the retained prefix. Quiet readers need not walk that prefix on every publish.
+        let start = retained.count - Int(sequence - after)
+        for stored in retained.dropFirst(start) {
             let event = stored.event
             if filter.matches(event) {
                 let commaBytes = events.isEmpty ? 0 : 1

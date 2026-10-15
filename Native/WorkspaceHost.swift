@@ -199,19 +199,19 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             } catch { NSLog("Layout startup publication failed: %@", String(describing: error)) }
             if !self.integration { self.present(RPCFailure(code: -32000, message: message)) }
         }
-        pluginCommands.onChange = { [weak self] in self?.refreshSettings(); self?.refreshCommandPicker(); self?.refreshHeaderActions() }
+        pluginCommands.onChange = { [weak self] in self?.refreshPluginSettingsStatus(); self?.refreshCommandPicker(); self?.refreshHeaderActions() }
         pluginCommands.onLifecycle = { [weak self] record, context in
             guard let self else { throw CancellationError() }
             try self.publishCommandLifecycle(record, context: context)
         }
         pluginInstances.onEvent = { [weak self] instance, name, value, lineage in
             guard let self else { return }
-            self.refreshSettings()
             var payload: [String: JSONValue] = ["instanceId": .string(instance.id), "type": .string(instance.registration.id)]
             if name == "storageChanged" {
                 payload["key"] = value.object?["key"]
                 self.events.publishHost("host.plugin.storage.changed", payload: .object(payload), targetInstanceId: instance.id, lineage: lineage)
             } else if name == "stateChanged" {
+                self.refreshPluginSettingsStatus()
                 payload["state"] = value.object?["state"]
                 self.events.publishHost("host.plugin.state.changed", payload: .object(payload), tab: instance.tab)
             }
@@ -321,18 +321,22 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
 
     private func reloadConfiguration(operation: WorkspaceOperationContext = .init(origin: .native)) throws -> JSONValue {
         let candidate = try? AppConfiguration.parse(configurationSource())
-        return try performSettingsOperation(operation: operation, candidate: candidate) { try applyConfiguration() }
+        let result = try performSettingsOperation(operation: operation, candidate: candidate) { try applyConfiguration() }
+        if let source = configurationRevisionSource, (try? AppConfiguration.parse(source)) == settings.current {
+            configurationWatcher?.acknowledgeAppliedContents(Data(source.utf8))
+        }
+        return result
     }
 
     private func applyConfiguration(prepared: ApplicationSettings.PreparedConfiguration? = nil) throws -> JSONValue {
         defer { buildMenus(); refreshSettings() }
-        let result = try settings.reload(prepared: prepared) { url in
+        let result = try settings.reload(prepared: prepared) { url, engineChanged in
             if integration, prepared != nil, let fault = configurationApplyFault {
                 configurationApplyFault = nil
                 if let replacement = fault.replacement { try replacement.write(to: settings.configURL, atomically: true, encoding: .utf8) }
                 throw RPCFailure(code: -32020, message: "Injected configuration apply failure")
             }
-            try runtime.reload(from: url)
+            if engineChanged { try runtime.reload(from: url) }
         }
         applyAppearance()
         for browser in leaves.values.compactMap({ $0 as? BrowserPane }) { browser.browserConfiguration = settings.current.browser }
@@ -1607,9 +1611,12 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             }
             terminals[id] = terminal
             shellNames[id] = integration && ProcessInfo.processInfo.environment["SLATE_TERM_TEST_REAL_SHELL"] != "1" ? "sh" : URL(fileURLWithPath: settings.current.terminal.shell).lastPathComponent
-            terminal.onContextChange = { [weak self] _ in
-                self?.updatePaneTitle(id)
-                self?.publishTerminalContext(id, reason: "engine")
+            terminal.onContextChange = { [weak self] _, change in
+                guard let self else { return }
+                // Authenticated reports own the effective directory returned by context.get.
+                if change == .workingDirectory, self.shellSessions[id]?.report != nil { return }
+                self.updatePaneTitle(id)
+                self.publishTerminalContext(id, reason: "engine")
             }
             shellSessions[id] = sessions[id]
             let controller = NSViewController()
@@ -2519,7 +2526,12 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         model.agentSkills = agentSkills.entries()
         model.commands = pluginCatalog.activeRegistrations.flatMap(\.workspaceCommands) + CommandRegistry.commands
             + unavailableCommands.map { .init(id: $0, title: "\($0) (Unavailable)", key: "", shift: false) }
-        model.plugins = pluginCatalog.registrations.map { registration in
+        refreshPluginSettingsStatus()
+    }
+
+    private func refreshPluginSettingsStatus() {
+        guard let model = settingsModel else { return }
+        let plugins = pluginCatalog.registrations.map { registration in
             let instances = pluginInstances.all.filter { $0.registration.id == registration.id }
             let runs = pluginCommands.all.filter { $0.object?["type"]?.string == registration.id }
             let enabled = !pluginCatalog.disabledPlugins.contains(registration.id)
@@ -2537,6 +2549,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 indicator: !enabled ? .disabled : busy ? .busy : failed ? .failed : ready ? .ready : .idle,
                 status: !enabled ? "Disabled" : details.isEmpty ? (registration.commands.isEmpty ? "Not running" : "\(registration.commands.count) commands available") : details.joined(separator: ", "))
         }
+        if plugins != model.plugins { model.plugins = plugins }
     }
 
     func saveSettings(source: String, changes: [String: String], refreshEditor: Bool = true) throws {
@@ -2567,6 +2580,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 try source.write(to: settings.configURL, atomically: true, encoding: .utf8)
                 throw error
             }
+            configurationWatcher?.acknowledgeAppliedContents(Data(updated.utf8))
             refreshSettings(force: refreshEditor)
             return .object([:])
         }

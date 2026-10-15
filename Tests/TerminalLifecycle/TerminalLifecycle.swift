@@ -147,7 +147,7 @@ final class LifecycleDelegate: NSObject, NSApplicationDelegate {
     private func verifyEmbedding(_ terminal: TerminalView, clipboard: NSPasteboard, window: NSWindow) async throws {
         try require(terminal.context.isAtPrompt == nil, "Invented prompt status without an engine callback")
         var contextChanges = 0
-        terminal.onContextChange = { _ in contextChanges += 1 }
+        terminal.onContextChange = { _, _ in contextChanges += 1 }
         try terminal.send("printf '\\033]0;Slate engine title\\007\\033]7;file://localhost/tmp\\007\\033]133;C\\007'; sleep 0.1; printf '\\033]133;D;7\\007'; printf 'SLATE_%s\\n' CONTEXT\r")
         try await waitFor("engine title/cwd/command callbacks") {
             terminal.context.title == "Slate engine title"

@@ -27,6 +27,7 @@ final class ApplicationSettings {
     /// The palettes the terminal engine was last configured with; appearance.get reads these.
     private(set) var appliedPalettes: ResolvedTerminalPalettes
     let bundledPaletteDirectory = Bundle.main.resourceURL!.appendingPathComponent("ghostty/themes")
+    private var bundledColors: [String: TerminalColors] = [:]
     /// Home folder whose agent skill folders receive links. Integration runs never use the real home.
     let agentHome: URL
     private(set) var error: String?
@@ -143,15 +144,26 @@ final class ApplicationSettings {
         return try PreparedConfiguration(configuration: configuration, palettes: palettes, engineSource: engineConfiguration(configuration, palettes: palettes))
     }
 
-    func reload(prepared: PreparedConfiguration? = nil, apply: (URL) throws -> Void) throws -> JSONValue {
+    func terminalColors(dark: Bool) throws -> TerminalColors {
+        let theme = dark ? current.terminal.darkTheme : current.terminal.lightTheme
+        if theme.bundled != nil, let colors = bundledColors[theme.rawValue] { return colors }
+        let colors = try appliedPalettes.colors(dark: dark, bundledDirectory: bundledPaletteDirectory)
+        // Bundled resources are immutable for this app process. Custom colors remain
+        // the validated snapshot from the last successful reload.
+        if theme.bundled != nil { bundledColors[theme.rawValue] = colors }
+        return colors
+    }
+
+    func reload(prepared: PreparedConfiguration? = nil, apply: (URL, Bool) throws -> Void) throws -> JSONValue {
         do {
             let next = try prepared ?? prepare(AppConfiguration.load(from: configURL))
             let changed = next.configuration.changedKeys(from: current)
             let previousSource = try String(contentsOf: engineURL, encoding: .utf8)
-            try next.engineSource.write(to: engineURL, atomically: true, encoding: .utf8)
-            do { try apply(engineURL) }
+            let engineChanged = previousSource != next.engineSource
+            if engineChanged { try next.engineSource.write(to: engineURL, atomically: true, encoding: .utf8) }
+            do { try apply(engineURL, engineChanged) }
             catch {
-                try previousSource.write(to: engineURL, atomically: true, encoding: .utf8)
+                if engineChanged { try previousSource.write(to: engineURL, atomically: true, encoding: .utf8) }
                 throw error
             }
             current = next.configuration

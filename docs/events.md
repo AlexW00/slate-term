@@ -45,7 +45,7 @@ Background services use `targetService:{serviceId,generation}` (CLI `--target-se
 const stop = await workspace.subscribe(async event => {
   // Refresh authoritative state; avoid assuming events are durable snapshots.
   const context = await workspace.context();
-  render(context);
+  renderIfChanged(context); // Compare the derived state this view actually displays.
 }, {
   topics: ["host.context.*", "host.workspace.*"],
   onError(error) { showResyncRequired(error); }
@@ -58,7 +58,9 @@ await workspace.emit("review.requested", { file: "README.md" }, {
 stop(); // cancels the outstanding native poll, not just future callbacks
 ```
 
-Options also accept `after`, `limit`, `waitMilliseconds`, `tab`, and `pane`. Handlers run sequentially; slow handlers can outlive retained history and receive an explicit error. A failed subscription stops and calls `onError` if supplied.
+Subscribe to the narrowest relevant topics/tab/pane and compare derived state before rendering. When scheduling asynchronous refreshes, keep one read in flight and a trailing refresh; never apply a superseded result. Metadata/prompt notifications are not filesystem-change notifications.
+
+Options also accept `after`, `limit`, `waitMilliseconds`, `tab`, and `pane`. Each fact is still delivered individually; handlers run sequentially; slow handlers can outlive retained history and receive an explicit error. A failed subscription stops and calls `onError` if supplied.
 
 Generic bridge calls accept cancellation:
 
@@ -91,13 +93,13 @@ Automation admission allows 10 mutations/second with a burst of 20 per plugin ID
 
 ## Native topics
 
-- `host.workspace.changed`: model/layout/focus/native-tab changes; read `workspace.get`/`context.get` for current state.
-- `host.context.changed`: authenticated shell reports or terminal-engine metadata changes. Includes session/sequence identifiers, not the command text; read context for details.
+- `host.workspace.changed`: model/layout/focus/native-tab changes; read `workspace.get`/`context.get` for current state. Single-tab changes carry that tab when groups and the key tab are unchanged; cross-tab/group/key-tab changes remain broadcasts. Unfiltered/global readers still receive every committed invalidation.
+- `host.context.changed`: authenticated shell reports or effective terminal-engine metadata changes. Equal title/PWD reports and engine PWD overridden by authenticated shell context emit nothing. Engine command-finished callbacks still invalidate context even with equal results; secure-input ownership is not public context. Includes session/sequence identifiers, not the command text; read context for details.
 - `host.plugins.changed`: successful registration/unregistration or enable/disable. Payload includes `type`, `registered` and `enabled`; enable/disable/removal also carry operation attribution and workspace revisions. No-op enable/disable publishes nothing. Read `plugins.list` for current registrations and enabled state.
 - `host.appearance.changed`: the resolved terminal colors, light/dark slot or terminal font changed, including a macOS light/dark flip in Auto mode. Payload `{revision, tone, slot}`; read `appearance.get` for values. Published once per effective change; no-op applies publish nothing.
 - `host.plugin.state.changed`: panel backend state, instance ID and type.
 - `host.service.state.changed`: separate manual background-service state, public registration/runtime/generation identity, operation attribution and current workspace revision. See [manual services](background-services.md).
-- `host.plugin.storage.changed`: changed key, directed to the owning logical instance after successful persistence.
+- `host.plugin.storage.changed`: changed key, directed to the owning logical instance after successful persistence. Equal writes and deletion of an absent key neither persist nor publish; stored JSON null is distinct from deletion.
 - `host.layout.startup.failed`: saved-recipe startup failure, with bounded state, current workspace revision and original operation attribution. Command text and diagnostic messages remain outside the event; use `layouts.startupStatus`.
 
 ## Workspace commit facts

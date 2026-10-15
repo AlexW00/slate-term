@@ -64,22 +64,25 @@ await workspace.setTitle("README.md");      // pane header title; null restores 
 
 Convenience namespaces include `terminal`, `panes`, `layout`, `tabs`, `web`, `browser`, `services`, `layouts`, `storage` and `pluginSettings`. Inspect `Object.keys(workspace)` and `workspace.methods` rather than assuming a helper exists. Every helper takes a final `{signal, cause}` options object; use `AbortController` for long waits.
 
-## Events: subscribe, then re-read
+## Events: cursor, snapshot, then subscribe
 
-Events are invalidations, not snapshots. Fetch state first, subscribe, and re-read authoritative state on each event.
+Events are invalidations, not snapshots. Capture a cursor before reading state, then subscribe from it.
 
 ```js
-async function refresh() { render(await workspace.context()); }
+const { cursor } = await workspace.call("events.head");
+async function refresh() { renderIfChanged(await workspace.context()); }
 await refresh();
 const stop = await workspace.subscribe(async event => {
   await refresh();
 }, {
+  after: cursor,
   topics: ["host.context.*", "host.workspace.*"],
   onError: error => showResyncNeeded(error)   // expired cursor: resnapshot, then resubscribe
 });
 await workspace.emit("notes.updated", { key: "draft" });
 ```
 
+- Narrow topics/tab/pane; compare derived state before rendering. Coalesce refreshes with one in-flight read plus a trailing read, and reject stale results. Title/prompt events are not filesystem changes.
 - Publish your own topics outside `host.`. Direct an event to one instance with `targetInstanceId`.
 - For work triggered by an event, pass `{ cause: event.deliveryContext }`. This lets the host stop feedback loops.
 - Mutations are rate limited per plugin. Do not turn every event into another mutation.

@@ -66,6 +66,7 @@ final class PluginInstance {
         var next = values
         next[key] = value
         guard next.count <= 1024 else { throw RPCFailure(code: -32602, message: "Plugin storage exceeds 1024 keys") }
+        guard next != values else { return }
         try storage.save(next)
         values = next
         onEvent?("storageChanged", .object(["key": .string(key)]), lineage)

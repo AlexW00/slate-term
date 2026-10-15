@@ -25,6 +25,15 @@ public final class ConfigurationWatcher {
         refreshFileSource()
     }
 
+    /// Suppress observation of a source already applied by this writer, never a superseding edit.
+    public func acknowledgeAppliedContents(_ contents: Data) {
+        guard !closed, FileContents.read(url) == .data(contents) else { return }
+        observedContents = .data(contents)
+        pending?.cancel()
+        pending = nil
+        refreshFileSource()
+    }
+
     public func close() {
         guard !closed else { return }
         closed = true
