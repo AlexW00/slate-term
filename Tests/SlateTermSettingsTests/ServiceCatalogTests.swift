@@ -31,19 +31,13 @@ private func catalogService(_ id: String = "worker") throws -> PluginRegistratio
     #expect(try PluginCatalog(directory: directory).enabledServices.isEmpty)
 }
 
-@Test func legacyCatalogNeverImportsUnversionedOptInAndV2RejectsInvalidRecipients() throws {
+@Test func catalogRejectsInvalidServiceRecipients() throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("slate-service-catalog-\(UUID().uuidString)")
     defer { try? FileManager.default.removeItem(at: directory) }
     let store = try PrivateJSONStore(url: directory.appendingPathComponent("plugins.json"))
     let plugin = try catalogService()
-    var snapshot: [String: JSONValue] = ["schemaVersion": .integer(1), "registrations": .array([try .encoding(plugin)]),
-                                       "enabledServices": .array([.string("worker")])]
-    try store.save(snapshot)
-    var migrated = try PluginCatalog(directory: directory)
-    #expect(migrated.enabledServices.isEmpty)
-    _ = try migrated.setServiceEnabled("worker", enabled: true)
-    #expect(try store.load([String: JSONValue].self)?["schemaVersion"] == .integer(2))
-    snapshot["schemaVersion"] = .integer(2)
+    var snapshot: [String: JSONValue] = ["schemaVersion": .integer(3), "registrations": .array([try .encoding(plugin)]),
+                                       "disabledPlugins": .array([])]
     for invalid in [JSONValue.null, .array([.string("missing")]), .array([.string("worker"), .string("worker")])] {
         snapshot["enabledServices"] = invalid
         try store.save(snapshot)
@@ -82,6 +76,8 @@ private func catalogService(_ id: String = "worker") throws -> PluginRegistratio
     #expect(chmod(path.path, 0o644) == 0)
     defer { _ = chmod(path.path, 0o600) }
     #expect(throws: (any Error).self) { try catalog.setServiceEnabled("worker", enabled: false) }
+    #expect(throws: (any Error).self) { try catalog.setEnabled("worker", enabled: false) }
+    #expect(catalog.disabledPlugins.isEmpty)
     #expect(throws: (any Error).self) { try catalog.register(plugin, replace: true) }
     #expect(throws: (any Error).self) { try catalog.remove("worker") }
     #expect(catalog.registrations == [plugin] && catalog.enabledServices == ["worker"])

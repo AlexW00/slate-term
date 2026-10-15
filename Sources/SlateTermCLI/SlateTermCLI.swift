@@ -131,7 +131,7 @@ struct TerminalCommand: ParsableCommand {
 
 struct Plugins: ParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Register trusted web panels. Registered pages can control your terminals.")
-    enum Action: String, CaseIterable, ExpressibleByArgument { case list, register, validate, unregister, status, restart, logs, settings, service }
+    enum Action: String, CaseIterable, ExpressibleByArgument { case list, register, validate, unregister, enable, disable, status, restart, logs, settings, service }
     @Argument var action: Action
     @Argument var id: String?
     @Argument(help: "Plugin namespace for settings get/patch or service controls.") var namespace: String?

@@ -17,6 +17,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
     case paletteList = "palette.list", paletteImport = "palette.import", appearanceGet = "appearance.get"
     case skillsList = "skills.list", skillsInstall = "skills.install", skillsUninstall = "skills.uninstall"
     case pluginsList = "plugins.list", pluginsRegister = "plugins.register", pluginsUnregister = "plugins.unregister"
+    case pluginsEnable = "plugins.enable", pluginsDisable = "plugins.disable"
     case pluginsStatus = "plugins.status", pluginsRestart = "plugins.restart", pluginsLogs = "plugins.logs"
     case pluginSettingsGet = "plugins.settings.get", pluginSettingsPatch = "plugins.settings.patch", settingsGet = "settings.get"
     case storageGet = "storage.get", storageSet = "storage.set", storageDelete = "storage.delete", paneTitle = "pane.title"
@@ -39,7 +40,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
         case .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsCreate, .layoutsUpdate, .layoutsWindows, .layoutsCapture, .layoutsOpen, .layoutsLauncher, .layoutsStartupStatus,
              .describe, .version, .contextGet, .workspaceGet, .workspaceSnapshot, .layoutGet, .tabsList, .panesList, .paneInspect,
              .commandList, .commandRun, .windowList, .windowGet, .configGet, .configReload, .configValidate, .configPatch,
-             .paletteList, .paletteImport, .appearanceGet, .skillsList, .skillsInstall, .skillsUninstall, .pluginsList, .pluginsRegister, .pluginsUnregister, .pluginsStatus, .pluginsLogs,
+             .paletteList, .paletteImport, .appearanceGet, .skillsList, .skillsInstall, .skillsUninstall, .pluginsList, .pluginsRegister, .pluginsUnregister, .pluginsEnable, .pluginsDisable, .pluginsStatus, .pluginsLogs,
              .pluginSettingsGet, .pluginSettingsPatch, .panesSend, .panesCapture: .synchronous
         case .layoutConfiguration, .contextInspect, .settingsGet, .storageGet, .storageSet, .storageDelete, .paneTitle: .contextual
         case .terminalSend, .terminalKey, .terminalCapture, .terminalRun, .terminalWait: .terminal
@@ -65,7 +66,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
              .paletteList, .appearanceGet, .skillsList, .pluginsList, .pluginsStatus, .pluginsLogs, .pluginSettingsGet, .settingsGet, .storageGet,
              .terminalCapture, .terminalWait, .panesCapture, .eventsHead, .eventsPoll, .webGet, .webSnapshot, .webWait,
              .browserGet, .browserSnapshot, .browserWait, .serviceList, .serviceStatus, .serviceLogs: .read
-        case .layoutsCreate, .layoutsUpdate, .layoutsCapture, .layoutsOpen, .layoutsLauncher, .commandRun, .configReload, .configPatch, .paletteImport, .skillsInstall, .skillsUninstall, .pluginsRegister, .pluginsUnregister,
+        case .layoutsCreate, .layoutsUpdate, .layoutsCapture, .layoutsOpen, .layoutsLauncher, .commandRun, .configReload, .configPatch, .paletteImport, .skillsInstall, .skillsUninstall, .pluginsRegister, .pluginsUnregister, .pluginsEnable, .pluginsDisable,
              .pluginsRestart, .pluginSettingsPatch, .storageSet, .storageDelete, .paneTitle, .terminalSend,
              .terminalKey, .terminalRun, .panesSend, .eventsEmit, .webClick, .webFill, .webSelect, .webScroll,
              .webScreenshot, .browserNavigate, .browserClick, .browserFill, .browserSelect, .browserScroll,
@@ -109,7 +110,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
         case .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsCreate, .layoutsUpdate, .layoutsWindows, .layoutsCapture, .layoutsOpen, .layoutsLauncher, .layoutsStartupStatus,
              .describe, .version, .workspaceGet, .tabsList, .panesList, .commandList, .windowList, .windowGet,
              .configGet, .configReload, .configValidate, .configPatch, .paletteList, .paletteImport, .appearanceGet,
-             .skillsList, .skillsInstall, .skillsUninstall, .pluginsList, .pluginsRegister, .pluginsUnregister, .pluginsStatus, .pluginsRestart, .pluginsLogs,
+             .skillsList, .skillsInstall, .skillsUninstall, .pluginsList, .pluginsRegister, .pluginsUnregister, .pluginsEnable, .pluginsDisable, .pluginsStatus, .pluginsRestart, .pluginsLogs,
              .eventsHead, .eventsPoll, .eventsEmit, .serviceStart, .serviceStop, .serviceList, .serviceStatus,
              .serviceLogs, .serviceReady, .shellUpdate, .shellRunInput, .browserClearData: break
         }

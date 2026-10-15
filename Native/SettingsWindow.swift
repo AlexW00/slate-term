@@ -8,7 +8,29 @@ import SlateTermSettings
 final class SettingsModel: ObservableObject {
     struct Plugin: Identifiable {
         let id: String
+        enum Indicator {
+            case disabled, idle, busy, ready, failed
+            var symbol: String {
+                switch self {
+                case .disabled: "pause.circle.fill"
+                case .idle: "circle.fill"
+                case .busy: "clock.fill"
+                case .ready: "checkmark.circle.fill"
+                case .failed: "exclamationmark.circle.fill"
+                }
+            }
+            var color: Color {
+                switch self {
+                case .disabled, .idle: .secondary
+                case .busy: .orange
+                case .ready: .green
+                case .failed: .red
+                }
+            }
+        }
         let title: String
+        let enabled: Bool
+        let indicator: Indicator
         let status: String
     }
     @Published var selection: SettingsSection? = .general
@@ -40,6 +62,8 @@ final class SettingsModel: ObservableObject {
     let configURL: URL
     var save: ((String, [String: String]) throws -> Void)?
     var registerPlugin: (() -> Void)?
+    var setPluginEnabled: ((String, Bool) -> Void)?
+    var removePlugin: ((String) -> Void)?
     var changeAgentSkill: ((String, Bool) -> Void)?
     var revealAgentSkill: (() -> Void)?
     var refreshAgentSkills: (() -> Void)?
@@ -433,11 +457,28 @@ private struct SettingsView: View {
         Group {
             Section {
                 ForEach(model.plugins) { plugin in
-                    LabeledContent {
-                        Text(plugin.status).foregroundStyle(.secondary)
-                    } label: {
-                        Text(plugin.title)
-                        Text(plugin.id).font(.caption).foregroundStyle(.secondary)
+                    HStack(spacing: 12) {
+                        Toggle("Enable \(plugin.title)", isOn: Binding(
+                            get: { plugin.enabled },
+                            set: { model.setPluginEnabled?(plugin.id, $0) }
+                        ))
+                        .labelsHidden()
+                        .toggleStyle(.checkbox)
+                        .fixedSize()
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(plugin.title)
+                            Text(plugin.id).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 12)
+                        Image(systemName: plugin.indicator.symbol)
+                            .foregroundStyle(plugin.indicator.color)
+                            .help(plugin.status)
+                            .accessibilityLabel("\(plugin.title): \(plugin.status)")
+                        Button { model.removePlugin?(plugin.id) } label: {
+                            Image(systemName: "trash")
+                        }
+                        .help("Remove \(plugin.title)")
+                        .accessibilityLabel("Remove \(plugin.title)")
                     }
                 }
             }
@@ -636,7 +677,7 @@ private final class ShortcutButton: NSButton {
 
     func updateTitle() {
         if isRecording { title = "Press keys…"; return }
-        guard let shortcut, let chord = try? KeyChord.parse(shortcut) else { title = "Record Shortcut…"; return }
+        guard let shortcut, let chord = try? KeyChord.parse(shortcut) else { title = "Record"; return }
         let symbols: [(KeyChord.Modifier, String)] = [(.ctrl, "⌃"), (.alt, "⌥"), (.shift, "⇧"), (.cmd, "⌘")]
         let keys = ["left": "←", "right": "→", "up": "↑", "down": "↓", "return": "↩", "escape": "⎋", "tab": "⇥", "space": "Space", "plus": "+"]
         title = symbols.filter { chord.modifiers.contains($0.0) }.map { $0.1 }.joined() + (keys[chord.key] ?? chord.key.uppercased())

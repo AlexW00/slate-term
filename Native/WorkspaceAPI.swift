@@ -103,6 +103,12 @@ extension WorkspaceHost {
             ]),
             "causation": OperationControl.descriptor,
             "backgroundServices": Self.serviceDescriptor,
+            "pluginManagement": .object([
+                "version": .integer(1), "enableMethod": .string("plugins.enable"), "disableMethod": .string("plugins.disable"),
+                "removeMethod": .string("plugins.unregister"), "required": .array([.string("id")]),
+                "forceClosesPanes": .bool(true), "persisted": .bool(true), "retainsSavedData": .bool(true),
+                "listEnabledField": .string("enabled"), "enableStartsProcesses": .bool(false)
+            ]),
             "appearance": Self.appearanceDescriptor,
             "settingsLifecycle": .object([
                 "version": .integer(1), "scope": .string("configurationSourceAndApplied"),
@@ -117,7 +123,7 @@ extension WorkspaceHost {
             ]),
             "workspaceCommit": .object([
                 "version": .integer(1), "scope": .string("workspace-model mutations"),
-                "additionalMethods": .array([.string("plugins.unregister"), .string("layouts.open")]),
+                "additionalMethods": .array([.string("plugins.unregister"), .string("plugins.enable"), .string("plugins.disable"), .string("layouts.open")]),
                 "resultFields": .array(["operationId", "outcome", "workspaceRevision", "workspacePersistence"].map(JSONValue.string)),
                 "outcomes": .array(["committed", "unchanged"].map(JSONValue.string)),
                 "workspacePersistence": .array(WorkspacePersistence.allCases.map { .string($0.rawValue) }),

@@ -1,5 +1,10 @@
 # Slate Terminal engineering contracts
 
+## Development status
+
+- This app is still in development. Its only current use is the Debug build built through Xcode, with a few test plugins installed.
+- Data migrations and backward-compatibility machinery for unreleased development formats are not required.
+
 ## Capability parity is part of completion
 
 - Implement behavior once in the authoritative model/host operation. Trusted CLI, registered-plugin bridge and service clients use one public API catalog, validation and dispatch path; native controls and command helpers reuse its operations. Do not maintain separate capability allowlists.

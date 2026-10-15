@@ -12,10 +12,22 @@ slate-term panes type --pane p2 --type notes --force
 slate-term plugins status notes
 slate-term plugins logs --instance-id INSTANCE_ID
 slate-term plugins restart notes
+slate-term plugins disable notes --force
+slate-term plugins enable notes
 slate-term plugins unregister notes --force
 ```
 
-The pane-header type dropdown includes only plugins with a panel source. **Workspace → Plugin Commands**, the **⌘K command picker**, and **Settings → Keyboard Shortcuts** include contributed commands. Switching type destroys the live view; saved plugin data follows its declared scope. Registration replacement (`--replace`) requires that type's visible panes to be closed first. Unregister refuses active views unless `--force` is supplied. Unregister retains saved data.
+The pane-header type dropdown includes only plugins with a panel source. **Workspace → Plugin Commands**, the **⌘K command picker**, and **Settings → Keyboard Shortcuts** include contributed commands. Switching type destroys the live view; saved plugin data follows its declared scope. Registration replacement (`--replace`) requires that type's visible panes to be closed first. Disable and unregister refuse active views unless `--force` is supplied. Both retain saved data.
+
+**Settings → Plugins** has a leading enable checkbox and a trash icon button to remove each plugin. Changes apply immediately, independently of the config editor’s Apply/Revert buttons. Disabling keeps the registration but removes its pane types, contributed commands, header buttons and shortcuts from active use; running commands, panel instances and background services are stopped. Open plugin panes are closed only after native confirmation (or explicit API/CLI `force`). Enabling restores contributions but does not reopen panes or start processes. The choice persists across app launches and registration replacement; removal clears it. Saved plugin data, settings, and shortcut bindings are retained.
+
+The colored status icon’s tooltip contains the runtime details (including the last command outcome); these are no longer inline text. Shape and accessibility text also distinguish disabled, idle, busy, ready and failed states.
+
+### Shared lifecycle API
+
+`plugins.enable {id}`, `plugins.disable {id, force?: boolean}` and `plugins.unregister {id, force?: boolean}` use the same host operations as Settings. They accept the standard app/workspace guards, return `id`, `enabled` and workspace commit fields, and never ask for interactive confirmation. `plugins.list` includes an `enabled` boolean on each registration. Unknown IDs/payload fields fail with `-32602`; in-use panes without force fail with `-32010`. Repeated enable/disable is unchanged and emits no registry event. Successful changes publish `host.plugins.changed` after persistence; catalog-only changes do not advance the workspace revision. Writes that fail leave the catalog and runtime unchanged.
+
+All trusted clients (CLI/socket, registered page and service) discover these methods through `api.describe.pluginManagement`; pages can use `workspace.call("plugins.disable", {id, force: true})` or the generated `workspace.rpc` adapters. There are no parameterless picker/shortcut actions for per-plugin lifecycle changes; use Settings or the ID-targeted API/CLI.
 
 ## Command-only plugins
 

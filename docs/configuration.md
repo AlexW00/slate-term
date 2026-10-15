@@ -43,11 +43,11 @@ The editor preserves comments and unrelated values in standard tables and dotted
 
 **Layouts** embeds the [saved-layout editor](saved-layouts.md), with a top layout selector, New Layout button, clickable/reorderable tabs, pane inspector and per-layout Spotlight launcher creation. Its Save Changes/Revert controls apply to the selected recipe, independently of TOML Apply/Revert.
 
-Register plugins and view their live status directly in **Settings → Plugins**. You or an agent can also run `slate-term plugins register --manifest /path/to/plugin.json`. Plugin registrations remain in the separate plugin catalog.
+Register, enable/disable, remove plugins and view their live status directly in **Settings → Plugins**. Hover over a colored status icon for details. Lifecycle changes apply immediately; Apply/Revert only affect configuration edits. You or an agent can also run `slate-term plugins register --manifest /path/to/plugin.json`. Plugin registrations remain in the separate plugin catalog.
 
 **⌘K** opens the [command picker](command-picker.md) for built-in and plugin commands. Its `command.picker` binding and **⌘,** (`settings.open`) are configurable like other actions.
 
-**Keyboard Shortcuts** lists each action with one editable shortcut and a **Reset** button. Click the shortcut and press a replacement key combination. Escape cancels recording; Delete clears the binding. Reset restores the action's default shortcut. Assigning or resetting replaces that action's existing bindings. Conflicts are rejected without changing either action. Use **Apply** to save.
+**Keyboard Shortcuts** lists each action with one editable shortcut and a **Reset** button. Click the shortcut (or **Record** for an unbound action) and press a replacement key combination. Escape cancels recording; Delete clears the binding. Reset restores the action's default shortcut. Assigning or resetting replaces that action's existing bindings. Conflicts are rejected without changing either action. Use **Apply** to save.
 
 ## Terminal palettes
 

@@ -23,6 +23,7 @@ public struct WorkspaceTransition: Sendable {
     public enum Observation: String, Sendable {
         case nativeFocus = "native.focus", nativeTabs = "native.tabs", nativeResize = "native.resize"
         case startup = "native.startup", windowFocus = "window.focus", pluginRemoval = "plugins.unregister"
+        case pluginEnable = "plugins.enable", pluginDisable = "plugins.disable"
         case savedLayoutOpen = "layouts.open"
     }
 

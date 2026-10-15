@@ -24,7 +24,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     var serviceSettingsRecipients: [(plugin: String, target: ServiceEventRecipient)] { backgroundServices.recipients }
     private lazy var backgroundServices = BackgroundServices(appID: instanceID,
         cliPath: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/slate-term").path, operations: operations,
-        registrations: { [weak self] in self?.pluginCatalog.registrations ?? [] },
+        registrations: { [weak self] in self?.pluginCatalog.activeRegistrations ?? [] },
         settings: { [weak self] id in self?.settings.current.plugins[id] ?? [:] },
         request: { [weak self] method, params, metadata, caller in
             guard let self else { throw CancellationError() }
@@ -34,6 +34,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             var payload = fields
             payload["workspaceRevision"] = .string(self.revisions.revision)
             try self.events.commitWorkspace([operation.publication(topic: "host.service.state.changed", payload: payload)], updatingModel: commit)
+            self.refreshSettings()
         }, retireOwned: { [weak self] owner in
             self?.pluginCommands.cancelOwned(by: owner) ?? Task { false }
         })
@@ -152,7 +153,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         let catalog = try PluginCatalog(directory: settings.base.appendingPathComponent("state"))
         pluginCatalog = catalog
         pluginInstances = PluginInstances(directory: settings.base.appendingPathComponent("state/plugin-data"))
-        self.workspace = settings.restore(or: workspace, registeredTypes: Set(catalog.registrations.filter(\.hasPanel).map(\.id)))
+        self.workspace = settings.restore(or: workspace, registeredTypes: Set(catalog.activeRegistrations.filter(\.hasPanel).map(\.id)))
         // An app launched from another Slate pane must not pass that app's routing,
         // command settings or shell credentials to its new surfaces. Ghostty inherits
         // the process environment before applying explicit per-surface overrides.
@@ -164,7 +165,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         runtime = try GhosttyRuntime(configurationURL: settings.engineURL)
         super.init()
         _ = revisions // Seed before the first mutation, including native/legacy paths.
-        savedLayouts.types = { [weak self] in SavedLayoutPaneType.available(plugins: self?.pluginCatalog.registrations ?? []) }
+        savedLayouts.types = { [weak self] in SavedLayoutPaneType.available(plugins: self?.pluginCatalog.activeRegistrations ?? []) }
         savedLayouts.windows = { [weak self] in self?.layoutSourceWindows ?? [] }
         savedLayouts.capture = { [weak self] source, directories, urls, commands in
             guard let self else { throw SocketError.disconnected }
@@ -399,7 +400,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     var availableCommands: [WorkspaceCommand] {
-        CommandRegistry.commands + pluginCatalog.registrations.flatMap(\.workspaceCommands)
+        CommandRegistry.commands + pluginCatalog.activeRegistrations.flatMap(\.workspaceCommands)
     }
     private var unavailableCommands: [String] {
         let known = Set(availableCommands.map(\.id))
@@ -414,7 +415,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     private func preparePluginCommand(_ id: String, params: [String: JSONValue], resolveWorkspace: Bool = true,
                                       operation: WorkspaceOperationContext = WorkspaceOperationContext(origin: .native)) throws -> () async throws -> JSONValue {
         try synchronizeNativeGroups()
-        guard let registration = pluginCatalog.registrations.first(where: { registration in registration.commands.contains { $0.namespacedID(plugin: registration.id) == id } }) else {
+        guard let registration = pluginCatalog.activeRegistrations.first(where: { registration in registration.commands.contains { $0.namespacedID(plugin: registration.id) == id } }) else {
             throw RPCFailure(code: -32601, message: "Unknown plugin command: \(id)")
         }
         let command = registration.commands.first { $0.namespacedID(plugin: registration.id) == id }!
@@ -435,9 +436,11 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             ?? PluginControlConnection(socketPath: socketPath, appInstanceID: instanceID,
                 cliPath: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/slate-term").path)
         let preferences = settings.current.plugins[registration.id] ?? [:]
+        let registrationRevision = headerActionRevisions[registration.id]
         return { [weak self, invocation] in
             guard let self, self.server?.path == socketPath,
-                  self.pluginCatalog.registrations.contains(registration) else {
+                  self.pluginCatalog.activeRegistrations.contains(registration),
+                  self.headerActionRevisions[registration.id] == registrationRevision else {
                 throw RPCFailure(code: -32022, message: "Plugin registration or application closed")
             }
             try operation.validateCaller()
@@ -654,7 +657,12 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             return nativeWindowInfo(target.window, tab: target.tab)
         case .tabsList: return try .encoding(workspace.tabs)
         case .panesList: return try .encoding(workspace.panes)
-        case .pluginsList: return try .encoding(pluginCatalog.registrations)
+        case .pluginsList:
+            return .array(try pluginCatalog.registrations.map { registration in
+                var info = try JSONValue.encoding(registration).object ?? [:]
+                info["enabled"] = .bool(!pluginCatalog.disabledPlugins.contains(registration.id))
+                return .object(info)
+            })
         case .pluginsStatus:
             return .array((pluginInstances.all.map(\.info) + pluginCommands.all).filter { params["id"]?.string == nil || $0.object?["type"] == params["id"] })
         case .pluginsLogs:
@@ -676,35 +684,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             pluginCommands.remove(plugin: registration.id)
             buildMenus()
             refreshSettings()
-            events.publishHost("host.plugins.changed", payload: .object(["type": .string(registration.id), "registered": .bool(true)]), lineage: operation.lineage)
+            events.publishHost("host.plugins.changed", payload: .object(["type": .string(registration.id), "registered": .bool(true), "enabled": .bool(!pluginCatalog.disabledPlugins.contains(registration.id))]), lineage: operation.lineage)
             return try .encoding(registration)
-        case .pluginsUnregister:
-            guard let id = params["id"]?.string, pluginCatalog.registrations.contains(where: { $0.id == id }) else { throw RPCFailure(code: -32602, message: "A registered plugin id is required") }
-            let using = workspace.panes.filter { $0.type == .registered(id) }.map(\.id)
-            guard using.isEmpty || params["force"] == .bool(true) else { throw RPCFailure(code: -32010, message: "Plugin is in use; pass --force to close its panes") }
-            var next = workspace
-            for pane in using { try next.close(pane) }
-            let transition = try WorkspaceTransition(observing: next, from: workspace, revisions: revisions, action: .pluginRemoval)
-            let registryFact = operation.publication(topic: "host.plugins.changed", payload: [
-                "type": .string(id), "registered": .bool(false), "actionKind": .string("plugins.unregister"),
-                "beforeWorkspaceRevision": .string(transition.beforeWorkspaceRevision), "workspaceRevision": .string(transition.revisions.revision)
-            ])
-            // Preflight the journal before catalog persistence, then persist before model
-            // assignment/irreversible teardown. No fallible resources follow the file write.
-            let persistence: WorkspacePersistence
-            if using.isEmpty {
-                try commitWorkspace(transition, operation: operation, additionalPublications: [registryFact], beforeCommit: { try pluginCatalog.remove(id) })
-                persistence = .notRequired
-            } else {
-                persistence = try reconcile(next, transition: transition, operation: operation, additionalPublications: [registryFact], beforeCommit: { try pluginCatalog.remove(id) })
-            }
-            backgroundServices.remove(id, operation: operation)
-            headerActionRevisions.removeValue(forKey: id)
-            pluginInstances.remove(type: id)
-            pluginCommands.remove(plugin: id)
-            buildMenus()
-            refreshSettings()
-            return operationResult(.object([:]), transition: transition, operation: operation, workspacePersistence: persistence, committedExternalEffect: true)
+        case .pluginsEnable, .pluginsDisable, .pluginsUnregister:
+            return try changePluginRegistration(contract, params: params, operation: operation)
         case .contextGet: return try context(params)
         case .shellRunInput:
             let pane = try targetPaneID(params)
@@ -792,7 +775,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 if params["activate"] == .bool(true) { NSApp.activate() }
                 return operationResult(nativeWindowInfo(target.window, tab: target.tab), transition: transition, operation: operation, workspacePersistence: persistence)
             }
-            if ["pane.type", "pane.split"].contains(id), !(["terminal", "browser", "private-browser"] + pluginCatalog.registrations.filter(\.hasPanel).map(\.id)).contains(params["type"]?.string ?? (id == "pane.split" ? "terminal" : "")) {
+            if ["pane.type", "pane.split"].contains(id), !(["terminal", "browser", "private-browser"] + pluginCatalog.activeRegistrations.filter(\.hasPanel).map(\.id)).contains(params["type"]?.string ?? (id == "pane.split" ? "terminal" : "")) {
                 throw RPCFailure(code: -32602, message: "Unknown pane type")
             }
             try validateMutationAdmission(id, params: params)
@@ -1121,6 +1104,24 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 if params["paletteMode"]?.string == "light" { model.lightTheme = name }
                 else { model.darkTheme = name }
             }
+            if let plugin = params["changePlugin"]?.string, let action = params["pluginAction"]?.string {
+                guard ["enable", "disable", "remove"].contains(action) else { throw RPCFailure(code: -32602, message: "Invalid plugin action") }
+                testConfirmationHandler = { alert in
+                    if let path = params["confirmationScreenshot"]?.string { try? Self.captureWindow(alert.window.windowNumber, path: path) }
+                    if let stale = params["changeWhileConfirming"]?.string {
+                        _ = try? self.call("command.run", params: ["id": .string("tab.new"), "title": .string(stale)])
+                    }
+                    if params["replaceWhileConfirming"] == .bool(true),
+                       let registration = self.pluginCatalog.registrations.first(where: { $0.id == plugin }),
+                       let manifest = try? JSONValue.encoding(registration) {
+                        _ = try? self.call("plugins.register", params: ["manifest": manifest, "replace": .bool(true)])
+                    }
+                    alert.buttons[params["confirmPluginChange"] == .bool(true) ? 1 : 0].performClick(nil)
+                }
+                defer { testConfirmationHandler = nil }
+                if action == "remove" { model.removePlugin?(plugin) }
+                else { model.setPluginEnabled?(plugin, action == "enable") }
+            }
             if let action = params["resetAction"]?.string { model.resetShortcut(for: action) }
             if let action = params["recordAction"]?.string {
                 guard settingsWindow?.beginRecordingShortcut(action: action, shortcut: params["recordPrevious"]?.string) == true else {
@@ -1140,6 +1141,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                             "shortcuts": .object(model.shortcuts.mapValues(JSONValue.string)),
                             "hasToolbar": .bool(settingsWindow?.window?.toolbar != nil),
                             "pluginStatuses": .array(model.plugins.map { .string($0.status) }),
+                            "pluginEnabled": .object(Dictionary(uniqueKeysWithValues: model.plugins.map { ($0.id, .bool($0.enabled)) })),
+                            "pluginIndicators": .object(Dictionary(uniqueKeysWithValues: model.plugins.map { ($0.id, .string($0.indicator.symbol)) })),
                             "commands": .array(model.commands.map { .string($0.id) }),
                             "pluginsMenu": .bool(NSApp.mainMenu?.items.contains { $0.title == "Plugins" } ?? false)])
         case "debug.commandPicker" where integration:
@@ -1504,7 +1507,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         guard transition.workspace == next else { throw RPCFailure(code: APIError.conflict, message: "Prepared workspace does not match reconciliation") }
         leaves.values.compactMap { $0 as? BrowserPane }.forEach { $0.rememberFocus() }
         for pane in next.panes {
-            if case .registered(let type) = pane.type, !pluginCatalog.registrations.contains(where: { $0.id == type && $0.hasPanel }) { throw RPCFailure(code: -32602, message: "Pane type is not registered: \(type)") }
+            if case .registered(let type) = pane.type, !pluginCatalog.activeRegistrations.contains(where: { $0.id == type && $0.hasPanel }) { throw RPCFailure(code: -32602, message: "Pane type is not registered: \(type)") }
         }
         let replacements = Set(next.panes.filter { pane in workspace.panes.contains(where: { $0.id == pane.id && $0.type != pane.type }) }.map(\.id))
         var created: [PaneID: TerminalView] = [:]
@@ -1545,7 +1548,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 sessions[pane.id] = session
             }
             for pane in next.panes where leaves[pane.id] == nil || replacements.contains(pane.id) {
-                guard case .registered(let type) = pane.type, let registration = pluginCatalog.registrations.first(where: { $0.id == type && $0.hasPanel }) else { continue }
+                guard case .registered(let type) = pane.type, let registration = pluginCatalog.activeRegistrations.first(where: { $0.id == type && $0.hasPanel }) else { continue }
                 let tab = next.tabs.first { $0.layout.paneIDs.contains(pane.id) }!
                 let instance = try pluginInstances.acquire(registration, pane: pane.id, tab: tab.id)
                 let controller = PluginPane(instance: instance, paneID: pane.id)
@@ -2159,7 +2162,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         addCommands(["pane.rename", "pane.copyID", "pane.close"], to: workspaceMenu)
         workspaceMenu.addItem(.separator())
         addCommands(["config.reload"], to: workspaceMenu)
-        let contributed = pluginCatalog.registrations.flatMap(\.workspaceCommands)
+        let contributed = pluginCatalog.activeRegistrations.flatMap(\.workspaceCommands)
         if !contributed.isEmpty {
             workspaceMenu.addItem(.separator())
             let item = workspaceMenu.addItem(withTitle: "Plugin Commands", action: nil, keyEquivalent: "")
@@ -2258,7 +2261,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     private func refreshHeaderActions() {
-        for registration in pluginCatalog.registrations where headerActionRevisions[registration.id] == nil {
+        for registration in pluginCatalog.activeRegistrations where headerActionRevisions[registration.id] == nil {
             headerActionRevisions[registration.id] = UUID()
         }
         let running = Set(pluginCommands.all.filter { $0.object?["state"] == .string("running") }.compactMap { $0.object?["commandId"]?.string })
@@ -2270,14 +2273,14 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             case .privateBrowser: type = "private-browser"
             case .registered(let id): type = id
             }
-            let actions = pluginCatalog.registrations.flatMap { registration in
+            let actions = pluginCatalog.activeRegistrations.flatMap { registration in
                 registration.headerButtons.filter { $0.matches(paneType: type) }.map { button in
                     let command = "plugin.\(registration.id).\(button.command)"
                     return PaneHeaderAction(id: button.namespacedID(plugin: registration.id), title: "\(registration.title): \(button.title)",
                         symbol: button.symbol, enabled: !running.contains(command), revision: headerActionRevisions[registration.id]!, perform: { [weak self] in
                             guard let self, let tab = self.workspace.tabs.first(where: { $0.layout.paneIDs.contains(pane.id) }),
                                   self.workspace.panes.contains(where: { $0.id == pane.id && $0.type == pane.type }),
-                                  self.pluginCatalog.registrations.contains(where: { $0.id == registration.id && $0.headerButtons.contains(button) }) else { return }
+                                  self.pluginCatalog.activeRegistrations.contains(where: { $0.id == registration.id && $0.headerButtons.contains(button) }) else { return }
                             self.runUserCommand(command, params: ["pane": .string(pane.id.description), "tab": .string(tab.id.description)])
                         })
                 }
@@ -2301,7 +2304,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         for key in bindings.keys.sorted(by: { $0.description < $1.description }) {
             if let id = bindings[key], shortcuts[id] == nil { shortcuts[id] = key.displayLabel }
         }
-        let contributions = Dictionary(uniqueKeysWithValues: pluginCatalog.registrations.flatMap { registration in
+        let contributions = Dictionary(uniqueKeysWithValues: pluginCatalog.activeRegistrations.flatMap { registration in
             registration.commands.map { ($0.namespacedID(plugin: registration.id), (title: $0.title, plugin: registration.title)) }
         })
         let excluded: Set<String> = ["command.picker", "layouts.openWindow", "layouts.launcher", "layouts.folder"]
@@ -2384,6 +2387,81 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         return commands + templates
     }
 
+    private func changePluginRegistration(_ method: AutomationMethod, params: [String: JSONValue], operation: WorkspaceOperationContext) throws -> JSONValue {
+        let payload = withoutAPIGuards(params)
+        guard Set(payload.keys).isSubset(of: ["id", "force"]),
+              payload["force"] == nil || payload["force"] == .bool(true) || payload["force"] == .bool(false),
+              let id = payload["id"]?.string, pluginCatalog.registrations.contains(where: { $0.id == id }) else {
+            throw RPCFailure(code: -32602, message: "A registered plugin id and optional boolean force are required")
+        }
+        let removing = method == .pluginsUnregister
+        let enabling = method == .pluginsEnable
+        let action: WorkspaceTransition.Observation = removing ? .pluginRemoval : (enabling ? .pluginEnable : .pluginDisable)
+        let changed = removing || pluginCatalog.disabledPlugins.contains(id) == enabling
+        let using = enabling ? [] : workspace.panes.filter { $0.type == .registered(id) }.map(\.id)
+        guard using.isEmpty || payload["force"] == .bool(true) else {
+            throw RPCFailure(code: -32010, message: "Plugin is in use; pass --force to close its panes")
+        }
+        var next = workspace
+        for pane in using { try next.close(pane) }
+        let transition = try WorkspaceTransition(observing: next, from: workspace, revisions: revisions, action: action)
+        let result: JSONValue = .object(["id": .string(id), "enabled": .bool(enabling)])
+        guard changed else {
+            return operationResult(result, transition: transition, operation: operation, workspacePersistence: .notRequired)
+        }
+        let registryFact = operation.publication(topic: "host.plugins.changed", payload: [
+            "type": .string(id), "registered": .bool(!removing), "enabled": .bool(enabling), "actionKind": .string(method.rawValue),
+            "beforeWorkspaceRevision": .string(transition.beforeWorkspaceRevision), "workspaceRevision": .string(transition.revisions.revision)
+        ])
+        let persist = {
+            if removing { try self.pluginCatalog.remove(id) }
+            else { _ = try self.pluginCatalog.setEnabled(id, enabled: enabling) }
+        }
+        // Preflight publication and persist before assigning the model or retiring resources.
+        let persistence: WorkspacePersistence
+        if using.isEmpty {
+            try commitWorkspace(transition, operation: operation, additionalPublications: [registryFact], beforeCommit: persist)
+            persistence = .notRequired
+        } else {
+            persistence = try reconcile(next, transition: transition, operation: operation, additionalPublications: [registryFact], beforeCommit: persist)
+        }
+        if !enabling {
+            backgroundServices.remove(id, operation: operation)
+            if removing { headerActionRevisions.removeValue(forKey: id) }
+            else { headerActionRevisions[id] = UUID() }
+            pluginInstances.remove(type: id)
+            pluginCommands.remove(plugin: id)
+        }
+        buildMenus()
+        refreshSettings()
+        return operationResult(result, transition: transition, operation: operation, workspacePersistence: persistence, committedExternalEffect: true)
+    }
+
+    private func changePluginFromSettings(_ id: String, method: AutomationMethod) {
+        guard let registration = pluginCatalog.registrations.first(where: { $0.id == id }) else { return }
+        let revision = revisions.revision
+        let registrationRevision = headerActionRevisions[id]
+        let hasPanes = workspace.panes.contains { $0.type == .registered(id) }
+        if method == .pluginsUnregister || method == .pluginsDisable && hasPanes {
+            let alert = NSAlert()
+            let verb = method == .pluginsUnregister ? "Remove" : "Disable"
+            alert.messageText = "\(verb) \(registration.title)?"
+            alert.informativeText = (hasPanes ? "Its open panes will close and running work will stop. " : "Running work will stop. ")
+                + (method == .pluginsUnregister ? "Saved plugin data is kept. You can register it again later." : "Saved plugin data is kept. You can enable it again later.")
+            alert.addButton(withTitle: "Cancel")
+            alert.addButton(withTitle: verb)
+            guard runConfirmationAlert(alert) == .alertSecondButtonReturn else { return }
+        }
+        do {
+            guard pluginCatalog.registrations.first(where: { $0.id == id }) == registration,
+                  headerActionRevisions[id] == registrationRevision else {
+                throw RPCFailure(code: APIError.conflict, message: "Plugin registration changed; review it again")
+            }
+            _ = try call(method.rawValue, params: ["id": .string(id), "force": .bool(hasPanes), "expectedWorkspaceRevision": .string(revision)])
+            settingsModel?.error = nil
+        } catch { settingsModel?.error = (error as? RPCFailure)?.message ?? String(describing: error) }
+    }
+
     @objc private func showSettings() { showSettings(section: nil) }
 
     func showSettings(section: SettingsSection?) {
@@ -2395,6 +2473,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 try self.saveSettings(source: source, changes: changes)
             }
             model.registerPlugin = { [weak self] in self?.registerPlugin() }
+            model.setPluginEnabled = { [weak self] id, enabled in
+                self?.changePluginFromSettings(id, method: enabled ? .pluginsEnable : .pluginsDisable)
+            }
+            model.removePlugin = { [weak self] id in self?.changePluginFromSettings(id, method: .pluginsUnregister) }
             model.changeAgentSkill = { [weak self] id, install in
                 guard let self else { return }
                 do { _ = try self.changeAgentSkills(["agents": .array([.string(id)])], install: install) }
@@ -2435,14 +2517,25 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             model.load(editable, source: source, error: settings.error, force: force)
         } catch { model.error = String(describing: error) }
         model.agentSkills = agentSkills.entries()
-        model.commands = pluginCatalog.registrations.flatMap(\.workspaceCommands) + CommandRegistry.commands
+        model.commands = pluginCatalog.activeRegistrations.flatMap(\.workspaceCommands) + CommandRegistry.commands
             + unavailableCommands.map { .init(id: $0, title: "\($0) (Unavailable)", key: "", shift: false) }
         model.plugins = pluginCatalog.registrations.map { registration in
             let instances = pluginInstances.all.filter { $0.registration.id == registration.id }
             let runs = pluginCommands.all.filter { $0.object?["type"]?.string == registration.id }
-            let states = instances.map { $0.error ?? $0.state } + runs.suffix(1).compactMap { $0.object?["state"]?.string.map { "Last command: \($0)" } }
-            return SettingsModel.Plugin(id: registration.id, title: registration.title,
-                status: states.isEmpty ? (registration.commands.isEmpty ? "Not running" : "\(registration.commands.count) commands available") : states.joined(separator: ", "))
+            let enabled = !pluginCatalog.disabledPlugins.contains(registration.id)
+            let serviceState = enabled && registration.service != nil ? (try? backgroundServices.status(registration.id))?.object?["state"]?.string : nil
+            let lastCommand = runs.last?.object?["state"]?.string
+            let states = instances.map { $0.error ?? $0.state }
+                + (lastCommand.map { ["Last command: \($0)"] } ?? [])
+            let details = states + (serviceState.map { ["Service: \($0)"] } ?? [])
+            let failed = instances.contains { $0.error != nil || $0.state == "failed" }
+                || lastCommand == "failed" || lastCommand == "timedOut" || serviceState == "failed"
+            let busy = instances.contains { ["starting", "restarting"].contains($0.state) }
+                || runs.contains { $0.object?["state"] == .string("running") } || serviceState == "starting" || serviceState == "stopping"
+            let ready = instances.contains { $0.state == "ready" } || lastCommand == "succeeded" || serviceState == "ready"
+            return SettingsModel.Plugin(id: registration.id, title: registration.title, enabled: enabled,
+                indicator: !enabled ? .disabled : busy ? .busy : failed ? .failed : ready ? .ready : .idle,
+                status: !enabled ? "Disabled" : details.isEmpty ? (registration.commands.isEmpty ? "Not running" : "\(registration.commands.count) commands available") : details.joined(separator: ", "))
         }
     }
 
@@ -2502,7 +2595,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     private var availablePaneTypes: [(name: String, id: String)] {
-        [("Terminal", "terminal"), ("Browser", "browser"), ("Private Browser", "private-browser")] + pluginCatalog.registrations.filter(\.hasPanel).map { ($0.title, $0.id) }
+        [("Terminal", "terminal"), ("Browser", "browser"), ("Private Browser", "private-browser")] + pluginCatalog.activeRegistrations.filter(\.hasPanel).map { ($0.title, $0.id) }
     }
 
     private func changePaneType(_ pane: PaneID, to type: String) {

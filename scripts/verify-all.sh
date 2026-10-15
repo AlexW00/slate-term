@@ -73,6 +73,7 @@ run pane-titles python3 scripts/verify-pane-titles.py
 run pane-headers python3 scripts/verify-pane-headers.py
 run pane-movement python3 scripts/verify-pane-movement.py
 run plugins python3 scripts/verify-plugins.py
+run plugin-lifecycle python3 scripts/verify-plugin-lifecycle.py
 run plugin-services python3 scripts/verify-plugin-services.py
 run plugin-commands python3 scripts/verify-plugin-commands.py
 run plugin-header-buttons python3 scripts/verify-plugin-header-buttons.py

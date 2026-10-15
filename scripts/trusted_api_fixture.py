@@ -51,6 +51,13 @@ def verify_trusted_api(app, service_call):
     target = app.rpc('web.get', pane=sibling)
     guards = dict(expectedViewId=target['viewId'], expectedDocumentId=target['documentId'])
     for name, call in clients:
+        managed = 'managed-' + name
+        call('plugins.register', {'manifest': dict(id=managed, title=managed,
+             commands=[dict(id='test', title='Test', executable='/usr/bin/true')])})
+        assert call('plugins.disable', {'id': managed})['enabled'] is False
+        assert not next(p for p in cli('plugins.list') if p['id'] == managed)['enabled']
+        assert call('plugins.enable', {'id': managed})['enabled'] is True
+        call('plugins.unregister', {'id': managed})
         assert call('config.get')['current']
         assert call('window.list')
         call('command.run', {'id': 'config.reload'})
