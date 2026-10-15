@@ -31,13 +31,13 @@ Obtaining the cursor before the state read avoids missing a change between them.
 
 The native envelope identifies `{kind:"host"}`, `{kind:"client"}`, or `{kind:"plugin",type,instanceId}`. Clients and plugins cannot choose their source or publish under `host.`. Do not treat a payload's arbitrary fields as provenance.
 
-Unix callers are same-user administrators and can monitor the journal, including directed events. Explicit `tab` and `pane` fields on their publications are routing metadata. Plugins publish with the current native view's actual tab/pane and registered instance identity.
+Every trusted client can monitor the journal, including directed events. Publication `tab`/`pane` fields are routing metadata; page clients default to their captured native tab/pane. Source identity is always host-stamped: `client`, registered `plugin` (type/instance), or `service` (pluginId/serviceId/generation). Request parameters cannot forge source identity.
 
-Logical pane/tab plugin instances subscribe within their owning tab by default; global instances observe all tabs. Optional pane/topic filters narrow delivery. A plugin cannot widen its owning-tab filter or override its native recipient identity. This contextual routing is not a sandbox: registered plugins are explicitly trusted with terminal and workspace control.
+Logical pane/tab plugin instances default to their owning tab; global instances default to all tabs. All clients accept explicit tab/pane/topic filters. `scope:"global"` drops the default tab filter. `recipient:"all"`, `recipient:{instanceId}` or `recipient:{serviceId,generation}` selects the same directed-event projection for every client. Omitted recipient defaults to the caller's page/service recipient, or all for the root socket. Query selection is not permission or claimed provenance.
 
 `targetInstanceId` directs an event to a live logical plugin instance, including all its subscribed visible views. Matching directed delivery bypasses tab/pane filters, but not topic filters; other plugin instances cannot receive it. Untargeted events with absent tab/pane fields broadcast through the corresponding filters.
 
-Background services use a separate host-assigned `targetService:{serviceId,generation}` recipient. Starting and ready generations receive own-settings invalidations; other services/pages cannot observe those directed facts. Service polls derive their audience from authentication, never caller-supplied filters. Administrators can monitor both recipient kinds. Follow the snapshot-first bootstrap/recovery order in [manual services](background-services.md); there is no service `events.emit` in the current slice.
+Background services use `targetService:{serviceId,generation}`, distinct from page `targetInstanceId`; the two are mutually exclusive. Starting and ready generations receive settings invalidations. Any trusted client may explicitly observe either recipient kind or emit to a live target. Causation references still bind to the actual host-bound caller, independently of the selected query recipient. Follow the snapshot-first recovery order in [manual services](background-services.md).
 
 ## Plugin API
 
@@ -100,7 +100,7 @@ Automation admission allows 10 mutations/second with a burst of 20 per plugin ID
 
 ## Workspace commit facts
 
-Workspace changes now use a prepared model/revision/journal commit rather than discovering changes at autosave. Canonical facts include `operationId`, `actionKind`, `beforeWorkspaceRevision`, `workspaceRevision`, relevant pre/post layout revisions, and native-assigned `origin`. Host envelopes still have `source: {kind:"host"}`. The origin is `native`, `administrative`, or `plugin` (with bound plugin/instance/view IDs); request arguments cannot select it. Literal manual titles are not included.
+Workspace changes now use a prepared model/revision/journal commit rather than discovering changes at autosave. Canonical facts include `operationId`, `actionKind`, `beforeWorkspaceRevision`, `workspaceRevision`, relevant pre/post layout revisions, and native-assigned `origin`. Host envelopes still have `source: {kind:"host"}`. The origin is `native`, `administrative`, `plugin` (bound plugin/instance/view IDs), or `service` (bound plugin/service/generation IDs); request arguments cannot select it. Literal manual titles are not included.
 
 Facts include `host.pane.created`, `.closed`, `.type.changed`, `.title.changed`, `.moved`; `host.tab.created`, `.closed`, `.moved`, `.reordered`; and `host.layout.resized`. Resize facts identify split paths, not entire trees. Displaced tabs receive reorder facts too. Legacy split aliases normalize to the same split intent. Compatibility layout/focus/tab-group/workspace notifications share the operation ID and revisions. No-op model changes emit no fabricated facts.
 

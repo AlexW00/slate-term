@@ -1,6 +1,6 @@
 # Revised plan: one API, trusted clients
 
-Status: source-grounded plan, independently reviewed before runtime edits; two concrete guard/lifetime corrections incorporated below. Supersedes the administrative/page/service permission matrices and bearer-credential requirements in earlier plans. Review baseline: `f8d1284`. The common catalog/dispatch milestone is now implemented with focused headless evidence recorded in [progress](api-extension-progress.md); service bearer removal and actual-app parity verification remain unfinished.
+Status: source-grounded plan, independently reviewed before runtime edits; two concrete guard/lifetime corrections incorporated below. Supersedes the administrative/page/service permission matrices and bearer-credential requirements in earlier plans. Review baseline: `f8d1284`. The common API was checkpointed as `20ba881`. Token-free service transport, focused headless checks and the single owned-app parity batch are now implemented/verified; see [progress](api-extension-progress.md) for exact evidence and residual limits.
 
 ## User outcome and boundary
 
@@ -100,6 +100,6 @@ One bounded read-only reviewer inspected this plan and the current host, bridge,
 1. Resolve and freeze caller-default targets **before** target-dependent guard checks, preserving inactive-tab page behavior rather than consulting current focus.
 2. Externally targeted automatic titles need exact view/document identity, not only pane/logical-instance selection. Extend the existing public identity guards and retain immediate lifetime revalidation; storage remains instance-scoped.
 
-The reviewer otherwise found the common catalog/dispatch, event-observation versus causation separation, and credential-free generation ownership consistent with the source without a larger framework. Implementation evidence remains required, especially replacing old capability denials without losing their lifecycle regressions, malformed repeated hello, explicit event observation with caller-bound causes, and pre-ready delegated-job cleanup.
+The reviewer otherwise found the common catalog/dispatch, event-observation versus causation separation, and credential-free generation ownership consistent with the source without a larger framework. Implementation evidence for replacement of old capability denials, lifecycle regressions, malformed repeated hello, explicit event observation with caller-bound causes and pre-ready ownership is recorded in [progress](api-extension-progress.md). This does not claim a full sequential or visual certification.
 
 Acceptance: same public discovery and capabilities for all trusted clients; one validation/dispatch definition; no service bearer secret or permission tier; no ordinary-web/subframe bridge; stale work stays rejected; owner cleanup survives requester disconnect; no hidden-pane feature; no fabricated full-suite/visual certification. The first useful milestone after review is the common catalog/dispatch boundary and headless drift tests, not a new feature backlog.

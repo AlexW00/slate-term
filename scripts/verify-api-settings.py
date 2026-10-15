@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared appearance writer, conflict protection, pending-editor preservation and bridge denials."""
+"""Shared appearance writer, conflict protection, pending-editor preservation and bridge parity."""
 import json
 from api_fixture import AppFixture, eventually
 
@@ -71,7 +71,7 @@ with AppFixture('api-settings', source) as app:
     # Native manifests share command metadata; parameterized entries are not one-click actions.
     commands = {c['id']: c for c in app.rpc('command.list')}
     assert commands['appearance.dark']['contract']['workspaceIndependent']
-    assert not commands['appearance.dark']['contract']['pluginAccessible']
+    assert 'pluginAccessible' not in commands['appearance.dark']['contract']
     assert commands['appearance.set']['contract']['requiresArguments']
     panel = app.root / 'panel'
     panel.mkdir()
@@ -97,13 +97,15 @@ with AppFixture('api-settings', source) as app:
     assert app.rpc('pane.inspect', pane='p1')['title'] == 'Fixture'
     for value in [None, False, {'ok': False, 'value': 7, 'error': {'code': 123}}]:
         assert evaluate('(async()=>{await workspace.storage.set("envelope",' + json.dumps(value) + ');return await workspace.storage.get("envelope");})()') == value
-    # This read/reload command predates the new write APIs and remains a documented compatibility exception.
+    # Existing reload convenience remains compatible with the shared API.
     assert isinstance(evaluate('await workspace.command("config.reload")'), dict)
     discovery = evaluate('await workspace.api()')
-    assert 'config.patch' not in discovery['methods']
-    assert not any(c['id'].startswith('appearance.') for c in discovery['commands'])
-    for method, params in [('command.run', {'id': 'appearance.light'}), ('config.patch', {'values': {'appearance.theme': 'light'}, 'expectedSourceRevision': revision})]:
-        result = evaluate('await workspace.call(' + json.dumps(method) + ',' + json.dumps(params) + ').then(()=>({allowed:true}),e=>({allowed:false,code:e.code}))')
-        assert not result['allowed'], result
+    assert discovery == app.rpc('api.describe')
+    assert 'config.patch' in discovery['methods']
+    assert any(c['id'].startswith('appearance.') for c in discovery['commands'])
+    evaluate('await workspace.command("appearance.light")')
+    assert app.rpc('config.get')['current']['appearance']['theme'] == 'light'
+    revision = app.rpc('config.get')['sourceRevision']
+    evaluate('await workspace.call("config.patch",' + json.dumps(dict(values={'appearance.theme': 'dark'}, expectedSourceRevision=revision)) + ')')
     assert app.rpc('config.get')['current']['appearance']['theme'] == 'dark'
-print('Application settings, appearance commands, conflicts and bridge administrative denials passed')
+print('Application settings, appearance commands, conflicts and bridge capability parity passed')

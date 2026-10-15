@@ -43,7 +43,6 @@ struct ServiceGenerationTest {
         defer { try? FileManager.default.removeItem(at: directory) }
         let endpointFile = directory.appendingPathComponent("endpoint")
         let identity = try ServiceIdentity(appInstanceID: "app", pluginID: "controller", serviceID: "runtime", generation: "g1")
-        let credentials = try ServiceCredentials(identity: identity, token: String(repeating: "c", count: 64))
         let control = try OperationControl(epoch: UUID())
         let audience = CausationAudience.service(epoch: control.epoch, registrationID: identity.pluginID,
             recipient: try ServiceEventRecipient(serviceID: identity.serviceID, generation: identity.generation))
@@ -52,6 +51,7 @@ struct ServiceGenerationTest {
             import os,pathlib,time
             assert 'SLATE_TERM_PANE_ID' not in os.environ
             assert 'SLATE_TERM_TAB_ID' not in os.environ
+            assert 'SLATE_TERM_SERVICE_TOKEN' not in os.environ
             assert os.environ['SLATE_TERM_SERVICE_PLUGIN_ID']=='controller'
             pathlib.Path(os.environ['TEST_ENDPOINT']).write_text(os.environ['SLATE_TERM_SOCKET'])
             time.sleep(20)
@@ -62,7 +62,7 @@ struct ServiceGenerationTest {
                 "environment": ["TEST_ENDPOINT": endpointFile.path, "SLATE_TERM_PANE_ID": "poison", "SLATE_TERM_TAB_ID": "poison"]
             ]))
             let reference = GenerationReference()
-            let generation = try BackgroundServiceGeneration(credentials: credentials, cliPath: cli, spec: spec,
+            let generation = try BackgroundServiceGeneration(identity: identity, cliPath: cli, spec: spec,
                 isCurrent: { probe.current }, operations: control, request: { method, params, metadata, caller in
                     let operation = try caller.admit(method, metadata: metadata, through: control)
                     try require(operation.serviceOwner == identity, "Endpoint did not stamp generation ownership")
@@ -90,17 +90,18 @@ struct ServiceGenerationTest {
         try generation.start(settings: [:])
         try await wait { (try? String(contentsOf: endpointFile, encoding: .utf8).isEmpty) == false }
         let path = try String(contentsOf: endpointFile, encoding: .utf8)
-        let connection = PluginControlConnection(socketPath: path, appInstanceID: identity.appInstanceID, cliPath: cli, service: credentials)
+        let connection = PluginControlConnection(socketPath: path, appInstanceID: identity.appInstanceID, cliPath: cli, service: identity)
         _ = try await call(connection, "workspace.snapshot")
         _ = try await call(connection, "events.poll", ["waitMilliseconds": .integer(0)])
         _ = try await call(connection, "config.get")
-        try require(try generation.commandConnection().service?.identity == identity, "Starting generation could not delegate with its owner")
+        _ = try await Task.detached { try UnixClient(path: path).call("config.get") }.value
+        try require(try generation.commandConnection().service == identity, "Starting generation could not delegate with its owner")
         // Other views can exhaust this plugin's budget without blocking readiness/recovery.
         for _ in 0..<20 { _ = try control.admit("command.run", metadata: nil, origin: .service(identity), audience: audience) }
         _ = try await call(connection, "service.ready", ["version": .integer(1), "expectedInstanceId": .string("app")])
         _ = try await call(connection, "service.ready", ["version": .integer(1)])
         try require(probe.ready == 1 && generation.state == .ready, "Readiness was not idempotent")
-        try require(try generation.commandConnection().service?.identity == identity, "Delegation lost generation")
+        try require(try generation.commandConnection().service == identity, "Delegation lost generation")
         let pending = Task { try await call(connection, "events.poll") }
         try await wait { probe.polling }
         do { _ = try await call(connection, "events.poll"); throw Failure(message: "Concurrent generation polls admitted") }
@@ -113,8 +114,8 @@ struct ServiceGenerationTest {
         catch {}
         try require(generation.cleanupConfirmed && probe.retired == 1 && !probe.polling, "Generation cleanup leaked or duplicated")
         try require(!FileManager.default.fileExists(atPath: path), "Retired endpoint survived")
-        do { _ = try await call(connection, "service.ready", ["version": .integer(1)]); throw Failure(message: "Retired credential admitted") }
-        catch is Failure { throw Failure(message: "Retired credential admitted") }
+        do { _ = try await call(connection, "service.ready", ["version": .integer(1)]); throw Failure(message: "Retired endpoint admitted") }
+        catch is Failure { throw Failure(message: "Retired endpoint admitted") }
         catch {}
 
         let timeoutProbe = Probe()
@@ -144,12 +145,12 @@ struct ServiceGenerationTest {
         try closed.start(settings: [:]); closed.close(); await closed.stop()
         try require(!closed.cleanupConfirmed, "Immediate close fabricated confirmed cleanup")
         try require(closedProbe.retired == 1, "Close followed by stop duplicated ownership retirement")
-        try await nestedCommands(cli: cli, directory: directory, credentials: credentials)
+        try await nestedCommands(cli: cli, directory: directory, identity: identity)
         try await managerLifecycle(cli: cli)
         print("PASS window-free service generation: lifecycle-bound readiness, pre-ready API access, poll bounds, budget recovery, retirement, timeout/exit, honest cleanup and live A→CLI→B ownership")
     }
 
-    static func nestedCommands(cli: String, directory: URL, credentials: ServiceCredentials) async throws {
+    static func nestedCommands(cli: String, directory: URL, identity: ServiceIdentity) async throws {
         let commands = PluginCommands()
         defer { commands.close() }
         let plugin = try JSONDecoder().decode(PluginRegistration.self, from: JSONSerialization.data(withJSONObject: [
@@ -171,16 +172,16 @@ struct ServiceGenerationTest {
         var terminalFacts = 0
         commands.onLifecycle = { record, context in
             if record.phase == .finished { terminalFacts += 1 }
-            try require(context.operation.serviceOwner == credentials.identity, "Nested command lost its service owner")
+            try require(context.operation.serviceOwner == identity, "Nested command lost its service owner")
         }
-        let generation = try BackgroundServiceGeneration(credentials: credentials, cliPath: cli, spec: spec,
+        let generation = try BackgroundServiceGeneration(identity: identity, cliPath: cli, spec: spec,
             isCurrent: { true }, operations: control, request: { method, params, metadata, caller in
                 let operation = try caller.admit(method, metadata: metadata, through: control)
                 if method == "service.ready" {
                     guard params["version"] == .integer(1), let generation = reference.value else { throw Failure(message: "Invalid nested ready request") }
                     return try generation.acknowledgeReady(operation: operation)
                 }
-                if let expected = params["expectedInstanceId"], expected != .string(credentials.identity.appInstanceID) {
+                if let expected = params["expectedInstanceId"], expected != .string(identity.appInstanceID) {
                     throw RPCFailure(code: APIError.conflict, message: "Fixture app changed")
                 }
                 if method == "api.describe" {
@@ -202,7 +203,7 @@ struct ServiceGenerationTest {
         try generation.start(settings: [:])
         try await wait { (try? String(contentsOf: endpointFile, encoding: .utf8).isEmpty) == false }
         let connection = PluginControlConnection(socketPath: try String(contentsOf: endpointFile, encoding: .utf8),
-            appInstanceID: credentials.identity.appInstanceID, cliPath: cli, service: credentials)
+            appInstanceID: identity.appInstanceID, cliPath: cli, service: identity)
         _ = try await call(connection, "service.ready", ["version": .integer(1)])
         let invocation = Task { try await call(connection, "command.run", ["id": .string("plugin.tools.parent")]) }
         try await wait { commands.all.filter { $0.object?["state"]?.string == "running" }.count == 2 }
@@ -210,7 +211,7 @@ struct ServiceGenerationTest {
         do { _ = try await invocation.value; throw Failure(message: "Retired nested invocation returned success") }
         catch is Failure { throw Failure(message: "Retired nested invocation returned success") }
         catch {}
-        try require(owners == [credentials.identity, credentials.identity], "A→CLI→B changed service authority")
+        try require(owners == [identity, identity], "A→CLI→B changed service authority")
         try require(terminalFacts == 2 && generation.cleanupConfirmed, "Nested job cleanup/lifecycle was not confirmed exactly once")
         try require(commands.all.allSatisfy { $0.object?["state"]?.string == "cancelled" && $0.object?["cleanupPending"] == .bool(false) },
                     "Nested jobs survived generation retirement")

@@ -127,11 +127,12 @@ public struct LineFramer: Sendable {
 
 public struct ProtocolSession: Sendable {
     public enum Accepted: Equatable { case hello, command }
-    private var handshaken = false
+    public private(set) var handshaken = false
     public init() {}
 
     public mutating func accept(_ request: RPCRequest) throws -> Accepted {
         if request.method == "hello" {
+            handshaken = false // A failed renegotiation cannot retain the previous session.
             guard request.metadata == nil else { throw ProtocolError.invalidRequest }
             guard request.params?["protocolVersion"] == .integer(1) else { throw ProtocolError.incompatibleVersion }
             handshaken = true

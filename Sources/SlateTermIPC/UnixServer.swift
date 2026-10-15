@@ -9,7 +9,7 @@ public final class UnixServer {
     public let path: String
     private var listener: DispatchSourceRead?
     private var peers: [Int32: Peer] = [:]
-    private let service: ServiceCredentials?
+    private let service: ServiceIdentity?
     private let handle: @MainActor (String, [String: JSONValue], RPCMetadata?) async throws -> JSONValue
 
     /// Compatibility handlers must reject metadata rather than silently erase causation.
@@ -20,7 +20,7 @@ public final class UnixServer {
         }
     }
 
-    public init(directory: URL, service: ServiceCredentials? = nil,
+    public init(directory: URL, service: ServiceIdentity? = nil,
                 handle: @escaping @MainActor (String, [String: JSONValue], RPCMetadata?) async throws -> JSONValue) throws {
         self.handle = handle
         self.service = service
@@ -101,9 +101,8 @@ private final class Peer {
     private let writer: DispatchSourceWrite
     private let handle: @MainActor (String, [String: JSONValue], RPCMetadata?) async throws -> JSONValue
     private let onClose: @MainActor () -> Void
-    private let service: ServiceCredentials?
-    private var authenticated: Bool
-    private var authenticationExpiresAt = ContinuousClock.now.advanced(by: .seconds(2))
+    private let service: ServiceIdentity?
+    private var negotiationExpiresAt = ContinuousClock.now.advanced(by: .seconds(2))
     private var deadline: Task<Void, Never>?
     private var framing = LineFramer()
     private var session = ProtocolSession()
@@ -114,12 +113,11 @@ private final class Peer {
     private var requestBytes = 0
     private var processing: Task<Void, Never>?
 
-    init(descriptor: Int32, service: ServiceCredentials?,
+    init(descriptor: Int32, service: ServiceIdentity?,
          handle: @escaping @MainActor (String, [String: JSONValue], RPCMetadata?) async throws -> JSONValue,
          onClose: @escaping @MainActor () -> Void) {
         self.descriptor = descriptor
         self.service = service
-        authenticated = service == nil
         self.handle = handle
         self.onClose = onClose
         reader = DispatchSource.makeReadSource(fileDescriptor: descriptor, queue: .main)
@@ -149,8 +147,8 @@ private final class Peer {
     private func armDeadline() {
         guard service != nil, !closed else { return }
         deadline?.cancel()
-        // Invalid/partial authentication never renews the initial deadline.
-        let when = authenticated ? ContinuousClock.now.advanced(by: .seconds(2)) : authenticationExpiresAt
+        // Invalid/partial negotiation never renews the initial deadline.
+        let when = session.handshaken ? ContinuousClock.now.advanced(by: .seconds(2)) : negotiationExpiresAt
         deadline = Task { [weak self] in
             do { try await Task.sleep(until: when, clock: .continuous) }
             catch { return }
@@ -180,7 +178,7 @@ private final class Peer {
 
     private func startProcessing() {
         guard processing == nil else { return }
-        if authenticated { deadline?.cancel(); deadline = nil }
+        if session.handshaken { deadline?.cancel(); deadline = nil }
         processing = Task { [weak self] in
             guard let self else { return }
             defer { self.processing = nil; self.armDeadline() }
@@ -199,9 +197,9 @@ private final class Peer {
         do {
             let request = try RPCRequest.decode(data)
             decoded = true
-            if service != nil, request.method == "hello" {
-                if authenticated { authenticationExpiresAt = .now.advanced(by: .seconds(2)) }
-                authenticated = false // Before protocol/metadata validation, not just auth callback.
+            if request.method == "hello" {
+                if session.handshaken { negotiationExpiresAt = .now.advanced(by: .seconds(2)) }
+                session = ProtocolSession()
                 armDeadline()
             }
             id = request.id ?? .null
@@ -209,21 +207,22 @@ private final class Peer {
             let result: JSONValue
             switch try session.accept(request) {
             case .hello:
-                try service?.authenticateHello(request.params ?? [:])
-                authenticated = true
                 deadline?.cancel(); deadline = nil
                 var reply: [String: JSONValue] = ["protocolVersion": .integer(1), "appVersion": .string("0.1.0-dev")]
-                reply.merge(service?.helloReply ?? [:]) { _, value in value }
+                if let service { reply["service"] = .object(service.info) }
                 result = .object(reply)
             case .command:
-                guard authenticated else { throw RPCFailure(code: APIError.serviceSessionUnavailable, message: "Service session unavailable") }
                 result = try await handle(request.method, request.params ?? [:], request.metadata)
             }
             if !notification { enqueue(RPCResponse(id: id, result: result)) }
         } catch {
-            // A malformed service request may be a repeated hello that failed before
-            // its method could be decoded. Close rather than keep prior authority.
-            if service != nil, !decoded { close(); return }
+            // Malformed input may be a repeated hello that failed before decoding.
+            // Invalidate the ordinary protocol session too; a generation endpoint
+            // additionally closes/discards its queue as a lifecycle boundary.
+            if !decoded {
+                session = ProtocolSession()
+                if service != nil { close(); return }
+            }
             guard !notification else { return }
             let failure: RPCFailure
             switch error {

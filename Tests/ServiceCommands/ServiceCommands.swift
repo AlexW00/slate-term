@@ -27,13 +27,12 @@ struct ServiceCommandsTest {
         let cli = CommandLine.arguments[1]
         let owner = try ServiceIdentity(appInstanceID: "app", pluginID: "controller", serviceID: "runtime", generation: "g1")
         let successor = try ServiceIdentity(appInstanceID: "app", pluginID: "controller", serviceID: "runtime", generation: "g2")
-        let credential = try ServiceCredentials(identity: owner, token: String(repeating: "a", count: 64))
         let root = PluginControlConnection(socketPath: "/tmp/test-admin.sock", appInstanceID: "app", cliPath: cli)
-        let delegated = PluginControlConnection(socketPath: "/tmp/test-service.sock", appInstanceID: "app", cliPath: cli, service: credential)
+        let delegated = PluginControlConnection(socketPath: "/tmp/test-service.sock", appInstanceID: "app", cliPath: cli, service: owner)
         try rejects(APIError.serviceSessionUnavailable) { _ = try root.commandEnvironment(owner: owner) }
         try rejects(APIError.serviceSessionUnavailable) { _ = try delegated.commandEnvironment(owner: nil) }
         try rejects(APIError.serviceSessionUnavailable) { _ = try delegated.commandEnvironment(owner: successor) }
-        let wrongApp = PluginControlConnection(socketPath: "/tmp/test-service.sock", appInstanceID: "other", cliPath: cli, service: credential)
+        let wrongApp = PluginControlConnection(socketPath: "/tmp/test-service.sock", appInstanceID: "other", cliPath: cli, service: owner)
         try rejects(APIError.serviceSessionUnavailable) { _ = try wrongApp.commandEnvironment(owner: owner) }
 
         let epoch = UUID()
@@ -64,6 +63,13 @@ struct ServiceCommandsTest {
         guard case .array(let delivered) = delivery.object!["events"]! else { throw Failure(message: "Invalid event batch") }
         try require(delivered.count == 1 && delivered[0].object?["topic"]?.string == "test.own", "Service poll leaked page-directed events")
         try require(delivered[0].object?["deliveryContext"]?.string != nil, "Service delivery lost causation")
+        let all = try await events.poll(["after": cursor, "waitMilliseconds": .integer(0), "recipient": .string("all")], audience: audience)
+        guard case .array(let observed) = all.object!["events"]!, observed.count == 2,
+              let reference = observed[0].object?["deliveryContext"]?.string else { throw Failure(message: "Explicit all-recipient query lost events or cause") }
+        _ = try control.admit("workspace.snapshot", metadata: RPCMetadata(cause: reference), origin: .service(owner), audience: audience)
+        try rejects(-32055) {
+            _ = try control.admit("workspace.snapshot", metadata: RPCMetadata(cause: reference), origin: .administrative, audience: control.administrativeAudience)
+        }
         let reader = Lifetime()
         let head = events.head.object!["cursor"]!
         let pending = Task { try await events.poll(["after": head, "waitMilliseconds": .integer(2000)], audience: audience, validateCaller: {
@@ -94,7 +100,7 @@ struct ServiceCommandsTest {
             assert e['SLATE_TERM_SOCKET']=='/tmp/test-service.sock'
             assert e['SLATE_TERM_SERVICE_PLUGIN_ID']=='controller'
             assert e['SLATE_TERM_SERVICE_GENERATION']=='g1'
-            assert e['SLATE_TERM_SERVICE_TOKEN']=='a'*64
+            assert 'SLATE_TERM_SERVICE_TOKEN' not in e
         else:
             assert e['SLATE_TERM_SOCKET']=='/tmp/test-admin.sock'
             assert not any(k.startswith('SLATE_TERM_SERVICE_') for k in e)
@@ -108,7 +114,7 @@ struct ServiceCommandsTest {
         for (index, connection, context) in [(0, delegated, operation), (1, root, WorkspaceOperationContext(origin: .administrative))] {
             let result = try await runner.execute(plugin: plugin, command: plugin.commands[index], connection: connection,
                 tab: nil, pane: nil, params: [:], settings: [:], lifecycle: lifecycle(context))
-            try require(result.object?["stdout"]?.string == "environment verified\n", "Command credential environment was incorrect")
+            try require(result.object?["stdout"]?.string == "environment verified\n", "Command ownership environment was incorrect")
         }
         // Even a missing host resolver cannot accidentally launch service work with the admin socket.
         do {

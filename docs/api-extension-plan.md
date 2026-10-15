@@ -2,6 +2,8 @@
 
 Status: **reviewed proposal, revision 3; no implementation authorized by this document**. Baseline: checkpoint `0d12f34`, plus inspection of current production sources. All new names, flags and response fields below are proposed. Review and approve the contracts before implementation. Unrelated saved-layout mockup work is not part of this plan.
 
+The later [trusted API plan](trusted-automation-api-plan.md) supersedes all administrative/page/service exposure restrictions in this historical proposal. Its matrices are historical, not current permissions. Hidden panes were canceled; automatic service startup/restart remains outside the current slice.
+
 ## 1. What already exists — do not rebuild it
 
 | Surface | Current capability | Actual gap |

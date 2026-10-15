@@ -1,6 +1,8 @@
-# Background service protocol — proposed Phase 5 contract
+# Historical background-service proposal
 
-Status: one bounded read-only protocol/security review completed; corrections below are incorporated. The approved current delivery slice is [manual services](background-services.md): explicit start/stop/list/status/logs and narrow authenticated access. Identity/transport/CLI, catalog opt-in foundations, observer isolation and command ownership are implemented. Automatic activation, enable/disable/restart/backoff and broader bridge-equivalent access below remain deferred; this document describes the full roadmap, not a claim that all of it ships. This extends the approved roadmap, not the existing HTTP panel-server lifetime. See the progress record for actual checks and desktop limitations.
+**Superseded trust/protocol design—not implementation instructions.** The user requested one powerful API for trusted clients. The reviewed [trusted API plan](trusted-automation-api-plan.md) replaces this document's bearer token, authenticated flag, capability restrictions, own-namespace-only access and pre-ready permission gate. Current behavior is documented in [manual services](background-services.md): one shared API, public generation-bound same-user endpoints, ordinary hello and no service bearer secret. Lifecycle ownership and cleanup remain. Automatic startup, enable/disable and restart/backoff are still deferred and must not be resumed from this historical proposal.
+
+The original bounded review and proposed roadmap below are retained as historical design evidence, not a claim that all of it shipped.
 
 ## Scope and reuse
 

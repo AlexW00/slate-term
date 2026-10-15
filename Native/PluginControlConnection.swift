@@ -1,20 +1,21 @@
 import Foundation
 import SlateTermCore
 
-/// Host-owned connection capsule. Credentials never enter operation facts or status output.
+/// Host-owned connection capsule. Public service identity is a routing expectation;
+/// the endpoint's immutable host binding owns every delegated request.
 struct PluginControlConnection: Sendable {
     let socketPath: String
     let appInstanceID: String
     let cliPath: String
-    let service: ServiceCredentials?
+    let service: ServiceIdentity?
 
-    init(socketPath: String, appInstanceID: String, cliPath: String, service: ServiceCredentials? = nil) {
+    init(socketPath: String, appInstanceID: String, cliPath: String, service: ServiceIdentity? = nil) {
         self.socketPath = socketPath; self.appInstanceID = appInstanceID
         self.cliPath = cliPath; self.service = service
     }
 
     func commandEnvironment(owner: ServiceIdentity?) throws -> [String: String] {
-        guard owner == service?.identity,
+        guard owner == service,
               owner == nil || owner?.appInstanceID == appInstanceID,
               socketPath.hasPrefix("/"), !socketPath.contains("\0") else {
             throw RPCFailure(code: APIError.serviceSessionUnavailable, message: "Service session unavailable")

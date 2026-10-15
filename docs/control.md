@@ -37,11 +37,11 @@ Workspace commands use `command.run` with an `id` from `command.list` and routin
 
 Pane/tab identities (`p1`, `t1`, etc.) are stable across layout changes, but a terminal's **session** changes on replacement/restoration. Capture `sessionId` from context and provide it for delayed terminal work. Explicit CLI pane/tab options override inherited identifiers; an explicit tab suppresses an inherited pane. Event filters deliberately do not inherit those targets.
 
-Normal Browser pages have no bridge. Registered plugin main frames get a [scoped page API](plugins.md), which is a subset of the administrator socket. `shell.update` and shell run-input delivery are authenticated integration internals, not extension-owned context publication. Extensions publish their own context with custom events rather than spoofing native telemetry. Integration-only `debug.*` methods are unavailable in ordinary app launches.
+Normal Browser pages and subframes have no bridge. Registered plugin main frames use the [same API](plugins.md) as CLI and service clients; differences are caller defaults, transport and lifetime, not capabilities. `shell.update` and shell run-input delivery are authenticated integration internals, not extension-owned context publication. Extensions publish their own context with custom events rather than spoofing native telemetry. Integration-only `debug.*` methods are unavailable in ordinary app launches.
 
 ## Manual background services
 
-`plugins.service.start/stop/list/status/logs` are administrative-only and exposed by `slate-term plugins service …`. Registration does not activate a service. Each launch has a separate authenticated endpoint with a narrow service allowlist; service descendants never fall back to the administrator connection. See [manual services](background-services.md) for schemas, readiness, bootstrap, teardown and deliberate exclusions. Automatic startup/restart and enable/disable controls are deferred.
+`plugins.service.start/stop/list/status/logs` are shared API operations, with `slate-term plugins service …` conveniences. Registration does not activate a service. Each launch has a private same-user endpoint bound to its public generation identity, not a bearer token or separate capability list. Ordinary hello replies include that identity; inherited service clients validate it on the same peer before dispatch and never silently discard their owner. Invalid repeated hello invalidates negotiation on both endpoint kinds. See [manual services](background-services.md) for schemas, readiness, bootstrap and teardown. Automatic startup/restart and enable/disable controls remain deferred.
 
 ## Failures and recovery
 
@@ -54,6 +54,6 @@ Normal Browser pages have no bridge. Registered plugin main frames get a [scoped
 - `-32056`: causal-depth limit; stop the feedback loop.
 - `-32057`: automation mutation limit; bounded `data.retryAfterMilliseconds` indicates refill time, not permission to replay.
 - `-32058`: operation admission unavailable.
-- `-32059`: service session unavailable or credentials/context do not match; no administrator fallback.
+- `-32059`: service generation unavailable or public routing context does not match; no owner-discarding fallback.
 
 Other workspace, storage, shell-state and admission errors have descriptive messages. Do not automatically replay a mutation after disconnect, timeout or malformed response: it may already have taken effect. The CLI reports transport/response failures with `outcome: unknown`, not a clean rejection. Read current state and decide deliberately. Unknown shell context stays unknown; neither quiet output nor process-name sampling proves an idle prompt.

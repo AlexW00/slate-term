@@ -93,10 +93,13 @@ with AppFixture('web-conformance') as app:
         assert js('workspace.web.get()')['viewId'] == snapshots[p2]['viewId']
         assert js('workspace.web.snapshot({pane:"p1"})')['viewId'] == snapshots['p1']['viewId']
         exposure = js('workspace.call("api.describe")')
-        assert exposure['webAutomation']['screenshot'] is False and 'web.screenshot' not in exposure['methods']
-        for method in ['web.screenshot', 'web.eval', 'browser.eval']:
-            assert js('workspace.call(' + json.dumps(method) + ',{path:' + json.dumps(str(app.root / 'forbidden.png')) + ',script:"1"}).then(()=>null,e=>e.code)') == -32601
-        assert not (app.root / 'forbidden.png').exists()
+        assert exposure == app.rpc('api.describe')
+        assert exposure['webAutomation']['screenshot'] is True and 'web.screenshot' in exposure['methods']
+        assert js('workspace.call("web.eval",{script:"1"}).then(()=>null,e=>e.code)') == -32601
+        assert js('workspace.browser.eval({pane:"p1",script:"1"})') == 1
+        output = app.root / 'plugin-bridge.png'
+        js('workspace.web.screenshot({path:' + json.dumps(str(output)) + '})')
+        assert output.read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
 
         # Hiding via existing zoom is not document retirement or permission to reveal.
         old = app.rpc('web.get', pane=p2)

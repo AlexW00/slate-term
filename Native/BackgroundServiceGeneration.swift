@@ -3,7 +3,7 @@ import Foundation
 import SlateTermCore
 import SlateTermIPC
 
-/// One authenticated process lifetime. Registration intent, reservations and restart policy
+/// One host-bound process lifetime. Registration intent, reservations and restart policy
 /// belong to the manager; this capsule is never reused or overwritten by a successor.
 @MainActor
 final class BackgroundServiceGeneration {
@@ -18,7 +18,6 @@ final class BackgroundServiceGeneration {
     private(set) var process: PluginProcess?
     private(set) var stdout = Data()
     private(set) var stderr = Data()
-    private let credentials: ServiceCredentials
     private let cliPath: String
     private let spec: PluginProcessSpec
     private let directory = URL(fileURLWithPath: "/tmp/slate-svc-\(UUID().uuidString)")
@@ -37,12 +36,11 @@ final class BackgroundServiceGeneration {
     private var ownsDirectory = false
     private var polling = false
 
-    init(credentials: ServiceCredentials, cliPath: String, spec: PluginProcessSpec,
+    init(identity: ServiceIdentity, cliPath: String, spec: PluginProcessSpec,
          isCurrent: @escaping () -> Bool, operations: OperationControl, request: @escaping Request,
          ready: @escaping (WorkspaceOperationContext) throws -> Void,
          retireOwned: @escaping (ServiceIdentity) -> Task<Bool, Never>, failed: @escaping (Failure) -> Void) throws {
-        let identity = credentials.identity
-        self.credentials = credentials; self.identity = identity
+        self.identity = identity
         audience = .service(epoch: operations.epoch, registrationID: identity.pluginID,
                             recipient: try ServiceEventRecipient(serviceID: identity.serviceID, generation: identity.generation))
         self.cliPath = cliPath; self.spec = spec; self.isCurrent = isCurrent
@@ -59,7 +57,7 @@ final class BackgroundServiceGeneration {
         try validateLive()
         guard let server else { throw unavailable() }
         return PluginControlConnection(socketPath: server.path, appInstanceID: identity.appInstanceID,
-                                       cliPath: cliPath, service: credentials)
+                                       cliPath: cliPath, service: identity)
     }
 
     /// Called only after the manager's state/event/capacity preflight. No registration
@@ -72,13 +70,13 @@ final class BackgroundServiceGeneration {
             // mkdir must actually create the owned directory; never adopt/remove an existing one.
             guard mkdir(directory.path, 0o700) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
             ownsDirectory = true
-            let endpoint = try UnixServer(directory: directory, service: credentials) { [weak self] method, params, metadata in
+            let endpoint = try UnixServer(directory: directory, service: identity) { [weak self] method, params, metadata in
                 guard let self else { throw RPCFailure(code: APIError.serviceSessionUnavailable, message: "Service session unavailable") }
                 return try await self.handle(method, params: params, metadata: metadata)
             }
             server = endpoint
             let connection = PluginControlConnection(socketPath: endpoint.path, appInstanceID: identity.appInstanceID,
-                                                      cliPath: cliPath, service: credentials)
+                                                      cliPath: cliPath, service: identity)
             var environment = ProcessInfo.processInfo.environment.merging(spec.environment) { _, value in value }
             for key in environment.keys where key.hasPrefix("SLATE_TERM_") { environment.removeValue(forKey: key) }
             environment.merge(try connection.commandEnvironment(owner: identity)) { _, value in value }

@@ -35,13 +35,13 @@ A plugin defaults to its declared context. Explicit terminal IDs override its te
 
 ## Shared web panes
 
-`api.describe.webAutomation` advertises structured automation for browser and registered-plugin panes. The canonical RPCs are `web.get`, `.snapshot`, `.click`, `.fill`, `.select`, `.scroll`, `.wait`, and administrative `.screenshot`. Socket requests require an explicit pane; the CLI accepts `--pane` or a validated launching pane, not `--tab`/`--active` alone. These parameterized operations are not menu/picker actions.
+`api.describe.webAutomation` advertises structured automation for browser and registered-plugin panes. The canonical RPCs are `web.get`, `.snapshot`, `.click`, `.fill`, `.select`, `.scroll`, `.wait`, and `.screenshot`, shared by all trusted clients. Socket requests require an explicit pane; the CLI accepts `--pane` or a validated launching pane, not `--tab`/`--active` alone. These parameterized operations are not menu/picker actions.
 
 | Capability | Native menu / picker / shortcut | CLI / socket | Registered page |
 | --- | --- | --- | --- |
 | Structured `web` reads and DOM actions | No parameterless action | Yes | Yes, self or explicit pane |
-| `web.screenshot` | No parameterless action | Yes, absolute output path | Denied |
-| Direct `browser.navigate` / `browser.eval` RPCs | Navigation UI; no eval UI | Browser-only compatibility API | Not exposed directly; existing navigation commands remain compatible |
+| `web.screenshot` | No parameterless action | Yes, absolute output path | Yes, absolute output path |
+| Direct `browser.navigate` / `browser.eval` RPCs | Navigation UI; no eval UI | Browser-only compatibility API | Same browser-only API |
 
 ```sh
 slate-term web get --pane p2
@@ -67,7 +67,7 @@ const other = await workspace.web.snapshot({pane: 'p2'}); // explicit cross-pane
 
 Every helper accepts final `{signal, cause}` options. Cross-pane access is intentional for trusted registered controllers, not a new pane sandbox. Ordinary pages/subframes receive no bridge. Automation runs in a separate private content world; plugin origin restrictions, scoped data stores and bridge privileges stay in the plugin adapter. Browser navigation/address controls and ephemeral stores remain browser-owned.
 
-`web.get` can report an unavailable or nonrenderable target; DOM operations and screenshots require a ready, visible rendered pane and never reveal it implicitly. Zoom/hiding is not document retirement. Navigation, cached-history restoration, process exit and replacement invalidate pending work/refs. Screenshot output requires an explicit absolute local path and is socket-only. There is no `web.eval` or canonical plugin navigation API; existing administrative `browser.eval/navigate` remain browser-specific.
+`web.get` can report an unavailable or nonrenderable target; DOM operations and screenshots require a ready, visible rendered pane and never reveal it implicitly. Zoom/hiding is not document retirement. Navigation, cached-history restoration, process exit and replacement invalidate pending work/refs. Screenshot output requires an explicit absolute local path for every client. There is no `web.eval` or canonical plugin navigation API; `browser.eval/navigate` remain browser-specific, available to CLI, registered-page and service clients.
 
 Limits below apply to both adapters. Each view admits at most 32 logical DOM actions, including sleeping waits, and 32 outstanding platform submissions. Cancellation/timeout promptly releases callers but cannot cancel already-submitted JavaScript or snapshots: those submissions retain capacity until their callbacks or definitive process/view teardown. `pendingActions`, `pendingOperations` (caller continuations) and `pendingSubmissions` distinguish these lifetimes. An overload or uncertain response is not permission to retry a click.
 

@@ -3,74 +3,46 @@ import Testing
 @testable import SlateTermCore
 
 struct ServiceSessionTests {
-    private let token = String(repeating: "ab", count: 32)
-    private func credentials() throws -> ServiceCredentials {
-        try ServiceCredentials(identity: ServiceIdentity(appInstanceID: "app-1", pluginID: "example.worker",
-            serviceID: "service-1", generation: "generation-1"), token: token)
+    private func identity() throws -> ServiceIdentity {
+        try ServiceIdentity(appInstanceID: "app-1", pluginID: "example.worker", serviceID: "service-1", generation: "generation-1")
     }
 
-    @Test func strictHelloAndReply() throws {
-        let value = try credentials()
-        try value.authenticateHello(value.helloParams)
-        try value.validateReply(.object(value.helloReply))
-        #expect(!String(describing: value).contains(token))
-        #expect(!String(reflecting: value).contains(token))
-        #expect(!String(decoding: try JSONEncoder().encode(value.helloReply), as: UTF8.self).contains(token))
-        for key in value.helloParams.keys {
-            var missing = value.helloParams; missing.removeValue(forKey: key)
-            #expect(throws: RPCFailure.self) { try value.authenticateHello(missing) }
-            var null = value.helloParams; null[key] = .null
-            #expect(throws: RPCFailure.self) { try value.authenticateHello(null) }
+    @Test func everyPublicIdentityFieldMustMatchBeforeDispatch() throws {
+        let value = try identity()
+        try value.validateReply(.object(["protocolVersion": .integer(1), "service": .object(value.info)]))
+        for key in value.info.keys {
+            var foreign = value.info; foreign[key] = .string("foreign")
+            #expect(throws: RPCFailure.self) { try value.validateReply(.object(["protocolVersion": .integer(1), "service": .object(foreign)])) }
+            var missing = value.info; missing.removeValue(forKey: key)
+            #expect(throws: RPCFailure.self) { try value.validateReply(.object(["protocolVersion": .integer(1), "service": .object(missing)])) }
         }
-        var foreign = value.helloParams; foreign["generation"] = .string("generation-2")
-        #expect(throws: RPCFailure.self) { try value.authenticateHello(foreign) }
-        foreign = value.helloParams; foreign["token"] = .string(String(repeating: "cd", count: 32))
-        #expect(throws: RPCFailure.self) { try value.authenticateHello(foreign) }
-        foreign = value.helloParams; foreign["pluginId"] = .string("claimed.owner")
-        #expect(throws: RPCFailure.self) { try value.authenticateHello(foreign) }
-        foreign = value.helloParams; foreign["serviceProtocolVersion"] = .integer(2)
-        #expect(throws: RPCFailure.self) { try value.authenticateHello(foreign) }
+        #expect(throws: RPCFailure.self) { try value.validateReply(.object(["protocolVersion": .integer(2), "service": .object(value.info)])) }
     }
 
-    @Test func administrativeHelloCannotPromoteService() throws {
-        let value = try credentials()
-        #expect(throws: RPCFailure.self) { try value.validateReply(.object(["protocolVersion": .integer(1)])) }
-        for key in ["appInstanceId", "pluginId", "serviceId", "generation"] {
-            var reply = value.helloReply; reply[key] = .string("foreign")
-            #expect(throws: RPCFailure.self) { try value.validateReply(.object(reply)) }
-        }
-        var reply = value.helloReply; reply["serviceProtocolVersion"] = .integer(2)
-        #expect(throws: RPCFailure.self) { try value.validateReply(.object(reply)) }
-    }
-
-    @Test func poisonedOrPartialEnvironmentNeverBecomesAdministrative() throws {
-        let value = try credentials()
-        #expect(try ServiceCredentials.inherited(from: [:]) == nil)
-        #expect(try ServiceCredentials.inherited(from: ["SLATE_TERM_INSTANCE_ID": "app-1"]) == nil)
-        let parsed = try #require(try ServiceCredentials.inherited(from: value.environment))
-        #expect(parsed.identity == value.identity)
-        try value.authenticateHello(parsed.helloParams)
+    @Test func poisonedOrPartialEnvironmentNeverDiscardsOwnership() throws {
+        let value = try identity()
+        #expect(try ServiceIdentity.inherited(from: [:]) == nil)
+        #expect(try ServiceIdentity.inherited(from: ["SLATE_TERM_INSTANCE_ID": "app-1"]) == nil)
+        #expect(try ServiceIdentity.inherited(from: value.environment) == value)
         for key in value.environment.keys {
             var partial = value.environment; partial.removeValue(forKey: key)
-            #expect(throws: RPCFailure.self) { try ServiceCredentials.inherited(from: partial) }
+            #expect(throws: RPCFailure.self) { try ServiceIdentity.inherited(from: partial) }
         }
-        #expect(throws: RPCFailure.self) { try ServiceCredentials.inherited(from: ["SLATE_TERM_SERVICE_UNKNOWN": "x"]) }
-        var poisoned = value.environment; poisoned["SLATE_TERM_SERVICE_TOKEN"] = "short"
-        #expect(throws: RPCFailure.self) { try ServiceCredentials.inherited(from: poisoned) }
-        // The invoked command's plugin identity is not its authenticated service authority.
-        poisoned = value.environment; poisoned["SLATE_TERM_PLUGIN_ID"] = "other.command-owner"
-        #expect(try ServiceCredentials.inherited(from: poisoned)?.identity.pluginID == "example.worker")
+        #expect(throws: RPCFailure.self) { try ServiceIdentity.inherited(from: ["SLATE_TERM_SERVICE_UNKNOWN": "x"]) }
+        var delegated = value.environment; delegated["SLATE_TERM_PLUGIN_ID"] = "other.command-owner"
+        #expect(try ServiceIdentity.inherited(from: delegated)?.pluginID == "example.worker")
     }
 
-    @Test func boundedIdentifiersAndSecret() throws {
-        let identity = try credentials().identity
+    @Test func boundedIdentifiers() throws {
         for invalid in ["", " ", "with.dot", String(repeating: "a", count: 129), "é", "x\u{0}"] {
             #expect(throws: RPCFailure.self) {
                 try ServiceIdentity(appInstanceID: "app", pluginID: "example.worker", serviceID: invalid, generation: "g")
             }
         }
-        for invalid in ["", "a", String(repeating: "a", count: 65), String(repeating: "Z", count: 64)] {
-            #expect(throws: RPCFailure.self) { try ServiceCredentials(identity: identity, token: invalid) }
+        for invalid in ["terminal", "browser", "Bad", "a..b", String(repeating: "a", count: 65)] {
+            #expect(throws: RPCFailure.self) {
+                try ServiceIdentity(appInstanceID: "app", pluginID: invalid, serviceID: "service", generation: "g")
+            }
         }
     }
 

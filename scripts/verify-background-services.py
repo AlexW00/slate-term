@@ -8,6 +8,7 @@ import socket
 import subprocess
 import sys
 from api_fixture import AppFixture, CLI, eventually
+from trusted_api_fixture import verify_trusted_api
 
 
 def service_rpc(env, method, params=None, error=None):
@@ -15,12 +16,12 @@ def service_rpc(env, method, params=None, error=None):
         peer.settimeout(15)
         peer.connect(env['SLATE_TERM_SOCKET'])
         with peer.makefile('rb') as stream:
-            hello = dict(protocolVersion=1, serviceProtocolVersion=1,
-                         serviceId=env['SLATE_TERM_SERVICE_ID'], generation=env['SLATE_TERM_SERVICE_GENERATION'],
-                         token=env['SLATE_TERM_SERVICE_TOKEN'])
+            hello = dict(protocolVersion=1)
             peer.sendall(json.dumps(dict(jsonrpc='2.0', id=1, method='hello', params=hello)).encode() + b'\n')
             reply = json.loads(stream.readline())
-            assert reply['result']['generation'] == hello['generation'], 'wrong service generation'
+            assert reply['result']['service'] == dict(appInstanceId=env['SLATE_TERM_INSTANCE_ID'],
+                pluginId=env['SLATE_TERM_SERVICE_PLUGIN_ID'], serviceId=env['SLATE_TERM_SERVICE_ID'],
+                generation=env['SLATE_TERM_SERVICE_GENERATION']), 'wrong service generation'
             peer.sendall(json.dumps(dict(jsonrpc='2.0', id=2, method=method, params=params or {})).encode() + b'\n')
             data = stream.readline()
             if not data:
@@ -38,7 +39,7 @@ def alive(pid):
     return result.returncode == 0 and result.stdout.strip() and not result.stdout.strip().startswith('Z')
 
 
-with AppFixture('manual-services', '[terminal]\nshell="/bin/zsh"\n[plugins.controller]\nvalue=1\n[plugins.other]\nvalue="private-other"\n') as app:
+with AppFixture('trusted-api-services', '[terminal]\nshell="/bin/zsh"\n[plugins.controller]\nvalue=1\n[plugins.other]\nvalue="private-other"\n') as app:
     worker = app.root / 'service.py'
     worker.write_text('''import json,os,pathlib,subprocess,time
 root=pathlib.Path(os.environ['TEST_ROOT']); name=os.environ['SLATE_TERM_SERVICE_PLUGIN_ID']
@@ -51,8 +52,10 @@ def save(suffix,data):
  temporary.write_text(json.dumps(data)); temporary.chmod(0o600); temporary.replace(path)
 snapshot=rpc('workspace.snapshot')
 settings=rpc('plugins.settings.get')
-save('.credentials',{k:v for k,v in os.environ.items() if k.startswith('SLATE_TERM_')})
-save('.bootstrap',{'cursor':snapshot['eventCursor'],'settings':settings,'pid':os.getpid()})
+assert 'SLATE_TERM_SERVICE_TOKEN' not in os.environ
+starting=rpc('events.emit',{'topic':'fixture.starting'})
+save('.context',{k:v for k,v in os.environ.items() if k.startswith('SLATE_TERM_')})
+save('.bootstrap',{'cursor':snapshot['eventCursor'],'settings':settings,'pid':os.getpid(),'starting':starting})
 while not (root/(name+'.go')).exists(): time.sleep(.02)
 rpc('service.ready',{'version':1})
 save('.events',rpc('events.poll',{'after':snapshot['eventCursor'],'waitMilliseconds':0}))
@@ -92,26 +95,22 @@ while True: time.sleep(1)
     for name in ['controller', 'other']:
         (app.root / (name + '.go')).touch()
         eventually(name + ' ready and replay', lambda name=name: status(name)['state'] == 'ready' and (app.root / (name + '.events')).exists())
-    credentials = read('controller', '.credentials')
+    context = read('controller', '.context')
     batch = read('controller', '.events')
     directed = [e for e in batch['events'] if e['topic'] == 'host.plugin.settings.changed']
     assert len(directed) == 1 and directed[0]['payload']['pluginId'] == 'controller', 'Settings observer crossed namespace'
     assert directed[0]['targetService']['generation'] == first['generation']
     assert 'private-other' not in json.dumps(batch), 'Foreign settings leaked'
     assert read('controller', '.bootstrap')['settings']['values']['value'] == 1
-    assert service_rpc(credentials, 'plugins.settings.get')['values']['value'] == 2
-    surface = service_rpc(credentials, 'api.describe')
-    assert surface['surface'] == 'service' and 'config.get' not in surface['methods']
-    for method, params in [('config.get', {}), ('plugins.service.stop', {'id': 'controller'}),
-                           ('plugins.settings.get', {'id': 'other'}), ('command.run', {'id': 'config.reload'}),
-                           ('command.run', {'id': 'plugins.service.start'})]:
-        service_rpc(credentials, method, params, error=-32052)
-    service_rpc(credentials, 'pane.inspect', error=-32602)
+    assert service_rpc(context, 'plugins.settings.get')['values']['value'] == 2
+    assert read('controller', '.bootstrap')['starting']['source']['kind'] == 'service'
+    assert 'SLATE_TERM_SERVICE_TOKEN' not in context
+    verify_trusted_api(app, lambda method, params=None, error=None: service_rpc(context, method, params, error))
     app.rpc('plugins.register', manifest=dict(id='tools', title='Tools', commands=[
         dict(id='parent', title='Parent', executable=str(CLI), arguments=['rpc','command.run','--params','{"id":"plugin.tools.child"}']),
         dict(id='child', title='Child', executable='/bin/sleep', arguments=['30'])]))
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        pending = pool.submit(service_rpc, credentials, 'command.run', {'id': 'plugin.tools.parent'})
+        pending = pool.submit(service_rpc, context, 'command.run', {'id': 'plugin.tools.parent'})
         eventually('nested service commands', lambda: len([s for s in app.rpc('plugins.status', id='tools') if s['state'] == 'running']) == 2)
         jobs = app.rpc('plugins.status', id='tools')
         stopped = app.cli('plugins', 'service', 'stop', 'controller')
@@ -126,18 +125,18 @@ while True: time.sleep(1)
             eventually('owned nested process exited', lambda job=job: not alive(job['pid']))
     assert status('other')['state'] == 'ready', 'Stop affected unrelated service'
     try:
-        service_rpc(credentials, 'api.describe')
+        service_rpc(context, 'api.describe')
         raise AssertionError('Retired endpoint remained accessible')
     except (ConnectionError, OSError):
         pass
     second = app.cli('plugins', 'service', 'start', 'controller')
     assert second['generation'] != first['generation']
-    eventually('new credentials', lambda: read('controller', '.credentials')['SLATE_TERM_SERVICE_GENERATION'] == second['generation'])
-    newer = read('controller', '.credentials')
-    assert newer['SLATE_TERM_SERVICE_TOKEN'] != credentials['SLATE_TERM_SERVICE_TOKEN'], 'Credential was reused'
+    eventually('new public generation context', lambda: read('controller', '.context')['SLATE_TERM_SERVICE_GENERATION'] == second['generation'])
+    newer = read('controller', '.context')
+    assert 'SLATE_TERM_SERVICE_TOKEN' not in newer
     eventually('second ready', lambda: status('controller')['state'] == 'ready')
-    private_token = newer['SLATE_TERM_SERVICE_TOKEN']
-    assert private_token not in json.dumps(app.cli('plugins', 'service', 'list'))
+    stale = dict(newer, SLATE_TERM_SERVICE_GENERATION=context['SLATE_TERM_SERVICE_GENERATION'])
+    assert app.cli('rpc', 'api.describe', env=stale, error=True)['code'] == -32059
     eventually('service stdout', lambda: 'READY' in app.cli('plugins', 'service', 'logs', 'controller')['stdout'])
     controller_pid = read('controller', '.bootstrap')['pid']
     app.rpc('plugins.register', manifest=first_manifest, replace=True)
@@ -146,6 +145,6 @@ while True: time.sleep(1)
     app.rpc('plugins.unregister', id='controller')
     assert [s['pluginId'] for s in app.cli('plugins', 'service', 'list')] == ['other']
     other_pid = read('other', '.bootstrap')['pid']
-    print('PASS one-app manual services: CLI controls, no implicit activation, starting settings replay/isolation, endpoint denials, nested ownership, fresh credentials, replacement/unregister')
+    print('PASS one-app manual services: CLI controls, no implicit activation, starting mutation/settings replay, shared API parity, nested ownership, fresh public generations, replacement/unregister')
 eventually('app shutdown retired service', lambda: not alive(other_pid))
 print('PASS owned app shutdown/parent-death cleanup')

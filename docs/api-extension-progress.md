@@ -2,7 +2,7 @@
 
 Authorized scope: implement the reviewed API-extension plan iteratively with high-value tests, including post-operation lifecycle hooks (not veto hooks). Checkpoint before implementation: `2763ce9`; working tree was clean after that commit. Future capability-parity requirements live in `AGENTS.md`.
 
-## Current scope — one trusted automation API (in progress)
+## Current delivery — one trusted automation API
 
 The user's later correction supersedes the permission matrices below: CLI, registered-plugin bridge and managed services are clients of **one API**, not capability tiers. The [revised plan](trusted-automation-api-plan.md) received a bounded independent review before runtime edits; target-before-guard resolution and document-bound automatic titles were incorporated.
 
@@ -13,7 +13,15 @@ Common-contract milestone implemented:
 
 Inspected `bg_26ce821ade240eca` exit0: **222 package tests** (142 core,22 IPC,56 settings,2 CLI), app/CLI build, native generation/manager ownership and cleanup, event-hub lifecycle checks, and diff checks. Evidence: `artifacts/unified-api-{package,build,generation,events}-v3.log`. The namespace-error wrapper was restored after this batch; `bg_9cfd055e91380836` subsequently passed the app/CLI build and diff check (`unified-api-sanitization-build.log`). Existing ArgumentParser deprecation warnings remain.
 
-**Not complete:** service bearer transport still exists and is next to be removed. No actual-app parity fixture has run for this migration; title lifetime, ordinary-page/subframe isolation and end-to-end three-client parity still require the planned single batched fixture. Current historical service/permission documentation and denial-oriented fixtures will be updated with that slice. No UI changes, automatic startup, enable/disable controls, restart/backoff or hidden panes were added. This is not full-suite or visual certification.
+Common API checkpoint: **`20ba881`**, unsigned as authorized; configured Git signing remains enabled.
+
+The follow-up removes `ServiceCredentials`, token generation/environment delivery/comparison and the extra peer authentication flag. `ServiceIdentity` is public routing context, checked against the ordinary hello reply on the same peer; the endpoint's immutable host closure still owns requests. Partial/legacy context and stale generations fail before dispatch. Invalid repeated hello invalidates the shared protocol session on both endpoint kinds; malformed generation requests close/discard queued work. Delegated ownership, readiness deadlines, capacity and uncertain-cleanup reservations remain.
+
+Inspected `bg_7c850b66685e43b4` exit0: **223 package tests** (143 core,22 IPC,56 settings,2 CLI), app/CLI build, native service-owned command and generation/manager gates, fake-peer CLI routing and diff checks. Tests cover ordinary/service hello, missing/foreign identities, malformed repeated hello and queued mutation rejection, pre-ready access, explicit event observation with caller-bound causes, poisoned environment stripping and transitive cleanup. Evidence: `artifacts/token-free-{package,build,commands,generation,cli}.log`.
+
+**One announced owned-app batch**, `bg_82708fffa3c8d06c`, inspected exit0 (`token-free-app-parity.log`): identical three-client discovery; shared configuration/settings writes, storage, guarded distinct-view titles; explicit all/targeted events; browser/terminal control; inactive-tab caller guards; stale document rejection; ordinary website/subframe isolation and existing zoom safeguards. It also passed pre-ready mutation, snapshot-first settings replay, nested A→CLI→B cleanup, unrelated-service preservation, stale generation rejection, replacement/unregister, logs and app-shutdown/parent-death cleanup. No activation, clicks, screenshots or additional app launches.
+
+Updated current API/service/plugin/event/layout docs and replaced obsolete privilege-denial assertions in existing fixtures. Those broader legacy fixtures were syntax-checked, **not rerun**; the focused one-app fixture supplies current behavior evidence. Full sequential/visual certification, deterministic failed-kernel-reap fault injection and broader manual QA remain outside this slice. No UI changes, automatic startup, enable/disable controls, restart/backoff or hidden panes were added.
 
 ## Historical manual-service delivery (2026-10-15)
 
@@ -41,7 +49,7 @@ The user requested panel maximize/minimize behavior, not a separate hidden-pane 
 - [x] Workspace/command/configuration post-commit lifecycle notifications, causation and replay/recovery.
 - [x] Shared browser/plugin WebKit automation and bridge wrappers (focused behavior verified; foreground screenshot gate remains blocked).
 - [x] Manual background-service lifecycle foundation and focused production integration (historical permission tier superseded).
-- [ ] Finish trusted-client API migration: remove service bearer transport, update documentation/fixtures and verify three-client parity. Common catalog/dispatch and headless drift checks are implemented.
+- [x] Trusted-client API migration: shared catalog/dispatch, headless drift checks, token-free service identity, current docs/fixtures and focused three-client app parity.
 - [ ] User-enabled startup and restart/backoff (explicitly deferred; not part of current migration).
 - [ ] Complete parameter/result discovery schemas, availability metadata and documentation/examples. Application-font commands are implemented. Optional Later window geometry and command/service storage are not automatic scope; their concrete contracts require separate approval.
 - [ ] Independent code/security/visual reviews where applicable; resolve findings.

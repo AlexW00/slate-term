@@ -41,13 +41,13 @@ struct Connection: ParsableArguments {
 
     func request(_ method: String, params: [String: JSONValue] = [:], timeoutSeconds: Int = 30) throws -> JSONValue {
         let environment = ProcessInfo.processInfo.environment
-        let service = try ServiceCredentials.inherited(from: environment)
+        let service = try ServiceIdentity.inherited(from: environment)
         if let service {
             guard let inheritedSocket = environment["SLATE_TERM_SOCKET"],
                   inheritedSocket.hasPrefix("/"), !inheritedSocket.contains("\0"),
                   socket == nil || socket == inheritedSocket,
-                  expectedInstanceId == nil || expectedInstanceId == service.identity.appInstanceID,
-                  params["expectedInstanceId"] == nil || params["expectedInstanceId"] == .string(service.identity.appInstanceID) else {
+                  expectedInstanceId == nil || expectedInstanceId == service.appInstanceID,
+                  params["expectedInstanceId"] == nil || params["expectedInstanceId"] == .string(service.appInstanceID) else {
                 throw RPCFailure(code: APIError.serviceSessionUnavailable, message: "Service session unavailable")
             }
         }

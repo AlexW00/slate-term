@@ -46,7 +46,7 @@ slate-term tabs move --tab t2 --group w1 --index 1 --expected-workspace-revision
 
 Native group identity belongs to the group, not whichever tab happens to be first. Moving/reordering/detaching retains terminal sessions, plugin views/documents and native window identities; surviving destination groups retain their identity. Existing destination selection is preserved unless target focus is requested or the currently focused tab is being moved into it.
 
-The native **Move Tab to New Window** action is `tab.detachCurrent`, defaults to target focus and remains configurable at Control-Command-N. It is an administrative/native convenience alias; pages use guarded `tab.detach`. It is unavailable when the captured tab already has its own group.
+The native **Move Tab to New Window** action is `tab.detachCurrent`, defaults to target focus and remains configurable at Control-Command-N. It is a convenience alias available to all trusted clients; guarded `tab.detach` is preferred for explicit revision-based automation. It is unavailable when the captured tab already has its own group.
 
 ## Native windows
 
@@ -57,7 +57,7 @@ slate-term windows focus --window-id window-UUID
 slate-term windows focus --window-id window-UUID --activate
 ```
 
-`window.list`, `window.get` and `command.run` ID `window.focus` are administrative only. A native `windowId` identifies an app-owned `NSWindow` lifetime, distinct from the tab, group and OS window number. A closed identity is rejected, never replaced by the current key window. Window operations do not inherit pane/tab targeting. Supported guards are app instance and workspace revision.
+`window.list`, `window.get` and `command.run` ID `window.focus` are shared API operations for every trusted client. A native `windowId` identifies an app-owned `NSWindow` lifetime, distinct from the tab, group and OS window number. A closed identity is rejected, never replaced by the current key window. Window operations do not inherit pane/tab targeting. Supported guards are app instance and workspace revision.
 
 List accepts `limit` (1–64, default 32) and `cursor`, with `nextCursor`, `eventCursor`, `totalWindows` and workspace revision in its envelope. Pages follow model tab order; a changed workspace revision or different query requires restarting enumeration. The envelope is capped at 256 KiB. Window get/focus require `windowId`; only focus accepts the optional Boolean `activate` (default false). Focus selects/orders the owned window and restores it if minimized; activating the application is explicit.
 
@@ -79,4 +79,4 @@ await workspace.tabs.move('w1', {index: 1, expectedWorkspaceRevision});
 await workspace.tabs.detach({expectedWorkspaceRevision});
 ```
 
-Unspecified targets bind to the calling view's live pane/tab. Explicit targets are validated, not silently replaced with current focus. `workspace.layout.get(params)` preserves the raw layout read. These wrappers use `command.run`; they do not introduce a second implementation. Discovery and invocation both exclude administrative window methods and `tab.detachCurrent`, including indirect command execution. Ordinary pages/subframes have no bridge.
+Unspecified targets bind to the calling view's live pane/tab. Explicit targets are validated, not silently replaced with current focus. `workspace.layout.get(params)` preserves the raw layout read. These wrappers use `command.run`; they do not introduce a second implementation. Discovery and invocation also include window methods and `tab.detachCurrent`; caller context supplies defaults, not a separate permission tier. Ordinary pages/subframes have no bridge.

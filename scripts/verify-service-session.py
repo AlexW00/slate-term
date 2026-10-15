@@ -14,10 +14,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--cli', type=Path, default=CLI)
 args = parser.parse_args()
 identity = {'appInstanceId': 'app-1', 'pluginId': 'example.worker', 'serviceId': 'service-1', 'generation': 'g1'}
-hello = {'protocolVersion': 1, 'serviceProtocolVersion': 1, **identity}
-token = 'ab' * 32  # Fixture value, not a real credential.
-credentials = {'SLATE_TERM_INSTANCE_ID': 'app-1', 'SLATE_TERM_SERVICE_PLUGIN_ID': 'example.worker',
-               'SLATE_TERM_SERVICE_ID': 'service-1', 'SLATE_TERM_SERVICE_GENERATION': 'g1', 'SLATE_TERM_SERVICE_TOKEN': token}
+hello = {'protocolVersion': 1, 'service': identity}
+context = {'SLATE_TERM_INSTANCE_ID': 'app-1', 'SLATE_TERM_SERVICE_PLUGIN_ID': 'example.worker',
+           'SLATE_TERM_SERVICE_ID': 'service-1', 'SLATE_TERM_SERVICE_GENERATION': 'g1'}
 
 
 def exercise(reply=hello, overrides=None, options=(), error=None, connects=True):
@@ -54,7 +53,7 @@ def exercise(reply=hello, overrides=None, options=(), error=None, connects=True)
             worker.start()
             try:
                 env = {k: v for k, v in os.environ.items() if not k.startswith('SLATE_TERM_')}
-                env.update(credentials | {'SLATE_TERM_SOCKET': path, 'SLATE_TERM_PLUGIN_ID': 'other.command-owner'})
+                env.update(context | {'SLATE_TERM_SOCKET': path, 'SLATE_TERM_PLUGIN_ID': 'other.command-owner'})
                 for key, value in (overrides or {}).items():
                     if value is None:
                         env.pop(key, None)
@@ -74,17 +73,17 @@ def exercise(reply=hello, overrides=None, options=(), error=None, connects=True)
         else:
             assert result.returncode == 0 and json.loads(result.stdout) == {'ok': True}, result.stderr
             assert [r['method'] for r in seen] == ['hello', 'api.describe', 'command.run'], seen
-            assert seen[0]['params'] == {'protocolVersion': 1, 'serviceProtocolVersion': 1,
-                                        'serviceId': 'service-1', 'generation': 'g1', 'token': token}, seen[0]
+            assert seen[0]['params'] == {'protocolVersion': 1}, seen[0]
             assert seen[-1]['params']['expectedInstanceId'] == 'app-1'
         return seen
 
 
-exercise(reply={'protocolVersion': 1}, error=-32059)  # No accidental admin promotion.
+exercise(reply={'protocolVersion': 1}, error=-32059)  # Never silently discard an inherited owner.
 exercise()
-exercise(reply=hello | {'generation': 'retired'}, error=-32059)
-exercise(overrides={'SLATE_TERM_SERVICE_TOKEN': None}, error=-32059, connects=False)
+exercise(reply=hello | {'service': identity | {'generation': 'retired'}}, error=-32059)
+exercise(overrides={'SLATE_TERM_SERVICE_GENERATION': None}, error=-32059, connects=False)
+exercise(overrides={'SLATE_TERM_SERVICE_TOKEN': 'legacy-token'}, error=-32059, connects=False)
 exercise(overrides={'SLATE_TERM_SERVICE_UNKNOWN': 'x'}, error=-32059, connects=False)
 exercise(options=('--socket', '/tmp/slate-service-other-endpoint.sock'), error=-32059, connects=False)
 exercise(options=('--expected-instance-id', 'other-app'), error=-32059, connects=False)
-print('PASS headless service CLI: bound handshake, no admin/cross-app fallback, partial/poisoned context rejection')
+print('PASS headless service CLI: ordinary hello, public identity binding, no owner/cross-app fallback, partial/legacy context rejection')

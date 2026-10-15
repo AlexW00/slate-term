@@ -55,10 +55,9 @@ with AppFixture('plugin-settings-api', source) as app:
     for pane in ['p1', p2]:
         eventually('plugin ready', lambda pane=pane: evaluate('typeof workspace', pane) == 'object')
     assert evaluate('await workspace.pluginSettings.get()')['id'] == 'acme.tools'
-    denied = evaluate('await workspace.call("plugins.settings.get",{id:"other"}).then(()=>null,e=>e.code)')
-    assert denied == -32052
-    denied = evaluate('await workspace.call("plugins.settings.patch",{id:"other",operations:[],expectedWriteRevision:"stale"}).then(()=>null,e=>e.code)')
-    assert denied == -32052
+    assert evaluate('await workspace.call("plugins.settings.get",{id:"other"})')['id'] == 'other'
+    stale = evaluate('await workspace.call("plugins.settings.patch",{id:"other",operations:[],expectedWriteRevision:"stale"}).then(()=>null,e=>e.code)')
+    assert stale == -32050
     cursor = app.rpc('events.head')['cursor']
     result = evaluate('(async()=>{const s=await workspace.pluginSettings.get();return await workspace.pluginSettings.patch([{op:"set",path:["hookValue"],value:42}],s.writeRevision);})()')
     assert result['values']['hookValue'] == 42

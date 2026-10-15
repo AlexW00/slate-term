@@ -7,8 +7,8 @@ public struct UnixClient: Sendable {
     public let path: String
     public let protocolVersion: Int
     public let timeoutSeconds: Int
-    public let service: ServiceCredentials?
-    public init(path: String, protocolVersion: Int = 1, timeoutSeconds: Int = 30, service: ServiceCredentials? = nil) {
+    public let service: ServiceIdentity?
+    public init(path: String, protocolVersion: Int = 1, timeoutSeconds: Int = 30, service: ServiceIdentity? = nil) {
         self.path = path; self.protocolVersion = protocolVersion; self.timeoutSeconds = timeoutSeconds
         self.service = service
     }
@@ -35,8 +35,7 @@ public struct UnixClient: Sendable {
         try withSocketAddress(path) { address, length in
             guard connect(descriptor, address, length) == 0 else { throw SocketError.system("connect", errno) }
         }
-        var hello = service?.helloParams ?? [:]
-        hello["protocolVersion"] = .integer(protocolVersion)
+        let hello: [String: JSONValue] = ["protocolVersion": .integer(protocolVersion)]
         let reply = try Self.exchange(RPCRequest(id: .integer(1), method: "hello", params: hello), descriptor)
         try service?.validateReply(reply)
         return try body(session)

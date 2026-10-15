@@ -188,9 +188,9 @@ with AppFixture('layout-api') as app:
     assert pane('p3')['manualTitle'] == 'plugin user title'
     evaluate('await workspace.panes.clearTitle()')
     assert pane('p3')['manualTitle'] is None
-    denied = evaluate('await workspace.command("window.focus",{windowId:' + json.dumps(window_ids['t1']) + '}).then(()=>null,e=>e.code)')
-    assert denied == -32052
-    assert evaluate('await workspace.command("tab.detachCurrent").then(()=>null,e=>e.code)') == -32052
+    evaluate('await workspace.command("window.focus",{windowId:' + json.dumps(pane('p3')['windowId']) + '})')
+    assert evaluate('await workspace.command("tab.detachCurrent",{tab:"t999"}).then(()=>null,e=>e.code)') == -32602
+    assert 'tab.detachCurrent' in [c['id'] for c in evaluate('await workspace.api()')['commands']]
     revision = layout_revision('p3')
     created = evaluate('await workspace.panes.split({direction:"right",type:"browser",focus:"preserve",expectedLayoutRevision:' + json.dumps(revision) + '})')['paneId']
     assert pane(created)['type'] == 'browser'

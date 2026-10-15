@@ -96,10 +96,7 @@ final class BackgroundServices {
         }
         guard reservations.count < 16 else { throw RPCFailure(code: APIError.unavailable, message: "At most 16 service reservations are allowed") }
         let identity = try ServiceIdentity(appInstanceID: appID, pluginID: id, serviceID: entry.id, generation: UUID().uuidString)
-        var random = SystemRandomNumberGenerator()
-        let token = (0..<32).map { _ in String(format: "%02x", UInt8.random(in: .min ... .max, using: &random)) }.joined()
-        let credentials = try ServiceCredentials(identity: identity, token: token)
-        let generation = try BackgroundServiceGeneration(credentials: credentials, cliPath: cliPath, spec: entry.registration.service!,
+        let generation = try BackgroundServiceGeneration(identity: identity, cliPath: cliPath, spec: entry.registration.service!,
             isCurrent: { [weak self, weak entry] in
                 guard let self, let entry else { return false }
                 return !self.closed && self.entries[id] === entry && entry.generation?.identity == identity
