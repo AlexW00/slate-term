@@ -67,6 +67,8 @@ The menu/close-warning work has its own native gate, `python3 scripts/verify-men
 | `verify-appearance.py` | Light/dark/auto, original palette choices, rendering-option translation, Settings/TOML persistence, invalid-edit retention, unchanged live PTY, and native settings/terminal captures |
 | `verify-palettes.py` | All 25 bundled palettes in both modes, names-only custom imports, collision-safe copies, path rejection, custom rendering/snapshots, CLI/UI validation, explicit reload, and safe startup fallback |
 | `verify-shell.py` | Production zsh with isolated startup/history, executable quoting, PATH, Unicode and OSC 133 integration |
+| `verify-browser-navigation.sh` | Window-free WebKit: delayed welcome/recipe callbacks, RPC/page supersession, cancellation and platform capacity, immediate HTTP navigation, document identity and history restoration (requires a fresh CLI/package build) |
+| `verify-service-commands.sh` | Window-free command ownership/environment, retirement and descendant cleanup; repeated header-equivalent one-second commands with balanced lifecycle/busy-state notifications |
 | `verify-browser.py` | Actual owned HTTP fixture, WebKit navigation/evaluation/screenshots, isolated stores, DOM actions, stale/BFCache references, clipping, refusal paths and absence of plugin privileges |
 | `verify-context.py` | Authenticated zsh prompt/running/cwd/status, pane headers, generic run/wait, unfinished-draft refusal, disconnect cleanup, scoped targeting, replacement and unknown-state refusal |
 | `verify-plugins.py` | Actual ES modules, isolated bridge and frame/document boundaries, scoped storage/events/input, aborts, registration/unregister transactions, restoration and header controls |

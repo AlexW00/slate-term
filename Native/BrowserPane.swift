@@ -20,6 +20,9 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
     private var navigationOperation: UUID?
     private var currentNavigation: WKNavigation?
     private var trackedNavigations: [ObjectIdentifier: (navigation: WKNavigation, operation: UUID)] = [:]
+    // WebKit may omit terminal callbacks for loads replaced before they start.
+    // Remember their identities without retaining every native/welcome load forever.
+    private let submittedNavigations = NSHashTable<WKNavigation>.weakObjects()
     private var closed = false
     private var resumeAddressEditing = false
 
@@ -77,7 +80,9 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
                         web.observe(\.url) { [weak self] _, _ in MainActor.assumeIsolated { self?.updateControls() } },
                         web.observe(\.isLoading) { [weak self] _, _ in MainActor.assumeIsolated { self?.updateControls() } }]
         updateControls()
-        web.loadHTMLString("<!doctype html><meta name='color-scheme' content='light dark'><title>New Browser</title><style>body{font:16px system-ui;padding:48px;max-width:600px;margin:auto}h1{font-size:26px}</style><h1>New Browser</h1><p>Search or enter a URL in the address bar to browse.</p>", baseURL: nil)
+        startNavigation {
+            web.loadHTMLString("<!doctype html><meta name='color-scheme' content='light dark'><title>New Browser</title><style>body{font:16px system-ui;padding:48px;max-width:600px;margin:auto}h1{font-size:26px}</style><h1>New Browser</h1><p>Search or enter a URL in the address bar to browse.</p>", baseURL: nil)
+        }
     }
 
     var currentURL: String? { web.url?.absoluteString }
@@ -85,14 +90,14 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
     /// The recipe boundary has already checked this URL; do not interpret it as a search.
     func loadStartingURL(_ url: String) {
         loadViewIfNeeded()
-        web.load(URLRequest(url: URL(string: url)!))
+        startNavigation { web.load(URLRequest(url: URL(string: url)!)) }
     }
 
     func close() {
         guard !closed else { return }
         closed = true
         automation.close()
-        trackedNavigations.removeAll(); currentNavigation = nil
+        trackedNavigations.removeAll(); submittedNavigations.removeAllObjects(); currentNavigation = nil
         observations.removeAll()
         web.stopLoading()
         web.navigationDelegate = nil
@@ -137,7 +142,11 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
     }
     private func startNavigation(_ load: () -> WKNavigation?) {
         cancelPendingNavigation()
-        if let navigation = load() { currentNavigation = navigation; automation.invalidate() }
+        if let navigation = load() { trackNavigation(navigation); automation.invalidate() }
+    }
+    private func trackNavigation(_ navigation: WKNavigation) {
+        currentNavigation = navigation
+        submittedNavigations.add(navigation)
     }
     @objc private func goBack() { startNavigation { web.goBack() } }
     @objc private func goForward() { startNavigation { web.goForward() } }
@@ -175,7 +184,10 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
     }
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         guard let navigation else { return }
-        currentNavigation = navigation
+        // Host loads are ordered at submission, not by delayed delegate delivery.
+        // An unknown navigation (e.g. a page link) is still a genuine successor.
+        guard !submittedNavigations.contains(navigation) || navigation === currentNavigation else { return }
+        trackNavigation(navigation)
         let preserved = trackedNavigations[ObjectIdentifier(navigation)]?.operation
         if let id = navigationOperation, id != preserved {
             navigationOperation = nil // Do not stop the successor navigation.
@@ -184,8 +196,7 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
         automation.invalidate(except: preserved)
     }
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        guard let navigation else { return }
-        currentNavigation = navigation
+        guard let navigation, navigation === currentNavigation else { return }
         automation.invalidate(except: trackedNavigations[ObjectIdentifier(navigation)]?.operation)
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -224,7 +235,7 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
         status.stringValue = "Browser process exited; reload to recover"
         navigationOperation = nil
         automation.processTerminated()
-        trackedNavigations.removeAll(); currentNavigation = nil
+        trackedNavigations.removeAll(); submittedNavigations.removeAllObjects(); currentNavigation = nil
     }
     private func navigationFailed(_ navigation: WKNavigation?, error: any Error) {
         guard let navigation else { return }
@@ -255,7 +266,7 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
                 self.automation.complete(id, .failure(RPCFailure(code: APIError.unavailable, message: "Navigation could not start")))
                 return
             }
-            self.currentNavigation = navigation
+            self.trackNavigation(navigation)
             self.trackedNavigations[ObjectIdentifier(navigation)] = (navigation, id)
         }
     }

@@ -40,6 +40,7 @@ run palettes python3 scripts/verify-palettes.py
 run menu-ui python3 scripts/verify-menu-ui.py
 run shell python3 scripts/verify-shell.py
 run web-operations bash scripts/verify-web-operations.sh
+run browser-navigation bash scripts/verify-browser-navigation.sh
 run browser python3 scripts/verify-browser.py
 run web python3 scripts/verify-web.py
 run context python3 scripts/verify-context.py

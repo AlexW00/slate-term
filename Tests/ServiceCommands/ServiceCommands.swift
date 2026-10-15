@@ -23,6 +23,36 @@ struct ServiceCommandsTest {
     static func lifecycle(_ operation: WorkspaceOperationContext) -> CommandLifecycleContext {
         CommandLifecycleContext(operation: operation, launchWorkspaceRevision: "test-revision", launchLayoutRevision: nil)
     }
+    /// Same command/notification path as header buttons, without opening workspace windows.
+    static func checkShortCommandCompletion(connection: PluginControlConnection, directory: URL) async throws {
+        let runner = PluginCommands()
+        defer { runner.close() }
+        let marker = directory.appendingPathComponent("header-target")
+        let plugin = try registration([["id": "capture", "title": "Capture Pane Context", "executable": "/bin/sh",
+            "arguments": ["-c", "printf '%s/%s' \"$SLATE_TERM_TAB_ID\" \"$SLATE_TERM_PANE_ID\" > \"$MARKER\"; /bin/sleep 1"],
+            "environment": ["MARKER": marker.path], "timeoutSeconds": 5]])
+        var states: [CommandLifecycle.State] = []
+        var busyNotifications: [Bool] = []
+        runner.onLifecycle = { record, _ in states.append(record.state) }
+        runner.onChange = { [weak runner] in
+            busyNotifications.append(runner?.all.contains { $0.object?["state"] == .string("running") } ?? false)
+        }
+        // Bounded repetition exercises short supervisor exits and re-admission of
+        // the same command. A stale running record would leave every header disabled.
+        for iteration in 0..<6 {
+            states.removeAll(); busyNotifications.removeAll()
+            let start = ContinuousClock.now
+            let result = try await runner.execute(plugin: plugin, command: plugin.commands[0], connection: connection,
+                tab: TabID(1), pane: PaneID(1), params: [:], settings: [:],
+                lifecycle: lifecycle(WorkspaceOperationContext(origin: .native)))
+            try require(start.duration(to: .now) < .seconds(5), "Short command missed completion deadline at iteration \(iteration)")
+            try require(result.object?["state"] == .string("succeeded") && result.object?["exitCode"] == .integer(0), "Short command did not succeed: \(result)")
+            try require(states == [.running, .succeeded], "Short command lifecycle was not balanced: \(states)")
+            try require(busyNotifications == [true, false], "Header busy-state notifications were stale: \(busyNotifications)")
+            try require(try String(contentsOf: marker, encoding: .utf8) == "t1/p1", "Short command lost clicked-pane context")
+        }
+        print("PASS six header-equivalent short commands: exact context, exit report, lifecycle and busy-state notifications")
+    }
     static func main() async throws {
         let cli = CommandLine.arguments[1]
         let owner = try ServiceIdentity(appInstanceID: "app", pluginID: "controller", serviceID: "runtime", generation: "g1")
@@ -116,6 +146,7 @@ struct ServiceCommandsTest {
                 tab: nil, pane: nil, params: [:], settings: [:], lifecycle: lifecycle(context))
             try require(result.object?["stdout"]?.string == "environment verified\n", "Command ownership environment was incorrect")
         }
+        try await checkShortCommandCompletion(connection: root, directory: directory)
         // Even a missing host resolver cannot accidentally launch service work with the admin socket.
         do {
             _ = try await runner.execute(plugin: plugin, command: plugin.commands[1], connection: root,
