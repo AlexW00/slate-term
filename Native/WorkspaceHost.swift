@@ -34,7 +34,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             var payload = fields
             payload["workspaceRevision"] = .string(self.revisions.revision)
             try self.events.commitWorkspace([operation.publication(topic: "host.service.state.changed", payload: payload)], updatingModel: commit)
-            self.refreshSettings()
+            self.refreshPluginSettingsStatus()
         }, retireOwned: { [weak self] owner in
             self?.pluginCommands.cancelOwned(by: owner) ?? Task { false }
         })
