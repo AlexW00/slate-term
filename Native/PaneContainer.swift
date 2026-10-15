@@ -16,7 +16,7 @@ struct PaneHeaderAction {
 
 /// Stable chrome around retained content; split reparenting never recreates a surface.
 @MainActor
-final class PaneContainer: NSViewController, NSTextFieldDelegate {
+final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDelegate {
     let content: NSViewController
     private let typeName: String
     private let typeID: String
@@ -32,8 +32,12 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate {
     var dropView: PaneDropView { view as! PaneDropView }
     private let header = PaneHeaderView()
     private var latestTitle = ""
+    private var renameTitle = ""
+    private var renamePopover: NSPopover?
+    private let renameField = NSTextField(string: "")
     private var editingOriginal: String?
-    private var cancellingEdit = false
+    private let inactiveShade = PaneInactiveShade()
+    private var isActive = true
     var onClose: (() -> Void)?
     var onFocus: (() -> Void)?
     var onRename: ((String) -> Void)?
@@ -70,16 +74,13 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate {
         titleField.alignment = .center
         titleField.isBordered = false
         titleField.drawsBackground = false
-        titleField.isEditable = true
-        titleField.isSelectable = true
+        titleField.isEditable = false
+        titleField.isSelectable = false
         titleField.lineBreakMode = .byTruncatingTail
         titleField.maximumNumberOfLines = 1
-        titleField.delegate = self
-        titleField.setAccessibilityLabel("Pane title")
-        titleField.onClick = { [weak self] in
-            self?.onFocus?()
-            self?.beginTitleEditing()
-        }
+        titleField.setAccessibilityRole(.button)
+        titleField.setAccessibilityLabel("Rename Pane")
+        titleField.onClick = { [weak self] in self?.showRenamePopover() }
         typeButton.setContentHuggingPriority(.required, for: .horizontal)
         // Preserve the header's internal ordering, but keep optional text below the
         // split item's 251 holding priority. Otherwise fitting-size pressure silently
@@ -99,6 +100,15 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate {
         closeButton.toolTip = "Close Pane"
         for child in [dragHandle, typeButton, titleField, actionStrip, closeButton] { child.translatesAutoresizingMaskIntoConstraints = false; header.addSubview(child) }
         for child in [header, content.view] { child.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(child) }
+        inactiveShade.translatesAutoresizingMaskIntoConstraints = false
+        inactiveShade.isHidden = true
+        view.addSubview(inactiveShade)
+        NSLayoutConstraint.activate([
+            inactiveShade.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            inactiveShade.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            inactiveShade.topAnchor.constraint(equalTo: view.topAnchor),
+            inactiveShade.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
         // Fill the largest symmetric title region without compressing the type control.
         let preferredTitleWidth = titleField.widthAnchor.constraint(equalTo: header.widthAnchor)
         preferredTitleWidth.priority = .init(248)
@@ -123,35 +133,97 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate {
 
     func setTitle(_ title: String) {
         _ = view
+        renameTitle = title
         latestTitle = String(title.components(separatedBy: .controlCharacters).joined(separator: " ").prefix(512))
-        // Keep receiving live titles, but never replace an in-progress draft.
-        if editingOriginal == nil && titleField.currentEditor() == nil { titleField.stringValue = latestTitle }
+        // The header stays live; the separate rename draft is never overwritten.
+        titleField.stringValue = latestTitle
         titleField.toolTip = latestTitle
         header.setAccessibilityLabel("\(typeName): \(latestTitle)")
         closeButton.setAccessibilityLabel("Close \(typeName) Pane: \(latestTitle)")
         dragHandle.setAccessibilityLabel("Move \(typeName) Pane: \(latestTitle)")
     }
 
-    private func beginTitleEditing() {
-        if editingOriginal == nil { editingOriginal = titleField.stringValue }
+    override func viewWillDisappear() {
+        renamePopover?.close()
+        super.viewWillDisappear()
     }
 
-    func controlTextDidBeginEditing(_ notification: Notification) { beginTitleEditing() }
+    func setActive(_ active: Bool) {
+        _ = view
+        isActive = active
+        inactiveShade.isHidden = active
+        if !active { renamePopover?.close() }
+    }
 
-    func controlTextDidEndEditing(_ notification: Notification) {
-        let original = editingOriginal ?? latestTitle
-        let title = titleField.stringValue
+    func showRenamePopover() {
+        guard view.window != nil else { return }
+        if renamePopover?.isShown == true { renameField.selectText(nil); return }
+        onFocus?()
+        editingOriginal = renameTitle
+        renameField.stringValue = renameTitle
+        renameField.placeholderString = "Pane name"
+        renameField.setAccessibilityLabel("Pane name")
+        renameField.delegate = self
+        let heading = NSTextField(labelWithString: "Rename Pane")
+        heading.font = .systemFont(ofSize: 13, weight: .semibold)
+        let hint = NSTextField(labelWithString: "Leave empty to use the automatic title.")
+        hint.font = .systemFont(ofSize: 11)
+        hint.textColor = .secondaryLabelColor
+        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelRename))
+        cancel.keyEquivalent = "\u{1b}"
+        let save = NSButton(title: "Rename", target: self, action: #selector(commitRename))
+        save.keyEquivalent = "\r"
+        let buttons = NSStackView(views: [NSView(), cancel, save])
+        buttons.spacing = 8
+        let stack = NSStackView(views: [heading, renameField, hint, buttons])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 12
+        stack.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+        NSLayoutConstraint.activate([
+            stack.widthAnchor.constraint(equalToConstant: 320),
+            renameField.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -32),
+            buttons.widthAnchor.constraint(equalTo: renameField.widthAnchor),
+        ])
+        let controller = NSViewController()
+        controller.view = stack
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.animates = false
+        popover.delegate = self
+        popover.contentViewController = controller
+        renamePopover = popover
+        popover.show(relativeTo: titleField.bounds, of: titleField, preferredEdge: .minY)
+        renameField.selectText(nil)
+    }
+
+    @objc private func commitRename() {
+        let title = renameField.stringValue
+        let original = editingOriginal
+        renamePopover?.close()
+        // Closing a popover is not itself a mutation. Reuse the host's guarded
+        // title operation, including normalization, persistence and events.
+        if title != original { onRename?(title) }
+        onFocus?()
+    }
+
+    @objc private func cancelRename() {
+        renamePopover?.close()
+        onFocus?()
+    }
+
+    func popoverDidClose(_ notification: Notification) {
         editingOriginal = nil
-        if !cancellingEdit && title != original { onRename?(title) }
-        titleField.stringValue = latestTitle
-        cancellingEdit = false
+        renamePopover = nil
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-        guard commandSelector == #selector(NSResponder.cancelOperation(_:)) || commandSelector == #selector(NSResponder.insertNewline(_:)) else { return false }
-        cancellingEdit = commandSelector == #selector(NSResponder.cancelOperation(_:))
-        view.window?.makeFirstResponder(nil)
-        onFocus?()
+        guard !textView.hasMarkedText() else { return false }
+        switch commandSelector {
+        case #selector(NSResponder.cancelOperation(_:)): cancelRename()
+        case #selector(NSResponder.insertNewline(_:)): commitRename()
+        default: return false
+        }
         return true
     }
 
@@ -266,17 +338,26 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate {
 
     func editTitleForTesting(_ text: String?, finish: String?) throws {
         _ = view
-        if titleField.currentEditor() == nil {
+        if renamePopover?.isShown != true {
             guard let event = NSEvent.mouseEvent(with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
                                                 windowNumber: view.window?.windowNumber ?? 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) else { return }
             titleField.mouseDown(with: event)
         }
-        guard let editor = titleField.currentEditor() as? NSTextView else { throw RPCFailure(code: -32000, message: "Pane title editor did not open") }
+        guard let editor = renameField.currentEditor() as? NSTextView else { throw RPCFailure(code: -32000, message: "Pane title editor did not open") }
         if let text { editor.insertText(text, replacementRange: NSRange(location: 0, length: editor.string.utf16.count)) }
         switch finish {
         case "commit": editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
         case "cancel": editor.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
-        case "blur": view.window?.makeFirstResponder(nil)
+        case "blur": renamePopover?.close()
+        case "outsideClick":
+            guard let window = view.window else { return }
+            let point = content.view.convert(NSPoint(x: content.view.bounds.midX, y: content.view.bounds.midY), to: nil)
+            guard let down = NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1),
+                  let up = NSEvent.mouseEvent(with: .leftMouseUp, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                              windowNumber: window.windowNumber, context: nil, eventNumber: 2, clickCount: 1, pressure: 0) else { return }
+            NSApp.postEvent(up, atStart: true)
+            NSApp.postEvent(down, atStart: true)
         default: break
         }
     }
@@ -292,7 +373,9 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate {
                  "titleLeadingX": .number(titleRect.minX), "titleTrailingX": .number(titleRect.maxX),
                  "typeTrailingX": .number(typeButton.frame.maxX), "actionsLeadingX": .number(actionStrip.frame.minX),
                  "titleCentered": .bool(titleField.alignment == .center),
-                 "editing": .bool(titleField.currentEditor() != nil), "draft": .string(titleField.currentEditor()?.string ?? titleField.stringValue),
+                 "editing": .bool(renamePopover?.isShown == true), "draft": .string(renameField.currentEditor()?.string ?? renameField.stringValue),
+                 "active": .bool(isActive), "dimmed": .bool(!inactiveShade.isHidden),
+                 "renameWindowNumber": renameField.window.map { .integer($0.windowNumber) } ?? .null,
                  "headerActions": .array(headerActions.map { .object(["id": .string($0.id), "enabled": .bool($0.enabled)]) }),
                  "visibleHeaderActions": .array(actionStrip.arrangedSubviews.compactMap { $0.identifier?.rawValue }.map(JSONValue.string)),
                  "actionsBeforeClose": .bool(actionStrip.frame.maxX <= closeButton.frame.minX),
@@ -313,11 +396,18 @@ private final class PaneHeaderButton: NSButton {
 @MainActor
 private final class PaneTitleField: NSTextField {
     var onClick: (() -> Void)?
-    override func mouseDown(with event: NSEvent) {
-        if currentEditor() == nil {
-            onClick?()
-            selectText(nil)
-        } else { super.mouseDown(with: event) }
+    override func mouseDown(with event: NSEvent) { onClick?() }
+    override func accessibilityPerformPress() -> Bool { onClick?(); return true }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+}
+
+/// Paint over retained Metal/WebKit content without intercepting clicks or drags.
+@MainActor
+private final class PaneInactiveShade: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.black.withAlphaComponent(0.08).setFill()
+        bounds.fill()
     }
 }
 

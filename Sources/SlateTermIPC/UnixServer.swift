@@ -231,6 +231,7 @@ private final class Peer {
             case ProtocolError.incompatibleVersion: failure = .init(code: -32002, message: "Incompatible protocol version; expected 1")
             case ProtocolError.invalidRequest: failure = .init(code: -32600, message: "Invalid JSON-RPC 2.0 request")
             case ProtocolError.parseError: failure = .init(code: -32700, message: "Malformed request JSON")
+            case is CancellationError: failure = .init(code: -32022, message: "Request was cancelled")
             default: failure = .init(code: -32602, message: String(describing: error))
             }
             enqueue(RPCResponse(id: id, error: failure))

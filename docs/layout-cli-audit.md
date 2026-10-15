@@ -18,7 +18,7 @@ This matrix describes that historical checkpoint. Current incremental delivery i
 | Move an existing pane | Pane grip menu / edge drag | None | `Workspace.move` preserves the pane and its contents. Native move is same-tab, unzoomed, and geometry-constrained; new split is 50/50. |
 | Resize a divider | Drag divider | None | `Workspace.resize(tab:path:fraction:)` exists internally. `debug.divider` is not public. |
 | Equalize / zoom | Menu and shortcuts | `layout.equalize`, `pane.zoom` | Supported. Equalization is not arbitrary sizing. |
-| Change pane type | Header / Pane menu, with confirmation | `panes type --type …` / `pane.type` | Replaces content, not a move; potentially running terminals require force. Panel plugins only. |
+| Change pane type | Header type dropdown, with confirmation | `panes type --type …` / `pane.type` | Replaces content, not a move; potentially running terminals require force. Panel plugins only. |
 | Rename pane | Editable native header | No public user-title setter | Page plugins can supply their own automatic title via `workspace.setTitle`; manual user names take priority. The model has `setManualTitle`. |
 | Close/focus pane | Header/menu/directional navigation | `panes close/focus`, `focus.*` | Supported; terminal/session identity and destructive-close rules still apply. |
 | Create a full-height left panel at 25% | No dedicated workspace-sidebar operation | None | A leaf split is not a split of the whole existing layout. See below. |

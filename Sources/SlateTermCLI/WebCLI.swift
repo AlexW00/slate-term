@@ -19,7 +19,7 @@ struct WebCLI: ParsableCommand {
     @Option var maxElements: Int?
     @Option var state: String?
     @Option var timeoutMilliseconds: Int?
-    @Option(help: "Absolute local PNG output path (administrative only).") var path: String?
+    @Option(help: "Absolute local PNG output path.") var path: String?
 
     func run() throws {
         var params = try target.params(connection: connection)

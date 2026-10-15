@@ -153,13 +153,13 @@ Workspace actions are grouped into **Tabs**, **Browser**, **Split Pane**, **Focu
 | Split right / down | ⌘D / ⌘⇧D |
 | Split left / up | ⌘⌥D / ⌘⌥⇧D |
 | Focus adjacent pane | ⌘⌥← / → / ↑ / ↓ (also the H/J/K/L bindings above) |
-| Toggle pane zoom | ⌘⇧Return |
+| Maximize / restore pane size | ⌘⇧Return |
 | Equalize pane areas | ⌘⇧E |
 | Reload configuration | ⌘⇧R |
 
-Fixed native menu shortcuts: **Terminal / Browser type** ⌘⌃1 / ⌘⌃2; **Move Tab to New Window** ⌘⌃N; **Configuration & Workspace Status** ⌘⇧,; **Reset Close Warnings** ⌘⌥,. Registered pane types receive the remaining ⌘⌃3–9 slots in menu order; additional types remain available through the menu. Explicit workspace keybindings take priority over these fixed shortcuts.
+**Move Tab to New Window** uses the configurable ⌘⌃N binding. Fixed native menu shortcuts: **Configuration & Workspace Status** ⌘⇧,; **Reset Close Warnings** ⌘⌥,. Explicit workspace keybindings take priority over these fixed shortcuts. The former Pane menu and its ⌘⌃1–9 type-switch shortcuts have been removed.
 
-Pane types can also be changed from the dropdown beside the type in each header. The confirmation explains that switching back cannot restore the discarded state. Its **Don’t show again** preference persists independently of close warnings; restore it with **Slate Terminal → Reset Pane Type Warnings**. Rename a pane only by clicking its title once and editing inline.
+Change pane types from the dropdown beside the type in each header. The confirmation explains that switching back cannot restore the discarded state. Its **Don’t show again** preference persists independently of close warnings; restore it with **Slate Terminal → Reset Pane Type Warnings**. Click a pane title or invoke **Rename Pane…** (`pane.rename`, bindable with no default shortcut) to open an anchored popover. Return/Rename saves; Escape, Cancel, or clicking outside cancels.
 
 Overrides merge with the command registry's defaults. To remove a default registry shortcut:
 

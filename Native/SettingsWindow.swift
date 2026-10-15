@@ -495,6 +495,13 @@ private final class SettingsWindow: NSWindow {
             recorder.record(event)
             return true
         }
+        // Settings is not a workspace: Command-W closes this window rather
+        // than reaching the pane.close menu item (disabled here).
+        if event.modifierFlags.intersection([.command, .shift, .option, .control]) == [.command],
+           event.charactersIgnoringModifiers?.lowercased() == "w" {
+            performClose(nil)
+            return true
+        }
         return super.performKeyEquivalent(with: event)
     }
 

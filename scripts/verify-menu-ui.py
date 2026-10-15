@@ -87,7 +87,7 @@ with tempfile.TemporaryDirectory(prefix='slate-menu-', dir='/tmp') as temporary:
                     if item['children']:
                         check(item['children'])
                     else:
-                        if item.get('command') in {'pane.copyID', 'appearance.auto', 'appearance.light', 'appearance.dark',
+                        if item.get('command') in {'pane.rename', 'pane.copyID', 'appearance.auto', 'appearance.light', 'appearance.dark',
                                                    'terminal.font.increase', 'terminal.font.decrease', 'terminal.font.reset'}:
                             assert item['key'] == '', 'This action intentionally has no default shortcut'
                             continue
@@ -96,9 +96,16 @@ with tempfile.TemporaryDirectory(prefix='slate-menu-', dir='/tmp') as temporary:
             check(workspace['children'])
             assert any(item.get('command') == 'pane.copyID' and item['title'] == 'Copy Pane ID' for item in workspace['children'])
             assert len(shortcuts) == len(set(shortcuts)), 'Duplicate workspace shortcuts'
-            pane_menu = next(item for item in tree if item['title'] == 'Pane')
-            assert not any('Switching discards' in item['title'] or 'Rename' in item['title'] for item in pane_menu['children'])
-            assert all(item['key'] for item in pane_menu['children']), pane_menu
+            assert not any(item['title'] == 'Pane' for item in tree), tree
+            assert any(item.get('command') == 'pane.rename' for item in workspace['children'])
+            zoom = next(item for item in groups['Layout']['children'] if item.get('command') == 'pane.zoom')
+            assert zoom['title'] == 'Maximize Pane', zoom
+            rpc('debug.key', chord='cmd+shift+return', dispatch=True)
+            zoomed_tree = rpc('debug.menuTree')
+            zoomed_workspace = next(item for item in zoomed_tree if item['title'] == 'Workspace')
+            zoomed_layout = next(item for item in zoomed_workspace['children'] if item['title'] == 'Layout')
+            assert next(item for item in zoomed_layout['children'] if item.get('command') == 'pane.zoom')['title'] == 'Restore Pane Size'
+            rpc('debug.key', chord='cmd+shift+return', dispatch=True)
             rpc('debug.key', chord='cmd+alt+d', dispatch=True)
             layout = cli('layout', 'get')
             assert layout.get('axis') == 'horizontal' and layout.get('first') == {'kind': 'pane', 'pane': 'p2'}, (layout, rpc('debug.inspect'), rpc('config.get')['current']['keybind'])
@@ -147,14 +154,14 @@ with tempfile.TemporaryDirectory(prefix='slate-menu-', dir='/tmp') as temporary:
             assert 'terminal' in cli('panes', 'list')[0]['type']
             assert rpc('config.get')['typeWarning']['suppressed']
             assert not rpc('config.get')['closeWarning']['suppressed'], 'Type-switch consent must not suppress close warnings'
-            rpc('debug.key', chord='cmd+ctrl+2', dispatch=True)
+            rpc('debug.paneTypeMenu', pane='p1', select='browser')
             assert 'browser' in cli('panes', 'list')[0]['type']
-            rpc('debug.key', chord='cmd+ctrl+1', dispatch=True)
+            rpc('debug.paneTypeMenu', pane='p1', select='terminal')
             assert 'terminal' in cli('panes', 'list')[0]['type']
             # Capture menus after key tests: popup tracking can consume queued key events.
             rpc('debug.menuPreview', pane='p1', path=str(ARTIFACTS / 'pane-type-dropdown.png'))
             for menu, submenu, name in [('Workspace', None, 'workspace-menu'), ('Workspace', 'Split Pane', 'split-menu'),
-                                        ('Workspace', 'Focus Pane', 'focus-menu'), ('Pane', None, 'pane-menu')]:
+                                        ('Workspace', 'Focus Pane', 'focus-menu')]:
                 (ARTIFACTS / (name + '.png')).unlink(missing_ok=True)
                 params = dict(menu=menu, path=str(ARTIFACTS / (name + '.png')))
                 if submenu:

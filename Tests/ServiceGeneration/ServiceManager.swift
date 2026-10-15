@@ -69,4 +69,31 @@ extension ServiceGenerationTest {
         try require(states.contains("ready") && states.contains("stopping"), "Lifecycle facts missing")
         print("PASS manual service manager: publication preflight, idempotent/fresh starts, readiness, replacement reservation, stop and uncertain cleanup")
     }
+
+    /// A stop that arrives while crash cleanup is still running must keep the crash as the final reason.
+    static func crashThenStop(cli: String) async throws {
+        final class Gate { var open = false }
+        let registration = try JSONDecoder().decode(PluginRegistration.self, from: JSONSerialization.data(withJSONObject: [
+            "id": "crashing", "title": "Crashing", "service": ["executable": "/usr/bin/true", "arguments": [], "readyTimeoutSeconds": 5]
+        ]))
+        let gate = Gate()
+        let control = try OperationControl(epoch: UUID())
+        let manager = BackgroundServices(appID: "app", cliPath: cli, operations: control,
+            registrations: { [registration] }, settings: { _ in [:] }, request: { _, _, _, _ in
+                throw Failure(message: "Unexpected crash fixture request")
+            }, publish: { _, _, commit in commit() },
+            retireOwned: { _ in Task { while !gate.open { try? await Task.sleep(for: .milliseconds(5)) }; return true } })
+        defer { manager.close() }
+        let operation = WorkspaceOperationContext(origin: .plugin(id: "trusted", instance: "page", view: "view"))
+        _ = try manager.start("crashing", operation: operation)
+        try await wait { (try? manager.status("crashing").object?["reason"]) == .string("processExit") }
+        try require(try manager.status("crashing").object?["state"] == .string("stopping"), "Crash cleanup finished before the stop")
+        let stop = Task { try await manager.stop("crashing", operation: operation) }
+        try await Task.sleep(for: .milliseconds(20))
+        gate.open = true
+        let stopped = try await stop.value
+        try require(stopped.object?["state"] == .string("failed") && stopped.object?["reason"] == .string("processExit"),
+            "Stop during crash cleanup reported \(stopped)")
+        print("PASS manual service manager: stop during crash cleanup keeps the crash reason")
+    }
 }

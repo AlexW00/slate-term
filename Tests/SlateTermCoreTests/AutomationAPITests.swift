@@ -9,6 +9,10 @@ import Testing
         #expect(names.contains(name))
     }
     #expect(!names.contains("shell.update"))
+    // Shell telemetry is hidden from discovery but token-authenticated, not denied by client kind.
+    for method in [AutomationMethod.shellUpdate, .shellRunInput] {
+        #expect(method.family == .integration && method.admission == .authenticatedIntegration)
+    }
     #expect(!names.contains("debug.inspect"))
     #expect(AutomationMethod(rawValue: "plugin.tools.build") == nil) // command.run payload, not a second RPC
     #expect(AutomationMethod.webScreenshot.family == .web)

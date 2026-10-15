@@ -137,7 +137,8 @@ with tempfile.TemporaryDirectory(prefix='slate-picker-', dir='/tmp') as temporar
                 assert state['visible'] and state['searchFocused'] and state['keyWindow'], ('Background mutation stole picker input', state)
                 time.sleep(.05)
             key('return')
-            eventually('Picker invokes plugin command', marker.exists)
+            # Shell redirection creates the marker before the CLI writes JSON.
+            eventually('Picker invokes plugin command', lambda: any(run['state'] == 'succeeded' for run in cli('plugins', 'status', 'project-tools')))
             assert json.loads(marker.read_text())['focusedPaneId'] == target
             cli('tabs', 'close', '--tab', other, '--force')
             activate_workspace()
@@ -166,14 +167,30 @@ with tempfile.TemporaryDirectory(prefix='slate-picker-', dir='/tmp') as temporar
             rpc('debug.key', chord='cmd+k')
             key('cmd+k')
             assert not picker()['visible'], 'Shortcut should toggle picker from its search field'
-            original_title = next(p for p in rpc('workspace.get')['panes'] if p['id'] == target).get('manualTitle')
-            rpc('debug.paneHeader', pane=target, beginRename=True, draft='Uncommitted name')
+            # Configured shortcuts use the captured target and dismiss, even if
+            # background mutations change model focus while the picker is open.
             rpc('debug.key', chord='cmd+k')
-            key('escape')
-            header = rpc('debug.paneHeader', pane=target)
-            assert header['editing'] and header['draft'] == 'Uncommitted name', header
+            other = cli('tabs', 'new')['tabId']
+            key('cmd+shift+return')
+            assert not picker()['visible']
+            assert next(t for t in rpc('workspace.get')['tabs'] if t['id'] == 't1')['zoomedPane'] == target
+            cli('tabs', 'close', '--tab', other, '--force')
+            activate_workspace()
+            rpc('debug.key', chord='cmd+k')
+            assert next(r for r in picker()['results'] if r['id'] == 'pane.zoom')['title'] == 'Restore Pane Size'
+            key('cmd+shift+return')
+            assert not picker()['visible']
+            rpc('debug.key', chord='cmd+k')
+            assert next(r for r in picker()['results'] if r['id'] == 'pane.zoom')['title'] == 'Maximize Pane'
+            key('cmd+alt+up')
+            assert not picker()['visible'], 'Directional focus shortcuts must dismiss'
+            cli('command', 'run', 'pane.focus', '--pane', target)
+            rpc('debug.key', chord='cmd+k')
+            picker(query='rename pane')
+            assert picker()['selected'] == 'pane.rename'
+            key('return')
+            assert not picker()['visible'] and rpc('debug.paneHeader', pane=target)['editing']
             rpc('debug.paneHeader', pane=target, finish='cancel')
-            assert next(p for p in rpc('workspace.get')['panes'] if p['id'] == target).get('manualTitle') == original_title
             # Live catalog changes should neither stale-select nor execute removed commands.
             rpc('debug.key', chord='cmd+k')
             picker(query='project')
@@ -225,6 +242,11 @@ with tempfile.TemporaryDirectory(prefix='slate-picker-', dir='/tmp') as temporar
             assert picker()['selected'] == 'settings.open'
             key('return')
             assert not picker()['visible']
+            assert rpc('debug.settings', inspectOnly=True)['visible']
+            before_close = rpc('workspace.get')
+            rpc('debug.key', chord='cmd+w', settings=True, dispatch=True)
+            assert not rpc('debug.settings', inspectOnly=True)['visible']
+            assert rpc('workspace.get') == before_close, 'Closing Settings must not close a pane'
             config.write_text('[appearance]\ntheme = "dark"\n[keybind]\n"cmd+k" = "unbound"\n"cmd+shift+k" = "command.picker"\n"cmd+alt+s" = "settings.open"\n')
             rpc('config.reload')
             cli('command', 'run', 'tab.focus', '--tab', 't1')
@@ -249,7 +271,7 @@ with tempfile.TemporaryDirectory(prefix='slate-picker-', dir='/tmp') as temporar
             background_tab = cli('command', 'run', 'window.new')['tabId']
             assert picker()['visible']
             key('return')
-            eventually('Windowless command completed', context_marker.exists)
+            eventually('Windowless command completed', lambda: any(run['state'] == 'succeeded' for run in cli('plugins', 'status', 'context-fixture')))
             assert context_marker.read_text() == 'unset/unset'
             cli('tabs', 'close', '--tab', background_tab, '--force')
             cli('command', 'run', 'command.picker')

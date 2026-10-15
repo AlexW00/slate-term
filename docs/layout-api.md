@@ -13,12 +13,15 @@ Use `command.run` with an explicit `id` and ordinary `pane`/`tab` targeting:
 | `layout.resize` | `path`: array of first/second branches; `firstChildFraction` | `expectedLayoutRevision` |
 | `pane.title.set` | `title`: string | Optional ordinary identity/revision guards |
 | `pane.title.clear` | None | Optional ordinary identity/revision guards |
+| `pane.rename` | None; ordinary `pane`/`tab` target | A visible, non-minimized pane |
 
 Fractions must be finite and strictly between zero and one. A split fraction always describes the **new pane**, regardless of direction; resize describes the **first child**, excluding the divider. `target: root` wraps the complete tab layout. Types are validated before native preparation: a browser/plugin split does not first create a terminal. Model allocation, topology and type are committed together. Failures do not imply rollback of arbitrary shell startup or other external side effects.
 
 Paths address split nodes, not leaves, and have at most 64 branches. `[]` addresses the root. Obtain paths from `pane.inspect` or walk `layout.get`; always pair them with the observed layout revision. Successful mutations return resulting workspace/layout revisions and relevant IDs/paths.
 
 Native admission requires affected panes to remain at least 80 points wide and high. Root splits and subtree resize validate all affected leaves. Unavailable native geometry fails closed. `pane.move` is within one unzoomed tab and preserves pane/content identity; its placement matches native drag/drop. `focus: preserve` does not steal focus from another tab and retains that tab's active-terminal history. Existing `split.left/right/up/down` remain simple 50/50 aliases and share native geometry constraints, without requiring a new revision argument. Native menus/picker suppress splits that cannot fit.
+
+`pane.rename` is a presentation command: it opens the same anchored native popover used by clicking a header title, returns `{paneId: string}`, and does not set a title until the user confirms. It is discoverable through `command.list`, bindable without a default shortcut, and available via the picker, Workspace menu, CLI/socket (`command run pane.rename --pane p1`), registered pages (`workspace.command('pane.rename', {pane: 'p1'})`) and trusted services. Closed targets use the ordinary target error; hidden/minimized targets return `-32602` without revealing them. Native confirmation reuses `pane.title.set`; programmatic renaming should keep using `pane.title.set` / `.clear`, not a UI prompt. Cancel/outside dismissal never writes a title.
 
 Manual titles are trimmed and limited to 4096 UTF-8 bytes; an empty title clears the override. Manual titles are separate from plugin-published automatic titles. Renaming does not close/rebuild live content or request busy-terminal consent. Inspection bounds displayed title strings and exposes `manualTitleTruncated`.
 

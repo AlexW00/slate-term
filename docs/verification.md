@@ -52,7 +52,7 @@ The menu/close-warning work has its own native gate, `python3 scripts/verify-men
 | `verify-config-cli.py` | Offline configuration validation |
 | `verify-settings.py` | Live reload, native shortcuts, last-valid retention, tab reorder persistence, writer lease, restart and corruption recovery |
 | `verify-settings-window.py` | Native Settings navigation, shortcut recording/reset/conflicts, persistence, validation and captures |
-| `verify-command-picker.py` | Centered native Liquid Glass, search/text input, keyboard/two-click execution, hidden unavailable actions, stock copy-ID command, live catalog, focus/routing, shortcuts, windowless use and light/dark/context captures |
+| `verify-command-picker.py` | Centered native Liquid Glass, search/text input, keyboard/two-click execution, shortcut dismissal with frozen targets, rename command, contextual maximize/restore labels, Settings Cmd-W, hidden unavailable actions, stock copy-ID command, live catalog, focus/routing, shortcuts, windowless use and light/dark/context captures |
 | `verify-plugin-header-buttons.py` | Manifest all/built-in/widget selectors, clicked-pane routing, direct/overflow actions, busy state, no hidden service, persistence, replacement/removal and light/dark/narrow renders |
 | `verify-window-recovery.py` | Empty saved workspace opens a terminal without resetting IDs, windowless ⌘N/⌘T, creation from Settings, and idempotent Dock reopening |
 | `verify-appearance.py` | Light/dark/auto, original palette choices, rendering-option translation, Settings/TOML persistence, invalid-edit retention, unchanged live PTY, and native settings/terminal captures |

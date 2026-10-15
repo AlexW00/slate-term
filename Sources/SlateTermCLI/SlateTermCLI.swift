@@ -200,6 +200,9 @@ struct Events: ParsableCommand {
     @Option var tab: String?
     @Option var pane: String?
     @Option var targetInstanceId: String?
+    @Option(help: "Emit to one live service generation: SERVICE-ID:GENERATION.") var targetService: String?
+    @Option(help: "Directed-event projection: all, instance:INSTANCE-ID or service:SERVICE-ID:GENERATION.") var recipient: String?
+    @Option(help: "global drops the default tab filter; tab requires a tab.") var scope: String?
     @Option(help: "Maximum events per poll, 1...128.") var limit: Int?
     @Option(help: "Long-poll deadline, 0...25000 milliseconds; default 20000.") var waitMilliseconds: Int?
 
@@ -208,23 +211,28 @@ struct Events: ParsableCommand {
         if let tab { params["tab"] = .string(tab) }
         if let pane { params["pane"] = .string(pane) }
         if action == .head {
-            guard params.isEmpty, topic.isEmpty, after == nil, payload == nil, targetInstanceId == nil,
-                  limit == nil, waitMilliseconds == nil else { throw ValidationError("head takes no event options") }
+            guard params.isEmpty, topic.isEmpty, after == nil, payload == nil, targetInstanceId == nil, targetService == nil,
+                  recipient == nil, scope == nil, limit == nil, waitMilliseconds == nil else { throw ValidationError("head takes no event options") }
             try connection.call("events.head")
             return
         }
         if action == .emit {
-            guard topic.count == 1, after == nil, limit == nil, waitMilliseconds == nil else {
+            guard topic.count == 1, after == nil, recipient == nil, scope == nil, limit == nil, waitMilliseconds == nil else {
                 throw ValidationError("emit requires exactly one --topic and no polling options")
             }
             params["topic"] = .string(topic[0])
             if let payload { params["payload"] = try JSONDecoder().decode(JSONValue.self, from: Data(payload.utf8)) }
             if let targetInstanceId { params["targetInstanceId"] = .string(targetInstanceId) }
+            if let targetService { params["targetService"] = try Self.serviceRecipient(targetService) }
             try connection.call("events.emit", params: params)
             return
         }
-        guard payload == nil, targetInstanceId == nil else { throw ValidationError("payload and target-instance-id are only valid for emit") }
+        guard payload == nil, targetInstanceId == nil, targetService == nil else {
+            throw ValidationError("payload, target-instance-id and target-service are only valid for emit")
+        }
         if let after { params["after"] = .string(after) }
+        if let recipient { params["recipient"] = try Self.recipient(recipient) }
+        if let scope { params["scope"] = .string(scope) }
         if !topic.isEmpty { params["topics"] = .array(topic.map(JSONValue.string)) }
         if let limit { params["limit"] = .integer(limit) }
         if let waitMilliseconds { params["waitMilliseconds"] = .integer(waitMilliseconds) }
@@ -246,6 +254,24 @@ struct Events: ParsableCommand {
             }
             params["after"] = .string(cursor)
         }
+    }
+
+    /// Converts the CLI recipient spelling into the host's JSON selector; the host validates identities.
+    static func recipient(_ text: String) throws -> JSONValue {
+        if text == "all" { return .string("all") }
+        if text.hasPrefix("instance:"), text.count > "instance:".count {
+            return .object(["instanceId": .string(String(text.dropFirst("instance:".count)))])
+        }
+        if text.hasPrefix("service:") { return try serviceRecipient(String(text.dropFirst("service:".count))) }
+        throw ValidationError("recipient must be all, instance:INSTANCE-ID or service:SERVICE-ID:GENERATION")
+    }
+
+    /// Splits at the last colon because generations are UUIDs without colons.
+    static func serviceRecipient(_ text: String) throws -> JSONValue {
+        guard let separator = text.lastIndex(of: ":"), separator != text.startIndex, text.index(after: separator) != text.endIndex else {
+            throw ValidationError("service recipients must be SERVICE-ID:GENERATION")
+        }
+        return .object(["serviceId": .string(String(text[..<separator])), "generation": .string(String(text[text.index(after: separator)...]))])
     }
 }
 

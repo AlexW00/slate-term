@@ -8,9 +8,10 @@ Implemented:
 
 - Real, pinned libghostty terminal surfaces in AppKit windows.
 - Native tabs and nested `NSSplitViewController` panes, directional focus, zoom, and equalization.
-- Shared pane headers with type, a live title centered on the full panel width, optional command-backed plugin buttons, and a close control using the existing confirmation policy. Titles stay centered and truncate before overlapping the controls in narrow panes. Click the title once to edit it inline; Enter or clicking away saves, and Escape cancels. Manual names persist and override plugin/browser/terminal updates. Clear the name to restore automatic titles. **Copy Pane ID** is available in the command picker/Workspace menu and can be assigned a shortcut.
+- Shared pane headers with type, a live title centered on the full panel width, optional command-backed plugin buttons, and a close control using the existing confirmation policy. Titles stay centered and truncate before overlapping the controls in narrow panes. Click the title or choose **Rename Pane…** to open an anchored popover; Return/Rename saves, and Escape/Cancel or clicking outside discards the draft. Manual names persist and override plugin/browser/terminal updates. Clear the name to restore automatic titles. **Copy Pane ID** is available in the command picker/Workspace menu and can be assigned a shortcut.
 - A six-dot grip to the left of each pane type: drag to another pane’s left/right/top/bottom edge to move the existing pane within its tab. The highlight previews its new position; Escape or an invalid drop cancels. Click the grip for an accessible destination menu. Live terminal sessions and web content are retained. Unzoom before moving; cross-tab/window moves are not supported.
-- A dropdown beside each pane type, plus a native Pane menu, for type changes without replacing pane identity or layout. Switching warns that the current state is discarded; “Don’t show again” remembers your choice separately from close warnings.
+- Inactive panes are subtly dimmed; the selected pane stays undimmed even while a picker or popover is open. Window titles omit internal tab IDs.
+- A dropdown beside each pane type for type changes without replacing pane identity or layout. Switching warns that the current state is discarded; “Don’t show again” remembers your choice separately from close warnings.
 - Real WebKit browsers with navigation and trusted-client evaluation; shared guarded `web` snapshots, click/fill/select/scroll, waits and screenshots for browser/plugin panes. Plugin views retain separate origin, store and bridge privileges.
 - Pure Swift workspace model: monotonic IDs, split/close/focus, terminal focus history, fractions, tab groups, validated JSON roundtrips.
 - Shared command registry for menus, default shortcuts, and CLI actions; a keyboard-first **⌘K command picker** with native Liquid Glass, fuzzy search, context-aware availability, and built-in/plugin commands.
@@ -102,7 +103,7 @@ python3 scripts/verify-shell.py          # production zsh path, isolated dotfile
 python3 scripts/verify-browser.py
 python3 scripts/verify-context.py        # shell context and pane headers
 bash scripts/verify-pane-titles-native.sh # isolated production header layout/editing and native renders
-python3 scripts/verify-pane-titles.py    # full-app title centering, narrow panes and inline rename
+python3 scripts/verify-pane-titles.py    # full-app title centering, focus dimming and anchored rename
 bash scripts/verify-pane-movement-native.sh # drop geometry and native preview helpers
 python3 scripts/verify-pane-movement.py  # native drop callbacks, retained content, menu, previews and persistence
 python3 scripts/verify-plugins.py        # actual modules/bridge/storage/restoration/header controls

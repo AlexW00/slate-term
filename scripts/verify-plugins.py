@@ -184,8 +184,8 @@ try:
                 assert rpc("debug.paneHeader", pane="p2")["draft"] == "Discard me"
                 rpc("debug.paneHeader", pane="p2", finish="cancel")
                 assert rpc("debug.paneHeader", pane="p2")["title"] == "New automatic title"
-                rpc("debug.paneHeader", pane="p2", draft="Saved on blur", finish="blur")
-                assert rpc("debug.paneHeader", pane="p2")["title"] == "Saved on blur"
+                rpc("debug.paneHeader", pane="p2", draft="Discarded on blur", finish="blur")
+                assert rpc("debug.paneHeader", pane="p2")["title"] == "New automatic title"
                 rpc("debug.paneHeader", pane="p2", rename="My notes — 手動")
                 evaluate("workspace.setTitle('Plugin update')")
                 assert rpc("debug.paneHeader", pane="p2")["title"] == "My notes — 手動"
@@ -199,7 +199,8 @@ try:
                 assert evaluate("typeof window.webkit?.messageHandlers?.slate") == "undefined", "Native bridge handler leaked into page world"
                 assert evaluate("typeof document.querySelector('#child').contentWindow.workspace") == "undefined"
                 assert len(cli("tabs", "list")) == 1, "An iframe forged a privileged bridge request"
-                assert "not exposed" in evaluate("workspace.call('shell.update',{}).then(()=> 'unexpected',error=>String(error))")
+                # Shell telemetry is a non-public method; it stays reachable but requires the pane's shell token.
+                assert evaluate("workspace.call('shell.update',{}).then(()=> 'unexpected',error=>error.code)") == -32040
                 evaluate("workspace.storage.set('note','保存したメモ')")
                 assert evaluate("workspace.storage.get('note')") == "保存したメモ"
                 assert cli("panes", "split", "--down", "--pane", "p2")["paneId"] == "p3"
@@ -292,10 +293,7 @@ try:
                 rpc("debug.paneHeader", pane="p2", beginRename=True)
                 assert rpc("debug.paneHeader", pane="p2")["editing"] is True
                 if not args.functional_only:
-                    capture_path = ROOT / "artifacts/pane-rename-inline.png"
-                    previous_dimensions = None
-                    stable_captures = 0
-                    eventually("inline rename capture", settled_capture)
+                    rpc('debug.paneHeader', pane='p2', renameScreenshot=str(ROOT / 'artifacts/pane-rename-popover-plugin.png'))
                 stop()
                 app = start()
                 eventually("restored registered view is functional", lambda: evaluate("window.fixtureReady===true"))

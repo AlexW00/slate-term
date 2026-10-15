@@ -43,3 +43,16 @@ import SlateTermCore
     }
     #expect(count > 0)
 }
+
+@Test func eventRecipientOptionsMatchTheHostSelectors() throws {
+    #expect(try Events.recipient("all") == .string("all"))
+    #expect(try Events.recipient("instance:i1") == .object(["instanceId": .string("i1")]))
+    let service: JSONValue = .object(["serviceId": .string("acme:svc"), "generation": .string("G1")])
+    #expect(try Events.recipient("service:acme:svc:G1") == service)
+    #expect(try Events.serviceRecipient("acme:svc:G1") == service)
+    for invalid in ["", "instance:", "service:G1", "service::G1", "service:svc:", "everyone"] {
+        #expect(throws: (any Error).self) { try Events.recipient(invalid) }
+    }
+    let poll = try Events.parse(["poll", "--recipient", "service:svc:G1", "--scope", "global"])
+    #expect(poll.recipient == "service:svc:G1" && poll.scope == "global")
+}

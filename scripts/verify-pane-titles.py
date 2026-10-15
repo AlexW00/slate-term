@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Owned native app: true header-title centering, collision bounds and inline renaming."""
+"""Owned native app: centered headers, anchored renaming and active-pane styling."""
 import json
 import os
 import pathlib
@@ -79,14 +79,29 @@ with tempfile.TemporaryDirectory(prefix="slate-pane-titles-", dir="/tmp") as tem
             check("p1")
             capture("light")
 
-            # The field/editor keeps its centered region through commit, cancel and blur.
+            assert check('p1')['dimmed'] and check(p2)['active']
+            cli('command', 'run', 'pane.focus', '--pane', 'p1')
+            assert check('p1')['active'] and check(p2)['dimmed']
+            assert all(w['title'] == 'Slate Terminal' for w in rpc('debug.inspect')['windows'])
+            menu = rpc('debug.menuTree')
+            assert not any(item['title'] == 'Pane' for item in menu), menu
+            workspace_menu = next(item for item in menu if item['title'] == 'Workspace')
+            assert any(item.get('command') == 'pane.rename' for item in workspace_menu['children'])
+            commands = {c['id']: c for c in cli('command', 'list')}
+            assert not commands['pane.rename']['contract']['requiresArguments']
+            cli('command', 'run', 'pane.rename', '--pane', 'p1')
+            assert check('p1')['editing']
+            rpc('debug.paneHeader', pane='p1', finish='cancel')
+
+            # The separate popover draft keeps the header live; outside dismissal cancels.
             header = rpc("debug.paneHeader", pane="p1", beginRename=True, draft="Cancelled draft")
             assert header["editing"] and header["draft"] == "Cancelled draft", header
             check("p1")
             rpc("debug.paneHeader", pane="p1", finish="cancel")
             assert check("p1")["title"] == "Build"
-            rpc("debug.paneHeader", pane="p1", draft="Saved on blur", finish="blur")
-            assert check("p1")["title"] == "Saved on blur"
+            rpc("debug.paneHeader", pane="p1", draft="Discarded on blur", finish="outsideClick")
+            eventually('outside click dismisses rename', lambda: not rpc('debug.paneHeader', pane='p1')['editing'])
+            assert check("p1")["title"] == "Build"
             rpc("debug.paneHeader", pane="p1", rename="Build")
             assert check("p1")["title"] == "Build"
 
@@ -98,6 +113,11 @@ with tempfile.TemporaryDirectory(prefix="slate-pane-titles-", dir="/tmp") as tem
             rpc("browser.eval", pane=p2, script="document.title = 'Documentation'")
             eventually("restored browser title", lambda: check(p2)["title"] == "Documentation")
 
+            full_title = 'Long manual title ' * 60
+            cli('panes', 'set-title', '--pane', 'p1', '--title', full_title)
+            cli('command', 'run', 'pane.rename', '--pane', 'p1')
+            assert rpc('debug.paneHeader', pane='p1')['draft'] == full_title.strip(), 'Rename must not truncate the saved name'
+            rpc('debug.paneHeader', pane='p1', finish='cancel')
             long_title = "A deliberately long panel title — 日本語 — " * 8
             rpc("debug.paneHeader", pane="p1", rename=long_title)
             # Manual names normalize surrounding whitespace in Workspace.setManualTitle.
@@ -119,14 +139,39 @@ with tempfile.TemporaryDirectory(prefix="slate-pane-titles-", dir="/tmp") as tem
             rpc("debug.paneHeader", pane=p2, beginRename=True)
             check(p2)
             capture("editing")
+            rpc('debug.paneHeader', pane=p2, renameScreenshot=str(ARTIFACTS / 'pane-rename-popover-dark.png'))
             rpc("debug.paneHeader", pane=p2, finish="cancel")
+            config.write_text('[appearance]\ntheme = "light"\n')
+            rpc('config.reload')
+            rpc('debug.paneHeader', pane='p1', beginRename=True)
+            time.sleep(.7)  # Capture settled native appearance and window clipping.
+            rpc('debug.paneHeader', pane='p1', renameScreenshot=str(ARTIFACTS / 'pane-rename-popover-light.png'))
+            rpc('debug.paneHeader', pane='p1', finish='cancel')
 
             # Empty titles still expose a usable edit region and restore live titles.
             rpc("debug.paneHeader", pane=p2, rename="")
             assert check(p2)["title"] == "Documentation"
             cli("panes", "type", "--pane", p2, "--type", "terminal", "--force")
             check(p2)
-            print("PASS pane titles: centered on whole header, symmetric collision bounds, single/split/resized panes, long Unicode/live/empty titles, type replacement, inline commit/cancel/blur and light/dark captures")
+            # Registered pages discover/invoke the same prompt and title operation.
+            assets = directory / 'rename-plugin'
+            assets.mkdir()
+            (assets / 'index.html').write_text('<!doctype html><title>Rename fixture</title>')
+            rpc('plugins.register', manifest=dict(id='rename.fixture', title='Rename Fixture', source=dict(kind='directory', path=str(assets))))
+            cli('panes', 'type', '--pane', p2, '--type', 'rename.fixture', '--force')
+            eventually('registered bridge ready', lambda: rpc('debug.pluginEval', pane=p2, script='typeof workspace') == 'object')
+            assert rpc('debug.pluginEval', pane=p2, script="(await workspace.call('command.list')).some(c => c.id === 'pane.rename')")
+            result = rpc('debug.pluginEval', pane=p2, script="await workspace.command('pane.rename', {pane: 'p1'})")
+            assert result['paneId'] == 'p1' and check('p1')['editing']
+            rpc('debug.paneHeader', pane='p1', draft='From shared rename', finish='commit')
+            assert check('p1')['title'] == 'From shared rename'
+            rpc('debug.pluginEval', pane=p2, script="await workspace.panes.setTitle('From bridge', {pane: 'p1'})")
+            assert check('p1')['title'] == 'From bridge'
+            cli('command', 'run', 'pane.zoom', '--pane', p2)
+            error = rpc('debug.pluginEval', pane=p2, script="await workspace.command('pane.rename', {pane: 'p1'}).then(() => null, e => e.code)")
+            assert error == -32602, error
+            cli('command', 'run', 'pane.zoom', '--pane', p2)
+            print("PASS pane titles: centered/collision bounds, focus dimming, clean window titles, long Unicode/live/empty titles, anchored commit/cancel, CLI/plugin rename parity, hidden target refusal and light/dark captures")
         finally:
             if app.poll() is None:
                 os.killpg(app.pid, signal.SIGTERM)

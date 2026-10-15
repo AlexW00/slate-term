@@ -147,6 +147,7 @@ struct ServiceGenerationTest {
         try require(closedProbe.retired == 1, "Close followed by stop duplicated ownership retirement")
         try await nestedCommands(cli: cli, directory: directory, identity: identity)
         try await managerLifecycle(cli: cli)
+        try await crashThenStop(cli: cli)
         print("PASS window-free service generation: lifecycle-bound readiness, pre-ready API access, poll bounds, budget recovery, retirement, timeout/exit, honest cleanup and live A→CLI→B ownership")
     }
 

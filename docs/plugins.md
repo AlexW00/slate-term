@@ -15,7 +15,7 @@ slate-term plugins restart notes
 slate-term plugins unregister notes --force
 ```
 
-The Pane menu includes only plugins with a panel source. **Workspace → Plugin Commands**, the **⌘K command picker**, and **Settings → Keyboard Shortcuts** include contributed commands. Switching type destroys the live view; saved plugin data follows its declared scope. Registration replacement (`--replace`) requires that type's visible panes to be closed first. Unregister refuses active views unless `--force` is supplied. Unregister retains saved data.
+The pane-header type dropdown includes only plugins with a panel source. **Workspace → Plugin Commands**, the **⌘K command picker**, and **Settings → Keyboard Shortcuts** include contributed commands. Switching type destroys the live view; saved plugin data follows its declared scope. Registration replacement (`--replace`) requires that type's visible panes to be closed first. Unregister refuses active views unless `--force` is supplied. Unregister retains saved data.
 
 ## Command-only plugins
 
@@ -229,7 +229,7 @@ await workspace.setTitle("Reviewing README.md");
 await workspace.setTitle(null); // use document.title again
 ```
 
-An explicit plugin title is limited to 512 UTF-8 bytes and resets on a new document. Each view has its own title, even when it shares a tab/global instance. A user can override it by clicking the header title once and editing inline (Enter or blur saves; Escape cancels). Manual names persist with the workspace and take priority over both document and plugin titles. `workspace.panes.setTitle(title, params)` / `clearTitle(params)` set/clear this manual override; unlike `workspace.setTitle`, they are not automatic per-document title updates. Plugin updates are still accepted; clearing the manual name reveals the latest automatic title. Close uses the normal pane-close command; it does not implicitly close sibling panes.
+An explicit plugin title is limited to 512 UTF-8 bytes and resets on a new document. Each view has its own title, even when it shares a tab/global instance. A user can override it by clicking the header title or invoking `pane.rename` to open an anchored popover (Return/Rename saves; Escape, Cancel, or clicking outside cancels). Manual names persist with the workspace and take priority over both document and plugin titles. `workspace.panes.setTitle(title, params)` / `clearTitle(params)` set/clear this manual override; unlike `workspace.setTitle`, they are not automatic per-document title updates. Plugin updates are still accepted; clearing the manual name reveals the latest automatic title. Close uses the normal pane-close command; it does not implicitly close sibling panes.
 
 ### Events and cancellation
 

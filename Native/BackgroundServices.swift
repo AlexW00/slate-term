@@ -102,7 +102,9 @@ final class BackgroundServices {
                 return !self.closed && self.entries[id] === entry && entry.generation?.identity == identity
                     && self.registrations().contains(entry.registration)
             }, operations: operations, request: request, ready: { [weak self, weak entry] operation in
-                guard let self, let entry, self.entries[id] === entry, entry.generation?.identity == identity else { throw CancellationError() }
+                guard let self, let entry, self.entries[id] === entry, entry.generation?.identity == identity else {
+                    throw RPCFailure(code: APIError.serviceSessionUnavailable, message: "Service generation unavailable")
+                }
                 try self.transition(entry, to: "ready", reason: "ready", operation: operation)
             }, retireOwned: retireOwned, failed: { [weak self, weak entry] failure in
                 guard let self, let entry, entry.generation?.identity == identity else { return }
@@ -151,8 +153,12 @@ final class BackgroundServices {
     @discardableResult
     private func retire(_ entry: Entry, finalState: String, reason: String, operation: WorkspaceOperationContext) -> Task<Void, Never> {
         guard let generation = entry.generation else { return Task {} }
+        if let retirement = entry.retirement {
+            // A later stop or removal must not report an in-flight failure as a clean stop.
+            if entry.finishRequest?.state != "failed" { entry.finishRequest = (finalState, reason, operation) }
+            return retirement
+        }
         entry.finishRequest = (finalState, reason, operation)
-        if let retirement = entry.retirement { return retirement }
         // Resource retirement must proceed even if an observed-exit publication fails.
         if entry.state != "stopping" {
             do { try transition(entry, to: "stopping", reason: reason, operation: operation) }

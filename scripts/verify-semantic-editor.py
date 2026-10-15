@@ -25,29 +25,24 @@ with AppFixture('semantic-editor') as app:
     def facts(after):
         return app.rpc('events.poll', after=after, topics=['host.pane.*', 'host.focus.*', 'host.layout.*', 'host.workspace.*'], waitMilliseconds=0)['events']
 
-    def saved(after, result, title):
-        eventually('native draft committed without modal error', lambda: app.rpc('pane.inspect', pane='p1')['manualTitle'] == title)
+    def cancelled(after, result):
         emitted = facts(after)
-        native = [e for e in emitted if e['topic'] == 'host.pane.title.changed']
-        assert len(native) == 1 and native[0]['payload']['origin'] == {'kind': 'native'}, emitted
-        assert native[0]['payload']['operationId'] != result['operationId']
+        assert not any(e['topic'] == 'host.pane.title.changed' for e in emitted), emitted
         initiating = [e for e in emitted if e['payload']['operationId'] == result['operationId']]
         assert initiating and all(e['payload']['workspaceRevision'] == result['workspaceRevision'] for e in initiating)
-        assert native[0]['payload']['beforeWorkspaceRevision'] == result['workspaceRevision']
-        assert native[0]['payload']['workspaceRevision'] != result['workspaceRevision']
         assert not app.rpc('debug.paneHeader', pane='p1')['editing']
 
     other = app.cli('panes', 'split', '--pane', 'p1', '--right')['paneId']
     app.rpc('debug.activate')
-    start = begin('Saved during focus change')
+    start = begin('Discarded during focus change')
     response = mutate(id='pane.focus', pane=other)
-    saved(start, response, 'Saved during focus change')
+    cancelled(start, response)
     assert app.rpc('workspace.get')['tabs'][0]['focusedPane'] == other
 
     session = app.rpc('pane.inspect', pane='p1')['sessionId']
-    start = begin('Saved through split')
+    start = begin('Discarded through split')
     response = mutate(id='split.right', pane='p1')
-    saved(start, response, 'Saved through split')
+    cancelled(start, response)
     assert app.rpc('pane.inspect', pane='p1')['sessionId'] == session
 
     # An explicit model title update must not clobber the unsent editor draft. The
@@ -56,8 +51,13 @@ with AppFixture('semantic-editor') as app:
     mutate(id='pane.title.set', pane='p1', title='API title while editing')
     assert app.rpc('debug.paneHeader', pane='p1')['draft'] == 'User commits last'
     start = app.rpc('events.head')['cursor']
-    response = mutate(id='pane.focus', pane=other)
-    saved(start, response, 'User commits last')
+    before = app.rpc('workspace.snapshot')['workspaceRevision']
+    app.rpc('debug.paneHeader', pane='p1', finish='commit')
+    assert app.rpc('pane.inspect', pane='p1')['manualTitle'] == 'User commits last'
+    native = [e for e in facts(start) if e['topic'] == 'host.pane.title.changed']
+    assert len(native) == 1 and native[0]['payload']['origin'] == {'kind': 'native'}, native
+    assert native[0]['payload']['beforeWorkspaceRevision'] == before
+    assert native[0]['payload']['workspaceRevision'] != before
 
     start = begin('Must not reach a replacement')
     mutate(id='pane.type', pane='p1', type='browser', force=True)
@@ -69,4 +69,4 @@ with AppFixture('semantic-editor') as app:
     assert not any(pane['id'] == 'p1' for pane in app.rpc('workspace.get')['panes'])
     assert not any(e['topic'] == 'host.pane.title.changed' for e in facts(start))
 
-print('PASS native title completion: focus/reparent without modal error, exact operation revisions, draft preservation, no replacement/closure retargeting')
+print('PASS native rename popover: focus/reparent cancels without mutation/modal error, explicit commit native attribution/revisions, draft preservation, no replacement/closure retargeting')

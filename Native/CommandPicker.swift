@@ -30,6 +30,7 @@ final class CommandPicker: NSWindowController, NSWindowDelegate, NSSearchFieldDe
     private var sourceResizeObserver: NSObjectProtocol?
     private(set) var isRestoringFocus = false
     var onExecute: ((String) -> Void)?
+    var onKeyEquivalent: ((NSEvent) -> Bool)?
     var onDismiss: (() -> Void)?
     var isVisible: Bool { window?.isVisible == true }
     private let secondaryColor = NSColor(name: nil) { appearance in
@@ -54,6 +55,7 @@ final class CommandPicker: NSWindowController, NSWindowDelegate, NSSearchFieldDe
         super.init(window: panel)
         panel.delegate = self
         panel.onEscape = { [weak self] in self?.dismiss(restoreFocus: true) }
+        panel.onKeyEquivalent = { [weak self] in self?.onKeyEquivalent?($0) ?? false }
         buildContent(panel)
     }
     required init?(coder: NSCoder) { nil }
@@ -408,6 +410,11 @@ final class CommandPicker: NSWindowController, NSWindowDelegate, NSSearchFieldDe
 @MainActor
 private final class PickerPanel: NSPanel {
     var onEscape: (() -> Void)?
+    var onKeyEquivalent: ((NSEvent) -> Bool)?
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if onKeyEquivalent?(event) == true { return true }
+        return super.performKeyEquivalent(with: event)
+    }
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
     override func cancelOperation(_ sender: Any?) { onEscape?() }
