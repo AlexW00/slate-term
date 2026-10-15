@@ -3,7 +3,7 @@ import WebKit
 import SlateTermCore
 
 extension WorkspaceHost {
-    static let webMethods = ["web.get", "web.snapshot", "web.click", "web.fill", "web.select", "web.scroll", "web.wait"]
+    static var webMethods: [String] { AutomationMethod.publicMethods.filter { $0.family == .web }.map(\.rawValue) }
 
     func webAutomation(for pane: PaneID) -> WebPaneAutomation? {
         if let browser = leaves[pane] as? BrowserPane { return browser.automation }
@@ -21,7 +21,7 @@ extension WorkspaceHost {
     }
 
     func callWeb(_ method: String, params: [String: JSONValue], operation: WorkspaceOperationContext) async throws -> JSONValue {
-        guard Self.webMethods.contains(method) || method == "web.screenshot" else {
+        guard AutomationMethod(rawValue: method)?.family == .web else {
             throw RPCFailure(code: -32601, message: "Unknown web method")
         }
         guard params["pane"]?.string != nil else { throw RPCFailure(code: -32602, message: "Web methods require an explicit pane") }

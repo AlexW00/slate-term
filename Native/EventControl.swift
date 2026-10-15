@@ -1,7 +1,8 @@
 import Foundation
 import SlateTermCore
 
-/// The transport boundary chooses source/recipient identities; callers cannot supply them.
+/// The transport stamps source identity and causation audience. Recipient selection
+/// is a shared query option, independent of the caller's provenance.
 @MainActor
 final class EventControl {
     private let hub: EventHub
@@ -39,13 +40,14 @@ final class EventControl {
     func poll(_ params: [String: JSONValue], audience: CausationAudience, boundTab: TabID? = nil,
               validateCaller: @MainActor () throws -> Void = {}) async throws -> JSONValue {
         do {
-            try Self.checkKeys(params, allowed: ["after", "topics", "tab", "pane", "limit", "waitMilliseconds"])
+            try Self.checkKeys(params, allowed: ["after", "topics", "tab", "pane", "scope", "recipient", "limit", "waitMilliseconds"])
             let after = try Self.string("after", in: params)
             let tab = try Self.string("tab", in: params).map { try TabID(parsing: $0) }
             let pane = try Self.string("pane", in: params).map { try PaneID(parsing: $0) }
-            if let boundTab, let tab, boundTab != tab {
-                throw RPCFailure(code: -32602, message: "This plugin's subscriptions are scoped to its owning tab")
-            }
+            let scope = try Self.string("scope", in: params)
+            guard scope == nil || scope == "global" || scope == "tab" else { throw RPCFailure(code: -32602, message: "Event scope must be global or tab") }
+            let selectedTab = tab ?? (scope == "global" || pane != nil ? nil : boundTab)
+            if scope == "tab", selectedTab == nil { throw RPCFailure(code: -32602, message: "Tab scope requires a tab") }
             var topics: [String] = []
             if let value = params["topics"] {
                 guard case .array(let values) = value, values.count <= 64 else {
@@ -56,15 +58,14 @@ final class EventControl {
                     return value
                 }
             }
-            // Project from the authenticated delivery audience. A service with no
-            // page instance must never accidentally inherit administrator visibility.
-            let observer: EventObserver
+            let defaultObserver: EventObserver
             switch audience {
-            case .administrative: observer = .administrator
-            case .plugin(_, _, let instance, _, _): observer = .plugin(instanceID: instance)
-            case .service(_, _, let recipient): observer = .service(recipient)
+            case .administrative: defaultObserver = .administrator
+            case .plugin(_, _, let instance, _, _): defaultObserver = .plugin(instanceID: instance)
+            case .service(_, _, let recipient): defaultObserver = .service(recipient)
             }
-            let filter = try EventFilter(topics: topics, tab: boundTab ?? tab, pane: pane, observer: observer)
+            let observer = try EventObserver.selecting(params["recipient"], default: defaultObserver)
+            let filter = try EventFilter(topics: topics, tab: selectedTab, pane: pane, observer: observer)
             let delivery = try await hub.pollDelivery(after: after, filter: filter,
                 limit: Self.integer("limit", in: params, default: 128),
                 waitMilliseconds: Self.integer("waitMilliseconds", in: params, default: 20_000))
@@ -84,12 +85,9 @@ final class EventControl {
 
     func emit(_ params: [String: JSONValue], source: EventSource, operation: WorkspaceOperationContext,
               sourceTab: TabID? = nil, sourcePane: PaneID? = nil,
-              knownInstances: Set<String>) throws -> JSONValue {
+              knownInstances: Set<String>, knownServices: Set<ServiceEventRecipient> = []) throws -> JSONValue {
         do {
-            let client = source == .client
-            try Self.checkKeys(params, allowed: client
-                ? ["topic", "payload", "tab", "pane", "targetInstanceId"]
-                : ["topic", "payload", "targetInstanceId"])
+            try Self.checkKeys(params, allowed: ["topic", "payload", "tab", "pane", "targetInstanceId", "targetService"])
             guard let topic = try Self.string("topic", in: params) else {
                 throw RPCFailure(code: -32602, message: "topic is required")
             }
@@ -99,8 +97,16 @@ final class EventControl {
             if let target, !knownInstances.contains(target) {
                 throw RPCFailure(code: -32602, message: "targetInstanceId must identify a live plugin instance")
             }
+            var service: ServiceEventRecipient?
+            if let value = params["targetService"] {
+                guard target == nil, case .service(let recipient) = try EventObserver.selecting(value, default: .administrator),
+                      knownServices.contains(recipient) else {
+                    throw RPCFailure(code: -32602, message: "targetService must identify one live generation and excludes targetInstanceId")
+                }
+                service = recipient
+            }
             return try .encoding(hub.publish(topic: topic, payload: params["payload"] ?? .null,
-                source: source, tab: tab, pane: pane, targetInstanceId: target, lineage: operation.lineage))
+                source: source, tab: tab, pane: pane, targetInstanceId: target, targetService: service, lineage: operation.lineage))
         } catch { throw Self.failure(error) }
     }
 

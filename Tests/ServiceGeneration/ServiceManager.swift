@@ -12,22 +12,33 @@ extension ServiceGenerationTest {
         var confirmCleanup = true
         var states: [String] = []
         let control = try OperationControl(epoch: UUID())
+        let reference = ManagerReference()
         let manager = BackgroundServices(appID: "app", cliPath: cli, operations: control,
-            registrations: { catalog }, settings: { _ in [:] }, request: { method, _, _ in
+            registrations: { catalog }, settings: { _ in [:] }, request: { method, params, metadata, caller in
+                let operation = try caller.admit(method, metadata: metadata, through: control)
+                if method == "service.ready", let manager = reference.value {
+                    return try manager.acknowledgeReady(params.filter { $0.key != "expectedInstanceId" }, defaultOwner: operation.serviceOwner, operation: operation)
+                }
                 guard method == "api.describe" else { throw Failure(message: "Unexpected manager fixture request") }
                 return .object(["identityGuards": .bool(true), "guards": .array([.string("expectedInstanceId")])])
             }, publish: { fields, _, commit in
                 if rejectPublication { throw Failure(message: "Rejected publication") }
                 commit(); states.append(fields["state"]!.string!)
             }, retireOwned: { _ in let confirmed = confirmCleanup; return Task { confirmed } })
+        reference.value = manager
         defer { manager.close() }
-        let operation = WorkspaceOperationContext(origin: .administrative)
+        let operation = WorkspaceOperationContext(origin: .plugin(id: "trusted", instance: "page", view: "view"))
         do { _ = try manager.start("managed", operation: operation); throw Failure(message: "Preflight did not reject") }
         catch let error as Failure { try require(error.message == "Rejected publication", "Wrong preflight failure") }
         try require(try manager.status("managed").object?["state"] == .string("stopped"), "Failed publication changed service state")
         rejectPublication = false
         let first = try manager.start("managed", operation: operation)
         try require(first.object?["generation"] == manager.start("managed", operation: operation).object?["generation"], "Duplicate start launched a successor")
+        let selector: [String: JSONValue] = ["version": .integer(1), "serviceId": first.object!["serviceId"]!, "generation": first.object!["generation"]!]
+        _ = try manager.acknowledgeReady(selector, defaultOwner: nil, operation: operation)
+        var stale = selector; stale["generation"] = .string("stale")
+        do { _ = try manager.acknowledgeReady(stale, defaultOwner: nil, operation: operation); throw Failure(message: "Stale explicit generation acknowledged") }
+        catch let error as RPCFailure { try require(error.code == APIError.serviceSessionUnavailable, "Wrong stale readiness error") }
         try await wait { (try? manager.status("managed").object?["state"]) == .string("ready") }
         try require(manager.recipients.count == 1, "Live service missing settings recipient")
         let stopped = try await manager.stop("managed", operation: operation)

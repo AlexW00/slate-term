@@ -22,7 +22,6 @@ This matrix describes that historical checkpoint. Current incremental delivery i
 | Rename pane | Editable native header | No public user-title setter | Page plugins can supply their own automatic title via `workspace.setTitle`; manual user names take priority. The model has `setManualTitle`. |
 | Close/focus pane | Header/menu/directional navigation | `panes close/focus`, `focus.*` | Supported; terminal/session identity and destructive-close rules still apply. |
 | Create a full-height left panel at 25% | No dedicated workspace-sidebar operation | None | A leaf split is not a split of the whole existing layout. See below. |
-| Hide/show a pane without terminating its contents | No general operation | None | Current close removes the pane and destroys its live content. No detached/hidden-pane lifetime model. |
 
 ## The left-panel example
 
@@ -33,7 +32,6 @@ A generic root-split operation could wrap the existing layout tree with a new pa
 - **Target:** a specific leaf versus the tab's root layout.
 - **Fraction:** fraction of the new pane versus fraction of the first child; left/right and up/down must be consistent. Exclude the divider from available space.
 - **Creation:** commit type and initial fraction atomically, so callers do not have to create a terminal, destroy it, then resize.
-- **Hide vs. close:** preserving a live terminal/widget while hidden is a separate ownership/lifetime change. Do not approximate it with a zero-width split.
 - **Concurrency:** a split-tree path becomes stale when topology changes. Mutation APIs need a layout revision/precondition, or stable split identity, rather than silently acting on a new node at the old path.
 - **Focus/ownership:** a plugin should retain its pane ID and state per tab, not infer ownership from titles or restore a stale full-layout snapshot.
 
@@ -45,7 +43,9 @@ These names are proposals, not implemented commands.
 2. **Movement and resizing parity:** expose existing pane-move and divider-resize primitives through host commands and typed CLI wrappers. Define geometry/minimum-size and zoom behavior consistently with native UI. Reject stale targets atomically; preserve live terminal/web view identity on moves.
 3. **Tab-group parity:** public reorder, detach and move-to-group operations using existing group/tab IDs. Provide index validation and well-defined focus behavior; avoid APIs keyed by window titles.
 4. **Manual title parity:** a small user-title setter/clearer, distinct from a plugin's automatic document title.
-5. **Only then consider:** session-preserving hidden panes and OS-window frame/display controls. These require lifecycle/persistence policy, not just another RPC branch.
+5. **Only then consider:** OS-window frame/display controls, under a separately approved geometry/persistence contract.
+
+The separate hidden-pane proposal has been canceled by the user. Existing `pane.zoom` already provides pane maximize/restore without introducing another membership/lifetime system.
 
 A minimal validation plan for each addition: model invariants and rollback tests; CLI schema/routing/error tests; real native geometry and content-identity checks; focus/zoom/close-safety regressions; and concurrency/stale-target checks. Do not expose existing `debug.*` methods as a shortcut to a supported API.
 

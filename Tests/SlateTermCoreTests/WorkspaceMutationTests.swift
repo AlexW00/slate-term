@@ -98,7 +98,7 @@ import Testing
     let data = Data(#"{"id":"split.right","title":"Split Right","key":"d","shift":false,"alt":false}"#.utf8)
     let command = try JSONDecoder().decode(WorkspaceCommand.self, from: data)
     #expect(command.control == false)
-    #expect(command.contract.pluginAccessible)
+    #expect(!command.contract.workspaceIndependent)
     let detach = try #require(CommandRegistry.commands.first { $0.id == "tab.detachCurrent" })
     #expect(detach.control && detach.key == "n" && !detach.shift && !detach.alt)
     #expect(try JSONDecoder().decode(WorkspaceCommand.self, from: JSONEncoder().encode(detach)).control)
@@ -125,9 +125,8 @@ import Testing
     let pair = workspace
     #expect(throws: (any Error).self) { try CommandRegistry.execute("pane.title.set", params: ["pane": .string("p1"), "tab": .string(other.description), "title": .string("wrong owner")], workspace: &workspace) }
     #expect(workspace == pair)
-    #expect(CommandContract.forCommand("pane.split").pluginAccessible)
+    #expect(CommandContract.forCommand("pane.split").required.contains("expectedLayoutRevision"))
     #expect(CommandContract.forCommand("pane.split").requiresArguments)
-    #expect(CommandContract.forCommand("tab.detachCurrent").pluginAccessible == false)
     #expect(CommandContract.forCommand("tab.detachCurrent").workspaceIndependent == false)
 }
 

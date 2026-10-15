@@ -24,9 +24,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         cliPath: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/slate-term").path, operations: operations,
         registrations: { [weak self] in self?.pluginCatalog.registrations ?? [] },
         settings: { [weak self] id in self?.settings.current.plugins[id] ?? [:] },
-        request: { [weak self] method, params, operation in
+        request: { [weak self] method, params, metadata, caller in
             guard let self else { throw CancellationError() }
-            return try await self.callService(method, params: params, operation: operation)
+            return try await self.callAsync(method, params: params, metadata: metadata, caller: caller)
         }, publish: { [weak self] fields, operation, commit in
             guard let self else { throw CancellationError() }
             var payload = fields
@@ -385,19 +385,32 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }
     }
 
-    func runServiceCommand(_ id: String, params: [String: JSONValue], operation: WorkspaceOperationContext) async throws -> JSONValue {
-        // Services have no implicit active-pane target. Explicit supplied targets still freeze normally.
-        let invoke = try preparePluginCommand(id, params: params, resolveWorkspace: params["pane"] != nil || params["tab"] != nil, operation: operation)
-        return try await invoke()
+    func callAsync(_ method: String, params: [String: JSONValue], operation suppliedOperation: WorkspaceOperationContext? = nil,
+                   metadata: RPCMetadata? = nil, caller: AutomationCaller? = nil) async throws -> JSONValue {
+        do {
+            return try await dispatchAPI(method, params: params, operation: suppliedOperation, metadata: metadata, caller: caller)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            if let contract = AutomationMethod(rawValue: method), contract == .pluginSettingsGet || contract == .pluginSettingsPatch {
+                throw pluginSettingsFailure(error)
+            }
+            throw error
+        }
     }
 
-    private func callAsync(_ method: String, params: [String: JSONValue], operation suppliedOperation: WorkspaceOperationContext? = nil,
-                           metadata: RPCMetadata? = nil) async throws -> JSONValue {
+    private func dispatchAPI(_ method: String, params: [String: JSONValue], operation suppliedOperation: WorkspaceOperationContext?,
+                             metadata: RPCMetadata?, caller: AutomationCaller?) async throws -> JSONValue {
+        let contract = AutomationMethod(rawValue: method)
+        guard contract != nil || (integration && method.hasPrefix("debug.")) else {
+            throw RPCFailure(code: -32601, message: "Unknown method: \(method)")
+        }
         guard !reconciling, !settlingNativeLayouts else { throw RPCFailure(code: APIError.conflict, message: "Workspace presentation is being reconciled") }
+        try caller?.validate()
         try synchronizeNativeGroups()
         drainNativeLayouts()
         try settleDividerBeforeMutation(method)
-        var params = params
+        var params = contract?.resolving(params, defaults: caller?.defaults ?? .init()) ?? params
         if let reference = params.removeValue(forKey: "contextPane") {
             guard params["pane"] == nil, params["tab"] == nil else { throw RPCFailure(code: -32602, message: "Context anchor cannot be combined with a target") }
             let pane = try targetPaneID(["pane": reference])
@@ -406,12 +419,15 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         try Task.checkCancellation()
         try suppliedOperation?.validateCaller()
         try validateAPIGuards(params, method: method)
-        let operation = try suppliedOperation ?? operations.admit(method, metadata: metadata, origin: .administrative, audience: operations.administrativeAudience)
-        if Self.serviceControlMethods.contains(method) {
-            switch operation.origin {
-            case .native, .administrative: break
-            default: throw RPCFailure(code: APIError.forbidden, message: "Service control is administrative-only")
-            }
+        let client = caller ?? AutomationCaller(origin: .administrative, audience: operations.administrativeAudience)
+        let operation = try suppliedOperation ?? client.admit(method, metadata: metadata, through: operations)
+        if let contract, contract.family == .contextual {
+            return try await callContextualAPI(contract, params: params, operation: operation, caller: caller)
+        }
+        if contract == .serviceReady {
+            return try backgroundServices.acknowledgeReady(withoutAPIGuards(params), defaultOwner: operation.serviceOwner, operation: operation)
+        }
+        if contract?.family == .services {
             guard Set(params.keys).isSubset(of: ["id", "expectedInstanceId"]) else {
                 throw RPCFailure(code: -32602, message: "Service controls accept only id and expectedInstanceId")
             }
@@ -431,25 +447,42 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             let invoke = try preparePluginCommand(id, params: params, operation: operation)
             return try await invoke()
         }
-        if method.hasPrefix("terminal.") {
+        if contract?.family == .terminal {
             let pane = try terminalPane(params)
             var input = withoutAPIGuards(params)
             if input["sessionId"] == nil { input["sessionId"] = params["expectedAnchorSessionId"] }
             return try await terminalControl.call(String(method.dropFirst("terminal.".count)), pane: pane, params: input, validateCaller: operation.validateCaller)
         }
-        if method.hasPrefix("events.") {
+        if contract?.family == .events {
             try synchronizeNativeGroups()
             params = withoutAPIGuards(params)
             switch method {
             case "events.head":
                 guard params.isEmpty else { throw RPCFailure(code: -32602, message: "events.head takes no parameters") }
                 return events.head
-            case "events.poll": return try await events.poll(params, audience: operations.administrativeAudience, validateCaller: operation.validateCaller)
-            case "events.emit": return try events.emit(params, source: .client, operation: operation, knownInstances: Set(pluginInstances.all.map(\.id)))
+            case "events.poll":
+                return try await events.poll(params, audience: caller?.audience ?? operations.administrativeAudience,
+                    boundTab: caller?.defaults.scope == "global" ? nil : caller?.defaults.tab, validateCaller: operation.validateCaller)
+            case "events.emit":
+                let source: EventSource
+                switch operation.origin {
+                case .plugin(let id, let instance, _): source = .plugin(type: id, instanceId: instance)
+                case .service(let owner): source = .service(pluginID: owner.pluginID, recipient: try ServiceEventRecipient(serviceID: owner.serviceID, generation: owner.generation))
+                default: source = .client
+                }
+                var eventParams = params
+                let explicitTarget = params["pane"] != nil || params["tab"] != nil
+                if params["pane"] != nil {
+                    let pane = try targetPaneID(params)
+                    eventParams["tab"] = .string(try workspace.resolvedTab(pane: pane).id.description)
+                } else if params["tab"] != nil { _ = try targetTab(params) }
+                return try events.emit(eventParams, source: source, operation: operation,
+                    sourceTab: explicitTarget ? nil : caller?.defaults.tab, sourcePane: explicitTarget ? nil : caller?.defaults.pane,
+                    knownInstances: Set(pluginInstances.all.map(\.id)), knownServices: Set(backgroundServices.recipients.map(\.target)))
             default: throw RPCFailure(code: -32601, message: "Unknown event method: \(method)")
             }
         }
-        if method == "plugins.restart" {
+        if contract?.family == .pluginRuntime {
             guard let type = params["id"]?.string else { throw RPCFailure(code: -32602, message: "Plugin id is required") }
             let instances = pluginInstances.all.filter { $0.registration.id == type }
             guard !instances.isEmpty else { throw RPCFailure(code: -32602, message: "Plugin has no active instances") }
@@ -462,8 +495,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             guard let pane = leaves[try targetPaneID(params)] as? PluginPane, let source = params["script"]?.string else { throw RPCFailure(code: -32602, message: "Plugin pane and script are required") }
             return try await pane.evaluateForTesting(source)
         }
-        if method.hasPrefix("web.") { return try await callWeb(method, params: params, operation: operation) }
-        guard method.hasPrefix("browser.") else { return try call(method, params: params, operation: operation) }
+        if contract?.family == .web { return try await callWeb(method, params: params, operation: operation) }
+        guard contract?.family == .browser else { return try call(method, params: params, operation: operation) }
         let pane = try targetPaneID(params)
         guard let browser = leaves[pane] as? BrowserPane else { throw RPCFailure(code: -32602, message: "Target pane is not a browser") }
         params["pane"] = .string(pane.description)
@@ -500,31 +533,31 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         let operation = suppliedOperation ?? WorkspaceOperationContext(origin: .native)
         try operation.validateCaller()
         try validateAPIGuards(params, method: method)
-        switch method {
-        case "api.describe": return try describeAPI()
-        case "workspace.snapshot": return try workspaceSnapshot(params)
-        case "context.inspect": return try inspectContext(params)
-        case "pane.inspect": return try inspectPane(targetPaneID(params))
-        case "config.patch": return try patchConfiguration(params, operation: operation)
-        case "plugins.settings.get": return try pluginSettingsInfo(params)
-        case "plugins.settings.patch": return try patchPluginSettings(params, operation: operation)
-        case "palette.list": return try listPalettes()
-        case "palette.import": return try importPalette(params)
-        case "version": return .object(["cliVersion": .string("0.1.0-dev"), "appVersion": .string("0.1.0-dev"), "protocolVersion": .integer(1)])
-        case "window.list": return try nativeWindowsInfo(params)
-        case "window.get":
+        guard let contract = AutomationMethod(rawValue: method) else { return try callDebug(method, params: params, operation: operation) }
+        switch contract {
+        case .describe: return try describeAPI()
+        case .workspaceSnapshot: return try workspaceSnapshot(params)
+        case .paneInspect: return try inspectPane(targetPaneID(params))
+        case .configPatch: return try patchConfiguration(params, operation: operation)
+        case .pluginSettingsGet: return try pluginSettingsInfo(params)
+        case .pluginSettingsPatch: return try patchPluginSettings(params, operation: operation)
+        case .paletteList: return try listPalettes()
+        case .paletteImport: return try importPalette(params)
+        case .version: return .object(["cliVersion": .string("0.1.0-dev"), "appVersion": .string("0.1.0-dev"), "protocolVersion": .integer(1)])
+        case .windowList: return try nativeWindowsInfo(params)
+        case .windowGet:
             let target = try targetNativeWindow(params)
             return nativeWindowInfo(target.window, tab: target.tab)
-        case "tabs.list": return try .encoding(workspace.tabs)
-        case "panes.list": return try .encoding(workspace.panes)
-        case "plugins.list": return try .encoding(pluginCatalog.registrations)
-        case "plugins.status":
+        case .tabsList: return try .encoding(workspace.tabs)
+        case .panesList: return try .encoding(workspace.panes)
+        case .pluginsList: return try .encoding(pluginCatalog.registrations)
+        case .pluginsStatus:
             return .array((pluginInstances.all.map(\.info) + pluginCommands.all).filter { params["id"]?.string == nil || $0.object?["type"] == params["id"] })
-        case "plugins.logs":
+        case .pluginsLogs:
             if let id = params["instanceId"]?.string, let logs = pluginCommands.logs(instanceID: id) { return .object(["text": .string(logs)]) }
             guard let instance = pluginInstances.all.first(where: { $0.id == params["instanceId"]?.string }) else { throw RPCFailure(code: -32602, message: "An active instanceId is required") }
             return .object(["text": .string(instance.logs)])
-        case "plugins.register":
+        case .pluginsRegister:
             guard let manifest = params["manifest"] else { throw RPCFailure(code: -32602, message: "manifest is required") }
             let registration = try PluginRegistration.parse(JSONEncoder().encode(manifest))
             guard !workspace.panes.contains(where: { $0.type == .registered(registration.id) }) else { throw RPCFailure(code: -32010, message: "Close or change this type's panes before replacing its registration") }
@@ -541,7 +574,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             refreshSettings()
             events.publishHost("host.plugins.changed", payload: .object(["type": .string(registration.id), "registered": .bool(true)]), lineage: operation.lineage)
             return try .encoding(registration)
-        case "plugins.unregister":
+        case .pluginsUnregister:
             guard let id = params["id"]?.string, pluginCatalog.registrations.contains(where: { $0.id == id }) else { throw RPCFailure(code: -32602, message: "A registered plugin id is required") }
             let using = workspace.panes.filter { $0.type == .registered(id) }.map(\.id)
             guard using.isEmpty || params["force"] == .bool(true) else { throw RPCFailure(code: -32010, message: "Plugin is in use; pass --force to close its panes") }
@@ -568,8 +601,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             buildMenus()
             refreshSettings()
             return operationResult(.object([:]), transition: transition, operation: operation, workspacePersistence: persistence, committedExternalEffect: true)
-        case "context.get": return try context(params)
-        case "shell.runInput":
+        case .contextGet: return try context(params)
+        case .shellRunInput:
             let pane = try targetPaneID(params)
             guard let session = shellSessions[pane], let token = params["token"]?.string,
                   case .integer(let pid) = params["pid"], case .bool(let empty) = params["emptyBuffer"] else {
@@ -577,7 +610,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             }
             try session.authenticate(token: token, pid: pid)
             return .string(try terminalControl.claimInput(pane: pane, sessionID: session.instanceID, emptyBuffer: empty))
-        case "shell.update":
+        case .shellUpdate:
             let pane = try targetPaneID(params)
             guard terminals[pane] != nil, var session = shellSessions[pane], let token = params["token"]?.string else {
                 throw RPCFailure(code: -32040, message: "Shell session is unavailable")
@@ -590,17 +623,17 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             refreshTerminalTitles()
             publishTerminalContext(pane, reason: "shell")
             return .object(["sequence": .integer(report.sequence)])
-        case "workspace.get": return try JSONDecoder().decode(JSONValue.self, from: workspace.encoded())
-        case "layout.get": return try .encoding(targetTab(params).layout)
-        case "command.list": return try .encoding(availableCommands)
-        case "config.get":
+        case .workspaceGet: return try JSONDecoder().decode(JSONValue.self, from: workspace.encoded())
+        case .layoutGet: return try .encoding(targetTab(params).layout)
+        case .commandList: return try .encoding(availableCommands)
+        case .configGet:
             var status = try settings.status().object!
             status["unavailableCommands"] = .array(unavailableCommands.map(JSONValue.string))
             status.merge(configurationRevisionInfo()) { _, new in new }
             return .object(status)
-        case "config.validate": return .object(["valid": .bool(true), "configuration": try .encoding(settings.validate())])
-        case "config.reload": return try reloadConfiguration(operation: operation)
-        case "command.run":
+        case .configValidate: return .object(["valid": .bool(true), "configuration": try .encoding(settings.validate())])
+        case .configReload: return try reloadConfiguration(operation: operation)
+        case .commandRun:
             guard let id = params["id"]?.string else { throw RPCFailure(code: -32602, message: "Command id is required") }
             if let result = try runSettingsCommand(id, params: params, operation: operation) { return result }
             if id == "config.reload" { return try reloadConfiguration(operation: operation) }
@@ -653,11 +686,24 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 persistence = persistWorkspace()
             } else { persistence = try reconcile(next, transition: transition, operation: operation) }
             return operationResult(mutationResponse(id, result: result), transition: transition, operation: operation, workspacePersistence: persistence)
-        case "panes.send":
+        case .panesSend:
             guard let text = params["text"]?.string else { throw RPCFailure(code: -32602, message: "text is required") }
             try targetTerminal(params).send(text)
             return .object([:])
-        case "panes.capture": return try .encoding(TerminalOutput(targetTerminal(params).capture()))
+        case .panesCapture: return try .encoding(TerminalOutput(targetTerminal(params).capture()))
+        case .contextInspect, .settingsGet, .storageGet, .storageSet, .storageDelete, .paneTitle,
+             .terminalSend, .terminalKey, .terminalCapture, .terminalRun, .terminalWait,
+             .eventsHead, .eventsPoll, .eventsEmit, .pluginsRestart,
+             .webGet, .webSnapshot, .webClick, .webFill, .webSelect, .webScroll, .webWait, .webScreenshot,
+             .browserGet, .browserNavigate, .browserSnapshot, .browserClick, .browserFill, .browserSelect,
+             .browserScroll, .browserWait, .browserEval, .browserScreenshot,
+             .serviceStart, .serviceStop, .serviceList, .serviceStatus, .serviceLogs, .serviceReady:
+            throw RPCFailure(code: -32603, message: "This API operation requires the shared asynchronous entry")
+        }
+    }
+
+    private func callDebug(_ method: String, params: [String: JSONValue], operation: WorkspaceOperationContext) throws -> JSONValue {
+        switch method {
         case "debug.inspect" where integration: return inspect()
         case "debug.rejectNextWorkspacePublication" where integration:
             guard params.isEmpty else { throw RPCFailure(code: -32602, message: "This fixture takes no parameters") }
@@ -976,87 +1022,94 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }
     }
 
+    private func callContextualAPI(_ method: AutomationMethod, params: [String: JSONValue],
+                                   operation: WorkspaceOperationContext, caller: AutomationCaller?) async throws -> JSONValue {
+        let payload = withoutAPIGuards(params)
+        func keys(_ allowed: Set<String>) throws {
+            guard Set(payload.keys).isSubset(of: allowed) else { throw RPCFailure(code: -32602, message: "Unknown \(method.rawValue) parameter") }
+        }
+        switch method {
+        case .contextInspect:
+            let pane = caller?.defaults.pane
+            let view = pane.flatMap { leaves[$0] as? PluginPane }
+            return try inspectContext(params, caller: pane, view: view)
+        case .settingsGet:
+            try keys(["id"])
+            guard let id = payload["id"]?.string, pluginCatalog.registrations.contains(where: { $0.id == id }) else {
+                throw RPCFailure(code: -32602, message: "id must identify a registered plugin")
+            }
+            return .object(settings.current.plugins[id] ?? [:])
+        case .storageGet, .storageSet, .storageDelete:
+            try keys(["instanceId", "pane", "tab", "key", "value"])
+            let instance: PluginInstance
+            if payload["pane"] != nil {
+                guard let view = leaves[try targetPaneID(payload)] as? PluginPane else {
+                    throw RPCFailure(code: APIError.unavailable, message: "Storage requires a registered-plugin pane")
+                }
+                instance = view.instance
+                if let expected = payload["instanceId"], expected != .string(instance.id) {
+                    throw RPCFailure(code: APIError.conflict, message: "Plugin instance changed")
+                }
+            } else {
+                guard let id = payload["instanceId"]?.string, let found = pluginInstances.all.first(where: { $0.id == id }) else {
+                    throw RPCFailure(code: -32602, message: "instanceId or a registered-plugin pane is required")
+                }
+                instance = found
+            }
+            if let tab = payload["tab"], let owner = instance.tab, tab != .string(owner.description) {
+                throw RPCFailure(code: -32602, message: "Plugin instance does not belong to the requested tab")
+            }
+            try operation.validateCaller()
+            if method == .storageGet {
+                if let key = payload["key"], key.string == nil { throw RPCFailure(code: -32602, message: "Storage key must be a string") }
+                return instance.storageGet(payload["key"]?.string)
+            }
+            guard let key = payload["key"]?.string, method == .storageDelete || payload["value"] != nil else {
+                throw RPCFailure(code: -32602, message: "Storage key and value are required")
+            }
+            try instance.storageSet(key, value: method == .storageDelete ? nil : payload["value"], lineage: operation.lineage)
+            return .null
+        case .paneTitle:
+            try keys(["pane", "tab", "title"])
+            let pane = try targetPaneID(params)
+            guard let view = leaves[pane] as? PluginPane else { throw RPCFailure(code: APIError.unavailable, message: "Automatic titles require a registered-plugin pane") }
+            guard let title = payload["title"], title == .null || title.string != nil else { throw RPCFailure(code: -32602, message: "title must be a string or null") }
+            let expected = try WebIdentity.expected(in: params)
+            let ownView: Bool
+            if case .plugin(_, _, let viewID) = operation.origin { ownView = viewID == view.viewID }
+            else { ownView = false }
+            guard ownView || expected != nil else {
+                throw RPCFailure(code: -32602, message: "Cross-view titles require expectedViewId and expectedDocumentId")
+            }
+            if let expected {
+                _ = try await view.automation.inspect(expected: expected, beforeSubmission: operation.validateCaller)
+                guard leaves[pane] === view, view.automation.ready, view.automation.documentID == expected.documentID else {
+                    throw RPCFailure(code: APIError.conflict, message: "Title target document changed")
+                }
+            }
+            try Task.checkCancellation()
+            try operation.validateCaller()
+            try validateAPIGuards(params, method: method.rawValue)
+            try view.setPaneTitle(title.string)
+            return .null
+        default: throw RPCFailure(code: -32603, message: "Invalid contextual API route")
+        }
+    }
+
     private func callFromPlugin(_ method: String, params: [String: JSONValue], metadata: RPCMetadata?, pane: PaneID, view: PluginPane) async throws -> JSONValue {
         guard !reconciling, !settlingNativeLayouts else { throw RPCFailure(code: APIError.conflict, message: "Workspace presentation is being reconciled") }
         guard leaves[pane] === view, let tab = workspace.tabs.first(where: { $0.layout.paneIDs.contains(pane) }) else { throw RPCFailure(code: -32022, message: "Plugin instance was replaced") }
-        guard apiMethods(plugin: true).contains(method) else { throw RPCFailure(code: -32601, message: "Method is not exposed to plugins: \(method)") }
-        if method == "command.run" {
-            guard let id = params["id"]?.string, CommandContract.forCommand(id).pluginAccessible else {
-                throw RPCFailure(code: APIError.forbidden, message: "This administrative command is not exposed to plugin pages")
-            }
-        }
-        var scoped = params
-        if scoped["pane"] == nil && scoped["tab"] == nil {
-            scoped["pane"] = .string(pane.description)
-            scoped["tab"] = .string(tab.id.description)
-        }
-        let inheritsScope = ["context.get", "workspace.snapshot"].contains(method) || method.hasPrefix("terminal.")
-            || (method == "command.run" && params["id"]?.string?.hasPrefix("plugin.") == true)
-        if inheritsScope, scoped["scope"] == nil { scoped["scope"] = .string(view.instance.registration.scope.rawValue) }
-        try synchronizeNativeGroups()
-        drainNativeLayouts()
-        try settleDividerBeforeMutation(method)
-        if method.hasPrefix("plugins.settings.") {
-            guard params["id"] == nil || params["id"] == .string(view.instance.registration.id) else { throw RPCFailure(code: APIError.forbidden, message: "Plugin settings are bound to the caller's namespace") }
-            scoped["id"] = .string(view.instance.registration.id)
-        }
-        if ["pane.title", "settings.get", "plugins.settings.get", "plugins.settings.patch", "storage.get", "storage.set", "storage.delete"].contains(method) {
-            guard params["pane"] == nil || params["pane"] == .string(pane.description),
-                  params["tab"] == nil || params["tab"] == .string(tab.id.description) else {
-                throw RPCFailure(code: -32602, message: "This operation is bound to the calling plugin view/namespace")
-            }
-        }
         let audience = try view.causationAudience(epoch: operations.epoch)
-        let operation = try operations.admit(method, metadata: metadata,
+        let caller = AutomationCaller(
             origin: .plugin(id: view.instance.registration.id, instance: view.instance.id, view: view.viewID), audience: audience,
-            validateCaller: { [weak self, weak view] in
+            defaults: .init(pane: pane, tab: tab.id, pluginID: view.instance.registration.id,
+                            instanceID: view.instance.id, scope: view.instance.registration.scope.rawValue),
+            validate: { [weak self, weak view] in
                 guard let self, let view, self.leaves[pane] === view,
                       try view.causationAudience(epoch: self.operations.epoch) == audience else { throw CancellationError() }
                 try Task.checkCancellation()
             })
-        if method.hasPrefix("plugins.settings.") {
-            do { return try call(method, params: scoped, operation: operation) }
-            catch { throw pluginSettingsFailure(error) }
-        }
-        try validateAPIGuards(scoped, method: method)
-        let payload = withoutAPIGuards(params)
-        switch method {
-        case "context.get": return try context(scoped)
-        case "api.describe": return try describeAPI(plugin: true)
-        case "workspace.snapshot": return try workspaceSnapshot(scoped)
-        case "context.inspect": return try inspectContext(scoped, caller: pane, view: view)
-        case "pane.inspect": return try call(method, params: scoped, operation: operation)
-        case "events.head":
-            guard payload.isEmpty else { throw RPCFailure(code: -32602, message: "events.head takes no parameters") }
-            return events.head
-        case "events.poll":
-            // Logical pane/tab instances follow their owning tab's active-terminal
-            // context. Global instances observe every tab; callers may narrow filters.
-            return try await events.poll(payload, audience: audience, boundTab: view.instance.tab,
-                                         validateCaller: operation.validateCaller)
-        case "events.emit":
-            return try events.emit(payload, source: .plugin(type: view.instance.registration.id, instanceId: view.instance.id), operation: operation,
-                sourceTab: tab.id, sourcePane: pane, knownInstances: Set(pluginInstances.all.map(\.id)))
-        case "terminal.send", "terminal.key", "terminal.capture", "terminal.run", "terminal.wait",
-             "web.get", "web.snapshot", "web.click", "web.fill", "web.select", "web.scroll", "web.wait":
-            return try await callAsync(method, params: scoped, operation: operation)
-        case "command.run": return try await callAsync(method, params: scoped, operation: operation)
-        case "command.list": return try .encoding(availableCommands.filter { $0.contract.pluginAccessible })
-        case "workspace.get", "layout.get", "panes.list", "tabs.list": return try call(method, params: scoped, operation: operation)
-        case "settings.get": return .object(settings.current.plugins[view.instance.registration.id] ?? [:])
-        case "pane.title":
-            guard let title = params["title"], title == .null || title.string != nil else { throw RPCFailure(code: -32602, message: "title must be a string or null") }
-            try view.setPaneTitle(title.string)
-            return .null
-        case "storage.get":
-            if let value = params["key"], value.string == nil { throw RPCFailure(code: -32602, message: "Storage key must be a string") }
-            return view.instance.storageGet(params["key"]?.string)
-        case "storage.set", "storage.delete":
-            guard let key = params["key"]?.string, method == "storage.delete" || params["value"] != nil else { throw RPCFailure(code: -32602, message: "Storage key and value are required") }
-            try view.instance.storageSet(key, value: method == "storage.delete" ? nil : params["value"], lineage: operation.lineage)
-            return .null
-        default: throw RPCFailure(code: -32601, message: "Method is not exposed to plugins: \(method)")
-        }
+        return try await callAsync(method, params: params, metadata: metadata, caller: caller)
     }
 
     private func publishTerminalContext(_ pane: PaneID, reason: String) {

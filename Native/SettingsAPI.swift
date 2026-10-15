@@ -75,7 +75,8 @@ extension WorkspaceHost {
         default: message = "Plugin settings request rejected; check the patch and source configuration"
         }
         // A TOML diagnostic or underlying apply failure may quote an unrelated
-        // namespace's source. Page errors retain typed state, never those diagnostics.
+        // namespace's source. Namespace API errors retain typed state for every
+        // client, never those diagnostics.
         let safeKeys: Set<String> = ["operationId", "sourceRevision", "appliedRevision", "sourceValid", "appliedMatchesSource", "outcome", "persisted"]
         let data = failure?.data?.object.map { JSONValue.object($0.filter { safeKeys.contains($0.key) }) }
         return RPCFailure(code: code, message: message, data: data)

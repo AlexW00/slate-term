@@ -8,6 +8,7 @@ import SlateTermIPC
 struct ServiceGenerationTest {
     struct Failure: Error { let message: String }
     final class GenerationReference { weak var value: BackgroundServiceGeneration? }
+    final class ManagerReference { weak var value: BackgroundServices? }
     final class Probe {
         var current = true
         var ready = 0
@@ -60,10 +61,16 @@ struct ServiceGenerationTest {
                 "readyTimeoutSeconds": timeout, "restartLimit": 0,
                 "environment": ["TEST_ENDPOINT": endpointFile.path, "SLATE_TERM_PANE_ID": "poison", "SLATE_TERM_TAB_ID": "poison"]
             ]))
-            return try BackgroundServiceGeneration(credentials: credentials, cliPath: cli, spec: spec,
-                isCurrent: { probe.current }, operations: control, request: { method, _, operation in
-                    try require(operation.serviceOwner == identity, "Endpoint did not stamp authenticated ownership")
-                    if method == "events.poll" {
+            let reference = GenerationReference()
+            let generation = try BackgroundServiceGeneration(credentials: credentials, cliPath: cli, spec: spec,
+                isCurrent: { probe.current }, operations: control, request: { method, params, metadata, caller in
+                    let operation = try caller.admit(method, metadata: metadata, through: control)
+                    try require(operation.serviceOwner == identity, "Endpoint did not stamp generation ownership")
+                    if method == "service.ready" {
+                        guard params["version"] == .integer(1), let generation = reference.value else { throw Failure(message: "Invalid fixture ready request") }
+                        return try generation.acknowledgeReady(operation: operation)
+                    }
+                    if method == "events.poll", params["waitMilliseconds"] != .integer(0) {
                         probe.polling = true
                         defer { probe.polling = false }
                         try await Task.sleep(for: .seconds(10))
@@ -74,6 +81,8 @@ struct ServiceGenerationTest {
                     probe.retired += 1
                     return Task { probe.cleanupSucceeds }
                 }, failed: { probe.failures.append($0) })
+            reference.value = generation
+            return generation
         }
         let probe = Probe()
         let generation = try make(probe)
@@ -83,10 +92,9 @@ struct ServiceGenerationTest {
         let path = try String(contentsOf: endpointFile, encoding: .utf8)
         let connection = PluginControlConnection(socketPath: path, appInstanceID: identity.appInstanceID, cliPath: cli, service: credentials)
         _ = try await call(connection, "workspace.snapshot")
-        do { _ = try await call(connection, "events.poll", ["waitMilliseconds": .integer(0)]); throw Failure(message: "Pre-ready poll admitted") }
-        catch let error as RPCFailure { try require(error.code == APIError.unavailable, "Wrong pre-ready error") }
-        do { _ = try generation.commandConnection(); throw Failure(message: "Pre-ready command delegation admitted") }
-        catch is RPCFailure {}
+        _ = try await call(connection, "events.poll", ["waitMilliseconds": .integer(0)])
+        _ = try await call(connection, "config.get")
+        try require(try generation.commandConnection().service?.identity == identity, "Starting generation could not delegate with its owner")
         // Other views can exhaust this plugin's budget without blocking readiness/recovery.
         for _ in 0..<20 { _ = try control.admit("command.run", metadata: nil, origin: .service(identity), audience: audience) }
         _ = try await call(connection, "service.ready", ["version": .integer(1), "expectedInstanceId": .string("app")])
@@ -138,7 +146,7 @@ struct ServiceGenerationTest {
         try require(closedProbe.retired == 1, "Close followed by stop duplicated ownership retirement")
         try await nestedCommands(cli: cli, directory: directory, credentials: credentials)
         try await managerLifecycle(cli: cli)
-        print("PASS window-free service generation: authenticated readiness, bootstrap/poll bounds, budget recovery, retirement, timeout/exit, honest cleanup and live A→CLI→B ownership")
+        print("PASS window-free service generation: lifecycle-bound readiness, pre-ready API access, poll bounds, budget recovery, retirement, timeout/exit, honest cleanup and live A→CLI→B ownership")
     }
 
     static func nestedCommands(cli: String, directory: URL, credentials: ServiceCredentials) async throws {
@@ -166,7 +174,12 @@ struct ServiceGenerationTest {
             try require(context.operation.serviceOwner == credentials.identity, "Nested command lost its service owner")
         }
         let generation = try BackgroundServiceGeneration(credentials: credentials, cliPath: cli, spec: spec,
-            isCurrent: { true }, operations: control, request: { method, params, operation in
+            isCurrent: { true }, operations: control, request: { method, params, metadata, caller in
+                let operation = try caller.admit(method, metadata: metadata, through: control)
+                if method == "service.ready" {
+                    guard params["version"] == .integer(1), let generation = reference.value else { throw Failure(message: "Invalid nested ready request") }
+                    return try generation.acknowledgeReady(operation: operation)
+                }
                 if let expected = params["expectedInstanceId"], expected != .string(credentials.identity.appInstanceID) {
                     throw RPCFailure(code: APIError.conflict, message: "Fixture app changed")
                 }

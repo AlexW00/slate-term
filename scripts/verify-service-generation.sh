@@ -14,7 +14,7 @@ swiftc -swift-version 5 -parse-as-library -g -emit-library -emit-module \
   -emit-module-path "$gate/SlateTermIPC.swiftmodule" -o "$gate/libSlateTermIPC.dylib"
 swiftc -swift-version 5 -default-isolation MainActor -parse-as-library -g \
   -I "$gate" -L "$gate" -lSlateTermCore -lSlateTermIPC -Xlinker -rpath -Xlinker "$gate" \
-  Native/WorkspaceOperationContext.swift Native/OperationControl.swift Native/PluginControlConnection.swift \
+  Native/WorkspaceOperationContext.swift Native/OperationControl.swift Native/AutomationCaller.swift Native/PluginControlConnection.swift \
   Native/PluginProcess.swift Native/PluginCommands.swift Native/BackgroundServiceGeneration.swift Native/BackgroundServices.swift Tests/ServiceGeneration/*.swift \
   -o "$gate/service-generation"
 python3 - "$gate/service-generation" "$cli" <<'PY'

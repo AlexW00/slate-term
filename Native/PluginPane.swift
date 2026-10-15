@@ -293,7 +293,8 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
         }
         let identity = JSONValue.object(["id": .string(instance.registration.id), "instanceId": .string(instance.id), "scope": .string(instance.registration.scope.rawValue), "viewId": .string(viewID), "paneId": .string(paneID.description)])
         let encodedIdentity = String(decoding: try! JSONEncoder().encode(identity), as: UTF8.self)
-        return "(()=>{\(guardOrigin)const plugin=Object.freeze(\(encodedIdentity));" + #"""
+        let encodedMethods = String(decoding: try! JSONEncoder().encode(AutomationMethod.publicMethods.map(\.rawValue)), as: UTF8.self)
+        return "(()=>{\(guardOrigin)const plugin=Object.freeze(\(encodedIdentity)),methodNames=Object.freeze(\(encodedMethods));" + #"""
         const send=window.postMessage.bind(window),pending=new Map();let sequence=0;
         const currentDocumentId=()=>{
           let identity;
@@ -327,8 +328,10 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
           signal?.addEventListener('abort',abort,{once:true});
           try{send({channel:'slate-request',documentId,id,method,params,...(cause===undefined?{}:{metadata:{version:1,cause}})},'*');}catch(error){cleanup();reject(error);}
         });
+        const methodsFor=prefix=>Object.freeze(Object.fromEntries(methodNames.filter(name=>name.startsWith(prefix)).map(name=>[name.slice(prefix.length),(params={},options={})=>call(name,params,options)])));
         const workspace={
-          plugin,call,
+          plugin,call,methods:methodNames,
+          rpc:Object.freeze(Object.fromEntries(methodNames.map(name=>[name,(params={},options={})=>call(name,params,options)]))),
           setTitle:(title,options={})=>call('pane.title',{title},options),
           context:(params={})=>call('context.get',params),
           self:()=>call('context.inspect'),
@@ -350,7 +353,9 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
           command:(id,params={},options={})=>call('command.run',{...params,id},options),
           settings:()=>call('settings.get'),
           pluginSettings:Object.freeze({get:()=>call('plugins.settings.get'),patch:(operations,expectedWriteRevision,options={})=>call('plugins.settings.patch',{operations,expectedWriteRevision},options)}),
-          web:Object.freeze(Object.fromEntries(['get','snapshot','click','fill','select','scroll','wait'].map(method=>[method,(params={},options={})=>call('web.'+method,params,options)]))),
+          web:methodsFor('web.'),
+          browser:methodsFor('browser.'),
+          services:methodsFor('plugins.service.'),
           terminal:Object.freeze({
             send:(text,params={},options={})=>call('terminal.send',{...params,text},options),
             capture:(params={})=>call('terminal.capture',params),

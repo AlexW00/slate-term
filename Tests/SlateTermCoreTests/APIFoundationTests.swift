@@ -141,13 +141,14 @@ private let inherited: [String: String] = ["SLATE_TERM_SOCKET": "/tmp/a", "SLATE
     #expect(throws: RPCFailure.self) { try APIGuards.supported(by: .object(modern)) }
 }
 
-@Test func commandExposureKeepsContributionsSeparateFromAdministration() throws {
-    #expect(CommandContract.forCommand("appearance.dark").pluginAccessible == false)
+@Test func commandContractsDescribeTargetsAndArgumentsWithoutClientTiers() throws {
     #expect(CommandContract.forCommand("appearance.set").requiresArguments)
     #expect(CommandContract.forCommand("appearance.dark").workspaceIndependent)
-    #expect(CommandContract.forCommand("plugin.service.start").pluginAccessible)
-    #expect(!CommandContract.forCommand("plugins.service.start").pluginAccessible)
-    #expect(CommandContract.forCommand("config.reload").pluginAccessible, "Preserve the explicitly documented legacy reload exception")
+    #expect(CommandContract.forCommand("plugin.service.start").additionalParameters)
+    #expect(!CommandContract.forCommand("plugin.service.start").workspaceIndependent)
+    #expect(CommandContract.forCommand("config.reload").workspaceIndependent)
+    let encoded = try JSONValue.encoding(CommandContract.forCommand("appearance.dark")).object!
+    #expect(encoded["pluginAccessible"] == nil)
 }
 
 @Test func rpcFailureDataIsAdditiveAndPreservesLegacyDecoding() throws {

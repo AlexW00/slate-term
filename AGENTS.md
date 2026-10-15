@@ -2,10 +2,10 @@
 
 ## Capability parity is part of completion
 
-- Implement behavior once in the authoritative model/host operation. Native controls, registry commands, CLI and approved plugin bridge adapters must reuse it, not fork its behavior.
+- Implement behavior once in the authoritative model/host operation. Trusted CLI, registered-plugin bridge and service clients use one public API catalog, validation and dispatch path; native controls and command helpers reuse its operations. Do not maintain separate capability allowlists.
 - For every new capability, explicitly decide native, command-picker/shortcut, CLI/socket and plugin exposure. Add discovery metadata, typed inputs/results/errors, documentation and parity tests in the same change. Reads and parameter-dependent operations need not be one-click picker actions.
-- Administrative methods must be denied at invocation, including indirect `command.run`, not merely hidden in menus. Reserve `plugin.<id>.<command>` for contributed commands; use `plugins.*` for host administration. Ordinary web pages/subframes never receive the plugin bridge.
-- Maintain an explicit exposure matrix. Intentional exclusions (filesystem writes, credentials, arbitrary eval, application administration) are policy, not accidental missing adapters. Do not claim full parity when an exclusion exists.
+- Registered plugins and native services are trusted controllers, not permission tiers. Preserve registered-origin/main-frame/document bridge binding: ordinary web pages/subframes never receive a bridge. Reserve `plugin.<id>.<command>` for contributed commands; use `plugins.*` for host management. Keep host-bound ownership, caller liveness and target guards regardless of client.
+- Public discovery and capabilities must agree across trusted clients. Differences are transport, caller context/defaults, cancellation and resource availability—not hidden privilege exclusions. Generate or contract-check client aliases against the shared catalog; keep shell/debug internals explicitly non-public for every client.
 
 ## Identity and consistency
 
@@ -18,7 +18,7 @@
 
 - Reuse the shared WebKit automation implementation, but preserve separate browser/plugin navigation, data-store and bridge privileges. Keep automation identities separate from bridge credentials. Never expose credentials or entire environments in inspection/events.
 - Commands, panel HTTP services and background services have distinct lifetimes. Bound concurrency, waits, logs, restarts and process ownership; cleanup on cancellation, replacement, unregister and shutdown.
-- Hiding a pane is not closing it. Hidden running resources count toward termination consent and resource limits. Never silently evict a live session or replay an old tree over newer layout changes.
+- Preserve existing pane zoom/maximize/restore behavior and ordinary visibility safeguards. The separate hidden-pane feature is canceled; do not add detached hidden membership or hide/show APIs. Never silently evict a live pane session.
 - Settings edits preserve unrelated supported TOML/comments and conflict with stale sources. All writers must understand grammar another writer emits. JSON null is not a TOML value; deletion must be explicit.
 
 ## Tests and verification

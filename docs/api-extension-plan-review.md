@@ -26,7 +26,7 @@ An independent read-only reviewer reviewed the initial proposal against producti
 - Actual routing/guard tests, exhaustive native/legacy mutation tracking and pagination recovery tests.
 - Configuration failure/conflict tests and plugin-table/array edits followed by native appearance edits.
 - Shared WebKit conformance, BFCache, replacement, origin and bridge-isolation tests.
-- Separate service protocol/security and hidden-pane lifetime reviews before those phases.
+- Separate service protocol/security review before that phase. The originally proposed hidden-pane phase was subsequently canceled by the user; no lifetime review or implementation is pending for it.
 - After implementation, targeted tests and the documented sequential full verification suite; no prior baseline test result certifies these proposed extensions.
 
 The reviewer made no edits and ran no builds/tests. Concurrent `docs/mockups/saved-layouts.html` and `docs/mockups/saved-layouts.md` work was excluded and preserved. No commit, push or implementation is part of this planning deliverable.

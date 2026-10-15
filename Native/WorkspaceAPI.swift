@@ -20,8 +20,8 @@ extension WorkspaceHost {
             return text
         }
         if params["expectedViewId"] != nil || params["expectedDocumentId"] != nil {
-            guard Self.webMethods.contains(method) || method == "web.screenshot" else {
-                throw RPCFailure(code: -32602, message: "Automation identity guards are only supported by web methods")
+            guard Self.webMethods.contains(method) || method == "pane.title" else {
+                throw RPCFailure(code: -32602, message: "Automation identity guards are supported by web methods and pane.title")
             }
             _ = try WebIdentity.expected(in: params)
             // The shared helper checks fresh native/DOM identity before submission;
@@ -62,28 +62,18 @@ extension WorkspaceHost {
         }
     }
 
-    func apiMethods(plugin: Bool) -> [String] {
-        let common = Self.webMethods + ["api.describe", "context.get", "context.inspect", "workspace.get", "workspace.snapshot", "layout.get",
-                      "tabs.list", "panes.list", "pane.inspect", "command.list", "command.run",
-                      "terminal.send", "terminal.key", "terminal.capture", "terminal.run", "terminal.wait",
-                      "events.head", "events.poll", "events.emit", "plugins.settings.get", "plugins.settings.patch"]
-        let administrative = ["web.screenshot", "version", "window.list", "window.get", "panes.send", "panes.capture", "config.get", "config.reload", "config.validate", "config.patch", "palette.list", "palette.import", "plugins.list", "plugins.register",
-                              "plugins.unregister", "plugins.status", "plugins.restart", "plugins.logs",
-                              "browser.get", "browser.navigate", "browser.snapshot", "browser.click", "browser.fill",
-                              "browser.select", "browser.scroll", "browser.wait", "browser.eval", "browser.screenshot"]
-        return (common + (plugin ? ["settings.get", "storage.get", "storage.set", "storage.delete", "pane.title"] : administrative + Self.serviceControlMethods)).sorted()
-    }
+    func apiMethods() -> [String] { AutomationMethod.publicMethods.map(\.rawValue) }
 
-    func describeAPI(plugin: Bool = false) throws -> JSONValue {
+    func describeAPI() throws -> JSONValue {
         return .object([
             "apiVersion": .integer(1), "appInstanceId": .string(instanceID), "identityGuards": .bool(true),
-            "workspaceRevisions": .bool(true), "surface": .string(plugin ? "plugin" : "administrative"),
+            "workspaceRevisions": .bool(true), "surface": .string("trusted"),
             "webAutomation": .object([
                 "version": .integer(1), "paneKinds": .array([.string("browser"), .string("registeredPlugin")]),
                 "identity": .array([.string("viewId"), .string("documentId")]),
                 "selectorMutationGuardsRequired": .bool(true), "mainDocumentOnly": .bool(true),
                 "pendingActionsPerView": .integer(32), "pendingWebKitOperationsPerView": .integer(32), "resultByteLimit": .integer(900_000),
-                "screenshot": .bool(!plugin), "pluginEvaluation": .bool(false)
+                "screenshot": .bool(true), "pluginEvaluation": .bool(false)
             ]),
             "causation": OperationControl.descriptor,
             "backgroundServices": Self.serviceDescriptor,
@@ -100,15 +90,15 @@ extension WorkspaceHost {
             ]),
             "workspaceCommit": .object([
                 "version": .integer(1), "scope": .string("workspace-model mutations"),
-                "additionalMethods": .array(plugin ? [] : [.string("plugins.unregister")]),
+                "additionalMethods": .array([.string("plugins.unregister")]),
                 "resultFields": .array(["operationId", "outcome", "workspaceRevision", "workspacePersistence"].map(JSONValue.string)),
                 "outcomes": .array(["committed", "unchanged"].map(JSONValue.string)),
                 "workspacePersistence": .array(WorkspacePersistence.allCases.map { .string($0.rawValue) }),
                 "nativeDividerCoalescing": .bool(false)
             ]),
             "guards": .array(Self.apiGuardKeys.sorted().map(JSONValue.string)),
-            "methods": .array(apiMethods(plugin: plugin).map(JSONValue.string)),
-            "commands": try .encoding(availableCommands.filter { !plugin || $0.contract.pluginAccessible }),
+            "methods": .array(apiMethods().map(JSONValue.string)),
+            "commands": try .encoding(availableCommands),
             "limits": .object(["inspectionPageSize": .integer(64), "inspectionBytes": .integer(262144), "eventWaitMilliseconds": .integer(25000)]),
             "retryPolicy": .string("Mutations are not automatically retried; correlation IDs are not idempotency keys")
         ])

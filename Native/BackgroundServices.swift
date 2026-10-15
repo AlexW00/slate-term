@@ -54,6 +54,27 @@ final class BackgroundServices {
         return try generation.commandConnection()
     }
 
+    func acknowledgeReady(_ params: [String: JSONValue], defaultOwner: ServiceIdentity?, operation: WorkspaceOperationContext) throws -> JSONValue {
+        guard Set(params.keys).isSubset(of: ["version", "serviceId", "generation"]), params["version"] == .integer(1) else {
+            throw RPCFailure(code: -32602, message: "service.ready requires version 1 and a live generation selector")
+        }
+        let serviceID: String
+        let generationID: String
+        if params["serviceId"] != nil || params["generation"] != nil {
+            guard let service = params["serviceId"]?.string, let generation = params["generation"]?.string else {
+                throw RPCFailure(code: -32602, message: "serviceId and generation must be supplied together")
+            }
+            serviceID = service; generationID = generation
+        } else {
+            guard let defaultOwner else { throw RPCFailure(code: -32602, message: "serviceId and generation are required") }
+            serviceID = defaultOwner.serviceID; generationID = defaultOwner.generation
+        }
+        guard let generation = entries.values.compactMap(\.generation).first(where: {
+            $0.identity.serviceID == serviceID && $0.identity.generation == generationID
+        }) else { throw RPCFailure(code: APIError.serviceSessionUnavailable, message: "Service generation unavailable") }
+        return try generation.acknowledgeReady(operation: operation)
+    }
+
     func list() throws -> JSONValue {
         .array(try registrations().filter { $0.service != nil }.map { .object(info(try entry($0.id))) })
     }
@@ -67,7 +88,7 @@ final class BackgroundServices {
     }
 
     func start(_ id: String, operation: WorkspaceOperationContext) throws -> JSONValue {
-        try authorize(operation)
+        try validateOperation(operation)
         let entry = try entry(id)
         if ["starting", "ready"].contains(entry.state) { return .object(info(entry)) }
         guard entry.state != "stopping", !reservations.values.contains(where: { $0.identity.pluginID == id }) else {
@@ -106,7 +127,7 @@ final class BackgroundServices {
     }
 
     func stop(_ id: String, operation: WorkspaceOperationContext) async throws -> JSONValue {
-        try authorize(operation)
+        try validateOperation(operation)
         let entry = try entry(id)
         guard let generation = entry.generation else { return .object(info(entry)) }
         if entry.state == "failed", entry.reason == "cleanupUnconfirmed" { return .object(info(entry)) }
@@ -178,12 +199,8 @@ final class BackgroundServices {
         let entry = Entry(registration); entries[id] = entry
         return entry
     }
-    private func authorize(_ operation: WorkspaceOperationContext) throws {
+    private func validateOperation(_ operation: WorkspaceOperationContext) throws {
         try Task.checkCancellation(); try operation.validateCaller()
-        switch operation.origin {
-        case .native, .administrative: break
-        default: throw RPCFailure(code: APIError.forbidden, message: "Service control is administrative-only")
-        }
     }
     func close() {
         guard !closed else { return }

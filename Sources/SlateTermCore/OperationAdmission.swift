@@ -139,17 +139,9 @@ public enum AdmissionAction: Sendable {
 
     /// Explicit reads only: an arbitrary contributed command name never grants exemption.
     public static func forMethod(_ method: String) -> Self {
-        // These handlers still require the private terminal-session credential. Run-input
-        // delivery belongs to an already admitted terminal.run, not a second mutation.
-        if method == "shell.update" || method == "shell.runInput" { return .authenticatedIntegration }
-        if ["service.ready", "plugins.service.stop", "plugins.service.disable"].contains(method) { return .emergencyControl }
-        let reads: Set<String> = ["version", "api.describe", "context.get", "context.inspect", "workspace.get", "workspace.snapshot",
-            "layout.get", "tabs.list", "panes.list", "pane.inspect", "window.list", "window.get", "command.list",
-            "terminal.capture", "terminal.wait", "panes.capture", "events.head", "events.poll", "settings.get", "storage.get",
-            "config.get", "config.validate", "palette.list", "plugins.list", "plugins.status", "plugins.logs", "plugins.settings.get",
-            "browser.get", "browser.snapshot", "browser.wait", "web.get", "web.snapshot", "web.wait",
-            "plugins.service.list", "plugins.service.status", "plugins.service.logs"]
-        return reads.contains(method) ? .read : .mutation
+        // The common catalog owns classification as well as discovery/dispatch metadata.
+        // Unknown/contributed names never acquire a read or recovery exemption.
+        AutomationMethod(rawValue: method)?.admission ?? .mutation
     }
 }
 

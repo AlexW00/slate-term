@@ -101,7 +101,7 @@ struct Target: ParsableArguments {
 
 struct TerminalCommand: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "terminal", abstract: "Generic terminal I/O and authenticated shell run/wait operations.")
-    enum Action: String, ExpressibleByArgument { case send, key, capture, run, wait }
+    enum Action: String, CaseIterable, ExpressibleByArgument { case send, key, capture, run, wait }
     @Argument var action: Action
     @OptionGroup var connection: Connection
     @OptionGroup var target: Target
@@ -131,7 +131,7 @@ struct TerminalCommand: ParsableCommand {
 
 struct Plugins: ParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Register trusted web panels. Registered pages can control your terminals.")
-    enum Action: String, ExpressibleByArgument { case list, register, validate, unregister, status, restart, logs, settings, service }
+    enum Action: String, CaseIterable, ExpressibleByArgument { case list, register, validate, unregister, status, restart, logs, settings, service }
     @Argument var action: Action
     @Argument var id: String?
     @Argument(help: "Plugin namespace for settings get/patch or service controls.") var namespace: String?
@@ -144,12 +144,12 @@ struct Plugins: ParsableCommand {
     @OptionGroup var connection: Connection
     func run() throws {
         if action == .service {
-            guard let id, ["start", "stop", "list", "status", "logs"].contains(id),
+            guard let id, let method = AutomationMethod(rawValue: "plugins.service.\(id)"), method.family == .services,
                   (id == "list" ? namespace == nil : namespace != nil),
                   manifest == nil, instanceId == nil, !replace, !force, operations == nil, expectedWriteRevision == nil else {
                 throw ValidationError("Use plugins service list or plugins service start|stop|status|logs PLUGIN-ID; no registration/settings options")
             }
-            try connection.call("plugins.service.\(id)", params: namespace.map { ["id": .string($0)] } ?? [:])
+            try connection.call(method.rawValue, params: namespace.map { ["id": .string($0)] } ?? [:])
             return
         }
         if action == .settings {
@@ -191,7 +191,7 @@ struct Plugins: ParsableCommand {
 
 struct Events: ParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Publish events or read a bounded, resumable event journal.")
-    enum Action: String, ExpressibleByArgument { case head, emit, poll, watch }
+    enum Action: String, CaseIterable, ExpressibleByArgument { case head, emit, poll, watch }
     @Argument var action: Action
     @OptionGroup var connection: Connection
     @Option(help: "Exact topic or namespace wildcard; repeat to select multiple topics.") var topic: [String] = []
@@ -251,7 +251,7 @@ struct Events: ParsableCommand {
 
 struct ContextCommand: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "context", abstract: "Read focus and active-terminal context.")
-    enum Action: String, ExpressibleByArgument { case get, inspect }
+    enum Action: String, CaseIterable, ExpressibleByArgument { case get, inspect }
     enum Scope: String, ExpressibleByArgument { case pane, tab, global }
     @Argument var action: Action = .get
     @Option var scope: Scope = .tab
@@ -304,7 +304,7 @@ struct ShellCommand: ParsableCommand {
 
 struct BrowserCommand: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "browser", abstract: "Control an embedded browser pane.")
-    enum Action: String, ExpressibleByArgument { case get, navigate, eval, screenshot, snapshot, click, fill, select, scroll, wait }
+    enum Action: String, CaseIterable, ExpressibleByArgument { case get, navigate, eval, screenshot, snapshot, click, fill, select, scroll, wait }
     @Argument var action: Action
     @OptionGroup var connection: Connection
     @OptionGroup var target: Target
@@ -340,7 +340,7 @@ struct BrowserCommand: ParsableCommand {
 
 struct Commands: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "command", abstract: "Invoke the same commands as native menus.")
-    enum Action: String, ExpressibleByArgument { case list, run }
+    enum Action: String, CaseIterable, ExpressibleByArgument { case list, run }
     @Argument var action: Action
     @Argument var id: String?
     @Option(help: "JSON object of action arguments; routing uses --pane/--tab and revision flags.") var params: String = "{}"
@@ -363,7 +363,7 @@ struct Commands: ParsableCommand {
 
 struct ConfigCommand: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "config", abstract: "Inspect, reload, or validate TOML configuration.")
-    enum Action: String, ExpressibleByArgument { case get, reload, validate, set, patch }
+    enum Action: String, CaseIterable, ExpressibleByArgument { case get, reload, validate, set, patch }
     @Argument var action: Action
     @Option var key: String?
     @Option(help: "JSON value for set, or an object of dotted application keys for patch.") var value: String?

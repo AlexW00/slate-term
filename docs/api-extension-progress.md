@@ -2,9 +2,22 @@
 
 Authorized scope: implement the reviewed API-extension plan iteratively with high-value tests, including post-operation lifecycle hooks (not veto hooks). Checkpoint before implementation: `2763ce9`; working tree was clean after that commit. Future capability-parity requirements live in `AGENTS.md`.
 
-## Current scoped delivery — manual services (2026-10-15)
+## Current scope — one trusted automation API (in progress)
 
-After the user raised the elapsed time, scope was narrowed to a usable manual-service slice. Broader startup/restart and hidden-pane work is deferred, not silently included in this delivery. The user authorized sparse necessary Mac tests while working and unsigned local checkpoints. Checkpoint `29a279b` saved the earlier foundations; configured Git signing remains enabled (only that invocation used `commit.gpgsign=false`). Older staged/signing/no-manager statements below are historical and superseded by this section.
+The user's later correction supersedes the permission matrices below: CLI, registered-plugin bridge and managed services are clients of **one API**, not capability tiers. The [revised plan](trusted-automation-api-plan.md) received a bounded independent review before runtime edits; target-before-guard resolution and document-bound automatic titles were incorporated.
+
+Common-contract milestone implemented:
+- `AutomationMethod` owns the public inventory, handler families, caller defaults and admission classification. All three transports enter the same host validation/dispatch path. The synchronous dispatcher is exhaustive over the typed catalog; plugin/service allowlists and `pluginAccessible` are removed.
+- Discovery is identical across trusted clients. The SDK generates full RPC and web/browser/service inventories from the catalog; CLI namespace/literal and SDK alias tests check drift. Explicit settings namespaces, logical-instance storage, guarded cross-view titles and all/targeted event observation share handlers.
+- Service readiness is health state, not a capability unlock. Starting generations can use the API and delegate commands; generation ownership, deadlines, poll bounds and cleanup remain. Namespace errors are sanitized in the common entry, with cancellation preserved.
+
+Inspected `bg_26ce821ade240eca` exit0: **222 package tests** (142 core,22 IPC,56 settings,2 CLI), app/CLI build, native generation/manager ownership and cleanup, event-hub lifecycle checks, and diff checks. Evidence: `artifacts/unified-api-{package,build,generation,events}-v3.log`. The namespace-error wrapper was restored after this batch; `bg_9cfd055e91380836` subsequently passed the app/CLI build and diff check (`unified-api-sanitization-build.log`). Existing ArgumentParser deprecation warnings remain.
+
+**Not complete:** service bearer transport still exists and is next to be removed. No actual-app parity fixture has run for this migration; title lifetime, ordinary-page/subframe isolation and end-to-end three-client parity still require the planned single batched fixture. Current historical service/permission documentation and denial-oriented fixtures will be updated with that slice. No UI changes, automatic startup, enable/disable controls, restart/backoff or hidden panes were added. This is not full-suite or visual certification.
+
+## Historical manual-service delivery (2026-10-15)
+
+After the user raised the elapsed time, scope was narrowed to a usable manual-service slice. Broader startup/restart work is deferred, not silently included in this delivery. The separate hidden-pane feature was subsequently canceled by the user, not deferred. The user authorized sparse necessary Mac tests while working and unsigned local checkpoints. Checkpoint `29a279b` saved the earlier foundations; configured Git signing remains enabled (only that invocation used `commit.gpgsign=false`). Older staged/signing/no-manager statements below are historical and superseded by this section.
 
 Implemented administrative `plugins.service.start/stop/list/status/logs` and matching CLI; native manager with fresh per-attempt credentials,16 retained reservations and one retirement task; explicit scoped service adapter; live delegated command resolver; starting/ready own-settings recipients; catalog replacement/removal and shutdown hooks. Start is synchronous acceptance, never an async queued successor. Start during retirement conflicts; no implicit restart/activation. `api.describe` and [manual service documentation](background-services.md) advertise the narrow surface and exclusions. No UI controls or visual changes were added.
 
@@ -12,7 +25,11 @@ One bounded read-only review found repeated stop after unconfirmed cleanup incor
 
 Exactly one announced actual-app batch followed: `bg_42634865ffe7ff7f`, inspected exit0 (`manual-services-app.log`). It passed production CLI controls, registration-without-activation, snapshot-first starting-settings replay and namespace isolation, endpoint/indirect administrative denials, A→CLI→B ownership and cancellation without stopping another service, fresh credentials/retired endpoint rejection, replacement/unregister, logs, and owned-app shutdown/parent-death cleanup. No clicks, forced activation, screenshots, or repeated desktop fixtures. Added the gate to `verify-all.sh`; the full suite was NOT run. The previous215 package tests remain prior foundation evidence, not a new full-suite certification.
 
-Deferred: automatic startup, enable/disable controls, restart/backoff, broader service workspace/web/terminal access and settings writes/custom event emission, hidden panes, complete roadmap audit and foreground screenshots. Deterministic kernel-reap failure/capacity saturation and broader native quit/manual QA remain residual coverage; this slice does not certify them.
+Deferred: automatic startup, enable/disable controls, restart/backoff, broader service workspace/web/terminal access and settings writes/custom event emission, complete roadmap audit and foreground screenshots. Deterministic kernel-reap failure/capacity saturation and broader native quit/manual QA remain residual coverage; this slice does not certify them.
+
+## Canceled hidden-pane proposal
+
+The user requested panel maximize/minimize behavior, not a separate hidden-pane system. Repository inspection found no hidden membership, hide/show commands, persistence extension or resource lifecycle implementation to remove: panes still belong to layout leaves, and `pane.zoom` preserves the existing layout while changing presentation. Removed the proposed APIs, phase, lifecycle requirements and future-work references from active planning/instructions. Existing zoom/restore, native visibility checks, DOM visibility and service behavior are untouched. This cleanup changes documentation/instructions only; no build or desktop test is needed.
 
 ## Work queue
 
@@ -23,9 +40,9 @@ Deferred: automatic startup, enable/disable controls, restart/backoff, broader s
 - [x] Atomic layout operations, pane titles, native tab/window parity (focused checks; final audit still separate).
 - [x] Workspace/command/configuration post-commit lifecycle notifications, causation and replay/recovery.
 - [x] Shared browser/plugin WebKit automation and bridge wrappers (focused behavior verified; foreground screenshot gate remains blocked).
-- [x] Manual background-service start/stop/list/status/logs, narrow authenticated access and focused production integration.
-- [ ] User-enabled startup, restart/backoff and broader service controller surface (explicitly deferred).
-- [ ] Session-preserving hidden panes, lifecycle review, restoration/close tests.
+- [x] Manual background-service lifecycle foundation and focused production integration (historical permission tier superseded).
+- [ ] Finish trusted-client API migration: remove service bearer transport, update documentation/fixtures and verify three-client parity. Common catalog/dispatch and headless drift checks are implemented.
+- [ ] User-enabled startup and restart/backoff (explicitly deferred; not part of current migration).
 - [ ] Complete parameter/result discovery schemas, availability metadata and documentation/examples. Application-font commands are implemented. Optional Later window geometry and command/service storage are not automatic scope; their concrete contracts require separate approval.
 - [ ] Independent code/security/visual reviews where applicable; resolve findings.
 - [ ] Sequential complete verification suite and final source/binary manifest check.
@@ -164,7 +181,7 @@ Typed service origin/owner and command-boundary enforcement are now implemented.
 
 `bg_b0bafa7da5fed94c` was inspected at exit0: headless owned-command harness, app/CLI build and production command-lifecycle compatibility. A bounded read-only review found no actionable defect; its two residual gaps were then covered by real `EventControl` service/retired-reader checks and actual shell/descendant termination checks. `bg_690cc349721c876f` was inspected at exit0: expanded native harness,214 package tests and diff. Artifacts: `service-commands-{red,green,build,lifecycle,expanded,unit}.log`. The refined fixture publishes child PID files atomically and proves that an administrative follow-up sharing service causation does not inherit service ownership. `bg_a1d8a8df6149e234` was inspected at exit0 (`service-commands-final-native.log` and diff). That earlier native harness emitted the `PluginProcess` deinit actor-isolation warning. The later receipt change explicitly preserves nonisolated resource destruction and verifies it off-actor/without a main-loop turn; this is not a blanket warning-free certification.
 
-Actual service endpoints/runtimes are still not wired into the host command resolver: service-origin commands intentionally fail closed until a live manager supplies the matching delegated connection. No complete A→CLI→B runtime integration is claimed. Next: native service lifecycle manager, scoped request adapter, settings recipients/resync, control APIs and explicit activation. Settings recipients must include starting generations to avoid the bootstrap-fetch→ready notification gap. The user renewed owned desktop testing permission until approximately04:27:08UTC; the latest necessary desktop check finished within that window. Runtime APIs/activation, complete ownership integration, end-to-end resync and hidden panes remain unimplemented. Avoid broad GUI reruns while the user works. The service protocol review is complete; hidden panes still require their membership/persistence review. Optional Later window geometry/storage need independently approved concrete contracts, not automatic expansion. Configuration lifecycle does not claim separate warning-preference-store coverage.
+Actual service endpoints/runtimes are still not wired into the host command resolver: service-origin commands intentionally fail closed until a live manager supplies the matching delegated connection. No complete A→CLI→B runtime integration is claimed. Next: native service lifecycle manager, scoped request adapter, settings recipients/resync, control APIs and explicit activation. Settings recipients must include starting generations to avoid the bootstrap-fetch→ready notification gap. The user renewed owned desktop testing permission until approximately04:27:08UTC; the latest necessary desktop check finished within that window. At that checkpoint, runtime APIs/activation, complete ownership integration and end-to-end resync remained unimplemented. Avoid broad GUI reruns while the user works. The service protocol review is complete. Optional Later window geometry/storage need independently approved concrete contracts, not automatic expansion. Configuration lifecycle does not claim separate warning-preference-store coverage.
 
 ### Single-generation service resource capsule
 

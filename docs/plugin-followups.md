@@ -10,6 +10,6 @@ The full project and initial command-plugin expansion were checkpointed in **`1f
 
 4. **Native plugin frame buttons:** manifest-declared `headerButtons` invoke owned commands beside Close, with all-type/built-in/widget-ID selectors, clicked-pane context, busy state, adaptive overflow, persistence and live registration cleanup. See [the manifest API](plugins.md#native-frame-buttons).
 
-The audits are deliverables, not implementations of every API they identify. Root-split/sidebar primitives, hidden-pane lifetime, OS-wide shortcuts, startup services, and a hook SDK remain explicitly outside this change. The command picker intentionally has no workflow engine, usage history, AI, or argument-editor subsystem.
+The audits are deliverables, not implementations of every API they identify. Root-split/sidebar primitives, OS-wide shortcuts, startup services, and a hook SDK remain explicitly outside this change. The command picker intentionally has no workflow engine, usage history, AI, or argument-editor subsystem.
 
 Verification entry points: `swift test`, `scripts/verify-plugin-commands.py`, `scripts/verify-plugin-header-buttons.py`, and `scripts/verify-command-picker.py`. The latter captures native light/dark, search/empty/unavailable, and in-workspace material states for visual review. All are also covered by the sequential `scripts/verify-all.sh` run and its source/binary manifest. Full manual accessibility/IME and multi-display QA remain release work.

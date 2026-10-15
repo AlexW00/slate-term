@@ -4,7 +4,7 @@ import SlateTermCore
 
 struct WebCLI: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "web", abstract: "Inspect and interact with browser or registered-plugin documents.")
-    enum Action: String, ExpressibleByArgument { case get, snapshot, click, fill, select, scroll, wait, screenshot }
+    enum Action: String, CaseIterable, ExpressibleByArgument { case get, snapshot, click, fill, select, scroll, wait, screenshot }
     @Argument var action: Action
     @OptionGroup var connection: Connection
     @OptionGroup var target: Target

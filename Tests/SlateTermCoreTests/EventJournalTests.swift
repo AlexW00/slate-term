@@ -263,12 +263,14 @@ import Testing
 @Test func eventJournalCodableHasStableWireShapesAndRoundTrips() throws {
     var journal = try EventJournal(timestampMillis: { 1_234 })
     let beginning = journal.cursor
-    for source in [EventSource.host, .client, .plugin(type: "notes", instanceId: "a")] {
+    let service = try ServiceEventRecipient(serviceID: "worker", generation: "generation")
+    for source in [EventSource.host, .client, .plugin(type: "notes", instanceId: "a"), .service(pluginID: "notes", recipient: service)] {
         let value = try JSONValue.encoding(source)
         let expected: JSONValue = switch source {
         case .host: .object(["kind": .string("host")])
         case .client: .object(["kind": .string("client")])
         case .plugin: .object(["kind": .string("plugin"), "type": .string("notes"), "instanceId": .string("a")])
+        case .service: .object(["kind": .string("service"), "pluginId": .string("notes"), "serviceId": .string("worker"), "generation": .string("generation")])
         }
         #expect(value == expected)
         #expect(try JSONDecoder().decode(EventSource.self, from: JSONEncoder().encode(source)) == source)

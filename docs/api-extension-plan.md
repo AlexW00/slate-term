@@ -167,7 +167,6 @@ Fraction contract: `pane.split.newPaneFraction` always describes the newly creat
 | `plugins.service.start/stop/restart/enable/disable` | C, A | New background runtime only; do not silently change existing `plugins restart` panel-service semantics. |
 | `plugins.service.list/status/logs` | R, A | Bounded status/log reads; service generation and failure/backoff state. |
 | `plugins.storage.get/set/delete` | R/M, A; owned service binding later | Optional app-scoped command/service storage, distinct from existing pane/tab/global page instance storage. Namespace, quotas and lifecycle must be approved before adding this; scripts can use files meanwhile. |
-| `pane.hide/show`, `panes.hidden` | C/R, A+B; gated phase | Session-preserving lifetime extension, not an alias for close or a zero-width split. |
 
 Reserve the singular **`plugin.<plugin-id>.<local-command-id>`** prefix exclusively for contributed executable commands. Administrative IDs use `plugins.*` (plural) or another nonconflicting prefix. Do not retroactively reserve existing valid plugin IDs such as `service` or `settings`; add collision fixtures proving `plugin.service.start` still dispatches an installed plugin's own command.
 
@@ -177,7 +176,7 @@ Not a new-command backlog: `command.run/list`, settings opening, config reload, 
 
 Introduce a shared host operation context: operation ID, native-assigned origin, target IDs, pre/post revisions and optional host-validated causation. It must cover menu/shortcut/CLI/page actions **and** native drag, divider and tab-group paths. Retain `host.workspace.changed` for compatibility.
 
-Initial topics: `host.pane.created/moved/closed/type.changed/title.changed`, `host.layout.resized`, `host.tab.created/closed/reordered/moved`, `host.command.started/finished`, and `host.settings.changed` / `host.plugin.settings.changed`. Add visibility/service topics only with those phases. A split emits a pane-created event containing its split intent/result, not a second indistinguishable “created” lifecycle. Define one canonical event set for a compound operation and deterministic ordering, tied by operation ID. Divider dragging emits a semantic event at gesture commit rather than one journal event per pixel.
+Initial topics: `host.pane.created/moved/closed/type.changed/title.changed`, `host.layout.resized`, `host.tab.created/closed/reordered/moved`, `host.command.started/finished`, and `host.settings.changed` / `host.plugin.settings.changed`. Add service topics only with that phase. A split emits a pane-created event containing its split intent/result, not a second indistinguishable “created” lifecycle. Define one canonical event set for a compound operation and deterministic ordering, tied by operation ID. Divider dragging emits a semantic event at gesture commit rather than one journal event per pixel.
 
 Events carry bounded operation-specific facts, not terminal text, DOM, settings values or entire layouts. Plugin-settings details go only to that plugin's eligible views/services (administrative socket observers retain their existing access); unrelated plugins must not receive namespace details through a global event. Existing logical-instance directed routing is not automatically suitable for headless services: add explicit recipient identity support in that phase.
 
@@ -185,7 +184,7 @@ A snapshot returns a cursor from the same host metadata boundary, allowing subsc
 
 Automation feedback policy: event-triggered mutations carry a causation reference validated against a host-issued delivery context, not a freely trusted `source` field. Bound chain depth and per-plugin rate/admission, expose refusal diagnostics and provide disable/stop controls. Generic admin callers can always create independent root requests; indirect page/DOM side effects may also become new roots when the host cannot prove causation. Apply bounded per-plugin and global admission independently of chain tracking. This is accidental-loop containment, not a sandbox against trusted code. Do not enable automatic service event activation until attribution and resync rules are tested.
 
-## 7. Background services, then hidden-pane lifetime
+## 7. Background services
 
 ### Background services (separate from commands and HTTP panel servers)
 
@@ -196,13 +195,7 @@ Automation feedback policy: event-triggered mutations carry a causation referenc
 - Service settings changes have a versioned notification. The process environment stays its launch snapshot; services fetch current own settings explicitly. Expired cursors/restarted app epochs require resnapshot, not silent skipping or replay of arbitrary external actions.
 - Stopping a service cannot undo commands/side effects it already initiated. Define which owned pending requests/jobs are canceled, and test nested command ownership before shipping automatic activation.
 
-### Hidden panes (requires its own lifecycle gate)
-
-Retain the pane ID, terminal/WebKit content and live resources while removing it from the visible layout. Store hidden membership explicitly, not in the split tree with fraction zero. Preserve page instances and document lifetime deliberately; hiding is not navigation or closing. Hidden activities still consume resources and may have external effects.
-
-Define a reattachment intent anchored to a live pane/root plus a validated fraction/revision; never replay an old layout snapshot over current work. Missing anchors produce a conflict with explicit caller-selected fallback. Hiding the last visible pane is rejected initially. Focus/active-terminal history excludes hidden panes, but explicitly addressed terminal operations may still target retained sessions. Web interaction requires a renderable visible view and must not silently reveal it. Inspection reports hidden/readiness/renderability truthfully.
-
-Close-tab/window/quit and plugin-unregister policies must account for hidden running contents in termination warnings and cleanup. Saved restoration may remember configuration/visibility, **not promise survival of PTYs or WebKit documents across app restart**. Document memory limits and a user-visible list of hidden panes; do not silently evict live sessions.
+The separate hidden-pane proposal was canceled by the user. Pane maximize/restore is the existing `pane.zoom` behavior, not a new lifetime or membership system.
 
 ### Interception hooks remain deferred
 
@@ -219,15 +212,14 @@ No before-operation/veto hooks in the above phases. Revisit only with a requirem
 | 3 | Shared mutation/event commit path; atomic split-with-type/fraction, move/resize, manual title and tab-group parity | Model invariant/rollback tests; revision conflicts after awaits; native gestures and API produce consistent results/events; content identity retained; safety/force/zoom/minimum-size rules; cursor loss and causation tests. |
 | 4 | Shared web automation helper and plugin-panel interaction | Existing browser tests unchanged plus reusable conformance tests on both adapters and all origin/lifetime/privacy negatives. Can be scheduled after Phase 1 independently of Phase 3; do not make it depend on background services. |
 | 5 | Explicit/user-enabled background service runtime | Separate service protocol review; real process crash/shutdown/unregister cleanup, restart caps, settings/event resync, ownership and loop containment. |
-| 6 | Session-preserving hidden panes | Separate model/persistence design review; retain PTY/view identity, safe restore anchors, hidden-work close consent, memory bounds and visibility/inspection semantics. |
 | Later | Native window geometry, optional app-font aliases, command/service storage, narrowly justified interception | Approve their concrete contracts independently; no automatic expansion of earlier phases. |
 
 Each phase should be a reviewable change set with typed request/result tests, host/CLI/bridge dispatch tests, failure/cancellation/conflict tests, native regression coverage where applicable, documentation and examples. Run the sequential full suite after integration; inspect the actual source/binary verification manifest. No claim that this proposal's APIs have passed tests merely because the current baseline has.
 
-The first useful implementation slice after approval is **Phases 0, 1 and 2a**: discover the API, identify/inspect the caller's workspace safely, and change appearance through the same path as Settings. Phase 2b is a separate settings-editor extension. Next deliver layout/events and shared web interaction; do not start services, hide/show or hooks in the first PR.
+The first useful implementation slice after approval is **Phases 0, 1 and 2a**: discover the API, identify/inspect the caller's workspace safely, and change appearance through the same path as Settings. Phase 2b is a separate settings-editor extension. Next deliver layout/events and shared web interaction; do not start services or hooks in the first PR.
 
 ## 9. Review/approval checklist
 
-The reviewer should challenge: environment staleness and app/session confusion; claims of atomicity; compatible response shapes; exposure via `command.run`; native gesture bypasses; information/content bounds; plugin bridge versus automation-world isolation; shared WebKit ownership; event loss/feedback loops; and hidden/service resource lifecycle. Confirm each proposed command is actually missing or an intentional typed wrapper, and that optional/deferred items are not silently bundled into the first delivery.
+The reviewer should challenge: environment staleness and app/session confusion; claims of atomicity; compatible response shapes; exposure via `command.run`; native gesture bypasses; information/content bounds; plugin bridge versus automation-world isolation; shared WebKit ownership; event loss/feedback loops; and service resource lifecycle. Confirm each proposed command is actually missing or an intentional typed wrapper, and that optional/deferred items are not silently bundled into the first delivery.
 
 User approval is still needed before implementation, particularly for administrative-versus-page exposure, cross-pane structured web interaction, required revision guards on new structural operations, the cross-app CLI targeting safety change, and the service activation policy. Review findings and their disposition belong in `api-extension-plan-review.md`.

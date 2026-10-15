@@ -187,8 +187,9 @@ public struct EventPublication: Sendable {
 public enum EventSource: Equatable, Sendable, Codable {
     case host, client
     case plugin(type: String, instanceId: String)
+    case service(pluginID: String, recipient: ServiceEventRecipient)
 
-    private enum Keys: String, CodingKey { case kind, type, instanceId }
+    private enum Keys: String, CodingKey { case kind, type, instanceId, pluginId, serviceId, generation }
 
     public init(from decoder: any Decoder) throws {
         let values = try decoder.container(keyedBy: Keys.self)
@@ -203,6 +204,11 @@ public enum EventSource: Equatable, Sendable, Codable {
                 type: values.decode(String.self, forKey: .type),
                 instanceId: values.decode(String.self, forKey: .instanceId)
             ).checked()
+        case "service":
+            try requireEventKeys(decoder, allowed: ["kind", "pluginId", "serviceId", "generation"])
+            self = try EventSource.service(pluginID: values.decode(String.self, forKey: .pluginId),
+                recipient: ServiceEventRecipient(serviceID: values.decode(String.self, forKey: .serviceId),
+                    generation: values.decode(String.self, forKey: .generation))).checked()
         default: throw EventJournalError.invalidSource
         }
     }
@@ -217,12 +223,18 @@ public enum EventSource: Equatable, Sendable, Codable {
             try values.encode("plugin", forKey: .kind)
             try values.encode(type, forKey: .type)
             try values.encode(instanceId, forKey: .instanceId)
+        case .service(let plugin, let recipient):
+            try values.encode("service", forKey: .kind)
+            try values.encode(plugin, forKey: .pluginId)
+            try values.encode(recipient.serviceID, forKey: .serviceId)
+            try values.encode(recipient.generation, forKey: .generation)
         }
     }
 
     fileprivate func checked() throws -> EventSource {
         if case .plugin(let type, let instanceId) = self,
            !validEventIdentity(type) || !validEventIdentity(instanceId) { throw EventJournalError.invalidSource }
+        if case .service(let plugin, _) = self, !validEventIdentity(plugin) { throw EventJournalError.invalidSource }
         return self
     }
 }
@@ -258,15 +270,33 @@ public struct ServiceEventRecipient: Hashable, Sendable, Codable {
     }
 }
 
-/// Always selected by the host adapter, never from a caller's claimed recipient fields.
+/// A query projection, not a permission tier. Adapters choose defaults; trusted
+/// clients may explicitly select all recipients or one target. Causation references
+/// remain bound to the actual caller audience regardless of this projection.
 public enum EventObserver: Equatable, Sendable {
     case administrator
     case plugin(instanceID: String)
     case service(ServiceEventRecipient)
+
+    public static func selecting(_ value: JSONValue?, default fallback: Self) throws -> Self {
+        guard let value else { return fallback }
+        if value == .string("all") { return .administrator }
+        if let object = value.object {
+            if Set(object.keys) == ["instanceId"], let instance = object["instanceId"]?.string, validEventIdentity(instance) {
+                return .plugin(instanceID: instance)
+            }
+            if Set(object.keys) == ["serviceId", "generation"], let service = object["serviceId"]?.string,
+               let generation = object["generation"]?.string {
+                return .service(try ServiceEventRecipient(serviceID: service, generation: generation))
+            }
+        }
+        throw EventJournalError.invalidFilter("recipient must be all, {instanceId}, or {serviceId,generation}")
+    }
 }
 
 /// Topics are ORed. Untargeted events with absent tab/pane fields broadcast to scoped recipients.
-/// Directed delivery bypasses scope, never topics; only explicit administrators monitor all recipients.
+/// Directed delivery bypasses scope, never topics. The historical `administrator`
+/// observer means an all-recipient query; every trusted client may select it.
 public struct EventFilter: Equatable, Sendable, Codable {
     public static let all = try! EventFilter()
 

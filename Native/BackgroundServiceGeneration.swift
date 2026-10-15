@@ -9,7 +9,7 @@ import SlateTermIPC
 final class BackgroundServiceGeneration {
     enum State: String { case starting, ready, retired }
     enum Failure: String { case readinessTimeout, processExit }
-    typealias Request = @MainActor (String, [String: JSONValue], WorkspaceOperationContext) async throws -> JSONValue
+    typealias Request = @MainActor (String, [String: JSONValue], RPCMetadata?, AutomationCaller) async throws -> JSONValue
 
     let identity: ServiceIdentity
     let audience: CausationAudience
@@ -23,7 +23,6 @@ final class BackgroundServiceGeneration {
     private let spec: PluginProcessSpec
     private let directory = URL(fileURLWithPath: "/tmp/slate-svc-\(UUID().uuidString)")
     private let isCurrent: () -> Bool
-    private let operations: OperationControl
     private let request: Request
     private let ready: (WorkspaceOperationContext) throws -> Void
     private let retireOwned: (ServiceIdentity) -> Task<Bool, Never>
@@ -47,7 +46,7 @@ final class BackgroundServiceGeneration {
         audience = .service(epoch: operations.epoch, registrationID: identity.pluginID,
                             recipient: try ServiceEventRecipient(serviceID: identity.serviceID, generation: identity.generation))
         self.cliPath = cliPath; self.spec = spec; self.isCurrent = isCurrent
-        self.operations = operations; self.request = request; self.ready = ready
+        self.request = request; self.ready = ready
         self.retireOwned = retireOwned; self.failed = failed
     }
 
@@ -55,10 +54,10 @@ final class BackgroundServiceGeneration {
         guard state != .retired, isCurrent() else { throw unavailable() }
     }
 
-    /// Only ready generations can delegate newly launched command jobs.
+    /// Readiness is health state, not an automation capability gate.
     func commandConnection() throws -> PluginControlConnection {
         try validateLive()
-        guard state == .ready, let server else { throw unavailable() }
+        guard let server else { throw unavailable() }
         return PluginControlConnection(socketPath: server.path, appInstanceID: identity.appInstanceID,
                                        cliPath: cliPath, service: credentials)
     }
@@ -104,43 +103,34 @@ final class BackgroundServiceGeneration {
         }
     }
 
+    func acknowledgeReady(operation: WorkspaceOperationContext) throws -> JSONValue {
+        try validateLive()
+        try operation.validateCaller()
+        if state == .starting {
+            try ready(operation)
+            try validateLive()
+            state = .ready
+            deadline?.cancel(); deadline = nil
+        }
+        return .object(["version": .integer(1), "serviceId": .string(identity.serviceID),
+                        "generation": .string(identity.generation), "state": .string(state.rawValue)])
+    }
+
     private func handle(_ method: String, params: [String: JSONValue], metadata: RPCMetadata?) async throws -> JSONValue {
         try Task.checkCancellation()
         try validateLive()
-        // These bootstrap reads are implemented without long waits by the scoped host adapter.
-        let bootstrap: Set<String> = ["api.describe", "workspace.snapshot", "context.inspect", "pane.inspect",
-                                      "plugins.settings.get", "settings.get", "events.head", "service.ready"]
-        guard state == .ready || bootstrap.contains(method) else {
-            throw RPCFailure(code: APIError.unavailable, message: "Service is not ready")
-        }
-        let operation = try operations.admit(method, metadata: metadata, origin: .service(identity), audience: audience) { [weak self] in
+        let caller = AutomationCaller(origin: .service(identity), audience: audience, defaults: .init(pluginID: identity.pluginID)) { [weak self] in
             guard let self else { throw RPCFailure(code: APIError.serviceSessionUnavailable, message: "Service session unavailable") }
             try self.validateLive()
-        }
-        if method == "service.ready" {
-            guard Set(params.keys).isSubset(of: ["version", "expectedInstanceId"]), params["version"] == .integer(1) else {
-                throw RPCFailure(code: -32602, message: "service.ready requires version 1 and supported guards")
-            }
-            if let expected = params["expectedInstanceId"], expected != .string(identity.appInstanceID) {
-                throw RPCFailure(code: APIError.conflict, message: "Application instance changed")
-            }
-            if state == .starting {
-                try ready(operation) // Preflight/publication failure cannot grant ready authority.
-                try validateLive()
-                state = .ready
-                deadline?.cancel(); deadline = nil
-            }
-            return .object(["version": .integer(1), "serviceId": .string(identity.serviceID),
-                            "generation": .string(identity.generation), "state": .string(state.rawValue)])
         }
         if method == "events.poll" {
             guard !polling else { throw RPCFailure(code: -32032, message: "A service poll is already pending") }
             polling = true
         }
         defer { if method == "events.poll" { polling = false } }
-        let result = try await request(method, params, operation)
+        let result = try await request(method, params, metadata, caller)
         try Task.checkCancellation()
-        try operation.validateCaller()
+        try caller.validate()
         return result
     }
 

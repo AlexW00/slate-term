@@ -1,8 +1,7 @@
 import Foundation
 
-/// One source of truth for discovery and invocation policy, including indirect command.run.
+/// Shared argument/target contract for discovery and invocation through command.run.
 public struct CommandContract: Codable, Sendable {
-    public let pluginAccessible: Bool
     public let requiresArguments: Bool
     public let workspaceIndependent: Bool
     public let parameters: [String: String]
@@ -11,12 +10,10 @@ public struct CommandContract: Codable, Sendable {
     public let retry: String
 
     public static func forCommand(_ id: String) -> Self {
-        // config.reload is an explicit compatibility exception: existing registered
-        // pages could invoke it before settings-write APIs existed. New writes stay administrative.
-        let administrative = id.hasPrefix("appearance.") || id.hasPrefix("terminal.font.") || id.hasPrefix("terminal.palette.")
+        let global = id.hasPrefix("appearance.") || id.hasPrefix("terminal.font.") || id.hasPrefix("terminal.palette.")
             || id.hasPrefix("warnings.") || id.hasPrefix("plugins.") || id.hasPrefix("window.frame.")
             || ["window.focus", "window.minimize", "window.restore", "window.fullscreen.set", "tab.detachCurrent"].contains(id)
-        let independent = (administrative && id != "tab.detachCurrent") || ["window.new", "settings.open", "config.reload", "command.picker"].contains(id)
+        let independent = (global && id != "tab.detachCurrent") || ["window.new", "settings.open", "config.reload", "command.picker"].contains(id)
         let parameters: [String: String]
         let required: [String]
         switch id {
@@ -38,7 +35,7 @@ public struct CommandContract: Codable, Sendable {
         case "window.focus": parameters = ["windowId": "native-window-id", "activate": "boolean"]; required = ["windowId"]
         default: parameters = [:]; required = []
         }
-        return Self(pluginAccessible: !administrative, requiresArguments: !required.isEmpty,
+        return Self(requiresArguments: !required.isEmpty,
                     workspaceIndependent: independent, parameters: parameters, required: required,
                     additionalParameters: id.hasPrefix("plugin."), retry: "never-automatic")
     }

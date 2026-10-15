@@ -89,13 +89,14 @@ final class EventHub {
         tab: TabID? = nil,
         pane: PaneID? = nil,
         targetInstanceId: String? = nil,
+        targetService: ServiceEventRecipient? = nil,
         lineage: OperationLineage? = nil
     ) throws -> WorkspaceEvent {
         guard !isClosed else { throw EventHubError.closed }
         guard !committing else { throw EventHubError.preparationConflict }
         let event = try journal.append(
             topic: topic, payload: payload, source: source, tab: tab, pane: pane,
-            targetInstanceId: targetInstanceId, lineage: lineage
+            targetInstanceId: targetInstanceId, targetService: targetService, lineage: lineage
         )
         publicationGeneration = UUID()
         resumeReaders()

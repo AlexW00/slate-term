@@ -4,7 +4,7 @@ import SlateTermCore
 
 struct APICLI: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "api", abstract: "Discover supported production methods and safety contracts.")
-    enum Action: String, ExpressibleByArgument { case describe }
+    enum Action: String, CaseIterable, ExpressibleByArgument { case describe }
     @Argument var action: Action = .describe
     @OptionGroup var connection: Connection
     func run() throws { try connection.call("api.describe") }
@@ -12,7 +12,7 @@ struct APICLI: ParsableCommand {
 
 struct WorkspaceCLI: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "workspace", abstract: "Read authoritative topology or bounded revision-consistent inspection pages.")
-    enum Action: String, ExpressibleByArgument { case get, snapshot }
+    enum Action: String, CaseIterable, ExpressibleByArgument { case get, snapshot }
     @Argument var action: Action = .snapshot
     @OptionGroup var connection: Connection
     @OptionGroup var target: Target
