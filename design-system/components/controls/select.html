@@ -1,0 +1,19 @@
+<!--
+name: Select
+summary: Native select restyled to match fields.
+use: Picking one of four or more options. For two or three, use a segmented control.
+avoid: Custom dropdown widgets; the native menu matches macOS and is accessible.
+styles: slate.css
+-->
+<div style="display:flex;gap:8px;flex-wrap:wrap">
+  <select class="st-select" aria-label="Branch">
+    <option>main</option>
+    <option>feature/theme-api</option>
+    <option>release/1.2</option>
+  </select>
+  <select class="st-select" aria-label="Sort">
+    <option>Most recent</option>
+    <option>Name</option>
+    <option>Size</option>
+  </select>
+</div>

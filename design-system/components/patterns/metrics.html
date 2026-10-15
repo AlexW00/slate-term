@@ -1,0 +1,20 @@
+<!--
+name: Metrics
+summary: A row of compact numbers with labels that wraps to fit the pane.
+use: Three to five key numbers at the top of a dashboard-like plugin.
+avoid: Decorative cards, icons on every tile, trend arrows without a clear baseline.
+-->
+<style>
+  .st-metrics { display: flex; flex-wrap: wrap; gap: 1px; margin: var(--space-2); border-radius: var(--radius-lg); overflow: hidden; background: var(--separator); }
+  .st-metric { flex: 1 1 110px; padding: 10px var(--space-3); background: var(--surface); }
+  .st-metric-label { font-size: var(--text-sm); color: var(--text-secondary); }
+  .st-metric-value { margin-top: 2px; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+  .st-metric-value small { font-size: var(--text-md); font-weight: 400; color: var(--text-secondary); }
+  .st-metric-value.is-danger { color: var(--danger); }
+</style>
+
+<div class="st-metrics">
+  <div class="st-metric"><div class="st-metric-label">Requests</div><div class="st-metric-value">1,284</div></div>
+  <div class="st-metric"><div class="st-metric-label">p95 latency</div><div class="st-metric-value">182<small> ms</small></div></div>
+  <div class="st-metric"><div class="st-metric-label">Errors</div><div class="st-metric-value is-danger">7</div></div>
+</div>

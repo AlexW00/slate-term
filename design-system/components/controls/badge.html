@@ -1,0 +1,17 @@
+<!--
+name: Badge and status dot
+summary: Short status labels and colored dots, tinted from the terminal's ANSI colors.
+use: Item state in rows (passed, failed, draft) and live status next to a label.
+avoid: Color as the only signal. Badges on every row when most share one state; mark the exceptions.
+styles: slate.css
+-->
+<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+  <span class="st-badge">draft</span>
+  <span class="st-badge is-accent">3 new</span>
+  <span class="st-badge is-success">passed</span>
+  <span class="st-badge is-warning">slow</span>
+  <span class="st-badge is-danger">failed</span>
+  <span style="display:inline-flex;gap:6px;align-items:center;font-size:12px"><span class="st-dot is-success"></span>Running</span>
+  <span style="display:inline-flex;gap:6px;align-items:center;font-size:12px"><span class="st-dot is-danger"></span>Stopped</span>
+  <span style="display:inline-flex;gap:6px;align-items:center;font-size:12px"><span class="st-dot"></span>Idle</span>
+</div>

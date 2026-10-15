@@ -1,0 +1,37 @@
+<!--
+name: Task list
+summary: Steps or jobs with a status icon, name and duration; the running one shows a spinner.
+use: Build steps, test suites, agent runs, deploy stages.
+avoid: Separate progress bars per row. Logs inline in every row (expand one at a time, or link to a Log output).
+-->
+<style>
+  .st-tasks { list-style: none; margin: 0; padding: var(--space-1); }
+  .st-task { display: flex; align-items: center; gap: 10px; height: var(--row-height); padding: 0 10px; border-radius: var(--radius); }
+  .st-task:hover { background: var(--fill); }
+  .st-task-status { width: 14px; height: 14px; display: grid; place-items: center; flex: none; }
+  .st-task-status .st-icon { width: 14px; height: 14px; stroke-width: 1.75; }
+  .st-task.is-done .st-task-status { color: var(--success); }
+  .st-task.is-failed .st-task-status { color: var(--danger); }
+  .st-task.is-pending { color: var(--text-tertiary); }
+  .st-task-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .st-task-time { font-size: var(--text-sm); color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+</style>
+
+<ol class="st-tasks">
+  <li class="st-task is-done">
+    <span class="st-task-status"><svg class="st-icon" viewBox="0 0 16 16"><path d="m3.5 8.5 3 3 6-7"/></svg></span>
+    <span class="st-task-name">Resolve packages</span><span class="st-task-time">1.2s</span>
+  </li>
+  <li class="st-task is-failed">
+    <span class="st-task-status"><svg class="st-icon" viewBox="0 0 16 16"><path d="m4.5 4.5 7 7M11.5 4.5l-7 7"/></svg></span>
+    <span class="st-task-name">Lint</span><span class="st-task-time">3.8s</span>
+  </li>
+  <li class="st-task is-running">
+    <span class="st-task-status"><span class="st-spinner" style="width:12px;height:12px"></span></span>
+    <span class="st-task-name">Compile SlateTermCore</span><span class="st-task-time">0:14</span>
+  </li>
+  <li class="st-task is-pending">
+    <span class="st-task-status"><svg class="st-icon" viewBox="0 0 16 16"><circle cx="8" cy="8" r="4.5"/></svg></span>
+    <span class="st-task-name">Run tests</span><span class="st-task-time"></span>
+  </li>
+</ol>

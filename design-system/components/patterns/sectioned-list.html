@@ -1,0 +1,182 @@
+<!--
+name: Sectioned list
+summary: Compact list split into groups under sticky, collapsible headers with counts.
+use: One collection with a few natural groups: local and remote branches, staged and unstaged files.
+avoid: A single group (use List). Groups of one item. Nesting groups (use Outline).
+notes: Pairs with List. Place it in the pane shell's scrolling content so headers stick there. For fixed groups, replace the header button with a plain label.
+script: Arrow keys move across groups and skip collapsed ones; Return dispatches "open".
+-->
+<style>
+  .st-grouped { padding: 0 var(--space-1) var(--space-1); }
+  .st-grouped-header {
+    position: sticky; top: 0; z-index: 1;
+    display: flex; align-items: center;
+    height: 26px;
+    background: var(--bg);
+  }
+  .st-grouped-toggle {
+    display: flex; align-items: center; gap: 6px;
+    flex: 1; min-width: 0; height: 22px; padding: 0 6px;
+    border: 0; border-radius: var(--radius-sm);
+    background: none;
+    color: var(--text-secondary);
+    font: 600 var(--text-sm)/1 var(--font-ui);
+    text-align: left;
+  }
+  .st-grouped-toggle:hover { color: var(--text); }
+  .st-grouped-toggle .st-icon { width: 10px; height: 10px; stroke-width: 2; transition: transform 120ms var(--ease-out); }
+  .st-grouped-toggle[aria-expanded="true"] .st-icon { transform: rotate(90deg); }
+  .st-grouped-count { font-weight: 400; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+  .st-grouped-rows { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--space-2); outline: none; }
+  .st-grouped-row {
+    display: flex; align-items: center; gap: var(--space-2);
+    height: var(--row-height); padding: 0 10px;
+    border-radius: var(--radius);
+  }
+  .st-grouped-row:hover { background: var(--fill); }
+  .st-grouped-row[aria-selected="true"] { background: var(--accent-tint); }
+  .st-grouped-rows:focus-visible .st-grouped-row[aria-selected="true"] { box-shadow: inset 0 0 0 1px var(--focus-ring); }
+  .st-grouped-row > .st-icon { color: var(--text-secondary); }
+  .st-grouped-row[aria-selected="true"] > .st-icon { color: var(--accent); }
+  .st-grouped-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .st-grouped-trailing { flex: none; font-size: var(--text-sm); color: var(--text-tertiary); }
+</style>
+
+<!-- The fixed height stands in for the pane's scrolling content area. -->
+<div style="height: 240px; overflow: auto">
+  <div class="st-grouped">
+    <section>
+      <div class="st-grouped-header">
+        <button class="st-grouped-toggle" aria-expanded="true" aria-controls="st-grouped-local">
+          <svg class="st-icon" viewBox="0 0 10 10"><path d="m3.5 2 3 3-3 3"/></svg>
+          <span id="st-grouped-local-label">Local</span>
+          <span class="st-grouped-count">3</span>
+        </button>
+      </div>
+      <div class="st-grouped-rows" id="st-grouped-local" role="listbox" tabindex="0" aria-labelledby="st-grouped-local-label">
+        <div class="st-grouped-row" role="option" aria-selected="true">
+          <svg class="st-icon" viewBox="0 0 16 16"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5.5" r="1.5"/><path d="M4.5 5v6M11.5 7c0 3-7 2-7 4"/></svg>
+          <span class="st-grouped-title">main</span>
+          <span class="st-grouped-trailing">1h</span>
+        </div>
+        <div class="st-grouped-row" role="option" aria-selected="false">
+          <svg class="st-icon" viewBox="0 0 16 16"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5.5" r="1.5"/><path d="M4.5 5v6M11.5 7c0 3-7 2-7 4"/></svg>
+          <span class="st-grouped-title">feature/theme-api</span>
+          <span class="st-grouped-trailing">2m</span>
+        </div>
+        <div class="st-grouped-row" role="option" aria-selected="false">
+          <svg class="st-icon" viewBox="0 0 16 16"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5.5" r="1.5"/><path d="M4.5 5v6M11.5 7c0 3-7 2-7 4"/></svg>
+          <span class="st-grouped-title">fix/pane-drag-preview</span>
+          <span class="st-grouped-trailing">3d</span>
+        </div>
+      </div>
+    </section>
+    <section>
+      <div class="st-grouped-header">
+        <button class="st-grouped-toggle" aria-expanded="true" aria-controls="st-grouped-remote">
+          <svg class="st-icon" viewBox="0 0 10 10"><path d="m3.5 2 3 3-3 3"/></svg>
+          <span id="st-grouped-remote-label">Remote</span>
+          <span class="st-grouped-count">5</span>
+        </button>
+      </div>
+      <div class="st-grouped-rows" id="st-grouped-remote" role="listbox" tabindex="-1" aria-labelledby="st-grouped-remote-label">
+        <div class="st-grouped-row" role="option" aria-selected="false">
+          <svg class="st-icon" viewBox="0 0 16 16"><path d="M4.5 12.5h7a2.5 2.5 0 0 0 .4-5 3.5 3.5 0 0 0-6.8-.9A3 3 0 0 0 4.5 12.5z"/></svg>
+          <span class="st-grouped-title">origin/main</span>
+          <span class="st-grouped-trailing">1h</span>
+        </div>
+        <div class="st-grouped-row" role="option" aria-selected="false">
+          <svg class="st-icon" viewBox="0 0 16 16"><path d="M4.5 12.5h7a2.5 2.5 0 0 0 .4-5 3.5 3.5 0 0 0-6.8-.9A3 3 0 0 0 4.5 12.5z"/></svg>
+          <span class="st-grouped-title">origin/feature/theme-api</span>
+          <span class="st-grouped-trailing">2m</span>
+        </div>
+        <div class="st-grouped-row" role="option" aria-selected="false">
+          <svg class="st-icon" viewBox="0 0 16 16"><path d="M4.5 12.5h7a2.5 2.5 0 0 0 .4-5 3.5 3.5 0 0 0-6.8-.9A3 3 0 0 0 4.5 12.5z"/></svg>
+          <span class="st-grouped-title">origin/release/0.4</span>
+          <span class="st-grouped-trailing">2w</span>
+        </div>
+        <div class="st-grouped-row" role="option" aria-selected="false">
+          <svg class="st-icon" viewBox="0 0 16 16"><path d="M4.5 12.5h7a2.5 2.5 0 0 0 .4-5 3.5 3.5 0 0 0-6.8-.9A3 3 0 0 0 4.5 12.5z"/></svg>
+          <span class="st-grouped-title">origin/chore/update-swift-format</span>
+          <span class="st-grouped-trailing">3w</span>
+        </div>
+        <div class="st-grouped-row" role="option" aria-selected="false">
+          <svg class="st-icon" viewBox="0 0 16 16"><path d="M4.5 12.5h7a2.5 2.5 0 0 0 .4-5 3.5 3.5 0 0 0-6.8-.9A3 3 0 0 0 4.5 12.5z"/></svg>
+          <span class="st-grouped-title">upstream/main</span>
+          <span class="st-grouped-trailing">1mo</span>
+        </div>
+      </div>
+    </section>
+    <section>
+      <div class="st-grouped-header">
+        <button class="st-grouped-toggle" aria-expanded="false" aria-controls="st-grouped-tags">
+          <svg class="st-icon" viewBox="0 0 10 10"><path d="m3.5 2 3 3-3 3"/></svg>
+          <span id="st-grouped-tags-label">Tags</span>
+          <span class="st-grouped-count">3</span>
+        </button>
+      </div>
+      <div class="st-grouped-rows" id="st-grouped-tags" role="listbox" tabindex="-1" aria-labelledby="st-grouped-tags-label" hidden>
+        <div class="st-grouped-row" role="option" aria-selected="false">
+          <svg class="st-icon" viewBox="0 0 16 16"><path d="M2.5 2.5h5l6 6-5 5-6-6zM5.5 5.5h0"/></svg>
+          <span class="st-grouped-title">v0.4.0</span>
+          <span class="st-grouped-trailing">2w</span>
+        </div>
+        <div class="st-grouped-row" role="option" aria-selected="false">
+          <svg class="st-icon" viewBox="0 0 16 16"><path d="M2.5 2.5h5l6 6-5 5-6-6zM5.5 5.5h0"/></svg>
+          <span class="st-grouped-title">v0.3.2</span>
+          <span class="st-grouped-trailing">1mo</span>
+        </div>
+        <div class="st-grouped-row" role="option" aria-selected="false">
+          <svg class="st-icon" viewBox="0 0 16 16"><path d="M2.5 2.5h5l6 6-5 5-6-6zM5.5 5.5h0"/></svg>
+          <span class="st-grouped-title">v0.3.1</span>
+          <span class="st-grouped-trailing">2mo</span>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll(".st-grouped").forEach(root => {
+    const lists = () => [...root.querySelectorAll(".st-grouped-rows")];
+    const rows = () => lists().filter(list => !list.hidden).flatMap(list => [...list.querySelectorAll("[role=option]")]);
+    // One tab stop: the open list holding the selection, or else the first open list.
+    const syncTabStop = () => {
+      const open = lists().filter(list => !list.hidden);
+      const stop = open.find(list => list.querySelector("[aria-selected=true]")) ?? open[0];
+      lists().forEach(list => { list.tabIndex = list === stop ? 0 : -1; });
+      return stop;
+    };
+    const select = row => {
+      root.querySelectorAll("[role=option]").forEach(other => other.setAttribute("aria-selected", String(other === row)));
+      const stop = syncTabStop();
+      if (root.contains(document.activeElement) && document.activeElement !== stop) stop.focus();
+      row.scrollIntoView({ block: "nearest" });
+    };
+
+    root.addEventListener("click", event => {
+      const toggle = event.target.closest(".st-grouped-toggle");
+      if (toggle) {
+        const open = toggle.getAttribute("aria-expanded") !== "true";
+        toggle.setAttribute("aria-expanded", String(open));
+        document.getElementById(toggle.getAttribute("aria-controls")).hidden = !open;
+        syncTabStop();
+        return;
+      }
+      const row = event.target.closest("[role=option]");
+      if (row) select(row);
+    });
+
+    root.addEventListener("keydown", event => {
+      if (!event.target.matches(".st-grouped-rows")) return;
+      const all = rows();
+      if (!all.length) return;
+      const index = all.findIndex(row => row.getAttribute("aria-selected") === "true");
+      if (event.key === "ArrowDown") select(all[Math.min(index + 1, all.length - 1)]);
+      else if (event.key === "ArrowUp") select(all[Math.max(index - 1, 0)]);
+      else if (event.key === "Enter") all[index]?.dispatchEvent(new CustomEvent("open", { bubbles: true }));
+      else return;
+      event.preventDefault();
+    });
+  });
+</script>

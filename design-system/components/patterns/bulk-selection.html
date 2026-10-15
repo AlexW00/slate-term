@@ -1,0 +1,168 @@
+<!--
+name: Bulk selection
+summary: Multi-select list whose toolbar switches to a selection count, a few actions and Done.
+use: Acting on many items at once: cleaning up branches, removing sessions, archiving results.
+avoid: Checkboxes on every row. More than two or three actions in selection mode (use a menu). Lists people rarely act on in bulk.
+notes: Below ~360px wide, the actions collapse into one More button. Confirm deletes or offer undo in the handler.
+script: Click selects, Command-click toggles, Shift-click and Shift-arrows extend, Command-A selects all, Escape clears. Actions dispatch "delete" and "copy" with the selected rows.
+-->
+<style>
+  .st-bulk-bar {
+    container-type: inline-size;
+    height: var(--toolbar-height);
+    border-bottom: 1px solid var(--separator);
+  }
+  .st-bulk-mode { display: flex; align-items: center; gap: var(--space-2); height: 100%; padding: 0 var(--space-2); }
+  .st-bulk-mode .st-search { flex: 1; max-width: 240px; }
+  .st-bulk-total { color: var(--text-tertiary); font-size: var(--text-sm); white-space: nowrap; }
+  .st-bulk-count { padding-left: 4px; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .st-bulk-bar .st-bulk-more { display: none; }
+  @container (max-width: 360px) {
+    .st-bulk-bar .st-bulk-wide { display: none; }
+    .st-bulk-bar .st-bulk-more { display: inline-flex; }
+  }
+
+  .st-bulk-list { display: flex; flex-direction: column; padding: var(--space-1); outline: none; }
+  .st-bulk-row {
+    display: flex; align-items: center; gap: var(--space-2);
+    height: var(--row-height); padding: 0 10px;
+    border-radius: var(--radius);
+  }
+  .st-bulk-row:hover { background: var(--fill); }
+  .st-bulk-row[aria-selected="true"] { background: var(--accent-tint); }
+  /* Adjacent selected rows read as one block, like Finder. */
+  .st-bulk-row[aria-selected="true"]:has(+ [aria-selected="true"]) { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+  [aria-selected="true"] + .st-bulk-row[aria-selected="true"] { border-top-left-radius: 0; border-top-right-radius: 0; }
+  .st-bulk-list:focus-visible .st-bulk-row.is-cursor { box-shadow: inset 0 0 0 1px var(--focus-ring); }
+  .st-bulk-row > .st-icon { color: var(--text-secondary); }
+  .st-bulk-row[aria-selected="true"] > .st-icon { color: var(--accent); }
+  .st-bulk-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .st-bulk-trailing { flex: none; font-size: var(--text-sm); color: var(--text-tertiary); }
+</style>
+
+<div class="st-bulk">
+  <div class="st-bulk-bar" role="toolbar" aria-label="Merged branches">
+    <div class="st-bulk-mode" data-mode="browse">
+      <label class="st-search">
+        <svg class="st-icon" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
+        <input class="st-field" type="search" placeholder="Filter branches" aria-label="Filter branches">
+      </label>
+      <span class="st-spacer"></span>
+      <span class="st-bulk-total">6 merged</span>
+    </div>
+    <div class="st-bulk-mode" data-mode="select" hidden>
+      <span class="st-bulk-count" aria-live="polite"></span>
+      <span class="st-spacer"></span>
+      <button class="st-button is-icon st-bulk-wide" data-action="copy" aria-label="Copy Names" title="Copy Names">
+        <svg class="st-icon" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5V3c0-.8-.7-1.5-1.5-1.5H4C3.2 1.5 2.5 2.2 2.5 3v5c0 .8.7 1.5 1.5 1.5h.5"/></svg>
+      </button>
+      <button class="st-button is-danger st-bulk-wide" data-action="delete">Delete</button>
+      <button class="st-button is-icon st-bulk-more" aria-label="Actions" title="Actions">
+        <svg class="st-icon" viewBox="0 0 16 16"><circle cx="4" cy="8" r=".6"/><circle cx="8" cy="8" r=".6"/><circle cx="12" cy="8" r=".6"/></svg>
+      </button>
+      <button class="st-button is-plain" data-action="done">Done</button>
+    </div>
+  </div>
+
+  <div class="st-bulk-list" role="listbox" aria-multiselectable="true" tabindex="0" aria-label="Merged branches">
+    <div class="st-bulk-row" role="option" aria-selected="false">
+      <svg class="st-icon" viewBox="0 0 16 16"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5.5" r="1.5"/><path d="M4.5 5v6M11.5 7c0 3-7 2-7 4"/></svg>
+      <span class="st-bulk-title">feature/theme-api</span><span class="st-bulk-trailing">2d</span>
+    </div>
+    <div class="st-bulk-row" role="option" aria-selected="true">
+      <svg class="st-icon" viewBox="0 0 16 16"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5.5" r="1.5"/><path d="M4.5 5v6M11.5 7c0 3-7 2-7 4"/></svg>
+      <span class="st-bulk-title">fix/pane-drag-preview</span><span class="st-bulk-trailing">5d</span>
+    </div>
+    <div class="st-bulk-row" role="option" aria-selected="true">
+      <svg class="st-icon" viewBox="0 0 16 16"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5.5" r="1.5"/><path d="M4.5 5v6M11.5 7c0 3-7 2-7 4"/></svg>
+      <span class="st-bulk-title">chore/update-swift-format</span><span class="st-bulk-trailing">1w</span>
+    </div>
+    <div class="st-bulk-row" role="option" aria-selected="true">
+      <svg class="st-icon" viewBox="0 0 16 16"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5.5" r="1.5"/><path d="M4.5 5v6M11.5 7c0 3-7 2-7 4"/></svg>
+      <span class="st-bulk-title">feature/plugin-bridge-events</span><span class="st-bulk-trailing">2w</span>
+    </div>
+    <div class="st-bulk-row" role="option" aria-selected="false">
+      <svg class="st-icon" viewBox="0 0 16 16"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5.5" r="1.5"/><path d="M4.5 5v6M11.5 7c0 3-7 2-7 4"/></svg>
+      <span class="st-bulk-title">fix/scrollback-reflow</span><span class="st-bulk-trailing">3w</span>
+    </div>
+    <div class="st-bulk-row" role="option" aria-selected="false">
+      <svg class="st-icon" viewBox="0 0 16 16"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5.5" r="1.5"/><path d="M4.5 5v6M11.5 7c0 3-7 2-7 4"/></svg>
+      <span class="st-bulk-title">spike/metal-renderer</span><span class="st-bulk-trailing">2mo</span>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll(".st-bulk").forEach(root => {
+    const list = root.querySelector(".st-bulk-list");
+    const browse = root.querySelector("[data-mode=browse]");
+    const selecting = root.querySelector("[data-mode=select]");
+    const count = root.querySelector(".st-bulk-count");
+    const rows = () => [...list.querySelectorAll("[role=option]")];
+    const chosen = () => rows().filter(row => row.getAttribute("aria-selected") === "true");
+    // The anchor is where a Shift range starts; the cursor is the row keys move.
+    let anchor = rows().findIndex(row => row.getAttribute("aria-selected") === "true");
+    let cursor = rows().findLastIndex(row => row.getAttribute("aria-selected") === "true");
+
+    const render = () => {
+      const n = chosen().length;
+      browse.hidden = n > 0;
+      selecting.hidden = n === 0;
+      count.textContent = `${n} selected`;
+      rows().forEach((row, i) => row.classList.toggle("is-cursor", i === cursor));
+    };
+    const setRange = (from, to, additive) => {
+      const [low, high] = from < to ? [from, to] : [to, from];
+      rows().forEach((row, i) => {
+        const inRange = i >= low && i <= high;
+        if (inRange || !additive) row.setAttribute("aria-selected", String(inRange));
+      });
+    };
+    const clear = () => {
+      rows().forEach(row => row.setAttribute("aria-selected", "false"));
+      anchor = cursor = -1;
+      render();
+    };
+
+    list.addEventListener("click", event => {
+      const row = event.target.closest("[role=option]");
+      if (!row) return;
+      const index = rows().indexOf(row);
+      if (event.shiftKey && anchor >= 0) setRange(anchor, index, event.metaKey);
+      else if (event.metaKey) {
+        row.setAttribute("aria-selected", String(row.getAttribute("aria-selected") !== "true"));
+        anchor = index;
+      } else {
+        setRange(index, index, false);
+        anchor = index;
+      }
+      cursor = index;
+      render();
+    });
+
+    list.addEventListener("keydown", event => {
+      const last = rows().length - 1;
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        const step = event.key === "ArrowDown" ? 1 : -1;
+        cursor = cursor < 0 ? 0 : Math.min(Math.max(cursor + step, 0), last);
+        if (event.shiftKey && anchor >= 0) setRange(anchor, cursor, false);
+        else { anchor = cursor; setRange(cursor, cursor, false); }
+        render();
+        rows()[cursor].scrollIntoView({ block: "nearest" });
+      } else if (event.key === "a" && event.metaKey) {
+        setRange(0, last, false);
+        render();
+      } else if (event.key === "Escape") clear();
+      else return;
+      event.preventDefault();
+    });
+
+    root.querySelector(".st-bulk-bar").addEventListener("click", event => {
+      const action = event.target.closest("[data-action]")?.dataset.action;
+      if (action === "done") { clear(); list.focus(); }
+      else if (action) list.dispatchEvent(new CustomEvent(action, { bubbles: true, detail: { rows: chosen() } }));
+    });
+
+    render();
+  });
+</script>

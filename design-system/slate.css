@@ -1,0 +1,405 @@
+/*
+ * Slate Terminal plugin foundation: tokens, base styles and controls.
+ * Copy this file into a plugin unchanged, then add pattern styles beside it.
+ *
+ * Every color derives from the terminal palette variables (--st-*).
+ * slate-theme.js writes them from the host and keeps them current.
+ * The defaults below only apply outside Slate Terminal, e.g. in a plain browser.
+ */
+
+/* ---------- 1. Palette input (written by slate-theme.js) ---------- */
+
+:root {
+  --st-bg: #1e1e1e;
+  --st-fg: #d4d4d4;
+  --st-cursor: #d4d4d4;
+  --st-selection-bg: #264f78;
+  --st-selection-fg: #ffffff;
+  --st-ansi-0: #1e1e1e;  --st-ansi-8: #6e6e6e;
+  --st-ansi-1: #f14c4c;  --st-ansi-9: #f14c4c;
+  --st-ansi-2: #23d18b;  --st-ansi-10: #23d18b;
+  --st-ansi-3: #e5c07b;  --st-ansi-11: #f5f543;
+  --st-ansi-4: #3b8eea;  --st-ansi-12: #3b8eea;
+  --st-ansi-5: #d670d6;  --st-ansi-13: #d670d6;
+  --st-ansi-6: #29b8db;  --st-ansi-14: #29b8db;
+  --st-ansi-7: #cccccc;  --st-ansi-15: #ffffff;
+  --st-font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --st-font-mono-size: 12px;
+  color-scheme: dark;
+}
+
+:root[data-appearance="light"] {
+  --st-bg: #ffffff;
+  --st-fg: #1f1f1f;
+  --st-cursor: #1f1f1f;
+  --st-selection-bg: #b5d5ff;
+  --st-selection-fg: #000000;
+  --st-ansi-1: #c72e2e;
+  --st-ansi-2: #1f8a3c;
+  --st-ansi-3: #a36a00;
+  --st-ansi-4: #1a63d6;
+  --st-ansi-5: #a23ba2;
+  --st-ansi-6: #0f7f9a;
+  color-scheme: light;
+}
+
+/* ---------- 2. Semantic tokens (use these, never --st-* directly) ---------- */
+
+:root {
+  /* Surfaces: the pane is the terminal background; layers mix in foreground. */
+  --bg: var(--st-bg);
+  --surface: color-mix(in oklab, var(--st-fg) 4%, var(--st-bg));
+  --surface-raised: color-mix(in oklab, var(--st-fg) 7%, var(--st-bg));
+  /* The selected segment must stand out from a --fill track. */
+  --control-selected: color-mix(in oklab, var(--st-fg) 20%, var(--st-bg));
+  --fill: color-mix(in oklab, var(--st-fg) 8%, transparent);
+  --fill-hover: color-mix(in oklab, var(--st-fg) 12%, transparent);
+  --fill-active: color-mix(in oklab, var(--st-fg) 17%, transparent);
+  --separator: color-mix(in oklab, var(--st-fg) 11%, transparent);
+  --border: color-mix(in oklab, var(--st-fg) 17%, transparent);
+
+  /* Text */
+  --text: var(--st-fg);
+  --text-secondary: color-mix(in oklab, var(--st-fg) 76%, var(--st-bg));
+  --text-tertiary: color-mix(in oklab, var(--st-fg) 56%, var(--st-bg));
+
+  /*
+   * Hues come from the ANSI colors, with lightness clamped for legibility.
+   * Palettes like Builtin Dark ship a near-black blue, so raw values fail.
+   */
+  --accent: oklch(from var(--st-ansi-4) clamp(0.7, l, 0.82) min(c, 0.16) h);
+  --danger: oklch(from var(--st-ansi-1) clamp(0.68, l, 0.8) min(c, 0.17) h);
+  --success: oklch(from var(--st-ansi-2) clamp(0.7, l, 0.84) min(c, 0.15) h);
+  --warning: oklch(from var(--st-ansi-3) clamp(0.74, l, 0.86) min(c, 0.15) h);
+  --info: oklch(from var(--st-ansi-6) clamp(0.7, l, 0.84) min(c, 0.13) h);
+  /* Text on a solid accent fill: the palette background, darkened if needed. */
+  --on-accent: oklch(from var(--st-bg) min(l, 0.24) c h);
+
+  --accent-tint: color-mix(in oklab, var(--accent) 16%, transparent);
+  --danger-tint: color-mix(in oklab, var(--danger) 14%, transparent);
+  --success-tint: color-mix(in oklab, var(--success) 14%, transparent);
+  --warning-tint: color-mix(in oklab, var(--warning) 14%, transparent);
+  --focus-ring: color-mix(in oklab, var(--accent) 60%, transparent);
+
+  /* Type: system UI font for chrome, the terminal font for data and code. */
+  --font-ui: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: var(--st-font-mono);
+  --text-xs: 10px;
+  --text-sm: 11px;
+  --text-md: 12px;
+  --text-base: 13px;
+  --text-lg: 15px;
+
+  /* Space: a 4px grid. Most gaps are 8 or 12. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+
+  /* Shape */
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-lg: 9px;
+  --control-height: 24px;
+  --control-height-sm: 20px;
+  --row-height: 28px;
+  --toolbar-height: 36px;
+
+  --shadow-popover: 0 0 0 0.5px var(--border), 0 8px 24px rgb(0 0 0 / 0.22), 0 2px 6px rgb(0 0 0 / 0.12);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+:root[data-appearance="light"] {
+  --surface: color-mix(in oklab, var(--st-fg) 3%, var(--st-bg));
+  --surface-raised: var(--st-bg);
+  --control-selected: var(--st-bg);
+  --fill: color-mix(in oklab, var(--st-fg) 6%, transparent);
+  --fill-hover: color-mix(in oklab, var(--st-fg) 9%, transparent);
+  --fill-active: color-mix(in oklab, var(--st-fg) 13%, transparent);
+  --separator: color-mix(in oklab, var(--st-fg) 10%, transparent);
+  --border: color-mix(in oklab, var(--st-fg) 16%, transparent);
+  --text-secondary: color-mix(in oklab, var(--st-fg) 80%, var(--st-bg));
+  --text-tertiary: color-mix(in oklab, var(--st-fg) 60%, var(--st-bg));
+  --accent: oklch(from var(--st-ansi-4) clamp(0.42, l, 0.54) clamp(0.08, c, 0.18) h);
+  --danger: oklch(from var(--st-ansi-1) clamp(0.4, l, 0.5) min(c, 0.19) h);
+  --success: oklch(from var(--st-ansi-2) clamp(0.42, l, 0.54) min(c, 0.15) h);
+  --warning: oklch(from var(--st-ansi-3) clamp(0.42, l, 0.52) min(c, 0.15) h);
+  --info: oklch(from var(--st-ansi-6) clamp(0.44, l, 0.56) min(c, 0.13) h);
+  --on-accent: #fff;
+  --shadow-popover: 0 0 0 0.5px var(--border), 0 8px 24px rgb(0 0 0 / 0.12), 0 2px 6px rgb(0 0 0 / 0.06);
+}
+
+/* ---------- 3. Base ---------- */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: var(--text-base)/1.4 var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  /* Plugin UIs behave like app chrome, not documents. */
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+  overflow: hidden;
+}
+
+/* Content people read or copy stays selectable. */
+input, textarea, [contenteditable], .st-selectable, pre, code, .st-mono {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+::selection { background: var(--st-selection-bg); color: var(--st-selection-fg); }
+
+[hidden] { display: none !important; }
+
+h1, h2, h3, h4, p { margin: 0; }
+h1 { font-size: var(--text-lg); font-weight: 600; letter-spacing: -0.01em; }
+h2 { font-size: var(--text-base); font-weight: 600; }
+h3 { font-size: var(--text-sm); font-weight: 600; color: var(--text-secondary); }
+
+a { color: var(--accent); text-decoration: none; cursor: pointer; }
+a:hover { text-decoration: underline; }
+
+code, pre, kbd, samp, .st-mono { font-family: var(--font-mono); font-size: var(--st-font-mono-size); }
+
+:focus { outline: none; }
+:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 1px;
+  border-radius: var(--radius);
+}
+
+/* No ::-webkit-scrollbar rules: any of them replaces the native macOS overlay scrollbars. */
+
+svg.st-icon {
+  width: 16px; height: 16px; flex: none;
+  fill: none; stroke: currentColor; stroke-width: 1.5;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+
+.st-secondary { color: var(--text-secondary); }
+.st-tertiary { color: var(--text-tertiary); }
+.st-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.st-spacer { flex: 1; }
+.st-numeric { font-variant-numeric: tabular-nums; }
+
+/* ---------- 4. Controls ---------- */
+
+/* Button. Default is a quiet filled button; add one modifier at most. */
+.st-button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: var(--control-height);
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--fill);
+  color: var(--text);
+  font: 500 var(--text-md)/1 var(--font-ui);
+  white-space: nowrap;
+  cursor: default;
+  transition: background-color 120ms ease;
+}
+.st-button:hover { background: var(--fill-hover); }
+.st-button:active { background: var(--fill-active); }
+.st-button:disabled, .st-button[aria-disabled="true"] { opacity: 0.4; pointer-events: none; }
+.st-button .st-icon { width: 14px; height: 14px; }
+
+.st-button.is-primary { background: var(--accent); color: var(--on-accent); }
+.st-button.is-primary:hover { background: color-mix(in oklab, var(--accent) 88%, var(--st-fg)); }
+.st-button.is-primary:active { background: color-mix(in oklab, var(--accent) 80%, var(--st-fg)); }
+
+.st-button.is-danger { background: var(--danger-tint); color: var(--danger); }
+.st-button.is-danger:hover { background: color-mix(in oklab, var(--danger) 22%, transparent); }
+
+.st-button.is-plain { background: transparent; color: var(--text-secondary); }
+.st-button.is-plain:hover { background: var(--fill); color: var(--text); }
+
+.st-button.is-icon { width: var(--control-height); padding: 0; background: transparent; color: var(--text-secondary); }
+.st-button.is-icon:hover { background: var(--fill); color: var(--text); }
+.st-button.is-icon[aria-pressed="true"] { color: var(--accent); background: var(--accent-tint); }
+
+.st-button.is-small { height: var(--control-height-sm); padding: 0 8px; font-size: var(--text-sm); }
+.st-button.is-small.is-icon { width: var(--control-height-sm); padding: 0; }
+
+/* Text field, select and textarea share one look. */
+.st-field, .st-select, .st-textarea {
+  height: var(--control-height);
+  min-width: 0;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--st-fg) 3%, var(--st-bg));
+  color: var(--text);
+  font: var(--text-md)/1 var(--font-ui);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.st-field::placeholder, .st-textarea::placeholder { color: var(--text-tertiary); }
+.st-field:focus, .st-select:focus, .st-textarea:focus {
+  outline: none;
+  border-color: color-mix(in oklab, var(--accent) 70%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent);
+}
+.st-field[aria-invalid="true"] { border-color: var(--danger); }
+.st-field.is-mono { font-family: var(--font-mono); font-size: var(--st-font-mono-size); }
+
+.st-textarea { height: auto; min-height: 64px; padding: 6px 8px; line-height: 1.45; resize: vertical; }
+
+.st-select {
+  appearance: none;
+  padding-right: 24px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='10' fill='none' stroke='%23888' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 3.5 4 1l3 2.5M1 6.5 4 9l3-2.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+
+/* Search field: a field with a leading icon. */
+.st-search { position: relative; display: flex; align-items: center; min-width: 0; }
+.st-search > .st-icon { position: absolute; left: 7px; width: 13px; height: 13px; color: var(--text-tertiary); pointer-events: none; }
+.st-search > .st-field { width: 100%; padding-left: 26px; border-color: transparent; background: var(--fill); }
+.st-search > .st-field:focus { background: color-mix(in oklab, var(--st-fg) 3%, var(--st-bg)); }
+
+/* Checkbox and radio use native inputs tinted with the accent. */
+.st-check {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: var(--text-md);
+}
+.st-check input:not(.st-switch) { margin: 0; width: 14px; height: 14px; accent-color: var(--accent); }
+
+/* Switch: a checkbox with role="switch". */
+.st-switch {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 28px; height: 16px; margin: 0;
+  border-radius: 8px;
+  background: var(--fill-active);
+  transition: background-color 160ms ease;
+}
+.st-switch::after {
+  content: "";
+  position: absolute; top: 2px; left: 2px;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
+  transition: transform 160ms var(--ease-out);
+}
+.st-switch:checked { background: var(--accent); }
+.st-switch:checked::after { transform: translateX(12px); }
+.st-switch:disabled { opacity: 0.4; }
+
+/* Segmented control: buttons in a track; mark the current one with aria-pressed. */
+.st-segmented {
+  display: inline-flex; gap: 2px; padding: 2px;
+  border-radius: 7px;
+  background: var(--fill);
+}
+.st-segmented > button {
+  height: calc(var(--control-height) - 4px);
+  padding: 0 10px;
+  border: 0; border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: 500 var(--text-sm)/1 var(--font-ui);
+  cursor: default;
+}
+.st-segmented > button:hover { color: var(--text); }
+.st-segmented > button[aria-pressed="true"] {
+  background: var(--control-selected);
+  color: var(--text);
+  box-shadow: 0 0 0 0.5px var(--border), 0 1px 2px rgb(0 0 0 / 0.15);
+}
+
+/* Badge: short status labels. Pair color with text, never color alone. */
+.st-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 18px; padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: var(--fill);
+  color: var(--text-secondary);
+  font: 500 var(--text-xs)/1 var(--font-ui);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.st-badge.is-accent { background: var(--accent-tint); color: var(--accent); }
+.st-badge.is-success { background: var(--success-tint); color: var(--success); }
+.st-badge.is-warning { background: var(--warning-tint); color: var(--warning); }
+.st-badge.is-danger { background: var(--danger-tint); color: var(--danger); }
+
+/* Status dot for live state next to a label. */
+.st-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--text-tertiary); }
+.st-dot.is-success { background: var(--success); }
+.st-dot.is-warning { background: var(--warning); }
+.st-dot.is-danger { background: var(--danger); }
+.st-dot.is-accent { background: var(--accent); }
+
+/* Keyboard shortcut hint. */
+.st-kbd {
+  display: inline-flex; align-items: center;
+  min-width: 18px; height: 18px; padding: 0 4px;
+  border-radius: var(--radius-sm);
+  background: var(--fill);
+  color: var(--text-secondary);
+  font: 500 var(--text-sm)/1 var(--font-ui);
+  justify-content: center;
+}
+
+/* Spinner: use for waits longer than ~300ms. */
+.st-spinner {
+  width: 14px; height: 14px; flex: none;
+  border: 2px solid var(--fill-active);
+  border-top-color: var(--text-secondary);
+  border-radius: 50%;
+  animation: st-spin 700ms linear infinite;
+}
+@keyframes st-spin { to { transform: rotate(360deg); } }
+
+/* Progress bar for determinate work. Set --value from 0 to 1. */
+.st-progress {
+  --value: 0;
+  height: 4px; border-radius: 2px;
+  background: var(--fill);
+  overflow: hidden;
+}
+.st-progress::before {
+  content: ""; display: block; height: 100%;
+  width: calc(var(--value) * 100%);
+  background: var(--accent);
+  border-radius: inherit;
+  transition: width 200ms ease;
+}
+
+/* Search match highlight. Keeps the text color and weight so rows do not shift. */
+mark {
+  background: color-mix(in oklab, var(--warning) 32%, transparent);
+  color: inherit;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--warning) 32%, transparent);
+}
+
+/* Inline meter for per-row levels. Set --value from 0 to 1; add is-warning or is-danger past thresholds. */
+.st-meter {
+  --value: 0;
+  --meter-color: var(--accent);
+  display: inline-block; flex: none;
+  width: 48px; height: 4px; border-radius: 2px;
+  background: linear-gradient(var(--meter-color), var(--meter-color)) 0 0 / calc(var(--value) * 100%) 100% no-repeat, var(--fill-active);
+}
+.st-meter.is-warning { --meter-color: var(--warning); }
+.st-meter.is-danger { --meter-color: var(--danger); }
+
+/* Sparkline: an SVG polyline drawn in the current text color. */
+.st-sparkline { display: inline-block; flex: none; width: 56px; height: 16px; overflow: visible; }
+.st-sparkline polyline { fill: none; stroke: currentColor; stroke-width: 1.25; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0ms !important; animation-duration: 0.01ms !important; }
+  .st-spinner { animation-duration: 1.4s !important; }
+}

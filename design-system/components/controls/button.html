@@ -1,0 +1,25 @@
+<!--
+name: Button
+summary: Quiet filled default, plus primary, danger, plain, icon and small variants.
+use: Any action. One primary button per view, for the action people came to do.
+avoid: Primary for every action. Text links for actions. Labels longer than two words.
+styles: slate.css
+-->
+<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+  <button class="st-button is-primary">Run</button>
+  <button class="st-button">Refresh</button>
+  <button class="st-button is-plain">Cancel</button>
+  <button class="st-button is-danger">Delete</button>
+  <button class="st-button" disabled>Disabled</button>
+  <button class="st-button">
+    <svg class="st-icon" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>
+    New
+  </button>
+  <button class="st-button is-icon" aria-label="Refresh" title="Refresh">
+    <svg class="st-icon" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v3h-3"/></svg>
+  </button>
+  <button class="st-button is-icon" aria-label="Pin" aria-pressed="true" title="Pin">
+    <svg class="st-icon" viewBox="0 0 16 16"><path d="M5.5 2.5h5M6.5 2.5v4L4.5 9h7l-2-2.5v-4M8 9v4.5"/></svg>
+  </button>
+  <button class="st-button is-small">Small</button>
+</div>

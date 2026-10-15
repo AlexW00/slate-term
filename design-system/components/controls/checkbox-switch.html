@@ -1,0 +1,14 @@
+<!--
+name: Checkbox and switch
+summary: Accent-tinted native checkbox and radio, and a switch for settings that apply immediately.
+use: Switch for an on/off setting that takes effect at once. Checkbox for choices confirmed later or for selecting items.
+avoid: A switch inside a form with a Save button.
+styles: slate.css
+-->
+<div style="display:grid;gap:10px">
+  <label class="st-check"><input type="checkbox" checked> Include hidden files</label>
+  <label class="st-check"><input type="checkbox"> Follow symlinks</label>
+  <label class="st-check"><input type="radio" name="scope" checked> This tab</label>
+  <label class="st-check"><input type="radio" name="scope"> All tabs</label>
+  <label class="st-check"><input class="st-switch" type="checkbox" role="switch" checked> Auto-refresh</label>
+</div>

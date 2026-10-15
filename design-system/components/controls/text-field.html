@@ -1,0 +1,17 @@
+<!--
+name: Text field
+summary: Single-line input, search field, monospace field and textarea.
+use: Free text input. Use the search field to filter a list in place.
+avoid: Labels inside placeholders as the only label in forms. Helper text under every field.
+styles: slate.css
+-->
+<div style="display:grid;gap:10px;max-width:320px">
+  <label class="st-search">
+    <svg class="st-icon" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
+    <input class="st-field" type="search" placeholder="Filter" aria-label="Filter">
+  </label>
+  <input class="st-field" type="text" value="feature/theme-api" aria-label="Branch">
+  <input class="st-field is-mono" type="text" value="npm run build -- --watch" aria-label="Command">
+  <input class="st-field" type="text" value="not a port" aria-invalid="true" aria-label="Port">
+  <textarea class="st-textarea" placeholder="Notes" aria-label="Notes"></textarea>
+</div>

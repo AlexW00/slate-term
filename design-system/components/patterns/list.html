@@ -1,0 +1,79 @@
+<!--
+name: List
+summary: Selectable rows with an optional icon, a title, one line of detail and trailing metadata.
+use: Collections people scan and pick from: files, branches, sessions, search results.
+avoid: More than one line of detail. Comparing many fields per item (use Table). Hover-only actions people need to find.
+script: Click or arrow keys move selection; Return opens. Keep keyboard support when adapting.
+-->
+<style>
+  .st-list { display: flex; flex-direction: column; gap: 2px; padding: var(--space-1); outline: none; }
+  .st-list-row {
+    display: flex; align-items: center; gap: 10px;
+    min-height: 40px; padding: 4px 10px;
+    border-radius: var(--radius);
+  }
+  .st-list-row:hover { background: var(--fill); }
+  .st-list-row[aria-selected="true"] { background: var(--accent-tint); }
+  .st-list:focus-visible .st-list-row[aria-selected="true"] { box-shadow: inset 0 0 0 1px var(--focus-ring); }
+  .st-list-row > .st-icon { color: var(--text-secondary); }
+  .st-list-row[aria-selected="true"] > .st-icon { color: var(--accent); }
+  .st-list-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .st-list-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .st-list-detail { font-size: var(--text-sm); color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .st-list-trailing { flex: none; display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); color: var(--text-tertiary); }
+  /* Compact rows for long, single-line lists. */
+  .st-list.is-compact .st-list-row { min-height: var(--row-height); }
+</style>
+
+<div class="st-list" role="listbox" tabindex="0" aria-label="Branches">
+  <div class="st-list-row" role="option" aria-selected="true">
+    <svg class="st-icon" viewBox="0 0 16 16"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5.5" r="1.5"/><path d="M4.5 5v6M11.5 7c0 3-7 2-7 4"/></svg>
+    <div class="st-list-text">
+      <span class="st-list-title">feature/theme-api</span>
+      <span class="st-list-detail">Add appearance.get and change events</span>
+    </div>
+    <div class="st-list-trailing"><span class="st-badge is-accent">current</span><span>2m</span></div>
+  </div>
+  <div class="st-list-row" role="option" aria-selected="false">
+    <svg class="st-icon" viewBox="0 0 16 16"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5.5" r="1.5"/><path d="M4.5 5v6M11.5 7c0 3-7 2-7 4"/></svg>
+    <div class="st-list-text">
+      <span class="st-list-title">main</span>
+      <span class="st-list-detail">Merge pull request #212</span>
+    </div>
+    <div class="st-list-trailing"><span>1h</span></div>
+  </div>
+  <div class="st-list-row" role="option" aria-selected="false">
+    <svg class="st-icon" viewBox="0 0 16 16"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5.5" r="1.5"/><path d="M4.5 5v6M11.5 7c0 3-7 2-7 4"/></svg>
+    <div class="st-list-text">
+      <span class="st-list-title">fix/pane-drag-preview</span>
+      <span class="st-list-detail">Target-local highlights</span>
+    </div>
+    <div class="st-list-trailing"><span class="st-badge is-danger">conflict</span><span>3d</span></div>
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll(".st-list[role=listbox]").forEach((list, listIndex) => {
+    const rows = () => [...list.querySelectorAll("[role=option]")];
+    // Focus stays on the list, so aria-activedescendant tells assistive tech which row is selected.
+    rows().forEach((row, index) => row.id ||= `st-list-${listIndex}-${index}`);
+    const select = row => {
+      rows().forEach(other => other.setAttribute("aria-selected", String(other === row)));
+      list.setAttribute("aria-activedescendant", row.id);
+      row.scrollIntoView({ block: "nearest" });
+    };
+    list.addEventListener("click", event => {
+      const row = event.target.closest("[role=option]");
+      if (row) select(row);
+    });
+    list.addEventListener("keydown", event => {
+      const all = rows();
+      const index = all.findIndex(row => row.getAttribute("aria-selected") === "true");
+      if (event.key === "ArrowDown") select(all[Math.min(index + 1, all.length - 1)]);
+      else if (event.key === "ArrowUp") select(all[Math.max(index - 1, 0)]);
+      else if (event.key === "Enter") all[index]?.dispatchEvent(new CustomEvent("open", { bubbles: true }));
+      else return;
+      event.preventDefault();
+    });
+  });
+</script>

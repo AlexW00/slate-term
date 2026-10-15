@@ -1,0 +1,39 @@
+<!--
+name: Banner
+summary: Inline message at the top of the content for errors, warnings and important state.
+use: A problem that affects the whole view, with a way to fix it when there is one.
+avoid: Success banners for routine actions, banners that never go away, more than one at a time.
+notes: Errors say what happened and what to do, in one sentence each.
+-->
+<style>
+  .st-banner {
+    display: flex; align-items: flex-start; gap: 10px;
+    margin: var(--space-2); padding: 9px 10px 9px 12px;
+    border-radius: var(--radius);
+    background: var(--fill);
+    font-size: var(--text-md);
+  }
+  .st-banner > .st-icon { margin-top: 1px; color: var(--text-secondary); }
+  .st-banner-text { flex: 1; min-width: 0; }
+  .st-banner-text strong { font-weight: 600; }
+  .st-banner-text p { color: var(--text-secondary); margin-top: 1px; }
+  /* The action sits bottom right, after the message is read. */
+  .st-banner > .st-button { align-self: flex-end; margin: 2px -2px -3px 0; }
+  .st-banner.is-danger { background: var(--danger-tint); }
+  .st-banner.is-danger > .st-icon { color: var(--danger); }
+  .st-banner.is-warning { background: var(--warning-tint); }
+  .st-banner.is-warning > .st-icon { color: var(--warning); }
+</style>
+
+<div class="st-banner is-danger" role="alert">
+  <svg class="st-icon" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 5v3.5M8 11h.01"/></svg>
+  <div class="st-banner-text">
+    <strong>Server stopped</strong>
+    <p>Port 5173 is in use by another process.</p>
+  </div>
+  <button class="st-button is-small">Retry</button>
+</div>
+<div class="st-banner is-warning" role="status">
+  <svg class="st-icon" viewBox="0 0 16 16"><path d="M8 2.5 14 13H2z"/><path d="M8 6.5v3M8 11.2h.01"/></svg>
+  <div class="st-banner-text"><strong>Showing cached results</strong> from 10 minutes ago.</div>
+</div>

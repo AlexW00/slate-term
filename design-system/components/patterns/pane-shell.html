@@ -1,0 +1,48 @@
+<!--
+name: Pane shell
+summary: The default page frame: optional toolbar, one scrolling content area, optional status bar.
+use: Start every plugin page from this. Only the content area scrolls.
+avoid: Page-level scrolling, headers that repeat the pane title, footers with nothing live in them.
+notes: The native pane header already shows the plugin title. Use workspace.setTitle for context, not an <h1>.
+preview-height: 260
+-->
+<style>
+  .st-shell { display: flex; flex-direction: column; height: 100vh; }
+  .st-shell > .st-shell-content { flex: 1; min-height: 0; overflow: auto; }
+  .st-shell > .st-shell-toolbar,
+  .st-shell > .st-shell-status { flex: none; }
+  .st-shell-toolbar {
+    display: flex; align-items: center; gap: var(--space-2);
+    height: var(--toolbar-height); padding: 0 var(--space-2);
+    border-bottom: 1px solid var(--separator);
+  }
+  .st-shell-status {
+    display: flex; align-items: center; gap: var(--space-3);
+    height: 24px; padding: 0 var(--space-3);
+    border-top: 1px solid var(--separator);
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
+  }
+</style>
+
+<div class="st-shell">
+  <header class="st-shell-toolbar">
+    <label class="st-search" style="flex:1;max-width:260px">
+      <svg class="st-icon" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
+      <input class="st-field" type="search" placeholder="Filter" aria-label="Filter">
+    </label>
+    <span class="st-spacer"></span>
+    <button class="st-button is-icon" aria-label="Refresh" title="Refresh">
+      <svg class="st-icon" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v3h-3"/></svg>
+    </button>
+  </header>
+  <main class="st-shell-content">
+    <!-- Content: a list, table, form or detail view. -->
+    <div style="padding:var(--space-3);color:var(--text-secondary)">Content scrolls here.</div>
+  </main>
+  <footer class="st-shell-status">
+    <span class="st-numeric">24 items</span>
+    <span class="st-spacer"></span>
+    <span>Updated just now</span>
+  </footer>
+</div>

@@ -1,0 +1,69 @@
+<!--
+name: Menu
+summary: Popover menu anchored to a button, using the native popover attribute.
+use: Secondary actions behind a "More" button or a row's context menu.
+avoid: Primary actions only reachable here. Nested submenus. Menus for two items.
+notes: Opens instantly; frequent menus do not animate. Escape and outside clicks close it natively.
+script: Positions the menu under its trigger and adds arrow-key navigation.
+preview-height: 230
+preview-padding: true
+-->
+<style>
+  .st-menu {
+    margin: 0; padding: var(--space-1);
+    min-width: 180px;
+    border: 0; border-radius: var(--radius-lg);
+    background: var(--surface-raised);
+    color: var(--text);
+    box-shadow: var(--shadow-popover);
+    font-size: var(--text-base);
+  }
+  .st-menu-item {
+    display: flex; align-items: center; gap: var(--space-2);
+    width: 100%; height: 24px; padding: 0 var(--space-2);
+    border: 0; border-radius: var(--radius-sm);
+    background: none; color: inherit; font: inherit; text-align: left;
+  }
+  .st-menu-item:hover, .st-menu-item:focus-visible { background: var(--accent); color: var(--on-accent); outline: none; }
+  .st-menu-item .st-icon { width: 14px; height: 14px; }
+  .st-menu-item kbd { margin-left: auto; padding-left: var(--space-4); font: inherit; opacity: 0.6; }
+  .st-menu-item.is-danger { color: var(--danger); }
+  .st-menu-item.is-danger:hover { background: var(--danger); color: var(--on-accent); }
+  .st-menu-separator { height: 1px; margin: var(--space-1) var(--space-2); background: var(--separator); }
+</style>
+
+<button class="st-button" popovertarget="st-demo-menu">Actions</button>
+<div class="st-menu" id="st-demo-menu" popover role="menu">
+  <button class="st-menu-item" role="menuitem">Open in Terminal<kbd>⌘O</kbd></button>
+  <button class="st-menu-item" role="menuitem">Copy Path<kbd>⌥⌘C</kbd></button>
+  <button class="st-menu-item" role="menuitem">Rename…</button>
+  <div class="st-menu-separator" role="separator"></div>
+  <button class="st-menu-item is-danger" role="menuitem">Delete Branch</button>
+</div>
+
+<script>
+  document.querySelectorAll(".st-menu[popover]").forEach(menu => {
+    menu.addEventListener("toggle", event => {
+      if (event.newState !== "open") return;
+      const trigger = document.querySelector(`[popovertarget="${menu.id}"]`);
+      if (!trigger) return;
+      const anchor = trigger.getBoundingClientRect();
+      const left = Math.min(anchor.left, innerWidth - menu.offsetWidth - 8);
+      const below = anchor.bottom + 4 + menu.offsetHeight < innerHeight;
+      menu.style.left = `${Math.max(8, left)}px`;
+      menu.style.top = `${below ? anchor.bottom + 4 : anchor.top - menu.offsetHeight - 4}px`;
+      menu.querySelector(".st-menu-item")?.focus();
+    });
+    menu.addEventListener("keydown", event => {
+      const items = [...menu.querySelectorAll(".st-menu-item")];
+      const index = items.indexOf(document.activeElement);
+      if (event.key === "ArrowDown") items[(index + 1) % items.length].focus();
+      else if (event.key === "ArrowUp") items[(index - 1 + items.length) % items.length].focus();
+      else return;
+      event.preventDefault();
+    });
+    menu.addEventListener("click", event => {
+      if (event.target.closest(".st-menu-item")) menu.hidePopover();
+    });
+  });
+</script>

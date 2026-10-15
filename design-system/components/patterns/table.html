@@ -1,0 +1,43 @@
+<!--
+name: Table
+summary: Dense rows with a sticky header, aligned numeric columns and row selection.
+use: Comparing several fields across many items: processes, test results, dependencies.
+avoid: Fewer than three columns (use List). Zebra stripes, vertical rules, or wrapping cell text.
+notes: Right-align numbers and use tabular figures. Drop low-value columns at narrow widths.
+-->
+<style>
+  .st-table-wrap { container-type: inline-size; }
+  .st-table { width: 100%; border-collapse: collapse; font-size: var(--text-md); }
+  .st-table th {
+    position: sticky; top: 0; z-index: 1;
+    height: 26px; padding: 0 var(--space-3);
+    background: var(--bg);
+    border-bottom: 1px solid var(--separator);
+    color: var(--text-secondary);
+    font-size: var(--text-sm); font-weight: 500; text-align: left; white-space: nowrap;
+  }
+  .st-table td {
+    height: var(--row-height); padding: 0 var(--space-3);
+    border-bottom: 1px solid color-mix(in oklab, var(--st-fg) 6%, transparent);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0;
+  }
+  .st-table .is-numeric { text-align: right; font-variant-numeric: tabular-nums; }
+  .st-table .is-mono { font-family: var(--font-mono); font-size: var(--st-font-mono-size); }
+  .st-table tbody tr:hover { background: var(--fill); }
+  .st-table tbody tr[aria-current="true"] { background: var(--accent-tint); }
+  @container (max-width: 420px) { .st-table .is-optional { display: none; } }
+</style>
+
+<div class="st-table-wrap">
+  <table class="st-table">
+    <thead>
+      <tr><th style="width:44%">Process</th><th class="is-optional">User</th><th class="is-numeric">CPU</th><th class="is-numeric">Memory</th></tr>
+    </thead>
+    <tbody>
+      <tr aria-current="true"><td class="is-mono">node vite</td><td class="is-optional">alex</td><td class="is-numeric">12.4%</td><td class="is-numeric">318 MB</td></tr>
+      <tr><td class="is-mono">swift-frontend</td><td class="is-optional">alex</td><td class="is-numeric">96.0%</td><td class="is-numeric">1.2 GB</td></tr>
+      <tr><td class="is-mono">postgres</td><td class="is-optional">_postgres</td><td class="is-numeric">0.3%</td><td class="is-numeric">42 MB</td></tr>
+      <tr><td class="is-mono">zsh</td><td class="is-optional">alex</td><td class="is-numeric">0.0%</td><td class="is-numeric">4 MB</td></tr>
+    </tbody>
+  </table>
+</div>

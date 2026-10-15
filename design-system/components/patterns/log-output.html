@@ -1,0 +1,99 @@
+<!--
+name: Log output
+summary: Monospace output in the terminal's font and colors, with ANSI-colored levels.
+use: Command output, logs, diffs and other text the user reads like a terminal.
+avoid: Imitating a terminal for interactive input; open a real terminal pane instead.
+notes: Uses the terminal font and ANSI colors so output reads the same as in the terminal. Use the follow variant for live output.
+script: Follow variant stays pinned to the bottom, pauses when scrolled up, shows Jump to Latest with a new-line count, and keeps the last 5000 lines.
+-->
+<style>
+  .st-log {
+    margin: 0; padding: var(--space-2) var(--space-3);
+    font: var(--st-font-mono-size)/1.55 var(--font-mono);
+    color: var(--text);
+    white-space: pre-wrap; overflow-wrap: anywhere;
+    overflow: auto; tab-size: 4;
+  }
+  .st-log .t { color: var(--text-tertiary); }
+  .st-log .info { color: var(--st-ansi-6); }
+  .st-log .ok { color: var(--st-ansi-2); }
+  .st-log .warn { color: var(--st-ansi-3); }
+  .st-log .err { color: var(--st-ansi-1); }
+  .st-log.is-boxed { border-radius: var(--radius); background: var(--surface); box-shadow: inset 0 0 0 1px var(--separator); }
+
+  /* Follow variant: give .st-log-follow a height, usually by making it the pane's content area. */
+  .st-log-follow { position: relative; min-height: 0; }
+  .st-log-follow > .st-log { height: 100%; }
+  .st-log-jump {
+    position: absolute; bottom: var(--space-2); left: 50%; transform: translateX(-50%);
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 22px; padding: 0 10px;
+    border: 0; border-radius: 11px;
+    background: var(--surface-raised); color: var(--text);
+    box-shadow: var(--shadow-popover);
+    font: 500 var(--text-sm)/1 var(--font-ui); white-space: nowrap;
+  }
+  .st-log-jump:hover { background: color-mix(in oklab, var(--st-fg) 10%, var(--surface-raised)); }
+  .st-log-jump .st-icon { width: 12px; height: 12px; }
+  .st-log-jump b { font-weight: 500; color: var(--accent); font-variant-numeric: tabular-nums; }
+</style>
+
+<pre class="st-log is-boxed"><span class="t">14:02:11</span> <span class="info">info</span>  vite v6.2.0 dev server running
+<span class="t">14:02:11</span> <span class="info">info</span>  Local: http://127.0.0.1:5173/
+<span class="t">14:02:19</span> <span class="ok">ok</span>    hmr update /src/App.tsx
+<span class="t">14:02:31</span> <span class="warn">warn</span>  Large chunk: index-8f2a.js (612 kB)
+<span class="t">14:02:44</span> <span class="err">error</span> Cannot find module './theme'</pre>
+
+<div class="st-log-follow" style="height: 160px; margin-top: var(--space-3)">
+  <div class="st-log is-boxed" role="log" aria-label="Build output" tabindex="0"></div>
+  <button class="st-log-jump" hidden>
+    <svg class="st-icon" viewBox="0 0 16 16"><path d="M8 3v10M4 9l4 4 4-4"/></svg>Jump to Latest<b></b>
+  </button>
+</div>
+
+<script>
+  // Returns append(line). Lines are elements, such as a div with the colored spans above.
+  function followLog(root, maxLines = 5000) {
+    const log = root.querySelector(".st-log");
+    const jump = root.querySelector(".st-log-jump");
+    let following = true, unseen = 0;
+    const update = () => {
+      jump.hidden = following;
+      jump.querySelector("b").textContent = unseen ? `${unseen.toLocaleString()} new` : "";
+    };
+    const toBottom = () => { log.scrollTop = log.scrollHeight; };
+    log.addEventListener("scroll", () => {
+      following = log.scrollHeight - log.scrollTop - log.clientHeight < 4;
+      if (following) unseen = 0;
+      update();
+    });
+    jump.addEventListener("click", () => { toBottom(); following = true; unseen = 0; update(); });
+    return line => {
+      const before = log.scrollHeight;
+      log.append(line);
+      const added = log.scrollHeight - before;
+      while (log.childElementCount > maxLines) log.firstElementChild.remove();
+      if (following) return toBottom();
+      // Dropping old lines shifts content up; keep the user's place.
+      log.scrollTop -= before + added - log.scrollHeight;
+      unseen++;
+      update();
+    };
+  }
+
+  // Demo only: appends a fake build line every 1.5s.
+  {
+    const append = followLog(document.querySelector(".st-log-follow"));
+    const messages = ["compiled src/App.tsx", "hmr update /src/theme.css", "rebuilt 14 modules in 212 ms", "Large chunk: vendor.js (540 kB)"];
+    let n = 0;
+    const line = () => {
+      const [cls, label] = n % 4 === 3 ? ["warn", "warn "] : n % 2 ? ["ok", "ok   "] : ["info", "info "];
+      const row = document.createElement("div");
+      row.innerHTML = `<span class="t">${new Date().toLocaleTimeString([], { hour12: false })}</span> <span class="${cls}">${label}</span>`;
+      row.append(messages[n++ % messages.length]);
+      append(row);
+    };
+    for (let i = 0; i < 12; i++) line();
+    setInterval(line, 1500);
+  }
+</script>

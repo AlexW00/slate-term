@@ -1,0 +1,20 @@
+<!--
+name: Loading rows
+summary: Placeholder rows shaped like the content that is about to load.
+use: First load of a list or table that takes more than ~300ms.
+avoid: Replacing data that is already visible; refresh in place and show a spinner in the toolbar instead.
+-->
+<style>
+  .st-skeleton { display: flex; flex-direction: column; gap: 2px; padding: var(--space-1); }
+  .st-skeleton-row { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 10px; }
+  .st-skeleton-row i { display: block; height: 9px; border-radius: 4px; background: var(--fill); animation: st-pulse 1.4s ease-in-out infinite; }
+  .st-skeleton-row i:first-child { width: 16px; height: 16px; border-radius: 4px; flex: none; }
+  @keyframes st-pulse { 50% { opacity: 0.45; } }
+  @media (prefers-reduced-motion: reduce) { .st-skeleton-row i { animation: none; } }
+</style>
+
+<div class="st-skeleton" role="status" aria-busy="true" aria-label="Loading">
+  <div class="st-skeleton-row"><i></i><i style="width:40%"></i></div>
+  <div class="st-skeleton-row"><i></i><i style="width:62%"></i></div>
+  <div class="st-skeleton-row"><i></i><i style="width:48%"></i></div>
+</div>

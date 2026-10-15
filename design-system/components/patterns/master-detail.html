@@ -1,0 +1,62 @@
+<!--
+name: Master-detail
+summary: List beside a detail view when wide; the list alone with push navigation when narrow.
+use: Browsing items that each have a larger detail view.
+avoid: Fixed sidebars in narrow panes. Three columns.
+notes: Uses a container query, so it adapts to the pane, not the window. Width 560px is the switch point.
+script: Selecting an item sets data-showing="detail"; Back clears it. Only matters when narrow.
+-->
+<style>
+  .st-md { container-type: inline-size; height: 260px; }
+  .st-md-inner { display: grid; grid-template-columns: minmax(180px, 34%) 1fr; height: 100%; }
+  .st-md-sidebar { overflow: auto; border-right: 1px solid var(--separator); }
+  .st-md-detail { overflow: auto; padding: var(--space-4); }
+  .st-md-back { display: none; }
+  .st-md-item { display: block; width: 100%; padding: 7px 10px; border: 0; border-radius: var(--radius); background: none; color: inherit; font: inherit; text-align: left; }
+  .st-md-item:hover { background: var(--fill); }
+  .st-md-item[aria-current="true"] { background: var(--accent-tint); }
+  .st-md-sidebar nav { padding: var(--space-1); }
+  @container (max-width: 560px) {
+    .st-md-inner { grid-template-columns: 1fr; }
+    .st-md-sidebar { border-right: 0; }
+    .st-md-inner[data-showing="detail"] .st-md-sidebar,
+    .st-md-inner:not([data-showing="detail"]) .st-md-detail { display: none; }
+    .st-md-back { display: inline-flex; margin: 0 0 var(--space-3) -6px; }
+  }
+</style>
+
+<div class="st-md">
+  <div class="st-md-inner">
+    <aside class="st-md-sidebar">
+      <nav>
+        <button class="st-md-item" aria-current="true">deploy.yml</button>
+        <button class="st-md-item">test.yml</button>
+        <button class="st-md-item">release.yml</button>
+      </nav>
+    </aside>
+    <section class="st-md-detail">
+      <button class="st-button is-plain is-small st-md-back">
+        <svg class="st-icon" viewBox="0 0 16 16"><path d="M10 3 5 8l5 5"/></svg>Workflows
+      </button>
+      <h1>deploy.yml</h1>
+      <p class="st-secondary" style="margin-top:4px">Runs on push to main · last run 4m ago</p>
+    </section>
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll(".st-md-inner").forEach(root => {
+    root.addEventListener("click", event => {
+      const item = event.target.closest(".st-md-item");
+      if (item) {
+        root.querySelectorAll(".st-md-item").forEach(other => {
+          if (other === item) other.setAttribute("aria-current", "true");
+          else other.removeAttribute("aria-current");
+        });
+        root.querySelector(".st-md-detail h1").textContent = item.textContent;
+        root.dataset.showing = "detail";
+      }
+      if (event.target.closest(".st-md-back")) delete root.dataset.showing;
+    });
+  });
+</script>

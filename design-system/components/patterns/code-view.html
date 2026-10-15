@@ -1,0 +1,80 @@
+<!--
+name: Code and diff
+summary: Monospace code with a line-number gutter, unified diff tints, hunk headers and a target line.
+use: Showing a file excerpt, a unified diff, or the line a search result or error points to.
+avoid: Editing code; open the file in an editor instead. Syntax highlighting that drowns out the diff colors.
+notes: Unified only; side-by-side does not fit split panes. Long lines wrap and the gutters stay aligned. Add is-plain for code without a diff.
+-->
+<style>
+  .st-code {
+    --st-code-gutter: calc(4ch + 12px);
+    font: var(--st-font-mono-size)/1.55 var(--font-mono);
+    color: var(--text);
+  }
+  .st-code + .st-code { border-top: 1px solid var(--separator); }
+  .st-code-head {
+    position: sticky; top: 0; z-index: 1;
+    display: flex; align-items: center; gap: var(--space-2);
+    height: var(--row-height); padding: 0 var(--space-3);
+    background: var(--surface);
+    border-bottom: 1px solid var(--separator);
+  }
+  .st-code-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+  .st-code-stat { flex: none; font-variant-numeric: tabular-nums; }
+  .st-code-stat .is-add { color: var(--success); }
+  .st-code-stat .is-del { color: var(--danger); margin-left: 6px; }
+
+  .st-code-body { padding: var(--space-1) 0; user-select: text; -webkit-user-select: text; }
+  /* Gutters, marker and code share one grid row, so wrapped lines keep the gutter aligned. */
+  .st-code-line {
+    display: grid;
+    grid-template-columns: var(--st-code-gutter) var(--st-code-gutter) 2ch minmax(0, 1fr);
+  }
+  .st-code.is-plain .st-code-line { grid-template-columns: var(--st-code-gutter) minmax(0, 1fr); }
+  .st-code-n, .st-code-m {
+    padding-right: 8px;
+    color: var(--text-tertiary); text-align: right;
+    font-variant-numeric: tabular-nums;
+    user-select: none; -webkit-user-select: none;
+  }
+  .st-code-m { padding: 0; text-align: center; }
+  .st-code-line > code {
+    padding-right: var(--space-3);
+    font: inherit;
+    white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4;
+  }
+  .st-code-line.is-add { background: var(--success-tint); }
+  .st-code-line.is-add .st-code-m { color: var(--success); }
+  .st-code-line.is-del { background: var(--danger-tint); }
+  .st-code-line.is-del .st-code-m { color: var(--danger); }
+  .st-code-line.is-hunk { background: var(--surface); color: var(--text-tertiary); }
+  .st-code-line.is-hunk b { font-weight: inherit; color: var(--info); }
+  .st-code-line.is-target { background: var(--accent-tint); box-shadow: inset 2px 0 var(--accent); }
+  .st-code-line.is-target .st-code-n { color: var(--accent); }
+</style>
+
+<div class="st-code">
+  <div class="st-code-head">
+    <!-- direction: rtl keeps the file name visible when the path truncates. -->
+    <span class="st-code-path" title="Sources/Plugins/ThemeLoader.swift"><bdi>Sources/Plugins/ThemeLoader.swift</bdi></span>
+    <span class="st-code-stat"><span class="is-add">+3</span><span class="is-del">−1</span></span>
+  </div>
+  <div class="st-code-body">
+    <div class="st-code-line is-hunk"><span class="st-code-n"></span><span class="st-code-n"></span><span class="st-code-m"></span><code><b>@@ -41,6 +41,8 @@</b> func loadTheme(named name: String)</code></div>
+    <div class="st-code-line"><span class="st-code-n">41</span><span class="st-code-n">41</span><span class="st-code-m"></span><code>    let url = themesDirectory.appendingPathComponent(name)</code></div>
+    <div class="st-code-line is-del"><span class="st-code-n">42</span><span class="st-code-n"></span><span class="st-code-m">-</span><code>    let data = try! Data(contentsOf: url)</code></div>
+    <div class="st-code-line is-add"><span class="st-code-n"></span><span class="st-code-n">42</span><span class="st-code-m">+</span><code>    guard let data = try? Data(contentsOf: url) else {</code></div>
+    <div class="st-code-line is-add"><span class="st-code-n"></span><span class="st-code-n">43</span><span class="st-code-m">+</span><code>        throw ThemeError.missingFile(path: url.path, searched: [themesDirectory, bundledThemesDirectory])</code></div>
+    <div class="st-code-line is-add"><span class="st-code-n"></span><span class="st-code-n">44</span><span class="st-code-m">+</span><code>    }</code></div>
+    <div class="st-code-line is-target"><span class="st-code-n">43</span><span class="st-code-n">45</span><span class="st-code-m"></span><code>    return try decoder.decode(Theme.self, from: data)</code></div>
+    <div class="st-code-line"><span class="st-code-n">44</span><span class="st-code-n">46</span><span class="st-code-m"></span><code>}</code></div>
+  </div>
+</div>
+
+<div class="st-code is-plain">
+  <div class="st-code-body">
+    <div class="st-code-line"><span class="st-code-n">17</span><code>const port = Number(process.env.PORT ?? 5173);</code></div>
+    <div class="st-code-line is-target"><span class="st-code-n">18</span><code>server.listen(port, "127.0.0.1");</code></div>
+    <div class="st-code-line"><span class="st-code-n">19</span><code>console.log(`ready on ${port}`);</code></div>
+  </div>
+</div>

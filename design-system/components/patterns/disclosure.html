@@ -1,0 +1,38 @@
+<!--
+name: Disclosure
+summary: Collapsible section using native details/summary, with a rotating chevron.
+use: Grouping a long view into sections, or hiding advanced options one level deeper.
+avoid: Hiding the main content. Nesting disclosures more than one level.
+-->
+<style>
+  .st-disclosure > summary {
+    display: flex; align-items: center; gap: 6px;
+    height: 26px; padding: 0 var(--space-2);
+    list-style: none;
+    color: var(--text-secondary);
+    font-size: var(--text-sm); font-weight: 600;
+  }
+  .st-disclosure > summary::-webkit-details-marker { display: none; }
+  .st-disclosure > summary:hover { color: var(--text); }
+  .st-disclosure > summary .st-icon { width: 10px; height: 10px; stroke-width: 2; transition: transform 150ms var(--ease-out); }
+  .st-disclosure[open] > summary .st-icon { transform: rotate(90deg); }
+  .st-disclosure > summary .st-disclosure-count { margin-left: auto; font-weight: 400; color: var(--text-tertiary); }
+  .st-disclosure-body { padding: 2px var(--space-2) var(--space-2) 24px; font-size: var(--text-md); }
+</style>
+
+<details class="st-disclosure" open>
+  <summary>
+    <svg class="st-icon" viewBox="0 0 10 10"><path d="m3.5 2 3 3-3 3"/></svg>
+    Staged
+    <span class="st-disclosure-count">2</span>
+  </summary>
+  <div class="st-disclosure-body">README.md<br>docs/theme-api.md</div>
+</details>
+<details class="st-disclosure">
+  <summary>
+    <svg class="st-icon" viewBox="0 0 10 10"><path d="m3.5 2 3 3-3 3"/></svg>
+    Untracked
+    <span class="st-disclosure-count">5</span>
+  </summary>
+  <div class="st-disclosure-body">design-system/</div>
+</details>

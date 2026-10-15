@@ -1,0 +1,24 @@
+<!--
+name: Empty state
+summary: Centered icon, one short line and at most one action.
+use: No data yet, no results for a filter, or nothing selected.
+avoid: Paragraphs of explanation, illustrations, more than one button. Say what to do, not why it is empty.
+-->
+<style>
+  .st-empty {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: var(--space-2); height: 100%; min-height: 160px; padding: var(--space-5);
+    text-align: center; color: var(--text-secondary);
+  }
+  .st-empty > .st-icon { width: 28px; height: 28px; stroke-width: 1.25; color: var(--text-tertiary); margin-bottom: 2px; }
+  .st-empty-title { color: var(--text); font-weight: 500; }
+  .st-empty-detail { font-size: var(--text-md); max-width: 260px; }
+  .st-empty .st-button { margin-top: var(--space-1); }
+</style>
+
+<div class="st-empty">
+  <svg class="st-icon" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
+  <div class="st-empty-title">No matching branches</div>
+  <div class="st-empty-detail">Try a shorter filter.</div>
+  <button class="st-button is-small">Clear Filter</button>
+</div>

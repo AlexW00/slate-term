@@ -1,0 +1,18 @@
+<!--
+name: Spinner and progress
+summary: Indeterminate spinner and determinate progress bar.
+use: Spinner for waits over ~300ms with unknown length. Progress bar when the fraction is known.
+avoid: Spinners for instant operations. Full-pane loading screens when stale data can stay visible.
+styles: slate.css
+-->
+<div style="display:grid;gap:14px;max-width:280px">
+  <div style="display:flex;gap:8px;align-items:center;font-size:12px;color:var(--text-secondary)">
+    <span class="st-spinner"></span>Fetching branches…
+  </div>
+  <div style="display:grid;gap:6px">
+    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-secondary)">
+      <span>Indexing</span><span class="st-numeric">64%</span>
+    </div>
+    <div class="st-progress" style="--value:0.64" role="progressbar" aria-valuenow="64" aria-valuemin="0" aria-valuemax="100"></div>
+  </div>
+</div>

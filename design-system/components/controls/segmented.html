@@ -1,0 +1,22 @@
+<!--
+name: Segmented control
+summary: Two to four mutually exclusive options, such as views or filters.
+use: Switching views in a toolbar (List / Graph) or a small filter (All / Failed).
+avoid: More than four segments, or segments with long labels. Use a select instead.
+styles: slate.css
+script: Toggle aria-pressed on click; one button stays pressed.
+-->
+<div class="st-segmented" role="group" aria-label="Filter">
+  <button aria-pressed="true">All</button>
+  <button aria-pressed="false">Failed</button>
+  <button aria-pressed="false">Running</button>
+</div>
+<script>
+  document.querySelectorAll(".st-segmented").forEach(group => {
+    group.addEventListener("click", event => {
+      const button = event.target.closest("button");
+      if (!button) return;
+      group.querySelectorAll("button").forEach(other => other.setAttribute("aria-pressed", String(other === button)));
+    });
+  });
+</script>

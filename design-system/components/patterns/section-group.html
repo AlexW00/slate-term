@@ -1,0 +1,51 @@
+<!--
+name: Grouped section
+summary: macOS-style inset groups of label/control rows for settings and forms.
+use: Settings, configuration forms and short property lists.
+avoid: Nesting groups, explanatory paragraphs above each group, or one group per field.
+notes: Put a short caption under a row only when the label alone is ambiguous.
+-->
+<style>
+  .st-form { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-3); }
+  .st-group-label { padding: 0 var(--space-2) 6px; font-size: var(--text-sm); font-weight: 600; color: var(--text-secondary); }
+  .st-group {
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    box-shadow: inset 0 0 0 1px var(--separator);
+  }
+  .st-group-row {
+    display: flex; align-items: center; gap: var(--space-3);
+    min-height: 36px; padding: 6px var(--space-3);
+  }
+  .st-group-row + .st-group-row { border-top: 1px solid var(--separator); }
+  .st-group-row > label:first-child, .st-group-row > .st-group-row-label { flex: 1; min-width: 0; }
+  .st-group-row .st-field, .st-group-row .st-select { width: min(200px, 50%); }
+  .st-group-caption { display: block; margin-top: 1px; font-size: var(--text-sm); color: var(--text-tertiary); }
+  .st-form-actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
+</style>
+
+<form class="st-form" onsubmit="event.preventDefault()">
+  <section>
+    <div class="st-group-label">Server</div>
+    <div class="st-group">
+      <div class="st-group-row">
+        <label for="st-port">Port</label>
+        <input id="st-port" class="st-field is-mono" value="5173">
+      </div>
+      <div class="st-group-row">
+        <label for="st-env">Environment</label>
+        <select id="st-env" class="st-select"><option>Development</option><option>Staging</option></select>
+      </div>
+      <div class="st-group-row">
+        <span class="st-group-row-label">Open on start
+          <span class="st-group-caption">Opens a browser pane when ready</span>
+        </span>
+        <input class="st-switch" type="checkbox" role="switch" checked aria-label="Open on start">
+      </div>
+    </div>
+  </section>
+  <div class="st-form-actions">
+    <button class="st-button" type="reset">Revert</button>
+    <button class="st-button is-primary" type="submit">Save</button>
+  </div>
+</form>

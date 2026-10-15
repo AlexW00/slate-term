@@ -1,0 +1,113 @@
+<!--
+name: Starter page
+summary: Complete plugin index.html: theme setup, pane shell, toolbar filter, list, empty state and status bar.
+use: The starting point for a new panel plugin. Copy it, then replace the list with the plugin's content.
+avoid: Keeping parts the plugin does not need; delete the toolbar or status bar when they have nothing to hold.
+notes: Copy slate.css and slate-theme.js next to this file. Outside Slate Terminal it follows the system appearance.
+preview-height: 300
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Branches</title>
+  <script src="slate-theme.js"></script>
+  <link rel="stylesheet" href="slate.css">
+  <style>
+    .st-shell { display: flex; flex-direction: column; height: 100vh; }
+    .st-shell-content { flex: 1; min-height: 0; overflow: auto; }
+    .st-shell-toolbar { display: flex; align-items: center; gap: var(--space-2); height: var(--toolbar-height); padding: 0 var(--space-2); border-bottom: 1px solid var(--separator); }
+    .st-shell-status { display: flex; align-items: center; gap: var(--space-3); height: 24px; padding: 0 var(--space-3); border-top: 1px solid var(--separator); color: var(--text-secondary); font-size: var(--text-sm); }
+
+    .st-list { display: flex; flex-direction: column; gap: 2px; padding: var(--space-1); outline: none; }
+    .st-list-row { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 4px 10px; border-radius: var(--radius); }
+    .st-list-row:hover { background: var(--fill); }
+    .st-list-row[aria-selected="true"] { background: var(--accent-tint); }
+    .st-list:focus-visible .st-list-row[aria-selected="true"] { box-shadow: inset 0 0 0 1px var(--focus-ring); }
+    .st-list-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+    .st-list-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .st-list-detail { font-size: var(--text-sm); color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .st-list-trailing { flex: none; font-size: var(--text-sm); color: var(--text-tertiary); }
+
+    .st-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-2); height: 100%; padding: var(--space-5); text-align: center; color: var(--text-secondary); }
+    .st-empty-title { color: var(--text); font-weight: 500; }
+  </style>
+</head>
+<body>
+  <div class="st-shell">
+    <header class="st-shell-toolbar">
+      <label class="st-search" style="flex:1;max-width:260px">
+        <svg class="st-icon" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
+        <input class="st-field" id="filter" type="search" placeholder="Filter" aria-label="Filter">
+      </label>
+      <span class="st-spacer"></span>
+      <button class="st-button is-icon" id="refresh" aria-label="Refresh" title="Refresh">
+        <svg class="st-icon" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v3h-3"/></svg>
+      </button>
+    </header>
+    <main class="st-shell-content">
+      <div class="st-list" id="list" role="listbox" tabindex="0" aria-label="Branches"></div>
+      <div class="st-empty" id="empty" hidden>
+        <div class="st-empty-title">No matching branches</div>
+      </div>
+    </main>
+    <footer class="st-shell-status"><span id="count" class="st-numeric"></span></footer>
+  </div>
+
+  <script>
+    // Replace with data from the plugin backend or the workspace API.
+    const items = [
+      { title: "feature/theme-api", detail: "Add appearance.get and change events", age: "2m" },
+      { title: "main", detail: "Merge pull request #212", age: "1h" },
+      { title: "fix/pane-drag-preview", detail: "Target-local highlights", age: "3d" },
+    ];
+    let selected = items[0].title;
+
+    const list = document.getElementById("list");
+    const filter = document.getElementById("filter");
+
+    let visible = [];
+
+    function render() {
+      const query = filter.value.trim().toLowerCase();
+      visible = items.filter(item => item.title.toLowerCase().includes(query));
+      list.removeAttribute("aria-activedescendant");
+      list.replaceChildren(...visible.map((item, index) => {
+        const row = document.createElement("div");
+        row.className = "st-list-row";
+        row.id = `row-${index}`;
+        if (item.title === selected) list.setAttribute("aria-activedescendant", row.id);
+        row.setAttribute("role", "option");
+        row.setAttribute("aria-selected", String(item.title === selected));
+        row.innerHTML = `<div class="st-list-text"><span class="st-list-title"></span><span class="st-list-detail"></span></div><span class="st-list-trailing"></span>`;
+        row.querySelector(".st-list-title").textContent = item.title;
+        row.querySelector(".st-list-detail").textContent = item.detail;
+        row.querySelector(".st-list-trailing").textContent = item.age;
+        row.addEventListener("click", () => { selected = item.title; render(); });
+        return row;
+      }));
+      document.getElementById("empty").hidden = visible.length > 0;
+      document.getElementById("count").textContent = `${visible.length} of ${items.length}`;
+    }
+
+    // Arrow keys move the selection; Return opens. Focus stays on the list.
+    list.addEventListener("keydown", event => {
+      const index = visible.findIndex(item => item.title === selected);
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        const next = visible[Math.max(0, Math.min(visible.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)))];
+        if (!next) return;
+        selected = next.title;
+        render();
+        list.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+      } else if (event.key === "Enter" && index >= 0) {
+        // Open visible[index] here.
+      } else return;
+      event.preventDefault();
+    });
+
+    filter.addEventListener("input", render);
+    render();
+  </script>
+</body>
+</html>

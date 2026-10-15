@@ -1,0 +1,149 @@
+<!--
+name: Path bar
+summary: Breadcrumb path with clickable segments that collapses middle segments into a menu when narrow.
+use: Showing where a browser-style view is, such as a folder, a JSON key path or a nested group.
+avoid: Primary navigation between unrelated views. More than one path bar per pane.
+notes: Put it under the toolbar or in the status bar. The first and last segments always stay visible.
+script: Renders segments from data-path, collapses middle segments to fit, and dispatches a navigate event.
+preview-height: 150
+preview-padding: true
+-->
+<style>
+  .st-path {
+    display: flex; align-items: center;
+    height: var(--row-height); min-width: 0;
+    font-size: var(--text-md);
+  }
+  .st-path-list { display: flex; align-items: center; min-width: 0; margin: 0; padding: 0; list-style: none; }
+  .st-path-list > li { display: flex; align-items: center; flex: none; min-width: 0; }
+  /* The first and last segments shrink with an ellipsis once the middle is collapsed. */
+  .st-path-list > li:first-child { flex: 0 1 auto; max-width: 40%; }
+  .st-path-list > li:last-child { flex: 0 1 auto; }
+  .st-path-list.is-measuring > li { flex: none; max-width: none; }
+  .st-path-list > li + li::before {
+    content: ""; flex: none;
+    width: 5px; height: 5px; margin: 0 6px 0 4px;
+    border: solid var(--text-tertiary); border-width: 1.5px 1.5px 0 0;
+    transform: rotate(45deg);
+  }
+  .st-path-seg {
+    min-width: 0; height: var(--control-height-sm); padding: 0 4px;
+    border: 0; border-radius: var(--radius-sm);
+    background: none; color: var(--text-secondary); font: inherit;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .st-path-seg:hover { background: var(--fill); color: var(--text); }
+  .st-path-seg[aria-current] { color: var(--text); font-weight: 500; }
+  .st-path-seg[aria-current]:hover { background: none; }
+
+  .st-path-menu {
+    margin: 0; padding: var(--space-1); min-width: 160px;
+    border: 0; border-radius: var(--radius-lg);
+    background: var(--surface-raised); color: var(--text);
+    box-shadow: var(--shadow-popover);
+    font-size: var(--text-base);
+  }
+  .st-path-menu button {
+    display: block; width: 100%; height: 24px; padding: 0 var(--space-2);
+    border: 0; border-radius: var(--radius-sm);
+    background: none; color: inherit; font: inherit; text-align: left;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .st-path-menu button:hover, .st-path-menu button:focus-visible { background: var(--accent); color: var(--on-accent); outline: none; }
+</style>
+
+<nav class="st-path" aria-label="Path" data-path="~/Developer/slate-term/design-system/components/patterns">
+  <ol class="st-path-list"></ol>
+  <div class="st-path-menu" popover role="menu"></div>
+</nav>
+
+<script>
+  document.querySelectorAll(".st-path").forEach(nav => {
+    const list = nav.querySelector(".st-path-list");
+    const menu = nav.querySelector(".st-path-menu");
+    const more = document.createElement("li");
+    more.innerHTML = '<button class="st-path-seg" aria-label="Hidden segments" title="Hidden segments" aria-haspopup="menu">…</button>';
+    // A native popover invoker lets a second click close the menu instead of reopening it.
+    menu.id ||= `st-path-menu-${Math.random().toString(36).slice(2)}`;
+    more.firstChild.setAttribute("popovertarget", menu.id);
+    let segments = [], items = [];
+
+    const button = ({ label, path }, current) => {
+      const b = document.createElement("button");
+      b.className = "st-path-seg";
+      b.textContent = label;
+      b.title = path;
+      b.dataset.path = path;
+      if (current) b.setAttribute("aria-current", "location");
+      return b;
+    };
+
+    function render() {
+      const parts = nav.dataset.path.split("/");
+      segments = parts.map((part, i) => ({ label: part || "/", path: parts.slice(0, i + 1).join("/") || "/" }))
+        .filter((s, i) => s.label !== "/" || i === 0);
+      items = segments.map((s, i) => {
+        const li = document.createElement("li");
+        li.append(button(s, i === segments.length - 1));
+        return li;
+      });
+      list.replaceChildren(...items);
+      fit();
+    }
+
+    // Hide middle segments from the left until the natural widths fit, then show "…" after the first.
+    function fit() {
+      items.forEach(li => li.hidden = false);
+      more.remove();
+      list.classList.add("is-measuring");
+      let hidden = 0;
+      while (list.scrollWidth > nav.clientWidth && hidden < items.length - 2) {
+        items[++hidden].hidden = true;
+        if (hidden === 1) items[0].after(more);
+      }
+      list.classList.remove("is-measuring");
+    }
+
+    nav.addEventListener("click", event => {
+      const target = event.target.closest("button");
+      if (!target || target.hasAttribute("aria-current")) return;
+      if (more.contains(target)) return;
+      if (menu.matches(":popover-open")) menu.hidePopover();
+      nav.dispatchEvent(new CustomEvent("navigate", { detail: { path: target.dataset.path }, bubbles: true }));
+    });
+    menu.addEventListener("beforetoggle", event => {
+      if (event.newState !== "open") return;
+      menu.replaceChildren(...segments.filter((_, i) => items[i].hidden).map(s => {
+        const item = button(s);
+        item.className = "";
+        item.setAttribute("role", "menuitem");
+        return item;
+      }));
+    });
+    menu.addEventListener("toggle", event => {
+      if (event.newState !== "open") return;
+      const anchor = more.getBoundingClientRect();
+      menu.style.left = `${Math.max(8, Math.min(anchor.left, innerWidth - menu.offsetWidth - 8))}px`;
+      menu.style.top = `${anchor.bottom + 4}px`;
+      menu.querySelector("button")?.focus();
+    });
+    menu.addEventListener("keydown", event => {
+      const items = [...menu.querySelectorAll("button")];
+      const index = items.indexOf(document.activeElement);
+      if (event.key === "ArrowDown") items[(index + 1) % items.length].focus();
+      else if (event.key === "ArrowUp") items[(index - 1 + items.length) % items.length].focus();
+      else return;
+      event.preventDefault();
+    });
+
+    new ResizeObserver(fit).observe(nav);
+    nav.render = render;
+    render();
+  });
+
+  // Demo only: a real plugin loads the new location, then sets data-path and calls render().
+  document.querySelectorAll(".st-path").forEach(nav => nav.addEventListener("navigate", event => {
+    nav.dataset.path = event.detail.path;
+    nav.render();
+  }));
+</script>

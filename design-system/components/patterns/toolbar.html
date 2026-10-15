@@ -1,0 +1,43 @@
+<!--
+name: Toolbar
+summary: One row of view controls: filter, view switch, a few icon actions and at most one text button.
+use: Actions and filters that apply to the whole pane.
+avoid: More than about five controls, wrapping onto two lines, or a title. Move rare actions into a menu.
+notes: Below ~360px wide, hide text buttons behind icons or a menu (see the container query).
+-->
+<style>
+  .st-toolbar {
+    container-type: inline-size;
+    display: flex; align-items: center; gap: var(--space-2);
+    height: var(--toolbar-height); padding: 0 var(--space-2);
+    border-bottom: 1px solid var(--separator);
+  }
+  .st-toolbar .st-search { flex: 1; max-width: 240px; }
+  .st-toolbar-divider { width: 1px; height: 16px; background: var(--separator); flex: none; }
+  @container (max-width: 360px) {
+    .st-toolbar .st-toolbar-wide { display: none; }
+    /* Give the freed space to the filter. */
+    .st-toolbar .st-search { max-width: none; }
+    .st-toolbar .st-spacer { display: none; }
+  }
+</style>
+
+<div class="st-toolbar" role="toolbar" aria-label="Branches">
+  <label class="st-search">
+    <svg class="st-icon" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
+    <input class="st-field" type="search" placeholder="Filter branches" aria-label="Filter branches">
+  </label>
+  <div class="st-segmented st-toolbar-wide" role="group" aria-label="Show">
+    <button aria-pressed="true">Local</button>
+    <button aria-pressed="false">Remote</button>
+  </div>
+  <span class="st-spacer"></span>
+  <button class="st-button is-icon" aria-label="Fetch" title="Fetch">
+    <svg class="st-icon" viewBox="0 0 16 16"><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10"/></svg>
+  </button>
+  <span class="st-toolbar-divider"></span>
+  <button class="st-button is-primary st-toolbar-wide">New Branch</button>
+  <button class="st-button is-icon" aria-label="More" title="More">
+    <svg class="st-icon" viewBox="0 0 16 16"><circle cx="4" cy="8" r=".6"/><circle cx="8" cy="8" r=".6"/><circle cx="12" cy="8" r=".6"/></svg>
+  </button>
+</div>

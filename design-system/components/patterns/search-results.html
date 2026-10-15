@@ -1,0 +1,93 @@
+<!--
+name: Search results
+summary: Matches grouped by file, each a line number and a one-line snippet with the match highlighted.
+use: Text search across files, symbols or logs, and any filter that should show why an item matched.
+avoid: Multi-line snippets. Bold or recolored matches that shift the text; use mark.
+notes: Clip the snippet so the match stays visible: keep a few characters before it and add a leading ellipsis.
+script: highlight(text, query) builds a safe snippet with mark; Return on a row dispatches "open".
+-->
+<style>
+  .st-results { padding: var(--space-1); }
+  .st-results-file {
+    display: flex; align-items: center; gap: 6px;
+    height: var(--row-height); padding: 0 10px;
+    font-weight: 600; font-size: var(--text-md);
+  }
+  .st-results-file > .st-icon { color: var(--text-secondary); }
+  .st-results-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .st-results-path span { font-weight: 400; color: var(--text-tertiary); }
+  .st-results-count { margin-left: auto; font-weight: 400; color: var(--text-tertiary); font-size: var(--text-sm); }
+  .st-results-match {
+    display: flex; align-items: baseline; gap: 10px;
+    height: 24px; padding: 0 10px 0 32px;
+    border-radius: var(--radius);
+    font: var(--st-font-mono-size)/24px var(--font-mono);
+  }
+  .st-results-match:hover { background: var(--fill); }
+  .st-results-match[aria-selected="true"] { background: var(--accent-tint); }
+  .st-results-line { flex: none; min-width: 3ch; text-align: right; color: var(--text-tertiary); }
+  .st-results-snippet { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+  .st-results-snippet mark { color: var(--text); }
+</style>
+
+<div class="st-results" role="listbox" tabindex="0" aria-label="Search results">
+  <div class="st-results-file">
+    <svg class="st-icon" viewBox="0 0 16 16"><path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/></svg>
+    <span class="st-results-path">theme.ts <span>src/plugins</span></span>
+    <span class="st-results-count st-numeric">2</span>
+  </div>
+  <div class="st-results-match" role="option" aria-selected="true" data-text="export function applyPalette(palette: Palette) {" data-line="14"></div>
+  <div class="st-results-match" role="option" aria-selected="false" data-text="  window.workspace.subscribe(() => applyPalette(read()), { topics: [&quot;host.appearance.changed&quot;] });" data-line="41"></div>
+  <div class="st-results-file">
+    <svg class="st-icon" viewBox="0 0 16 16"><path d="M4 2h5l3 3v9H4z"/><path d="M9 2v3h3"/></svg>
+    <span class="st-results-path">README.md <span>docs</span></span>
+    <span class="st-results-count st-numeric">1</span>
+  </div>
+  <div class="st-results-match" role="option" aria-selected="false" data-text="Call applyPalette once at startup, then on every change event." data-line="7"></div>
+</div>
+
+<script>
+  // Escapes text and wraps every case-insensitive match in mark.
+  // Long lines start shortly before the first match so it stays in view.
+  function highlight(text, query, lead = 16) {
+    const escape = value => value.replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
+    const at = query ? text.toLowerCase().indexOf(query.toLowerCase()) : -1;
+    if (at < 0) return escape(text);
+    const start = at > lead ? at - lead : 0;
+    const shown = (start ? "…" : "") + text.slice(start).trimStart();
+    const pattern = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    let html = "", last = 0;
+    for (const match of shown.matchAll(pattern)) {
+      html += escape(shown.slice(last, match.index)) + `<mark>${escape(match[0])}</mark>`;
+      last = match.index + match[0].length;
+    }
+    return html + escape(shown.slice(last));
+  }
+
+  document.querySelectorAll(".st-results").forEach((results, listIndex) => {
+    const query = "applyPalette";
+    const rows = () => [...results.querySelectorAll("[role=option]")];
+    rows().forEach(row => {
+      row.innerHTML = `<span class="st-results-line st-numeric">${row.dataset.line}</span><span class="st-results-snippet">${highlight(row.dataset.text, query)}</span>`;
+    });
+    rows().forEach((row, index) => row.id ||= `st-results-${listIndex}-${index}`);
+    const select = row => {
+      rows().forEach(other => other.setAttribute("aria-selected", String(other === row)));
+      results.setAttribute("aria-activedescendant", row.id);
+      row.scrollIntoView({ block: "nearest" });
+    };
+    results.addEventListener("click", event => {
+      const row = event.target.closest("[role=option]");
+      if (row) select(row);
+    });
+    results.addEventListener("keydown", event => {
+      const all = rows();
+      const index = all.findIndex(row => row.getAttribute("aria-selected") === "true");
+      if (event.key === "ArrowDown") select(all[Math.min(index + 1, all.length - 1)]);
+      else if (event.key === "ArrowUp") select(all[Math.max(index - 1, 0)]);
+      else if (event.key === "Enter") all[index]?.dispatchEvent(new CustomEvent("open", { bubbles: true }));
+      else return;
+      event.preventDefault();
+    });
+  });
+</script>

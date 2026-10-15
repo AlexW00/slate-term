@@ -1,0 +1,36 @@
+<!--
+name: Meter and sparkline
+summary: Small inline level bar and trend line for per-row numbers such as CPU, memory or duration.
+use: A value people compare across rows at a glance, always next to the number itself.
+avoid: Meters without the number. Sparklines with axes or labels; use a real chart view only when the plugin is about the chart.
+notes: Hide the sparkline first when the pane is narrow. Switch the meter to is-warning or is-danger at thresholds that mean something.
+script: sparklinePoints(values) turns numbers into points for the polyline.
+styles: slate.css
+-->
+<div style="display:grid;grid-template-columns:1fr auto auto auto;gap:8px 12px;align-items:center;font-size:12px">
+  <span>node vite</span>
+  <svg class="st-sparkline" viewBox="0 0 56 16" style="color:var(--text-tertiary)" data-values="12 18 15 22 30 26 24 31 28 34"><polyline/></svg>
+  <span class="st-meter" style="--value:0.34" role="meter" aria-label="CPU" aria-valuenow="34" aria-valuemin="0" aria-valuemax="100"></span>
+  <span class="st-numeric" style="width:3ch;text-align:right;color:var(--text-secondary)">34%</span>
+
+  <span>tsc --watch</span>
+  <svg class="st-sparkline" viewBox="0 0 56 16" style="color:var(--text-tertiary)" data-values="40 52 61 58 70 66 74 79 72 81"><polyline/></svg>
+  <span class="st-meter is-warning" style="--value:0.81" role="meter" aria-label="CPU" aria-valuenow="81" aria-valuemin="0" aria-valuemax="100"></span>
+  <span class="st-numeric" style="width:3ch;text-align:right;color:var(--text-secondary)">81%</span>
+
+  <span>postgres</span>
+  <svg class="st-sparkline" viewBox="0 0 56 16" style="color:var(--text-tertiary)" data-values="5 4 6 5 4 5 7 5 4 6"><polyline/></svg>
+  <span class="st-meter" style="--value:0.06" role="meter" aria-label="CPU" aria-valuenow="6" aria-valuemin="0" aria-valuemax="100"></span>
+  <span class="st-numeric" style="width:3ch;text-align:right;color:var(--text-secondary)">6%</span>
+</div>
+
+<script>
+  // Scales values to the 56×16 viewBox. Pass max to share a scale across rows.
+  function sparklinePoints(values, max = Math.max(...values, 1)) {
+    const step = 56 / Math.max(values.length - 1, 1);
+    return values.map((value, index) => `${(index * step).toFixed(1)},${(15 - (value / max) * 14).toFixed(1)}`).join(" ");
+  }
+  document.querySelectorAll(".st-sparkline[data-values]").forEach(svg => {
+    svg.querySelector("polyline").setAttribute("points", sparklinePoints(svg.dataset.values.split(" ").map(Number), 100));
+  });
+</script>
