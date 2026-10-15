@@ -53,7 +53,7 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
     var onCloseRequest: ((Bool) -> Void)?
     var needsConfirmClose: Bool { surface.map { ghostty_surface_needs_confirm_quit($0) } ?? false }
 
-    init(runtime: GhosttyRuntime, environment: [String: String] = [:]) throws {
+    init(runtime: GhosttyRuntime, environment: [String: String] = [:], directory: String? = nil) throws {
         self.runtime = runtime
         super.init(frame: NSRect(x: 0, y: 0, width: 900, height: 560))
         autoresizingMask = [.width, .height]
@@ -66,6 +66,9 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
         configuration.platform.macos.nsview = Unmanaged.passUnretained(self).toOpaque()
         configuration.userdata = Unmanaged.passUnretained(self).toOpaque()
         configuration.scale_factor = Double(NSScreen.main?.backingScaleFactor ?? 1)
+        let workingDirectory = directory.flatMap { strdup($0) }
+        defer { if let workingDirectory { free(workingDirectory) } }
+        configuration.working_directory = workingDirectory.map { UnsafePointer($0) }
         let strings = environment.sorted { $0.key < $1.key }.map { (strdup($0.key)!, strdup($0.value)!) }
         defer { for (key, value) in strings { free(key); free(value) } }
         let variables = UnsafeMutablePointer<ghostty_env_var_s>.allocate(capacity: max(1, strings.count))

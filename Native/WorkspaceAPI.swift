@@ -19,6 +19,21 @@ extension WorkspaceHost {
             guard let text = value.string, !text.isEmpty else { throw RPCFailure(code: -32602, message: "\(key) must be a nonempty string") }
             return text
         }
+        if method.hasPrefix("layouts.") {
+            var supported: Set<String> = ["expectedInstanceId"]
+            if ["layouts.windows", "layouts.capture", "layouts.open"].contains(method) { supported.insert("expectedWorkspaceRevision") }
+            if method == "layouts.update" { supported.insert("expectedSavedLayoutRevision") }
+            if let unsupported = Set(params.keys).intersection(Self.apiGuardKeys).subtracting(supported).sorted().first {
+                throw RPCFailure(code: -32602, message: "\(unsupported) is not supported by \(method)")
+            }
+            if method == "layouts.open", params["replaceWindow"] != nil, params["expectedWorkspaceRevision"] == nil {
+                throw RPCFailure(code: -32602, message: "Replacement requires expectedWorkspaceRevision from layouts.windows")
+            }
+        }
+        if let _ = try string("expectedSavedLayoutRevision") {
+            guard method == "layouts.update" else { throw RPCFailure(code: -32602, message: "expectedSavedLayoutRevision is only supported by layouts.update") }
+            // This document guard is checked by SavedLayoutStore at atomic publication, not against TOML.
+        }
         if params["expectedViewId"] != nil || params["expectedDocumentId"] != nil {
             guard Self.webMethods.contains(method) || method == "pane.title" else {
                 throw RPCFailure(code: -32602, message: "Automation identity guards are supported by web methods and pane.title")
@@ -90,11 +105,17 @@ extension WorkspaceHost {
             ]),
             "workspaceCommit": .object([
                 "version": .integer(1), "scope": .string("workspace-model mutations"),
-                "additionalMethods": .array([.string("plugins.unregister")]),
+                "additionalMethods": .array([.string("plugins.unregister"), .string("layouts.open")]),
                 "resultFields": .array(["operationId", "outcome", "workspaceRevision", "workspacePersistence"].map(JSONValue.string)),
                 "outcomes": .array(["committed", "unchanged"].map(JSONValue.string)),
                 "workspacePersistence": .array(WorkspacePersistence.allCases.map { .string($0.rawValue) }),
                 "nativeDividerCoalescing": .bool(false)
+            ]),
+            "savedLayouts": .object([
+                "version": .integer(1), "targetKind": .string("windowGroup"),
+                "targetDiscovery": .string("layouts.windows"), "replacementGuard": .string("expectedWorkspaceRevision"),
+                "writeGuard": .string("expectedSavedLayoutRevision"), "configurationTarget": .string("pane"),
+                "startupLifetime": .string("committedTerminalSession"), "mergeSupported": .bool(false)
             ]),
             "guards": .array(Self.apiGuardKeys.sorted().map(JSONValue.string)),
             "methods": .array(apiMethods().map(JSONValue.string)),

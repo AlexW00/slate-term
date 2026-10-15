@@ -6,6 +6,7 @@ mkdir -p artifacts
   echo 'Run bash scripts/build-ghostty.sh first.' >&2; exit 1;
 }
 swift build --product slate-term --jobs 4 > artifacts/cli-build.log 2>&1
+swift build --product slate-layout-launcher --jobs 4 >> artifacts/cli-build.log 2>&1
 cli="$(swift build --show-bin-path)/slate-term"
 xcodebuild -project slate-term.xcodeproj -scheme SlateTermApp -configuration Debug \
   -destination 'platform=macOS' -derivedDataPath .derived -clonedSourcePackagesDirPath .build/xcode-packages \
@@ -15,7 +16,9 @@ grep -Fq "Target 'slate-term' in project 'slate-term'" artifacts/app-build.log
 app="$PWD/.derived/Build/Products/Debug/Slate Terminal.app"
 mkdir -p "$app/Contents/Helpers"
 cp "$cli" "$app/Contents/Helpers/slate-term"
+cp "$(dirname "$cli")/slate-layout-launcher" "$app/Contents/Helpers/slate-layout-launcher"
 # Development-only local signature. No publishing, notarization, or developer-account changes.
 codesign --force --sign - "$app/Contents/Helpers/slate-term"
+codesign --force --sign - "$app/Contents/Helpers/slate-layout-launcher"
 codesign --force --sign - "$app"
 echo "$app"

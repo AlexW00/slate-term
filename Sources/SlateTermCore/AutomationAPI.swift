@@ -6,6 +6,10 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
     case describe = "api.describe", version
     case contextGet = "context.get", contextInspect = "context.inspect"
     case workspaceGet = "workspace.get", workspaceSnapshot = "workspace.snapshot"
+    case layoutsList = "layouts.list", layoutsGet = "layouts.get", layoutsFields = "layouts.fields", layoutsValidate = "layouts.validate"
+    case layoutsCreate = "layouts.create", layoutsUpdate = "layouts.update", layoutsWindows = "layouts.windows"
+    case layoutsCapture = "layouts.capture", layoutsOpen = "layouts.open", layoutsStartupStatus = "layouts.startupStatus"
+    case layoutConfiguration = "layout.configuration"
     case layoutGet = "layout.get", tabsList = "tabs.list", panesList = "panes.list", paneInspect = "pane.inspect"
     case commandList = "command.list", commandRun = "command.run"
     case windowList = "window.list", windowGet = "window.get"
@@ -30,11 +34,12 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
     public enum Family: String, Sendable { case synchronous, contextual, terminal, browser, web, events, pluginRuntime, services, integration }
     public var family: Family {
         switch self {
-        case .describe, .version, .contextGet, .workspaceGet, .workspaceSnapshot, .layoutGet, .tabsList, .panesList, .paneInspect,
+        case .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsCreate, .layoutsUpdate, .layoutsWindows, .layoutsCapture, .layoutsOpen, .layoutsStartupStatus,
+             .describe, .version, .contextGet, .workspaceGet, .workspaceSnapshot, .layoutGet, .tabsList, .panesList, .paneInspect,
              .commandList, .commandRun, .windowList, .windowGet, .configGet, .configReload, .configValidate, .configPatch,
              .paletteList, .paletteImport, .pluginsList, .pluginsRegister, .pluginsUnregister, .pluginsStatus, .pluginsLogs,
              .pluginSettingsGet, .pluginSettingsPatch, .panesSend, .panesCapture: .synchronous
-        case .contextInspect, .settingsGet, .storageGet, .storageSet, .storageDelete, .paneTitle: .contextual
+        case .layoutConfiguration, .contextInspect, .settingsGet, .storageGet, .storageSet, .storageDelete, .paneTitle: .contextual
         case .terminalSend, .terminalKey, .terminalCapture, .terminalRun, .terminalWait: .terminal
         case .browserGet, .browserNavigate, .browserSnapshot, .browserClick, .browserFill, .browserSelect,
              .browserScroll, .browserWait, .browserEval, .browserScreenshot: .browser
@@ -52,12 +57,13 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
         switch self {
         case .shellUpdate, .shellRunInput: .authenticatedIntegration
         case .serviceReady, .serviceStop: .emergencyControl
-        case .describe, .version, .contextGet, .contextInspect, .workspaceGet, .workspaceSnapshot, .layoutGet,
+        case .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsWindows, .layoutsStartupStatus, .layoutConfiguration,
+             .describe, .version, .contextGet, .contextInspect, .workspaceGet, .workspaceSnapshot, .layoutGet,
              .tabsList, .panesList, .paneInspect, .commandList, .windowList, .windowGet, .configGet, .configValidate,
              .paletteList, .pluginsList, .pluginsStatus, .pluginsLogs, .pluginSettingsGet, .settingsGet, .storageGet,
              .terminalCapture, .terminalWait, .panesCapture, .eventsHead, .eventsPoll, .webGet, .webSnapshot, .webWait,
              .browserGet, .browserSnapshot, .browserWait, .serviceList, .serviceStatus, .serviceLogs: .read
-        case .commandRun, .configReload, .configPatch, .paletteImport, .pluginsRegister, .pluginsUnregister,
+        case .layoutsCreate, .layoutsUpdate, .layoutsCapture, .layoutsOpen, .commandRun, .configReload, .configPatch, .paletteImport, .pluginsRegister, .pluginsUnregister,
              .pluginsRestart, .pluginSettingsPatch, .storageSet, .storageDelete, .paneTitle, .terminalSend,
              .terminalKey, .terminalRun, .panesSend, .eventsEmit, .webClick, .webFill, .webSelect, .webScroll,
              .webScreenshot, .browserNavigate, .browserClick, .browserFill, .browserSelect, .browserScroll,
@@ -82,7 +88,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
         case .contextGet, .workspaceSnapshot:
             inheritScope()
             if params["scope"] != .string("global") { inheritPane() }
-        case .contextInspect, .layoutGet, .paneInspect, .paneTitle,
+        case .layoutConfiguration, .contextInspect, .layoutGet, .paneInspect, .paneTitle,
              .webGet, .webSnapshot, .webClick, .webFill, .webSelect, .webScroll, .webWait, .webScreenshot,
              .browserGet, .browserNavigate, .browserSnapshot, .browserClick, .browserFill, .browserSelect,
              .browserScroll, .browserWait, .browserEval, .browserScreenshot, .panesSend, .panesCapture:
@@ -98,7 +104,8 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
             if params["id"] == nil, let plugin = defaults.pluginID { params["id"] = .string(plugin) }
         case .storageGet, .storageSet, .storageDelete:
             if params["instanceId"] == nil, !explicitTarget, let instance = defaults.instanceID { params["instanceId"] = .string(instance) }
-        case .describe, .version, .workspaceGet, .tabsList, .panesList, .commandList, .windowList, .windowGet,
+        case .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsCreate, .layoutsUpdate, .layoutsWindows, .layoutsCapture, .layoutsOpen, .layoutsStartupStatus,
+             .describe, .version, .workspaceGet, .tabsList, .panesList, .commandList, .windowList, .windowGet,
              .configGet, .configReload, .configValidate, .configPatch, .paletteList, .paletteImport,
              .pluginsList, .pluginsRegister, .pluginsUnregister, .pluginsStatus, .pluginsRestart, .pluginsLogs,
              .eventsHead, .eventsPoll, .eventsEmit, .serviceStart, .serviceStop, .serviceList, .serviceStatus,

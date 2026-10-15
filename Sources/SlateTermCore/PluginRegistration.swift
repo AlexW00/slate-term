@@ -81,6 +81,7 @@ public struct PluginRegistration: Equatable, Codable, Sendable {
     public let service: PluginProcessSpec?
     public let commands: [PluginCommand]
     public let headerButtons: [PluginHeaderButton]
+    public let layoutFields: [SavedLayoutField]
 
     public var hasPanel: Bool { source != nil }
     public var entryURL: URL? {
@@ -100,9 +101,9 @@ public struct PluginRegistration: Equatable, Codable, Sendable {
         return try JSONDecoder().decode(Self.self, from: data)
     }
 
-    private enum Keys: String, CodingKey { case id, title, source, scope, process, service, commands, headerButtons }
+    private enum Keys: String, CodingKey { case id, title, source, scope, process, service, commands, headerButtons, layoutFields }
     public init(from decoder: any Decoder) throws {
-        try requirePluginKeys(decoder, allowed: ["id", "title", "source", "scope", "process", "service", "commands", "headerButtons"])
+        try requirePluginKeys(decoder, allowed: ["id", "title", "source", "scope", "process", "service", "commands", "headerButtons", "layoutFields"])
         let values = try decoder.container(keyedBy: Keys.self)
         id = try values.decode(String.self, forKey: .id)
         title = try values.decode(String.self, forKey: .title)
@@ -112,6 +113,11 @@ public struct PluginRegistration: Equatable, Codable, Sendable {
         service = try values.decodeIfPresent(PluginProcessSpec.self, forKey: .service)
         commands = try values.decodeIfPresent([PluginCommand].self, forKey: .commands) ?? []
         headerButtons = try values.decodeIfPresent([PluginHeaderButton].self, forKey: .headerButtons) ?? []
+        layoutFields = try values.decodeIfPresent([SavedLayoutField].self, forKey: .layoutFields) ?? []
+        guard layoutFields.count <= 32, Set(layoutFields.map(\.id)).count == layoutFields.count,
+              source != nil || layoutFields.isEmpty else {
+            throw invalidPlugin("Layout fields require a panel and at most 32 unique field IDs")
+        }
         guard headerButtons.count <= 8, Set(headerButtons.map(\.id)).count == headerButtons.count,
               headerButtons.allSatisfy({ button in commands.contains { $0.id == button.command } }) else {
             throw invalidPlugin("Header buttons must be unique (at most 8) and reference this plugin's commands")

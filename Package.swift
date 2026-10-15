@@ -9,6 +9,7 @@ let package = Package(
         .library(name: "SlateTermIPC", targets: ["SlateTermIPC"]),
         .library(name: "SlateTermSettings", targets: ["SlateTermSettings"]),
         .executable(name: "slate-term", targets: ["SlateTermCLI"]),
+        .executable(name: "slate-layout-launcher", targets: ["SlateLayoutLauncher"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", exact: "1.5.0"),
@@ -16,6 +17,7 @@ let package = Package(
     ],
     targets: [
         .target(name: "SlateTermCore"),
+        .executableTarget(name: "SlateLayoutLauncher"),
         .target(name: "SlateTermIPC", dependencies: ["SlateTermCore"]),
         .target(name: "SlateTermSettings", dependencies: [
             "SlateTermCore", .product(name: "TOMLDecoder", package: "TOMLDecoder"),

@@ -36,6 +36,12 @@ public enum CommandRegistry {
     public static let commands: [WorkspaceCommand] = [
         .init(id: "command.picker", title: "Search Commands…", key: "k", shift: false),
         .init(id: "settings.open", title: "Open Settings", key: ",", shift: false),
+        .init(id: "layouts.edit", title: "Edit Saved Layouts…", key: "", shift: false),
+        .init(id: "layouts.openWindow", title: "Open Saved Layout in New Window…", key: "", shift: false),
+        .init(id: "layouts.replaceWindow", title: "Replace Window with Saved Layout…", key: "", shift: false),
+        .init(id: "layouts.captureWindow", title: "Save a Window as a Layout…", key: "", shift: false),
+        .init(id: "layouts.launcher", title: "Create Spotlight Launcher…", key: "", shift: false),
+        .init(id: "layouts.folder", title: "Open Layouts Folder", key: "", shift: false),
         .init(id: "tab.new", title: "New Tab", key: "t", shift: false),
         .init(id: "window.new", title: "New Window", key: "n", shift: false),
         .init(id: "split.right", title: "Split Right", key: "d", shift: false),

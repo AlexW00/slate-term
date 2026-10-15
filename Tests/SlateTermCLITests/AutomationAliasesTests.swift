@@ -16,6 +16,9 @@ import SlateTermCore
         ("events", Events.Action.allCases.map { $0 == .watch ? "poll" : $0.rawValue }),
         ("config", ConfigCommand.Action.allCases.map { $0 == .set ? "patch" : $0.rawValue })
     ]
+    for action in SavedLayoutsCommand.Action.allCases {
+        #expect(AutomationMethod(rawValue: action.method)?.isPublic == true)
+    }
     for (namespace, aliases) in namespaces {
         for alias in aliases {
             let name = "\(namespace).\(alias)"

@@ -356,6 +356,19 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
           web:methodsFor('web.'),
           browser:methodsFor('browser.'),
           services:methodsFor('plugins.service.'),
+          layoutConfiguration:(params={},options={})=>call('layout.configuration',params,options),
+          layouts:Object.freeze({
+            list:(params={},options={})=>call('layouts.list',params,options),
+            get:(id,params={},options={})=>call('layouts.get',{...params,id},options),
+            fields:(type,options={})=>call('layouts.fields',type===undefined?{}:{type},options),
+            validate:(definition,options={})=>call('layouts.validate',{definition},options),
+            create:(definition,options={})=>call('layouts.create',{definition},options),
+            update:(definition,expectedSavedLayoutRevision,options={})=>call('layouts.update',{definition,expectedSavedLayoutRevision},options),
+            windows:(params={},options={})=>call('layouts.windows',params,options),
+            capture:(params,options={})=>call('layouts.capture',params,options),
+            open:(id,params={},options={})=>call('layouts.open',{...params,id},options),
+            startupStatus:(params={},options={})=>call('layouts.startupStatus',params,options)
+          }),
           terminal:Object.freeze({
             send:(text,params={},options={})=>call('terminal.send',{...params,text},options),
             capture:(params={})=>call('terminal.capture',params),

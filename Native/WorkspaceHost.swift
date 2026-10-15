@@ -100,6 +100,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     private var configurationWatcher: ConfigurationWatcher?
     private var appearanceObservation: NSKeyValueObservation?
     private var settingsWindow: SettingsWindowController?
+    private let savedLayouts: SavedLayouts
+    private let layoutStartup = LayoutStartup()
+    private var layoutRecipes: [PaneID: SavedLayoutPane] = [:]
     private var commandPicker: CommandPicker?
     private var pickerTarget: [String: JSONValue] = [:]
     private var pickerReturnPane: PaneID?
@@ -140,6 +143,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         events = try EventControl(epoch: epoch, operations: operations)
         let settings = try ApplicationSettings(environment: environment, integration: integration)
         self.settings = settings
+        savedLayouts = SavedLayouts(directory: settings.configURL.deletingLastPathComponent().appendingPathComponent("layouts"))
         let catalog = try PluginCatalog(directory: settings.base.appendingPathComponent("state"))
         pluginCatalog = catalog
         pluginInstances = PluginInstances(directory: settings.base.appendingPathComponent("state/plugin-data"))
@@ -155,6 +159,36 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         runtime = try GhosttyRuntime(configurationURL: settings.engineURL)
         super.init()
         _ = revisions // Seed before the first mutation, including native/legacy paths.
+        savedLayouts.types = { [weak self] in SavedLayoutPaneType.available(plugins: self?.pluginCatalog.registrations ?? []) }
+        savedLayouts.windows = { [weak self] in self?.layoutSourceWindows ?? [] }
+        savedLayouts.capture = { [weak self] source, directories, urls, commands in
+            guard let self else { throw SocketError.disconnected }
+            return try self.captureLayout(source: source, directories: directories, urls: urls, commands: commands)
+        }
+        savedLayouts.open = { [weak self] definition, source, force, operation in
+            guard let self else { throw SocketError.disconnected }
+            return try self.openSavedLayout(definition, replacing: source, force: force, operation: operation)
+        }
+        savedLayouts.invoke = { [weak self] method, params, operation in
+            guard let self else { throw SocketError.disconnected }
+            return try self.call(method, params: params, operation: operation)
+        }
+        savedLayouts.onChange = { [weak self] in self?.refreshCommandPicker() }
+        layoutStartup.run = { [weak self] pane, session, command in
+            guard let self else { throw SocketError.disconnected }
+            // Once committed, startup belongs to the new session, not the initiating page/service.
+            return try await self.terminalControl.call("run", pane: pane, params: ["command": .string(command), "sessionId": .string(session), "timeoutMilliseconds": .integer(295_000)], startup: true)
+        }
+        layoutStartup.failed = { [weak self] pane, message, operation in
+            guard let self else { return }
+            self.terminalControl.releaseStartup(pane)
+            do {
+                try self.events.publishOperation(operation.publication(topic: "host.layout.startup.failed", payload: [
+                    "workspaceRevision": .string(self.revisions.revision), "state": .string("failed")
+                ], pane: pane))
+            } catch { NSLog("Layout startup publication failed: %@", String(describing: error)) }
+            if !self.integration { self.present(RPCFailure(code: -32000, message: message)) }
+        }
         pluginCommands.onChange = { [weak self] in self?.refreshSettings(); self?.refreshCommandPicker(); self?.refreshHeaderActions() }
         pluginCommands.onLifecycle = { [weak self] record, context in
             guard let self else { throw CancellationError() }
@@ -242,6 +276,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         backgroundServices.close()
         pluginCommands.close()
         events.close()
+        layoutStartup.close()
+        savedLayouts.close()
         terminalControl.close()
         terminals.values.forEach { $0.close() }
         leaves.values.compactMap { $0 as? BrowserPane }.forEach { $0.close() }
@@ -330,7 +366,22 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     func confirmTermination() -> Bool {
-        !terminals.values.contains(where: \.needsConfirmClose) || confirm("Quit and terminate running processes?")
+        if let model = savedLayouts.editor?.model, model.hasUnsavedChanges {
+            let alert = NSAlert()
+            alert.messageText = "Save changes to your layouts before quitting?"
+            alert.informativeText = "Unsaved layout drafts will be lost."
+            alert.addButton(withTitle: "Cancel")
+            alert.addButton(withTitle: "Discard Changes")
+            alert.addButton(withTitle: "Save All")
+            switch runConfirmationAlert(alert) {
+            case .alertSecondButtonReturn: break
+            case .alertThirdButtonReturn:
+                do { try model.saveAll() }
+                catch { try? savedLayouts.showEditor(); return false }
+            default: return false
+            }
+        }
+        return !terminals.values.contains(where: \.needsConfirmClose) || confirm("Quit and terminate running processes?")
     }
 
     var availableCommands: [WorkspaceCommand] {
@@ -533,6 +584,13 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         try validateAPIGuards(params, method: method)
         guard let contract = AutomationMethod(rawValue: method) else { return try callDebug(method, params: params, operation: operation) }
         switch contract {
+        case .layoutsStartupStatus:
+            guard withoutAPIGuards(params).isEmpty else { throw RPCFailure(code: -32602, message: "layouts.startupStatus takes no payload parameters") }
+            return layoutStartup.status
+        case .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsCreate, .layoutsUpdate, .layoutsWindows, .layoutsCapture, .layoutsOpen:
+            var payload = withoutAPIGuards(params)
+            payload["expectedSavedLayoutRevision"] = params["expectedSavedLayoutRevision"]
+            return try savedLayouts.call(method, params: payload, operation: operation)
         case .describe: return try describeAPI()
         case .workspaceSnapshot: return try workspaceSnapshot(params)
         case .paneInspect: return try inspectPane(targetPaneID(params))
@@ -617,6 +675,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             try session.accept(report, token: token)
             shellSessions[pane] = session
             terminalControl.observe(pane: pane, sessionID: session.instanceID, report: report)
+            layoutStartup.observe(pane: pane, session: session.instanceID, report: report)
             processTitles.bind(pane: pane, pid: pid_t(report.pid))
             refreshTerminalTitles()
             publishTerminalContext(pane, reason: "shell")
@@ -636,6 +695,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             if let result = try runSettingsCommand(id, params: params, operation: operation) { return result }
             if id == "config.reload" { return try reloadConfiguration(operation: operation) }
             if id == "settings.open" { showSettings(); return .object([:]) }
+            if id.hasPrefix("layouts.") { try savedLayouts.perform(id, operation: operation); return .object([:]) }
             if id == "command.picker" { try toggleCommandPicker(params); return .object([:]) }
             if id == "pane.rename" {
                 let pane = try targetPaneID(params)
@@ -698,7 +758,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             try targetTerminal(params).send(text)
             return .object([:])
         case .panesCapture: return try .encoding(TerminalOutput(targetTerminal(params).capture()))
-        case .contextInspect, .settingsGet, .storageGet, .storageSet, .storageDelete, .paneTitle,
+        case .layoutConfiguration, .contextInspect, .settingsGet, .storageGet, .storageSet, .storageDelete, .paneTitle,
              .terminalSend, .terminalKey, .terminalCapture, .terminalRun, .terminalWait,
              .eventsHead, .eventsPoll, .eventsEmit, .pluginsRestart,
              .webGet, .webSnapshot, .webClick, .webFill, .webSelect, .webScroll, .webWait, .webScreenshot,
@@ -739,7 +799,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 if let path = params["screenshot"]?.string {
                     try? Self.captureWindow(alert.window.windowNumber, path: path)
                 }
-                alert.buttons[answer == "terminate" ? 1 : 0].performClick(nil)
+                let button = answer == "save" && alert.buttons.count > 2 ? 2 : answer == "terminate" ? 1 : 0
+                alert.buttons[button].performClick(nil)
             }
             defer { testConfirmationHandler = nil }
             if params["quit"] == .bool(true) { return .bool(confirmTermination()) }
@@ -920,6 +981,33 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             guard mode != "externalEdit" || (replacement != nil && replacement!.utf8.count <= 65536) else { throw RPCFailure(code: -32602, message: "A bounded replacement source is required") }
             configurationApplyFault = .init(replacement: mode == "externalEdit" ? replacement : nil)
             return .object(["armed": .bool(true)])
+        case "debug.savedLayouts" where integration:
+            try savedLayouts.showEditor()
+            let model = savedLayouts.editor!.model
+            if let path = params["launcherPath"]?.string, let definition = model.definition {
+                try LayoutLauncher.create(at: URL(fileURLWithPath: path), layoutID: definition.id, name: definition.name)
+            }
+            if let file = params["file"]?.string { model.select(file) }
+            if let name = params["name"]?.string { model.change { $0.name = name } }
+            if let type = params["type"]?.string { model.setType(type) }
+            if let pane = params["pane"]?.string { model.selectedPane = try PaneID(parsing: pane) }
+            if let title = params["title"]?.string { model.changePane { $0.title = title } }
+            if let fields = params["configuration"]?.object { model.changePane { $0.configuration = fields } }
+            if params["split"] == .string("right") { model.split(.horizontal) }
+            if params["split"] == .string("below") { model.split(.vertical) }
+            if params["remove"] == .bool(true) { model.removePane() }
+            if params["create"] == .bool(true) { model.create() }
+            if params["save"] == .bool(true) { model.save() }
+            if params["revert"] == .bool(true) { model.revert() }
+            if let width = params["width"], case .integer(let width) = width {
+                let height: Int
+                if case .integer(let requested) = params["height"] { height = max(488, requested) } else { height = 620 }
+                savedLayouts.editor?.window?.setContentSize(NSSize(width: max(920, width), height: height))
+            }
+            let contentSize = savedLayouts.editor?.window?.contentView?.frame.size ?? .zero
+            return .object(["width": .number(contentSize.width), "height": .number(contentSize.height),
+                            "dirty": .bool(model.isDirty), "conflict": .bool(model.conflict), "error": model.error.map(JSONValue.string) ?? .null,
+                            "file": model.selection.map(JSONValue.string) ?? .null, "definition": try model.definition.map(JSONValue.encoding) ?? .null])
         case "debug.settings" where integration:
             if params["inspectOnly"] == .bool(true) { return .object(["visible": .bool(settingsWindow?.window?.isVisible == true)]) }
             showSettings()
@@ -979,7 +1067,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             let controlLetter = chord.modifiers.contains(.ctrl) && !chord.modifiers.contains(.cmd) && (97...122).contains(scalar)
             let text = controlLetter ? String(UnicodeScalar(scalar & 0x1f)!) : key
             let menuOnly = params["menu"] == .bool(true)
-            let window = menuOnly ? nil : (params["picker"] == .bool(true) ? commandPicker?.window : (params["settings"] == .bool(true) ? settingsWindow?.window : windows[try targetTab(params).id]))
+            let window = menuOnly ? nil : (params["layouts"] == .bool(true) ? savedLayouts.editor?.window : (params["picker"] == .bool(true) ? commandPicker?.window : (params["settings"] == .bool(true) ? settingsWindow?.window : windows[try targetTab(params).id])))
             guard let code = ["d": UInt16(2), "j": UInt16(38), "h": 4, "k": 40, "l": 37, "1": 18, "2": 19, "=": 24, "left": 123, "right": 124, "up": 126, "down": 125, "e": 14, "r": 15, "return": 36, "t": 17, "n": 45, "w": 13, "[": 33, "]": 30, ",": 43, "q": 12, "s": 1, "escape": 53, "delete": 51][chord.key],
                   let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: chord.nativeModifiers, timestamp: ProcessInfo.processInfo.systemUptime,
                                                windowNumber: window?.windowNumber ?? 0, context: nil, characters: text,
@@ -1021,7 +1109,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 guard process.terminationStatus == 0 else { throw RPCFailure(code: -32000, message: "Picker context capture failed") }
                 return .object([:])
             }
-            guard let path = params["path"]?.string, let window = params["picker"] == .bool(true) ? commandPicker?.window : (params["settings"] == .bool(true) ? settingsWindow?.window : windows[workspace.keyTabID ?? TabID(1)]) else {
+            guard let path = params["path"]?.string, let window = params["layouts"] == .bool(true) ? savedLayouts.editor?.window : (params["picker"] == .bool(true) ? commandPicker?.window : (params["settings"] == .bool(true) ? settingsWindow?.window : windows[workspace.keyTabID ?? TabID(1)])) else {
                 throw RPCFailure(code: -32602, message: "path and key window are required")
             }
             try Self.captureWindow(window.windowNumber, path: path)
@@ -1037,6 +1125,11 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             guard Set(payload.keys).isSubset(of: allowed) else { throw RPCFailure(code: -32602, message: "Unknown \(method.rawValue) parameter") }
         }
         switch method {
+        case .layoutConfiguration:
+            try keys(["pane", "tab"])
+            guard payload["pane"] != nil else { throw RPCFailure(code: -32602, message: "layout.configuration requires a pane") }
+            let pane = try targetPaneID(payload)
+            return .object(layoutRecipes[pane]?.configuration ?? [:])
         case .contextInspect:
             let pane = caller?.defaults.pane
             let view = pane.flatMap { leaves[$0] as? PluginPane }
@@ -1118,6 +1211,120 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 try Task.checkCancellation()
             })
         return try await callAsync(method, params: params, metadata: metadata, caller: caller)
+    }
+
+    private func paneTypeName(_ type: PaneType) -> String {
+        switch type { case .terminal: "terminal"; case .browser: "browser"; case .registered(let id): id }
+    }
+
+    private func layoutWindowID(_ group: GroupID) -> String { instanceID + "/" + group.description }
+
+    private var layoutSourceWindows: [LayoutSourceWindow] {
+        workspace.groups.map { group in
+            let title = group.tabs.compactMap { windows[$0]?.title }.first ?? group.id.description
+            return LayoutSourceWindow(id: layoutWindowID(group.id), title: title, tabs: group.tabs.map(\.description),
+                                     groupId: group.id.description, windowIds: group.tabs.compactMap { windows[$0]?.identity },
+                                     workspaceRevision: revisions.revision)
+        }
+    }
+
+    private func layoutGroup(_ source: String) throws -> TabGroup {
+        guard let group = workspace.groups.first(where: { layoutWindowID($0.id) == source }) else {
+            throw RPCFailure(code: APIError.unavailable, message: "The selected workspace window closed or belongs to another application instance")
+        }
+        return group
+    }
+
+    private func captureLayout(source: String, directories: Bool, urls: Bool, commands: Bool) throws -> SavedLayoutDefinition {
+        let group = try layoutGroup(source)
+        let tabs = group.tabs.map { tabID -> SavedLayoutTab in
+            let tab = workspace.tabs.first { $0.id == tabID }!
+            let panes = tab.layout.paneIDs.map { id -> SavedLayoutPane in
+                let pane = workspace.panes.first { $0.id == id }!
+                let type = paneTypeName(pane.type)
+                var configuration = layoutRecipes[id]?.configuration ?? [:]
+                if pane.type == .terminal {
+                    configuration["directory"] = directories ? (shellSessions[id]?.report?.workingDirectory ?? terminals[id]?.context.workingDirectory).map(JSONValue.string) : nil
+                    if !commands { configuration.removeValue(forKey: "command") }
+                } else if pane.type == .browser {
+                    configuration["url"] = urls ? (leaves[id] as? BrowserPane)?.currentURL.map(JSONValue.string) : nil
+                }
+                return SavedLayoutPane(id: id, type: type, title: pane.manualTitle ?? "", configuration: configuration)
+            }
+            return SavedLayoutTab(name: "Tab \(group.tabs.firstIndex(of: tabID)! + 1)", layout: tab.layout, panes: panes)
+        }
+        return try SavedLayoutDefinition(name: "Untitled Layout", tabs: tabs).validated()
+    }
+
+    private func openSavedLayout(_ definition: SavedLayoutDefinition, replacing source: String?, force: Bool,
+                                 operation: WorkspaceOperationContext) throws -> JSONValue {
+        let group = try source.map(layoutGroup)
+        let problems = definition.problems(types: savedLayouts.types())
+        guard problems.isEmpty else { throw RPCFailure(code: -32602, message: problems.joined(separator: "\n")) }
+        let recipes = definition.tabs.flatMap(\.panes)
+        for pane in recipes where pane.type == "terminal" {
+            if let path = pane.configuration["directory"]?.string, !path.isEmpty {
+                var isDirectory: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: (path as NSString).expandingTildeInPath, isDirectory: &isDirectory), isDirectory.boolValue else {
+                    throw RPCFailure(code: -32602, message: "Starting folder does not exist: \(path)")
+                }
+            }
+            if let command = pane.configuration["command"]?.string, !command.isEmpty {
+                guard settings.current.terminal.shellIntegration == .auto,
+                      URL(fileURLWithPath: settings.current.terminal.shell).lastPathComponent == "zsh",
+                      !integration || ProcessInfo.processInfo.environment["SLATE_TERM_TEST_REAL_SHELL"] == "1" else {
+                    throw RPCFailure(code: -32602, message: "Startup commands require zsh with automatic shell integration")
+                }
+            }
+        }
+        if let group, !force {
+            let removed = Set(workspace.tabs.filter { group.tabs.contains($0.id) }.flatMap { $0.layout.paneIDs })
+            guard !terminals.contains(where: { removed.contains($0.key) && $0.value.needsConfirmClose }) else {
+                throw RPCFailure(code: -32010, message: "The selected window has running processes; pass force to replace it")
+            }
+        }
+        let opening = try definition.opening(in: workspace, replacing: group?.id)
+        var openingRecipes: [PaneID: SavedLayoutPane] = [:]
+        for (id, var pane) in opening.panes {
+            if let type = savedLayouts.types().first(where: { $0.id == pane.type }) {
+                pane.configuration = type.defaults.merging(pane.configuration) { _, value in value }
+            }
+            openingRecipes[id] = pane
+        }
+        let transition = try WorkspaceTransition(observing: opening.workspace, from: workspace, revisions: revisions, action: .savedLayoutOpen)
+        let startupPanes = Set(openingRecipes.compactMap { id, pane in
+            pane.type == "terminal" && !(pane.configuration["command"]?.string ?? "").isEmpty ? id : nil
+        })
+        // Reserve before any old sessions are torn down; ordinary runs cannot steal these slots.
+        try terminalControl.reserveStartup(startupPanes)
+        let persistence: WorkspacePersistence
+        do { persistence = try reconcile(opening.workspace, recipes: openingRecipes, transition: transition, operation: operation) }
+        catch { startupPanes.forEach { terminalControl.releaseStartup($0) }; throw error }
+        for (id, pane) in openingRecipes where pane.type == "terminal" {
+            if let command = pane.configuration["command"]?.string, !command.isEmpty, let session = shellSessions[id] {
+                layoutStartup.enqueue(pane: id, session: session.instanceID, command: command, operation: operation)
+                if let report = session.report { layoutStartup.observe(pane: id, session: session.instanceID, report: report) }
+            }
+        }
+        return operationResult(.object([
+            "window": .string(layoutWindowID(opening.groupID)), "groupId": .string(opening.groupID.description),
+            "windowIds": .array(opening.workspace.groups.first { $0.id == opening.groupID }!.tabs.compactMap { windows[$0].map { .string($0.identity) } }),
+            "paneIds": .array(openingRecipes.keys.sorted { $0.description < $1.description }.map { .string($0.description) }),
+            "startup": layoutStartup.status
+        ]), transition: transition, operation: operation, workspacePersistence: persistence)
+    }
+
+    func openLayoutURL(_ url: URL) {
+        do {
+            guard savedLayouts.usesDefaultLibrary else {
+                throw RPCFailure(code: -32602, message: "This instance uses a custom layout library. Open the default Slate configuration to use Spotlight launchers.")
+            }
+            guard url.scheme == "slate-term", url.host == "layout", url.query == nil, url.fragment == nil,
+                  let id = UUID(uuidString: String(url.path.dropFirst())) else {
+                throw RPCFailure(code: -32602, message: "Invalid saved layout launcher URL")
+            }
+            _ = try call("layouts.open", params: ["id": .string(id.uuidString)])
+        } catch { present(error) }
     }
 
     private func publishTerminalContext(_ pane: PaneID, reason: String) {
@@ -1202,7 +1409,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
 
     /// Prepare new surfaces before committing the value model; failures leave the old tree intact.
     @discardableResult
-    private func reconcile(_ next: Workspace, transition suppliedTransition: WorkspaceTransition? = nil,
+    private func reconcile(_ next: Workspace, recipes: [PaneID: SavedLayoutPane] = [:], transition suppliedTransition: WorkspaceTransition? = nil,
                            operation suppliedOperation: WorkspaceOperationContext? = nil,
                            observation: WorkspaceTransition.Observation = .startup,
                            additionalPublications: [EventPublication] = [], beforeCommit: () throws -> Void = {}) throws -> WorkspacePersistence {
@@ -1247,7 +1454,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                         environment["BASH_ENV"] = "/dev/null"
                     }
                 }
-                created[pane.id] = try TerminalView(runtime: runtime, environment: environment)
+                let directory = recipes[pane.id]?.configuration["directory"]?.string.flatMap { $0.isEmpty ? nil : ($0 as NSString).expandingTildeInPath }
+                created[pane.id] = try TerminalView(runtime: runtime, environment: environment, directory: directory)
                 if integration { terminalPreparationCount += 1 }
                 sessions[pane.id] = session
             }
@@ -1298,6 +1506,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             leaves.removeValue(forKey: id)
         }
         for id in changedTabs { rendered.removeValue(forKey: id) }
+        layoutRecipes = layoutRecipes.filter { id, recipe in
+            next.panes.contains { $0.id == id && paneTypeName($0.type) == recipe.type }
+        }
+        layoutRecipes.merge(recipes) { _, new in new }
         for (id, terminal) in created {
             terminal.onFocus = { [weak self] in self?.focused(id) }
             terminal.onCloseRequest = { [weak self, weak terminal] processAlive in
@@ -1325,6 +1537,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             browser.onFocus = { [weak self] in self?.focused(pane.id) }
             browser.onTitleChange = { [weak self] in self?.updatePaneTitle(pane.id) }
             leaves[pane.id] = browser
+            if let url = recipes[pane.id]?.configuration["url"]?.string, !url.isEmpty {
+                browser.loadStartingURL(url)
+            }
         }
         let retainedPanes = Set(next.panes.map(\.id))
         for id in Array(leaves.keys) where !retainedPanes.contains(id) {
@@ -1339,6 +1554,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             leaves.removeValue(forKey: id)
         }
         shellSessions = shellSessions.filter { terminals[$0.key] != nil }
+        layoutStartup.retain(shellSessions.mapValues(\.instanceID))
         shellNames = shellNames.filter { terminals[$0.key] != nil }
         processNames = processNames.filter { terminals[$0.key] != nil }
         for pane in next.panes {
@@ -1826,6 +2042,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         workspaceMenu.addItem(.separator())
         addCommands(["window.new"], to: workspaceMenu)
         workspaceMenu.addItem(.separator())
+        addCommands(["layouts.edit", "layouts.openWindow", "layouts.replaceWindow", "layouts.captureWindow", "layouts.launcher", "layouts.folder"], to: workspaceMenu)
+        workspaceMenu.addItem(.separator())
         for (title, commands) in [
             ("Tabs", ["tab.new", "tab.close", "tab.previous", "tab.next"]),
             ("Browser", ["browser.back", "browser.forward", "browser.focusAddress", "browser.reload"]),
@@ -1998,6 +2216,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 else if missingTarget { unavailable = "The original workspace target was closed" }
             } else {
                 switch command.id {
+                case let id where id.hasPrefix("layouts."): detail = "Saved Layouts"; symbol = "rectangle.split.2x2"; keywords = "recipe template save launch spotlight"
                 case "settings.open": detail = "Application"; symbol = "gearshape"; keywords = "preferences configuration"
                 case "config.reload": detail = "Application"; symbol = "arrow.clockwise"; keywords = "settings refresh"
                 case "window.new": symbol = "macwindow.badge.plus"; keywords = "create"

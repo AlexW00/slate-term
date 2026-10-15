@@ -17,12 +17,45 @@ struct TerminalRunsChecks {
             try await checkReplacementAndSendFailure()
             try await checkTimeoutAndCancellation()
             try await checkCapacityAndClose()
+            try await checkLayoutReservations()
             try await checkRacesAndLifetime()
             print("PASS all terminal run checks")
         } catch {
             fputs("FAIL terminal runs: \(error)\n", stderr)
             exit(1)
         }
+    }
+
+    static func checkLayoutReservations() async throws {
+        let runs = TerminalRuns()
+        defer { runs.close() }
+        let panes = Set((1...32).map(PaneID.init))
+        try runs.reserve(panes)
+        try await expectError(.overloaded(maximumPending: 32)) {
+            try await runs.run(pane: PaneID(33), sessionID: "s", command: "must not run") { _ in throw Failure(message: "Reservation was stolen") }
+        }
+        try await expectError(.alreadyRunning(PaneID(1))) {
+            try await runs.run(pane: PaneID(1), sessionID: "s", command: "must not run") { _ in throw Failure(message: "Startup target was stolen") }
+        }
+        _ = try await runs.run(pane: PaneID(1), sessionID: "s", command: "reserved", usingReservation: true) { line in
+            runs.observe(pane: PaneID(1), sessionID: "s", report: report(.running, 1, command: String(line.dropLast()))) { "" }
+            runs.observe(pane: PaneID(1), sessionID: "s", report: report(.prompt, 2, exit: 0)) { "done" }
+        }
+        try runs.reserve([PaneID(33)])
+        runs.remove(pane: PaneID(2))
+        try runs.reserve([PaneID(34)])
+        runs.close()
+        try await expectError(.closed) {
+            try await runs.run(pane: PaneID(3), sessionID: "s", command: "closed", usingReservation: true) { _ in }
+        }
+        let overfull = TerminalRuns()
+        do {
+            try overfull.reserve(Set((1...33).map(PaneID.init)))
+            throw Failure(message: "Over-capacity reservation accepted")
+        } catch TerminalRunError.overloaded(maximumPending: 32) {}
+        try overfull.reserve(panes)
+        overfull.close()
+        print("PASS startup reservations are atomic, cannot be stolen, and release on removal/completion/close")
     }
 
     static func checkQuotingAndSynchronousCompletion() async throws {

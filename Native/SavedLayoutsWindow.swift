@@ -1,0 +1,366 @@
+import AppKit
+import Combine
+import SwiftUI
+import SlateTermCore
+import SlateTermSettings
+
+@MainActor
+final class SavedLayoutsModel: ObservableObject {
+    struct Draft {
+        var definition: SavedLayoutDefinition
+        let original: SavedLayoutDefinition
+        let revision: String
+        var dirty: Bool { definition != original }
+    }
+    @Published var entries: [SavedLayoutEntry] = []
+    @Published var selection: String?
+    @Published var selectedTab = 0
+    @Published var selectedPane: PaneID?
+    @Published var drafts: [String: Draft] = [:]
+    @Published var types: [SavedLayoutPaneType] = []
+    @Published var error: String?
+    let store: SavedLayoutStore
+    let saveDefinition: (SavedLayoutDefinition, String?) throws -> SavedLayoutEntry
+    var didSave: (() -> Void)?
+
+    init(store: SavedLayoutStore, save: @escaping (SavedLayoutDefinition, String?) throws -> SavedLayoutEntry) {
+        self.store = store; saveDefinition = save
+    }
+    var entry: SavedLayoutEntry? { entries.first { $0.file == selection } }
+    var draft: Draft? { selection.flatMap { drafts[$0] } }
+    var definition: SavedLayoutDefinition? { draft?.definition }
+    var tab: SavedLayoutTab? { definition.flatMap { $0.tabs.indices.contains(selectedTab) ? $0.tabs[selectedTab] : nil } }
+    var pane: SavedLayoutPane? { tab?.panes.first { $0.id == selectedPane } }
+    var isDirty: Bool { draft?.dirty == true }
+    var hasUnsavedChanges: Bool { drafts.values.contains(where: \.dirty) }
+    var conflict: Bool { draft != nil && entry?.revision != draft?.revision }
+
+    func refresh() {
+        do {
+            var next = try store.list()
+            // Deleted files with unsaved drafts remain selectable, never silently discarded.
+            for entry in entries where drafts[entry.file]?.dirty == true && !next.contains(where: { $0.file == entry.file }) {
+                next.append(SavedLayoutEntry(file: entry.file, diagnostic: "The source file was removed. Your unsaved draft is retained."))
+            }
+            entries = next.sorted { ($0.definition?.name ?? $0.file).localizedStandardCompare($1.definition?.name ?? $1.file) == .orderedAscending }
+            for entry in entries where drafts[entry.file]?.dirty != true {
+                if let definition = entry.definition, let revision = entry.revision {
+                    drafts[entry.file] = Draft(definition: definition, original: definition, revision: revision)
+                } else { drafts.removeValue(forKey: entry.file) }
+            }
+            if selection == nil || !entries.contains(where: { $0.file == selection }) { selection = entries.first?.file }
+            normalizeSelection()
+        } catch { self.error = layoutErrorText(error) }
+    }
+    func select(_ file: String?) {
+        selection = file; selectedTab = 0; selectedPane = nil; error = nil; normalizeSelection()
+    }
+    func normalizeSelection() {
+        if definition?.tabs.indices.contains(selectedTab) != true { selectedTab = 0 }
+        if tab?.panes.contains(where: { $0.id == selectedPane }) != true { selectedPane = tab?.layout.paneIDs.first }
+    }
+    func change(_ operation: (inout SavedLayoutDefinition) -> Void) {
+        guard let selection, var draft = drafts[selection] else { return }
+        operation(&draft.definition); drafts[selection] = draft; error = nil
+    }
+    func changePane(_ operation: (inout SavedLayoutPane) -> Void) {
+        guard let paneIndex = tab?.panes.firstIndex(where: { $0.id == selectedPane }) else { return }
+        change { operation(&$0.tabs[selectedTab].panes[paneIndex]) }
+    }
+    func setType(_ type: String) {
+        guard pane?.type != type else { return }
+        changePane { $0.type = type; $0.configuration = types.first { $0.id == type }?.defaults ?? [:] }
+    }
+    func split(_ axis: SlateTermCore.Axis) {
+        guard var definition, let selectedPane else { return }
+        do {
+            let next = try definition.splitPane(selectedPane, axis: axis)
+            change { $0 = definition }; self.selectedPane = next
+        } catch { self.error = layoutErrorText(error) }
+    }
+    func removePane() {
+        guard var definition, let selectedPane else { return }
+        do {
+            let next = try definition.removePane(selectedPane)
+            change { $0 = definition }; self.selectedPane = next
+        } catch { self.error = layoutErrorText(error) }
+    }
+    func addTab() {
+        guard let definition, definition.tabs.count < 8 else { return }
+        let used = Set(definition.tabs.flatMap(\.panes).map(\.id))
+        let id = (1...65).map(PaneID.init).first { !used.contains($0) }!
+        change { $0.tabs.append(.init(name: "Tab \($0.tabs.count + 1)", layout: .pane(id), panes: [.init(id: id)])) }
+        selectedTab = definition.tabs.count; selectedPane = id
+    }
+    func removeTab() {
+        guard let definition, definition.tabs.count > 1 else { return }
+        change { $0.tabs.remove(at: selectedTab) }; selectedTab = 0; selectedPane = nil; normalizeSelection()
+    }
+    func create() {
+        do {
+            let entry = try saveDefinition(.blank(), nil)
+            refresh(); select(entry.file); didSave?()
+        } catch { self.error = layoutErrorText(error) }
+    }
+    func save() {
+        guard let draft else { return }
+        do {
+            let entry = try saveDefinition(draft.definition, draft.revision)
+            drafts.removeValue(forKey: entry.file)
+            error = nil; refresh(); didSave?()
+        } catch { self.error = layoutErrorText(error); refresh() }
+    }
+    func saveAll() throws {
+        for file in drafts.keys.sorted() {
+            guard let draft = drafts[file], draft.dirty else { continue }
+            do {
+                _ = try saveDefinition(draft.definition, draft.revision)
+                drafts.removeValue(forKey: file)
+            } catch {
+                self.error = layoutErrorText(error); refresh(); throw error
+            }
+        }
+        refresh(); didSave?()
+    }
+    func revert() {
+        guard let selection else { return }
+        drafts.removeValue(forKey: selection); error = nil; refresh()
+    }
+    func hasDraft(id: UUID) -> Bool { drafts.values.contains { $0.definition.id == id && $0.dirty } }
+}
+
+func layoutErrorText(_ error: any Error) -> String { (error as? RPCFailure)?.message ?? error.localizedDescription }
+
+@MainActor
+final class SavedLayoutsWindowController: NSWindowController, NSWindowDelegate {
+    let model: SavedLayoutsModel
+    init(model: SavedLayoutsModel) {
+        self.model = model
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1060, height: 620),
+                              styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        window.title = "Saved Layouts"
+        window.isReleasedWhenClosed = false
+        window.tabbingMode = .disallowed
+        window.minSize = NSSize(width: 920, height: 520)
+        window.contentViewController = NSHostingController(rootView: SavedLayoutsView(model: model))
+        super.init(window: window)
+        window.delegate = self
+        window.center()
+    }
+    required init?(coder: NSCoder) { nil }
+    func windowDidBecomeKey(_ notification: Notification) { model.refresh() }
+}
+
+private struct SavedLayoutsView: View {
+    @ObservedObject var model: SavedLayoutsModel
+    @State private var previewSize = CGSize(width: 360, height: 260)
+    var body: some View {
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                List(selection: Binding(get: { model.selection }, set: { model.select($0) })) {
+                    ForEach(model.entries) { entry in
+                        Label {
+                            HStack {
+                                Text(model.drafts[entry.file]?.definition.name ?? entry.definition?.name ?? entry.file)
+                                    .lineLimit(2).fontWeight(model.selection == entry.file ? .semibold : .regular)
+                                if model.drafts[entry.file]?.dirty == true { Circle().fill(.secondary).frame(width: 5, height: 5).accessibilityLabel("Unsaved changes") }
+                            }
+                        } icon: {
+                            Image(systemName: entry.diagnostic == nil ? "rectangle.split.2x2" : "exclamationmark.triangle")
+                                .font(.system(size: 13, weight: .medium)).foregroundStyle(.white)
+                                .frame(width: 25, height: 25)
+                                .background((entry.diagnostic == nil ? Color.indigo : Color.orange).gradient, in: RoundedRectangle(cornerRadius: 6))
+                        }.padding(.vertical, 4).tag(entry.file)
+                    }
+                }.listStyle(.sidebar)
+                Divider()
+                HStack {
+                    Button(action: model.create) { Label("New Layout", systemImage: "plus") }
+                    Spacer()
+                }.padding(16)
+            }.frame(width: 210)
+            Divider()
+            VStack(spacing: 0) {
+                if let definition = model.definition {
+                    editor(definition)
+                } else {
+                    ContentUnavailableView {
+                        Label(model.entry == nil ? "No Saved Layouts" : "Layout Needs Repair",
+                              systemImage: model.entry == nil ? "rectangle.split.2x2" : "exclamationmark.triangle")
+                    } description: {
+                        VStack(spacing: 12) {
+                            Text(model.entry?.diagnostic ?? "Create a layout, or save a window from Search Commands.")
+                            if let entry = model.entry { Text(entry.file).font(.caption.monospaced()) }
+                        }.textSelection(.enabled)
+                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                if let error = model.error {
+                    Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding()
+                }
+                Divider()
+                HStack {
+                    Text(model.conflict ? "File changed externally. Revert to reload." : model.isDirty ? "Unsaved changes" : "")
+                        .font(.callout).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Revert", action: model.revert).disabled(!model.isDirty && !model.conflict)
+                    Button("Save Changes", action: model.save).keyboardShortcut("s", modifiers: .command)
+                        .buttonStyle(.borderedProminent).disabled(!model.isDirty)
+                }.padding(16)
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func editor(_ definition: SavedLayoutDefinition) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            TextField("Layout Name", text: Binding(get: { model.definition?.name ?? "" }, set: { value in model.change { $0.name = value } }))
+                .font(.title2.weight(.semibold)).textFieldStyle(.plain).padding(24)
+                .accessibilityLabel("Layout Name")
+            HStack(spacing: 0) {
+                ScrollView {
+                  VStack(alignment: .leading, spacing: 16) {
+                    HStack {
+                        Picker("Tab", selection: $model.selectedTab) {
+                            ForEach(definition.tabs.indices, id: \.self) { index in Text(definition.tabs[index].name).tag(index) }
+                        }.labelsHidden().onChange(of: model.selectedTab) { model.normalizeSelection() }
+                        Menu {
+                            Button("Add Tab", action: model.addTab).disabled(definition.tabs.count >= 8)
+                            Button("Remove Tab", action: model.removeTab).disabled(definition.tabs.count <= 1)
+                        } label: { Image(systemName: "ellipsis.circle") }.menuStyle(.borderlessButton).fixedSize()
+                    }
+                    if let tab = model.tab {
+                        SavedLayoutMap(tree: tab.layout, panes: tab.panes, types: model.types, selected: model.selectedPane) { model.selectedPane = $0 }
+                            .frame(height: 260)
+                            .onGeometryChange(for: CGSize.self, of: { $0.size }) { previewSize = $0 }
+                        HStack(spacing: 8) {
+                            splitButtons
+                            Button("Remove Pane", action: model.removePane).disabled(tab.panes.count <= 1)
+                        }.labelStyle(.titleOnly).fixedSize(horizontal: true, vertical: false)
+                    }
+                  }.padding(.horizontal, 24).padding(.bottom, 24)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                Divider()
+                inspector.frame(width: 300)
+            }
+        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    @ViewBuilder private var splitButtons: some View {
+        Button { model.split(.horizontal) } label: { Label("Split Right", systemImage: "rectangle.split.2x1") }
+            .disabled(!canSplit(.horizontal))
+        Button { model.split(.vertical) } label: { Label("Split Below", systemImage: "rectangle.split.1x2") }
+            .disabled(!canSplit(.vertical))
+    }
+    private func canSplit(_ axis: SlateTermCore.Axis) -> Bool {
+        guard let tab = model.tab, let selected = model.selectedPane, tab.panes.count < 8 else { return false }
+        func size(_ tree: SlateTermCore.Layout, in available: CGSize) -> CGSize? {
+            switch tree {
+            case .pane(let id): return id == selected ? available : nil
+            case .split(let axis, let fraction, let first, let second):
+                var a = available, b = available
+                if axis == .horizontal { a.width = (available.width - 8) * fraction; b.width = (available.width - 8) * (1 - fraction) }
+                else { a.height = (available.height - 8) * fraction; b.height = (available.height - 8) * (1 - fraction) }
+                return size(first, in: a) ?? size(second, in: b)
+            }
+        }
+        guard let frame = size(tab.layout, in: previewSize) else { return false }
+        return axis == .horizontal ? frame.width >= 144 : frame.height >= 120
+    }
+    private var inspector: some View {
+        Form {
+            if let pane = model.pane {
+                Section("Pane") {
+                    TextField("Name", text: Binding(get: { model.pane?.title ?? "" }, set: { value in model.changePane { $0.title = value } }), prompt: Text("Automatic"))
+                    Picker("Type", selection: Binding(get: { model.pane?.type ?? "terminal" }, set: model.setType)) {
+                        ForEach(model.types) { type in Text(type.title).tag(type.id) }
+                        if !model.types.contains(where: { $0.id == pane.type }) { Text("\(pane.type) (Missing)").tag(pane.type) }
+                    }
+                }
+                if let type = model.types.first(where: { $0.id == pane.type }) {
+                    if !type.fields.isEmpty {
+                        Section("Starting Configuration") {
+                            ForEach(type.fields) { field in fieldView(field) }
+                        }
+                    }
+                    let unknown = pane.configuration.keys.filter { key in !type.fields.contains { $0.id == key } }
+                    if !unknown.isEmpty { Text("Additional configuration is preserved in the file.").font(.caption).foregroundStyle(.secondary) }
+                } else {
+                    Section {
+                        Label("Plugin unavailable", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                        Text("Install \(pane.type), or choose another type to replace this pane’s configuration.").font(.callout)
+                    }
+                }
+            }
+        }.formStyle(.grouped)
+    }
+    @ViewBuilder private func fieldView(_ field: SavedLayoutField) -> some View {
+        let text = Binding(get: { (model.pane?.configuration[field.id] ?? field.defaultValue)?.string ?? "" },
+                           set: { value in model.changePane { $0.configuration[field.id] = .string(value) } })
+        switch field.kind {
+        case .boolean:
+            Toggle(field.label, isOn: Binding(get: { (model.pane?.configuration[field.id] ?? field.defaultValue) == .bool(true) },
+                                              set: { value in model.changePane { $0.configuration[field.id] = .bool(value) } }))
+        case .choice:
+            Picker(field.label, selection: text) {
+                if !field.required { Text("None").tag("") }
+                ForEach(field.options, id: \.self) { Text($0).tag($0) }
+            }
+        case .multiline:
+            VStack(alignment: .leading, spacing: 6) {
+                Text(field.label)
+                TextEditor(text: text).font(.system(.body, design: .monospaced))
+                    .autocorrectionDisabled().writingToolsBehavior(.disabled).frame(minHeight: 80, maxHeight: 120)
+                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(.quaternary)).accessibilityLabel(field.label)
+            }
+        default:
+            VStack(alignment: .leading, spacing: 6) {
+                Text(field.label)
+                TextField(field.label, text: text, prompt: Text(field.kind == .directory ? "Default folder" : ""))
+                    .labelsHidden().textFieldStyle(.roundedBorder).accessibilityLabel(field.label)
+            }
+        }
+    }
+}
+
+private struct SavedLayoutMap: View {
+    let tree: SlateTermCore.Layout
+    let panes: [SavedLayoutPane]
+    let types: [SavedLayoutPaneType]
+    let selected: PaneID?
+    let select: (PaneID) -> Void
+    var body: some View {
+        GeometryReader { geometry in
+            render(tree, rect: CGRect(origin: .zero, size: geometry.size))
+        }
+    }
+    private func render(_ tree: SlateTermCore.Layout, rect: CGRect) -> AnyView {
+        switch tree {
+        case .pane(let id):
+            let pane = panes.first { $0.id == id }
+            let type = types.first { $0.id == pane?.type }
+            let active = id == selected
+            return AnyView(Button { select(id) } label: {
+                VStack(spacing: 8) {
+                    Image(systemName: pane?.type == "terminal" ? "terminal" : pane?.type == "browser" ? "globe" : "puzzlepiece.extension")
+                        .font(.system(size: 20, weight: .regular)).foregroundStyle(active ? Color.accentColor : .secondary)
+                    Text(pane?.title.isEmpty == false ? pane!.title : type?.title ?? pane?.type ?? "Pane")
+                        .font(.system(size: 12, weight: .medium)).lineLimit(2).multilineTextAlignment(.center)
+                    if type == nil { Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange).accessibilityLabel("Plugin unavailable") }
+                }.padding(8).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(active ? Color.accentColor.opacity(0.09) : Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(active ? Color.accentColor : Color(nsColor: .separatorColor), lineWidth: active ? 2 : 1))
+                    .contentShape(Rectangle())
+            }.buttonStyle(.plain).clipped().accessibilityAddTraits(active ? .isSelected : [])
+                .frame(width: max(0, rect.width), height: max(0, rect.height)).position(x: rect.midX, y: rect.midY))
+        case .split(let axis, let fraction, let first, let second):
+            let gap = 8.0
+            let length = (axis == .horizontal ? rect.width : rect.height) - gap
+            var a = rect, b = rect
+            if axis == .horizontal {
+                a.size.width = length * fraction; b.origin.x = a.maxX + gap; b.size.width = length * (1 - fraction)
+            } else {
+                a.size.height = length * fraction; b.origin.y = a.maxY + gap; b.size.height = length * (1 - fraction)
+            }
+            return AnyView(ZStack(alignment: .topLeading) { render(first, rect: a); render(second, rect: b) })
+        }
+    }
+}

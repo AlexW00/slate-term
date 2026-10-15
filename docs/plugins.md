@@ -216,6 +216,10 @@ Terminal operations use the active terminal in the plugin's context; an explicit
 
 Guarded pane split/move/resize, manual titles and native tab rearrangement are available through `workspace.panes`, `workspace.layout` and `workspace.tabs`; see [layout/page adapters](layout-api.md#registered-page-adapters). They use captured/live validated targets and explicit revisions rather than retargeting current focus. Window operations are available through the same `workspace.call`/`command.run` route.
 
+### Saved layouts
+
+Panel manifests may declare `layoutFields` for per-pane starting configuration. `workspace.layoutConfiguration(params, options)` reads these values, defaulting to this pane or accepting an explicit pane. `workspace.layouts` exposes the same recipe library, guarded file updates, capture, opening/replacement and startup status as CLI/service clients. Panel scope supplies context, not a restriction on explicit cross-window access. See [saved layouts](saved-layouts.md) for schemas, helper signatures and whole-window-group targeting.
+
 ### Structured web interaction
 
 `workspace.web.get/snapshot/click/fill/select/scroll/wait/screenshot(params, {signal, cause})` reuse the same guarded automation as browser panes. They target this pane by default or an explicit `pane`; cross-pane interaction is intentional for trusted registered controllers. Selector mutations require paired `expectedViewId`/`expectedDocumentId`, while opaque snapshot refs bind both identities. These public automation IDs are separate from bridge document credentials and initialize without a page API call. Trusted pages can use screenshot output and the generated `workspace.browser` namespace for browser navigation/evaluation. Arbitrary evaluation is still browser-only, not a plugin-document operation. `workspace.methods` and generated `workspace.rpc[METHOD]` cover the full shared catalog; `workspace.call` remains compatible. See [shared web automation](automation.md#shared-web-panes) for renderability, cancellation, platform-capacity and stale-document rules.

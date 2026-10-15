@@ -23,6 +23,8 @@ final class TerminalControl {
     }
 
     init(lookup: @escaping (PaneID) -> Target?) { self.lookup = lookup }
+    func reserveStartup(_ panes: Set<PaneID>) throws { try runs.reserve(panes) }
+    func releaseStartup(_ pane: PaneID) { runs.releaseReservation(pane) }
     func remove(pane: PaneID) { runs.remove(pane: pane) }
     func close() { closed = true; runs.close() }
     func observe(pane: PaneID, sessionID: String, report: ShellReport) {
@@ -30,7 +32,7 @@ final class TerminalControl {
         runs.observe(pane: pane, sessionID: sessionID, report: report, capture: { target.view.capture() })
     }
 
-    func call(_ action: String, pane: PaneID, params: [String: JSONValue],
+    func call(_ action: String, pane: PaneID, params: [String: JSONValue], startup: Bool = false,
               validateCaller: @escaping @MainActor () throws -> Void = {}) async throws -> JSONValue {
         try validateCaller()
         let fields: Set<String>
@@ -81,7 +83,8 @@ final class TerminalControl {
             guard let command = params["command"]?.string else { throw RPCFailure(code: -32602, message: "command must be a string") }
             do {
                 let result = try await runs.run(pane: pane, sessionID: target.sessionID, command: command,
-                    timeoutMilliseconds: timeout, validateCaller: validateCaller, send: { _ in try target.view.send(target.runKey) })
+                    timeoutMilliseconds: timeout, usingReservation: startup, validateCaller: validateCaller,
+                    send: { _ in try target.view.send(target.runKey) })
                 return try .encoding(result)
             } catch let error as TerminalRunError {
                 throw RPCFailure(code: error == .timeout ? -32024 : -32042, message: error.localizedDescription)

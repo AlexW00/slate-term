@@ -68,6 +68,18 @@ final class TerminalRuns {
     }
 
     private var pending: [PaneID: PendingRun] = [:]
+    private var reserved = Set<PaneID>()
+
+    /// Reserve capacity before a layout replaces any live workspace resources.
+    func reserve(_ panes: Set<PaneID>) throws {
+        guard !isClosed else { throw TerminalRunError.closed }
+        guard panes.isDisjoint(with: reserved), panes.isDisjoint(with: pending.keys),
+              panes.count + reserved.count + pending.count <= Self.maximumPendingRuns else {
+            throw TerminalRunError.overloaded(maximumPending: Self.maximumPendingRuns)
+        }
+        reserved.formUnion(panes)
+    }
+    func releaseReservation(_ pane: PaneID) { reserved.remove(pane) }
     private var isClosed = false
 
     func run(
@@ -75,6 +87,7 @@ final class TerminalRuns {
         sessionID: String,
         command: String,
         timeoutMilliseconds: Int = 30_000,
+        usingReservation: Bool = false,
         validateCaller: @escaping @MainActor () throws -> Void = {},
         send: (String) throws -> Void
     ) async throws -> TerminalRunResult {
@@ -90,8 +103,13 @@ final class TerminalRuns {
         try Task.checkCancellation()
         try validateCaller()
         guard pending[pane] == nil else { throw TerminalRunError.alreadyRunning(pane) }
-        guard pending.count < Self.maximumPendingRuns else {
-            throw TerminalRunError.overloaded(maximumPending: Self.maximumPendingRuns)
+        if usingReservation {
+            guard reserved.remove(pane) != nil else { throw TerminalRunError.replaced }
+        } else {
+            guard !reserved.contains(pane) else { throw TerminalRunError.alreadyRunning(pane) }
+            guard pending.count + reserved.count < Self.maximumPendingRuns else {
+                throw TerminalRunError.overloaded(maximumPending: Self.maximumPendingRuns)
+            }
         }
         let id = UUID()
         let prefix = ": __SLATE_RUN_\(id.uuidString);"
@@ -151,6 +169,7 @@ final class TerminalRuns {
     }
 
     func remove(pane: PaneID) {
+        reserved.remove(pane)
         guard let run = pending[pane] else { return }
         finish(pane: pane, id: run.id, with: .failure(TerminalRunError.replaced))
     }
@@ -158,6 +177,7 @@ final class TerminalRuns {
     func close() {
         guard !isClosed else { return }
         isClosed = true
+        reserved.removeAll()
         for (pane, run) in pending {
             finish(pane: pane, id: run.id, with: .failure(TerminalRunError.closed))
         }

@@ -31,6 +31,7 @@ done
 run config-cli python3 scripts/verify-config-cli.py
 run settings python3 scripts/verify-settings.py
 run settings-window python3 scripts/verify-settings-window.py
+run saved-layouts python3 scripts/verify-saved-layouts.py
 run command-picker python3 scripts/verify-command-picker.py
 run window-recovery python3 scripts/verify-window-recovery.py
 run appearance python3 scripts/verify-appearance.py

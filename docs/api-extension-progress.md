@@ -2,6 +2,16 @@
 
 Authorized scope: implement the reviewed API-extension plan iteratively with high-value tests, including post-operation lifecycle hooks (not veto hooks). Checkpoint before implementation: `2763ce9`; working tree was clean after that commit. Future capability-parity requirements live in `AGENTS.md`.
 
+## Saved-layout integration
+
+Implemented against the shared API at `7d533d8` in `feature/saved-layouts`, then integrated main's interaction/trusted-client refinements at `3598070` for the authorized main commit. The only textual conflict in that final integration was event documentation; both the new rename-popover semantics and saved-layout commit semantics are retained. Recovery stashes: `fc938206cbcee343fed401ac32cfa1e807da5799` (before API integration) and `4d12d4868dbee394a4a2886c5af1526cb60ae0cc` (before `3598070`).
+
+The shared catalog now includes library operations and pane configuration reads. CLI/page/service callers share validation, admission and dispatch. Document updates use `expectedSavedLayoutRevision`; whole-group replacement requires `expectedWorkspaceRevision`. Native selectors preserve that revision across dialogs. Opening uses attributed prepared workspace commits and preserves startup capacity reservations; committed startup is session-owned rather than caller-owned. Native `windowId` and saved-layout group selectors are explicitly distinct and linked in discovery. The native editor, file format and Spotlight packaging are retained.
+
+Verified combined source in `bg_14abf2659656219f` (exit 0): **244 package tests** (155 core, 22 IPC, 65 settings, 2 CLI), native terminal runs/reservations, fake-peer API negotiation, native service generation/manager checks, app/CLI/helper build and signing, focused owned-app saved-layout UI/CLI/page/service parity, guards, operation attribution, preparation/publication rejection, late-divider safety, service retirement and self-replacement startup, launcher packaging, and whitespace. Logs: `artifacts/layouts-integrated-*.log`. `artifacts/verification.json` records the exact selected checks and unchanged source/binary hashes; this is **not a full `verify-all.sh` run**.
+
+Independent code review found a missing task-cancellation check after modal dialogs; added checks before nested mutations and launcher publication, then freshly verified the fix by read-only review. Actual cancellation while a modal is open remains untested. Independent rendered review found no major/minor issues in current dark/light/narrow/plugin/invalid captures (one optional diagnostic-punctuation nit). Actual Spotlight indexing/cold/warm Launch Services launch and broader manual accessibility/IME testing remain unverified. These results certify the `7d533d8`-based integration, not the later `3598070` combination. The user requested the full sequential suite after integration into main; that run is pending. See `docs/saved-layouts.md` for the current contract.
+
 ## Current delivery — one trusted automation API
 
 The user's later correction supersedes the permission matrices below: CLI, registered-plugin bridge and managed services are clients of **one API**, not capability tiers. The [revised plan](trusted-automation-api-plan.md) received a bounded independent review before runtime edits; target-before-guard resolution and document-bound automatic titles were incorporated.

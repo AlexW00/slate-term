@@ -55,7 +55,7 @@ dialog{padding:0;border:1px solid var(--border);border-radius:13px;background:va
         <div id="layout-issue" class="issue-banner" role="status" hidden></div>
         <div id="preview-content">
           <div id="layout-preview" class="preview" role="group" aria-label="Unavailable layout" hidden></div>
-          <form id="edit-form"><div class="editor-shell"><div><div id="editor-map" class="editor-map" role="group" aria-label="Select a pane"></div><div class="split-tools"><button id="split-right" class="secondary" type="button">Split Right</button><button id="split-below" class="secondary" type="button">Split Below</button></div><p id="editor-limit" class="editor-limit" hidden>Prototype limit: 8 panes.</p></div><div class="inspector"><label class="field">Name<input id="pane-name" required maxlength="80"></label><label class="field">Pane type<select id="pane-type"></select></label><div id="edit-fields" class="dynamic-fields"></div></div></div></form>
+          <form id="edit-form"><div class="editor-shell"><div><div id="editor-map" class="editor-map" role="group" aria-label="Select a pane"></div><div class="split-tools"><button id="split-right" class="secondary" type="button">Split Right</button><button id="split-below" class="secondary" type="button">Split Below</button><button id="remove-pane" class="secondary" type="button">Remove Pane</button></div><p id="editor-limit" class="editor-limit" hidden>Prototype limit: 8 panes.</p></div><div class="inspector"><label class="field">Name<input id="pane-name" required maxlength="80"></label><label class="field">Pane type<select id="pane-type"></select></label><div id="edit-fields" class="dynamic-fields"></div></div></div></form>
         </div>
       </div>
       <footer class="actionbar"><p id="draft-state" class="draft-state" role="status"></p><button id="revert-edits" type="button" disabled>Revert</button><button id="save-edits" class="primary" type="submit" form="edit-form" disabled>Save Changes</button></footer>
@@ -246,6 +246,7 @@ function renderEditorMap(){
   $('split-below').disabled=full||rect.height<76;
   $('split-right').title=full?'Prototype limit: 8 panes.':$('split-right').disabled?'Pane is too narrow to split again.':'';
   $('split-below').title=full?'Prototype limit: 8 panes.':$('split-below').disabled?'Pane is too short to split again.':'';
+  $('remove-pane').disabled=editorDraft.panes.length<=1;
   $('editor-limit').hidden=!full;
   updateDraftUI();
 }
@@ -290,6 +291,20 @@ function splitEditorPane(axis){
   editorDraft.panes.push(added);editingPaneIndex=editorDraft.panes.length-1;
   renderEditorMap();renderInspector();$('pane-type').focus();
 }
+function removeLeaf(node,id){
+  if(node.pane)return node.pane===id?null:node;
+  const first=removeLeaf(node.first,id),second=removeLeaf(node.second,id);
+  return first&&second?{...node,first,second}:first||second;
+}
+function removeEditorPane(){
+  if(!editorDraft||editorDraft.panes.length<=1)return;
+  const id=editorDraft.panes[editingPaneIndex].id;
+  editorDraft.tree=removeLeaf(editorDraft.tree,id);
+  editorDraft.panes.splice(editingPaneIndex,1);
+  editingPaneIndex=Math.min(editingPaneIndex,editorDraft.panes.length-1);
+  renderEditorMap();renderInspector();
+  $('editor-map').querySelector(`[data-editor-pane="${editingPaneIndex}"]`).focus();
+}
 let pickerActions=[];
 function renderPicker(){
   const actions=[...layouts.map(layout=>({title:`Open Layout: ${layout.name}`,detail:layoutProblem(layout) || 'New window',icon:layoutProblem(layout)?'warning':'layout',run:()=>{selectLayout(layout.id);openLayout();}})),{title:'Save a Window as Layout…',detail:'Choose a workspace window',icon:'plus',run:showWindowChooser},{title:'Manage Saved Layouts',detail:'Workspace',icon:'folder',run:()=>{$('layout-search').focus();}},{title:launchers.has(selected.id)?'Edit Spotlight Launcher…':'Create Spotlight Launcher…',detail:layoutProblem(selected) || selected.name,icon:'app',run:showLauncher}];
@@ -332,6 +347,7 @@ $('edit-fields').addEventListener('change',storeEditorFields);
 $('pane-type').addEventListener('change',()=>{const old=editorDraft.panes[editingPaneIndex],key=$('pane-type').value;if(!paneTypes[key])return;const title=$('pane-name').value;const automatic=title===paneTypes[typeKey(old)]?.label||title===`Terminal ${editingPaneIndex+1}`;editorDraft.panes[editingPaneIndex]=makePane(key,old.id,automatic?paneTypes[key].label:title);renderEditorMap();renderInspector();$('pane-type').focus();});
 $('split-right').addEventListener('click',()=>splitEditorPane('horizontal'));
 $('split-below').addEventListener('click',()=>splitEditorPane('vertical'));
+$('remove-pane').addEventListener('click',removeEditorPane);
 $('edit-form').addEventListener('submit',event=>{
   event.preventDefault();storeEditorFields();
   selected.panes=structuredClone(editorDraft.panes);selected.tree=structuredClone(editorDraft.tree);

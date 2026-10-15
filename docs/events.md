@@ -97,12 +97,15 @@ Automation admission allows 10 mutations/second with a burst of 20 per plugin ID
 - `host.plugin.state.changed`: panel backend state, instance ID and type.
 - `host.service.state.changed`: separate manual background-service state, public registration/runtime/generation identity, operation attribution and current workspace revision. See [manual services](background-services.md).
 - `host.plugin.storage.changed`: changed key, directed to the owning logical instance after successful persistence.
+- `host.layout.startup.failed`: saved-recipe startup failure, with bounded state, current workspace revision and original operation attribution. Command text and diagnostic messages remain outside the event; use `layouts.startupStatus`.
 
 ## Workspace commit facts
 
 Workspace changes now use a prepared model/revision/journal commit rather than discovering changes at autosave. Canonical facts include `operationId`, `actionKind`, `beforeWorkspaceRevision`, `workspaceRevision`, relevant pre/post layout revisions, and native-assigned `origin`. Host envelopes still have `source: {kind:"host"}`. The origin is `native`, `administrative`, `plugin` (bound plugin/instance/view IDs), or `service` (bound plugin/service/generation IDs); request arguments cannot select it. Literal manual titles are not included.
 
 Facts include `host.pane.created`, `.closed`, `.type.changed`, `.title.changed`, `.moved`; `host.tab.created`, `.closed`, `.moved`, `.reordered`; and `host.layout.resized`. Resize facts identify split paths, not entire trees. Displaced tabs receive reorder facts too. Legacy split aliases normalize to the same split intent. Compatibility layout/focus/tab-group/workspace notifications share the operation ID and revisions. No-op model changes emit no fabricated facts.
+
+Opening/replacing a [saved layout](saved-layouts.md) participates in this commit contract with `actionKind: "layouts.open"`. Preparing resources or journal publication can fail before the old workspace is torn down. After commit, terminal startup is owned by the new sessions, not the initiating page/service; its later failure does not roll back the workspace.
 
 `api.describe.workspaceCommit` advertises the workspace commit/result contract and its current native-divider coalescing status. Built-in workspace mutation replies include `operationId`, `outcome` (`committed` or `unchanged`), `workspacePersistence` and the operation's own `workspaceRevision`, in addition to existing result fields. Raw reads and arbitrary contributed-command values are not wrapped. Native rename popovers commit only on explicit confirmation, as a separately attributed native title operation; outside dismissal, focus changes and reparenting cancel the draft without a title event. Inspect again when a subsequent guard conflicts. For `window.focus`, an unchanged model does not imply unchanged native window presentation. Unregistering an unused plugin is committed registry work even when the workspace revision is unchanged.
 

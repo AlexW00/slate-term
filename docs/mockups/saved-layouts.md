@@ -1,6 +1,6 @@
 # Saved layouts — design notes
 
-Status: interactive HTML proposal only. Native UI, persistence, CLI, and bridge APIs are not implemented by this mockup.
+Status: interactive HTML design reference. The native implementation and public contracts are documented in [Saved layouts](../saved-layouts.md); this mockup itself remains an in-memory simulation.
 
 Open `saved-layouts.html` directly in a browser. Changes are held in memory and reset on reload; commands, window opening, and launcher installation are simulated. The explicit sample-file download is a real browser download.
 
@@ -9,7 +9,7 @@ Open `saved-layouts.html` directly in a browser. Changes are held in memory and 
 - The layout library is the editor: layouts on the left, selectable split arrangement in the middle, type-specific fields on the right.
 - Pane tiles contain names, type icons, and dependency status—not configuration values.
 - Selecting a pane updates the inline inspector. Terminal, Browser, and an example plugin use declarative field definitions to render their forms.
-- Split Right / Split Below insert a pane into the selected leaf of the layout tree. The mockup caps layouts at eight panes and disables splits that would make tiles too small.
+- Split Right / Split Below insert a pane into the selected leaf of the layout tree. Remove Pane collapses the selected leaf's parent split, preserving its sibling; the last pane cannot be removed. These are draft edits until Save Changes. The mockup caps layouts at eight panes and disables splits that would make tiles too small.
 - Revert and Save Changes live in the bottom bar. Unsaved drafts survive switching layouts; they do not change saved definitions until Save Changes.
 - No Open in New Window, Save a Window, Open Layouts Folder, or JSON-view buttons on the editor screen. Opening a layout, capturing a workspace window, and creating a Spotlight launcher remain accessible through the command picker.
 - Capturing a window uses an explicit source chooser. The last-focused workspace is a suggestion, not an implicit target. The library window is never the source. A closed source is not silently replaced by another window.

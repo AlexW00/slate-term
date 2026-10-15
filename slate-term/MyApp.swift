@@ -15,6 +15,7 @@ struct SlateTermApplication {
 @MainActor
 final class ApplicationDelegate: NSObject, NSApplicationDelegate {
     private var host: WorkspaceHost?
+    private var pendingLayoutURLs: [URL] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
@@ -24,6 +25,8 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
             let host = try WorkspaceHost()
             self.host = host
             try host.start()
+            for url in pendingLayoutURLs { host.openLayoutURL(url) }
+            pendingLayoutURLs.removeAll()
             NSApp.activate(ignoringOtherApps: true)
         } catch {
             fputs("Slate Terminal startup failed: \(error)\n", stderr)
@@ -36,6 +39,11 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
             host?.close()
             exit(1)
         }
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        if let host { urls.forEach(host.openLayoutURL) }
+        else { pendingLayoutURLs.append(contentsOf: urls) }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

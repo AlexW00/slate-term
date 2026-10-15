@@ -16,7 +16,7 @@ def sources():
     paths = []
     for directory in ['Sources', 'Native', 'Tests', 'scripts', 'slate-term']:
         paths.extend(p for p in (root / directory).rglob('*') if p.is_file() and p.suffix in ['.swift', '.sh', '.py', '.plist', '.json'])
-    paths += [root / 'Package.swift', root / 'Package.resolved', root / 'slate-term.xcodeproj/project.pbxproj',
+    paths += [root / 'Package.swift', root / 'Package.resolved', root / 'AppInfo.plist', root / 'slate-term.xcodeproj/project.pbxproj',
               root / 'slate-term.xcodeproj/xcshareddata/xcschemes/SlateTermApp.xcscheme']
     return {str(p.relative_to(root)): digest(p) for p in sorted(paths)}
 
@@ -37,7 +37,7 @@ elif mode == 'finish':
         'completedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(),
         'checks': (artifacts / 'verification-checks.txt').read_text().splitlines(),
         'sources': after,
-        'binaries': {str(path.relative_to(root)): digest(path) for path in [app / 'MacOS/Slate Terminal', app / 'Helpers/slate-term']},
+        'binaries': {str(path.relative_to(root)): digest(path) for path in [app / 'MacOS/Slate Terminal', app / 'Helpers/slate-term', app / 'Helpers/slate-layout-launcher']},
     }
     (artifacts / 'verification.json').write_text(json.dumps(result, indent=2) + '\n')
     print('PASS expanded verification; unchanged source and binary hashes recorded in artifacts/verification.json')

@@ -80,6 +80,14 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
         web.loadHTMLString("<!doctype html><meta name='color-scheme' content='light dark'><title>New Browser</title><style>body{font:16px system-ui;padding:48px;max-width:600px;margin:auto}h1{font-size:26px}</style><h1>New Browser</h1><p>Search or enter a URL in the address bar to browse.</p>", baseURL: nil)
     }
 
+    var currentURL: String? { web.url?.absoluteString }
+
+    /// The recipe boundary has already checked this URL; do not interpret it as a search.
+    func loadStartingURL(_ url: String) {
+        loadViewIfNeeded()
+        web.load(URLRequest(url: URL(string: url)!))
+    }
+
     func close() {
         guard !closed else { return }
         closed = true
