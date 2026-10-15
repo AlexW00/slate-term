@@ -1,6 +1,6 @@
 # Background service protocol — proposed Phase 5 contract
 
-Status: one bounded read-only protocol/security review completed; corrections below are incorporated. Identity/transport/CLI, catalog opt-in, observer isolation and command-owner foundations are implemented; the native runtime and its verification remain pending. This extends the approved roadmap, not the existing HTTP panel-server lifetime. See the progress record for actual checks and desktop limitations.
+Status: one bounded read-only protocol/security review completed; corrections below are incorporated. The approved current delivery slice is [manual services](background-services.md): explicit start/stop/list/status/logs and narrow authenticated access. Identity/transport/CLI, catalog opt-in foundations, observer isolation and command ownership are implemented. Automatic activation, enable/disable/restart/backoff and broader bridge-equivalent access below remain deferred; this document describes the full roadmap, not a claim that all of it ships. This extends the approved roadmap, not the existing HTTP panel-server lifetime. See the progress record for actual checks and desktop limitations.
 
 ## Scope and reuse
 

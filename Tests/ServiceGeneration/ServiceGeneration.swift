@@ -137,6 +137,7 @@ struct ServiceGenerationTest {
         try require(!closed.cleanupConfirmed, "Immediate close fabricated confirmed cleanup")
         try require(closedProbe.retired == 1, "Close followed by stop duplicated ownership retirement")
         try await nestedCommands(cli: cli, directory: directory, credentials: credentials)
+        try await managerLifecycle(cli: cli)
         print("PASS window-free service generation: authenticated readiness, bootstrap/poll bounds, budget recovery, retirement, timeout/exit, honest cleanup and live A→CLI→B ownership")
     }
 

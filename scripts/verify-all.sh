@@ -47,6 +47,7 @@ run api-negotiation python3 scripts/verify-api-negotiation.py
 run service-session python3 scripts/verify-service-session.py
 run service-commands bash scripts/verify-service-commands.sh
 run service-generation bash scripts/verify-service-generation.sh
+run background-services python3 scripts/verify-background-services.py
 run plugin-settings-api python3 scripts/verify-plugin-settings-api.py
 run layout-api python3 scripts/verify-layout-api.py
 run semantic-events python3 scripts/verify-semantic-events.py

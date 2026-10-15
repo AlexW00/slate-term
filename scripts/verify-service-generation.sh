@@ -15,7 +15,7 @@ swiftc -swift-version 5 -parse-as-library -g -emit-library -emit-module \
 swiftc -swift-version 5 -default-isolation MainActor -parse-as-library -g \
   -I "$gate" -L "$gate" -lSlateTermCore -lSlateTermIPC -Xlinker -rpath -Xlinker "$gate" \
   Native/WorkspaceOperationContext.swift Native/OperationControl.swift Native/PluginControlConnection.swift \
-  Native/PluginProcess.swift Native/PluginCommands.swift Native/BackgroundServiceGeneration.swift Tests/ServiceGeneration/ServiceGeneration.swift \
+  Native/PluginProcess.swift Native/PluginCommands.swift Native/BackgroundServiceGeneration.swift Native/BackgroundServices.swift Tests/ServiceGeneration/*.swift \
   -o "$gate/service-generation"
 python3 - "$gate/service-generation" "$cli" <<'PY'
 import subprocess

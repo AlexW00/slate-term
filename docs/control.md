@@ -39,6 +39,10 @@ Pane/tab identities (`p1`, `t1`, etc.) are stable across layout changes, but a t
 
 Normal Browser pages have no bridge. Registered plugin main frames get a [scoped page API](plugins.md), which is a subset of the administrator socket. `shell.update` and shell run-input delivery are authenticated integration internals, not extension-owned context publication. Extensions publish their own context with custom events rather than spoofing native telemetry. Integration-only `debug.*` methods are unavailable in ordinary app launches.
 
+## Manual background services
+
+`plugins.service.start/stop/list/status/logs` are administrative-only and exposed by `slate-term plugins service …`. Registration does not activate a service. Each launch has a separate authenticated endpoint with a narrow service allowlist; service descendants never fall back to the administrator connection. See [manual services](background-services.md) for schemas, readiness, bootstrap, teardown and deliberate exclusions. Automatic startup/restart and enable/disable controls are deferred.
+
 ## Failures and recovery
 
 - `-32700`: JSON parse error; `-32600`: invalid request; `-32601`: unknown method; `-32602`: invalid parameters.
@@ -50,5 +54,6 @@ Normal Browser pages have no bridge. Registered plugin main frames get a [scoped
 - `-32056`: causal-depth limit; stop the feedback loop.
 - `-32057`: automation mutation limit; bounded `data.retryAfterMilliseconds` indicates refill time, not permission to replay.
 - `-32058`: operation admission unavailable.
+- `-32059`: service session unavailable or credentials/context do not match; no administrator fallback.
 
 Other workspace, storage, shell-state and admission errors have descriptive messages. Do not automatically replay a mutation after disconnect, timeout or malformed response: it may already have taken effect. The CLI reports transport/response failures with `outcome: unknown`, not a clean rejection. Read current state and decide deliberately. Unknown shell context stays unknown; neither quiet output nor process-name sampling proves an idle prompt.

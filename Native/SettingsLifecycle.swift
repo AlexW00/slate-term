@@ -41,7 +41,8 @@ extension WorkspaceHost {
         let previous = settings.current
         let beforeApplied = appliedConfigurationRevision
         let nextSource = UUID().uuidString, nextApplied = UUID().uuidString
-        let recipients = pluginSettingsRecipients
+        let recipients = pluginSettingsRecipients.map { (plugin: $0.plugin, instance: Optional($0.id), service: Optional<ServiceEventRecipient>.none) }
+            + serviceSettingsRecipients.map { (plugin: $0.plugin, instance: Optional<String>.none, service: Optional($0.target)) }
 
         func publications(after: AppConfiguration, sourceRevision: String?, appliedRevision: String,
                           source: String?, failed: Bool, allOutcomes: Bool = false) throws -> [EventPublication] {
@@ -54,11 +55,11 @@ extension WorkspaceHost {
             fields["sourceValid"] = .bool(parsed != nil)
             fields["appliedMatchesSource"] = .bool(parsed?.changedKeys(from: after).isEmpty == true)
             var records: [EventPublication] = []
-            func add(_ topic: String, _ payload: [String: JSONValue], recipient: String? = nil) {
+            func add(_ topic: String, _ payload: [String: JSONValue], recipient: String? = nil, service: ServiceEventRecipient? = nil) {
                 // Deliberately not operation.publication: no private caller, parent, intent,
                 // pane/tab, namespace or path metadata on a global settings envelope.
                 records.append(EventPublication(topic: topic, payload: .object(payload), source: .host,
-                                                targetInstanceId: recipient, lineage: operation.lineage))
+                                                targetInstanceId: recipient, targetService: service, lineage: operation.lineage))
             }
             if (sourceRevision != nil && sourceRevision != before.revision) || allOutcomes { add("host.settings.source.changed", fields) }
             if !after.changedKeys(from: previous).isEmpty || allOutcomes { add("host.settings.changed", fields) }
@@ -80,7 +81,7 @@ extension WorkspaceHost {
                 detail["changedPaths"] = allOutcomes ? .array([.array([.string(String(repeating: "x", count: 4096))])]) : .array(paths)
                 detail["changeCount"] = .integer(allOutcomes ? Int.max : keys.count)
                 detail["truncated"] = .bool(allOutcomes || paths.count < keys.count)
-                add("host.plugin.settings.changed", detail, recipient: recipient.id)
+                add("host.plugin.settings.changed", detail, recipient: recipient.instance, service: recipient.service)
             }
             if failed || allOutcomes {
                 fields["outcome"] = .string("unknown")

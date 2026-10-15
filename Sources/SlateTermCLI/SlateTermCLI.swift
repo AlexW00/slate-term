@@ -131,10 +131,10 @@ struct TerminalCommand: ParsableCommand {
 
 struct Plugins: ParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Register trusted web panels. Registered pages can control your terminals.")
-    enum Action: String, ExpressibleByArgument { case list, register, validate, unregister, status, restart, logs, settings }
+    enum Action: String, ExpressibleByArgument { case list, register, validate, unregister, status, restart, logs, settings, service }
     @Argument var action: Action
     @Argument var id: String?
-    @Argument(help: "Plugin namespace for settings get/patch.") var namespace: String?
+    @Argument(help: "Plugin namespace for settings get/patch or service controls.") var namespace: String?
     @Option(help: "JSON set/delete operation array for settings patch.") var operations: String?
     @Option var expectedWriteRevision: String?
     @Option var manifest: String?
@@ -143,6 +143,15 @@ struct Plugins: ParsableCommand {
     @Flag var force = false
     @OptionGroup var connection: Connection
     func run() throws {
+        if action == .service {
+            guard let id, ["start", "stop", "list", "status", "logs"].contains(id),
+                  (id == "list" ? namespace == nil : namespace != nil),
+                  manifest == nil, instanceId == nil, !replace, !force, operations == nil, expectedWriteRevision == nil else {
+                throw ValidationError("Use plugins service list or plugins service start|stop|status|logs PLUGIN-ID; no registration/settings options")
+            }
+            try connection.call("plugins.service.\(id)", params: namespace.map { ["id": .string($0)] } ?? [:])
+            return
+        }
         if action == .settings {
             guard let id, ["get", "patch"].contains(id), let namespace, manifest == nil, instanceId == nil, !replace, !force else {
                 throw ValidationError("Use plugins settings get|patch PLUGIN-ID; registration/process options do not apply")

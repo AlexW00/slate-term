@@ -1,6 +1,6 @@
 # Trusted plugins
 
-A plugin can provide **commands, a panel, or both**. Commands do not require an open pane, web view, HTTP server, or background service. Existing panel manifests remain valid.
+A plugin can provide **commands, a panel, a manual background service, or a combination**. Commands do not require an open pane, web view, HTTP server, or background service. Existing panel manifests remain valid. [Manual background services](background-services.md) have separate administrative start/stop controls; registration never activates them.
 
 Registration grants the loaded code access to terminal content and workspace commands. Register only code and origins you trust. Plugins are not a sandbox for untrusted code; ordinary Browser panes have no plugin bridge.
 

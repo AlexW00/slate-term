@@ -37,6 +37,8 @@ Logical pane/tab plugin instances subscribe within their owning tab by default; 
 
 `targetInstanceId` directs an event to a live logical plugin instance, including all its subscribed visible views. Matching directed delivery bypasses tab/pane filters, but not topic filters; other plugin instances cannot receive it. Untargeted events with absent tab/pane fields broadcast through the corresponding filters.
 
+Background services use a separate host-assigned `targetService:{serviceId,generation}` recipient. Starting and ready generations receive own-settings invalidations; other services/pages cannot observe those directed facts. Service polls derive their audience from authentication, never caller-supplied filters. Administrators can monitor both recipient kinds. Follow the snapshot-first bootstrap/recovery order in [manual services](background-services.md); there is no service `events.emit` in the current slice.
+
 ## Plugin API
 
 ```js
@@ -92,7 +94,8 @@ Automation admission allows 10 mutations/second with a burst of 20 per plugin ID
 - `host.workspace.changed`: model/layout/focus/native-tab changes; read `workspace.get`/`context.get` for current state.
 - `host.context.changed`: authenticated shell reports or terminal-engine metadata changes. Includes session/sequence identifiers, not the command text; read context for details.
 - `host.plugins.changed`: successful registration/unregistration.
-- `host.plugin.state.changed`: native service state, instance ID and type.
+- `host.plugin.state.changed`: panel backend state, instance ID and type.
+- `host.service.state.changed`: separate manual background-service state, public registration/runtime/generation identity, operation attribution and current workspace revision. See [manual services](background-services.md).
 - `host.plugin.storage.changed`: changed key, directed to the owning logical instance after successful persistence.
 
 ## Workspace commit facts

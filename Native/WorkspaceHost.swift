@@ -19,6 +19,22 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
     private let pluginInstances: PluginInstances
     private let pluginCommands = PluginCommands()
+    var serviceSettingsRecipients: [(plugin: String, target: ServiceEventRecipient)] { backgroundServices.recipients }
+    private lazy var backgroundServices = BackgroundServices(appID: instanceID,
+        cliPath: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/slate-term").path, operations: operations,
+        registrations: { [weak self] in self?.pluginCatalog.registrations ?? [] },
+        settings: { [weak self] id in self?.settings.current.plugins[id] ?? [:] },
+        request: { [weak self] method, params, operation in
+            guard let self else { throw CancellationError() }
+            return try await self.callService(method, params: params, operation: operation)
+        }, publish: { [weak self] fields, operation, commit in
+            guard let self else { throw CancellationError() }
+            var payload = fields
+            payload["workspaceRevision"] = .string(self.revisions.revision)
+            try self.events.commitWorkspace([operation.publication(topic: "host.service.state.changed", payload: payload)], updatingModel: commit)
+        }, retireOwned: { [weak self] owner in
+            self?.pluginCommands.cancelOwned(by: owner) ?? Task { false }
+        })
     private var headerActionRevisions: [String: UUID] = [:]
     private let runtime: GhosttyRuntime
     private var server: UnixServer?
@@ -134,7 +150,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         // the process environment before applying explicit per-surface overrides.
         let inheritedIdentity = Set(["SLATE_TERM_CLI", "SLATE_TERM_SOCKET", "SLATE_TERM_INSTANCE_ID", "SLATE_TERM_PANE_ID", "SLATE_TERM_TAB_ID",
                                      "SLATE_TERM_SESSION_ID", "SLATE_TERM_CONTEXT_TOKEN", "SLATE_TERM_RUN_KEY", "SLATE_TERM_SHELL_PID", "SLATE_TERM_INVOCATION_ID"])
-        for key in environment.keys where inheritedIdentity.contains(key) || key.hasPrefix("SLATE_TERM_PLUGIN_") || key.hasPrefix("SLATE_TERM_COMMAND_") {
+        for key in environment.keys where inheritedIdentity.contains(key) || key.hasPrefix("SLATE_TERM_PLUGIN_") || key.hasPrefix("SLATE_TERM_COMMAND_") || key.hasPrefix("SLATE_TERM_SERVICE_") {
             unsetenv(key)
         }
         runtime = try GhosttyRuntime(configurationURL: settings.engineURL)
@@ -224,6 +240,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         reconciling = true
         server?.close()
         server = nil
+        backgroundServices.close()
         pluginCommands.close()
         events.close()
         terminalControl.close()
@@ -351,8 +368,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         var invocation = params
         invocation["pane"] = pane.map { .string($0.description) }
         invocation["tab"] = tab.map { .string($0.description) }
-        let connection = PluginControlConnection(socketPath: socketPath, appInstanceID: instanceID,
-            cliPath: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/slate-term").path)
+        let connection = try operation.serviceOwner.map { try backgroundServices.connection(for: $0) }
+            ?? PluginControlConnection(socketPath: socketPath, appInstanceID: instanceID,
+                cliPath: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/slate-term").path)
         let preferences = settings.current.plugins[registration.id] ?? [:]
         return { [weak self, invocation] in
             guard let self, self.server?.path == socketPath,
@@ -365,6 +383,12 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 lifecycle: CommandLifecycleContext(operation: operation, launchWorkspaceRevision: self.revisions.revision,
                                                    launchLayoutRevision: tab.flatMap(self.revisions.layoutRevision)))
         }
+    }
+
+    func runServiceCommand(_ id: String, params: [String: JSONValue], operation: WorkspaceOperationContext) async throws -> JSONValue {
+        // Services have no implicit active-pane target. Explicit supplied targets still freeze normally.
+        let invoke = try preparePluginCommand(id, params: params, resolveWorkspace: params["pane"] != nil || params["tab"] != nil, operation: operation)
+        return try await invoke()
     }
 
     private func callAsync(_ method: String, params: [String: JSONValue], operation suppliedOperation: WorkspaceOperationContext? = nil,
@@ -383,6 +407,26 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         try suppliedOperation?.validateCaller()
         try validateAPIGuards(params, method: method)
         let operation = try suppliedOperation ?? operations.admit(method, metadata: metadata, origin: .administrative, audience: operations.administrativeAudience)
+        if Self.serviceControlMethods.contains(method) {
+            switch operation.origin {
+            case .native, .administrative: break
+            default: throw RPCFailure(code: APIError.forbidden, message: "Service control is administrative-only")
+            }
+            guard Set(params.keys).isSubset(of: ["id", "expectedInstanceId"]) else {
+                throw RPCFailure(code: -32602, message: "Service controls accept only id and expectedInstanceId")
+            }
+            if method == "plugins.service.list" {
+                guard params["id"] == nil else { throw RPCFailure(code: -32602, message: "list does not take id") }
+                return try backgroundServices.list()
+            }
+            guard let id = params["id"]?.string else { throw RPCFailure(code: -32602, message: "Service plugin id is required") }
+            switch method {
+            case "plugins.service.start": return try backgroundServices.start(id, operation: operation)
+            case "plugins.service.stop": return try await backgroundServices.stop(id, operation: operation)
+            case "plugins.service.logs": return try backgroundServices.logs(id)
+            default: return try backgroundServices.status(id)
+            }
+        }
         if method == "command.run", let id = params["id"]?.string, id.hasPrefix("plugin.") {
             let invoke = try preparePluginCommand(id, params: params, operation: operation)
             return try await invoke()
@@ -489,12 +533,13 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 _ = try PluginAssets(root: URL(fileURLWithPath: path)).file(forPercentEncodedPath: encodedPath)
             }
             try pluginCatalog.register(registration, replace: params["replace"] == .bool(true))
+            backgroundServices.remove(registration.id, operation: operation)
             headerActionRevisions[registration.id] = UUID()
             pluginInstances.remove(type: registration.id)
             pluginCommands.remove(plugin: registration.id)
             buildMenus()
             refreshSettings()
-            events.publishHost("host.plugins.changed", payload: .object(["type": .string(registration.id), "registered": .bool(true)]))
+            events.publishHost("host.plugins.changed", payload: .object(["type": .string(registration.id), "registered": .bool(true)]), lineage: operation.lineage)
             return try .encoding(registration)
         case "plugins.unregister":
             guard let id = params["id"]?.string, pluginCatalog.registrations.contains(where: { $0.id == id }) else { throw RPCFailure(code: -32602, message: "A registered plugin id is required") }
@@ -516,6 +561,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             } else {
                 persistence = try reconcile(next, transition: transition, operation: operation, additionalPublications: [registryFact], beforeCommit: { try pluginCatalog.remove(id) })
             }
+            backgroundServices.remove(id, operation: operation)
             headerActionRevisions.removeValue(forKey: id)
             pluginInstances.remove(type: id)
             pluginCommands.remove(plugin: id)

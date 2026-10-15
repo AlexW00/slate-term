@@ -71,7 +71,7 @@ extension WorkspaceHost {
                               "plugins.unregister", "plugins.status", "plugins.restart", "plugins.logs",
                               "browser.get", "browser.navigate", "browser.snapshot", "browser.click", "browser.fill",
                               "browser.select", "browser.scroll", "browser.wait", "browser.eval", "browser.screenshot"]
-        return (common + (plugin ? ["settings.get", "storage.get", "storage.set", "storage.delete", "pane.title"] : administrative)).sorted()
+        return (common + (plugin ? ["settings.get", "storage.get", "storage.set", "storage.delete", "pane.title"] : administrative + Self.serviceControlMethods)).sorted()
     }
 
     func describeAPI(plugin: Bool = false) throws -> JSONValue {
@@ -86,6 +86,7 @@ extension WorkspaceHost {
                 "screenshot": .bool(!plugin), "pluginEvaluation": .bool(false)
             ]),
             "causation": OperationControl.descriptor,
+            "backgroundServices": Self.serviceDescriptor,
             "settingsLifecycle": .object([
                 "version": .integer(1), "scope": .string("configurationSourceAndApplied"),
                 "topics": .array(["host.settings.source.changed", "host.settings.changed", "host.plugin.settings.changed", "host.settings.failed"].map(JSONValue.string)),

@@ -19,7 +19,7 @@ Implemented:
 - Typed TOML settings with live font/theme/shortcut reload, last-valid retention, offline validation, and restart diagnostics.
 - Private, atomic workspace restoration with single-writer ownership, native tab order, and corruption-preserving recovery (never placeholder views).
 - Native terminal input/composition, mouse input, clipboard confirmation, and token-bound zsh context reporting.
-- Trusted plugins can contribute on-demand executable commands, panels, or both. App-local shortcuts, namespaced settings, pane/tab/global panel instances, private persisted storage, bounded process logs, supervision and owned-group cleanup after GUI crashes.
+- Trusted plugins can contribute on-demand executable commands, panels, and independently controlled [manual background services](docs/background-services.md). App-local shortcuts, namespaced settings, pane/tab/global panel instances, private persisted storage, bounded process logs, supervision and owned-group cleanup after GUI crashes.
 - Bounded resumable event polling/streaming, native source attribution, scoped plugin subscriptions, directed delivery and cancellation.
 - Unit, socket, native lifecycle, CLI-driven restart/configuration, production-zsh, and regression-mutation checks.
 
@@ -64,6 +64,9 @@ slate-term panes type --pane p2 --type browser --force
 slate-term context get
 slate-term plugins register --manifest /absolute/path/plugin.json
 slate-term plugins list
+slate-term plugins service list
+slate-term plugins service start controller
+slate-term plugins service stop controller
 slate-term events watch --topic 'host.context.*'
 slate-term events emit --topic build.finished --payload '{"exitCode":0}'
 slate-term tabs new

@@ -2,6 +2,18 @@
 
 Authorized scope: implement the reviewed API-extension plan iteratively with high-value tests, including post-operation lifecycle hooks (not veto hooks). Checkpoint before implementation: `2763ce9`; working tree was clean after that commit. Future capability-parity requirements live in `AGENTS.md`.
 
+## Current scoped delivery — manual services (2026-10-15)
+
+After the user raised the elapsed time, scope was narrowed to a usable manual-service slice. Broader startup/restart and hidden-pane work is deferred, not silently included in this delivery. The user authorized sparse necessary Mac tests while working and unsigned local checkpoints. Checkpoint `29a279b` saved the earlier foundations; configured Git signing remains enabled (only that invocation used `commit.gpgsign=false`). Older staged/signing/no-manager statements below are historical and superseded by this section.
+
+Implemented administrative `plugins.service.start/stop/list/status/logs` and matching CLI; native manager with fresh per-attempt credentials,16 retained reservations and one retirement task; explicit scoped service adapter; live delegated command resolver; starting/ready own-settings recipients; catalog replacement/removal and shutdown hooks. Start is synchronous acceptance, never an async queued successor. Start during retirement conflicts; no implicit restart/activation. `api.describe` and [manual service documentation](background-services.md) advertise the narrow surface and exclusions. No UI controls or visual changes were added.
+
+One bounded read-only review found repeated stop after unconfirmed cleanup incorrectly reporting `stopping`; corrected with a headless repeated-stop regression. The first app build caught a missing `SlateTermSettings` import in the new adapter; fixed without launching an app. `bg_c09bdf0d3fe88c6c` inspected exit0: generation/manager headless tests (including nested commands, preflight, readiness, fresh/idempotent starts, replacement reservations and uncertain cleanup), app/CLI build, authenticated CLI fake-peer gate, fixture syntax and diff checks. Evidence: `manual-services-reviewed-{native,build,cli}.log`.
+
+Exactly one announced actual-app batch followed: `bg_42634865ffe7ff7f`, inspected exit0 (`manual-services-app.log`). It passed production CLI controls, registration-without-activation, snapshot-first starting-settings replay and namespace isolation, endpoint/indirect administrative denials, A→CLI→B ownership and cancellation without stopping another service, fresh credentials/retired endpoint rejection, replacement/unregister, logs, and owned-app shutdown/parent-death cleanup. No clicks, forced activation, screenshots, or repeated desktop fixtures. Added the gate to `verify-all.sh`; the full suite was NOT run. The previous215 package tests remain prior foundation evidence, not a new full-suite certification.
+
+Deferred: automatic startup, enable/disable controls, restart/backoff, broader service workspace/web/terminal access and settings writes/custom event emission, hidden panes, complete roadmap audit and foreground screenshots. Deterministic kernel-reap failure/capacity saturation and broader native quit/manual QA remain residual coverage; this slice does not certify them.
+
 ## Work queue
 
 - [x] Shared capability/exposure contracts, revision and identity foundations; test-first core coverage.
@@ -11,7 +23,8 @@ Authorized scope: implement the reviewed API-extension plan iteratively with hig
 - [x] Atomic layout operations, pane titles, native tab/window parity (focused checks; final audit still separate).
 - [x] Workspace/command/configuration post-commit lifecycle notifications, causation and replay/recovery.
 - [x] Shared browser/plugin WebKit automation and bridge wrappers (focused behavior verified; foreground screenshot gate remains blocked).
-- [ ] Explicit/user-enabled background services, lifecycle protocol review, supervision tests.
+- [x] Manual background-service start/stop/list/status/logs, narrow authenticated access and focused production integration.
+- [ ] User-enabled startup, restart/backoff and broader service controller surface (explicitly deferred).
 - [ ] Session-preserving hidden panes, lifecycle review, restoration/close tests.
 - [ ] Complete parameter/result discovery schemas, availability metadata and documentation/examples. Application-font commands are implemented. Optional Later window geometry and command/service storage are not automatic scope; their concrete contracts require separate approval.
 - [ ] Independent code/security/visual reviews where applicable; resolve findings.
