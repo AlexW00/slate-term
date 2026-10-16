@@ -384,22 +384,26 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         alert.runModal()
     }
 
-    func confirmTermination() -> Bool {
-        if let model = savedLayouts.editorModel, model.hasUnsavedChanges {
-            let alert = NSAlert()
-            alert.messageText = "Save changes to your layouts before quitting?"
-            alert.informativeText = "Unsaved layout drafts will be lost."
-            alert.addButton(withTitle: "Cancel")
-            alert.addButton(withTitle: "Discard Changes")
-            alert.addButton(withTitle: "Save All")
-            switch runConfirmationAlert(alert) {
-            case .alertSecondButtonReturn: break
-            case .alertThirdButtonReturn:
-                do { try model.saveAll() }
-                catch { try? savedLayouts.showEditor(); return false }
-            default: return false
-            }
+    private func confirmSettingsClose() -> Bool {
+        guard let model = settingsModel?.layouts, model.hasUnsavedChanges else { return true }
+        let alert = NSAlert()
+        alert.messageText = "Save changes to your layouts before closing Settings?"
+        alert.informativeText = "Unsaved layout drafts will be lost."
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Discard Changes")
+        alert.addButton(withTitle: "Save All")
+        switch runConfirmationAlert(alert) {
+        case .alertSecondButtonReturn:
+            model.discardAll()
+            return true
+        case .alertThirdButtonReturn:
+            do { try model.saveAll(); return !model.hasUnsavedChanges }
+            catch { settingsModel?.selection = .layouts; return false }
+        default: return false
         }
+    }
+
+    func confirmTermination() -> Bool {
         return !terminals.values.contains(where: \.needsConfirmClose) || confirm("Quit and terminate running processes?")
     }
 
@@ -857,15 +861,28 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             return shown
         case "debug.closeConfirmation" where integration:
             let answer = params["answer"]?.string ?? "cancel"
+            var prompts: [JSONValue] = []
             testConfirmationHandler = { alert in
+                prompts.append(.object(["message": .string(alert.messageText),
+                                        "buttons": .array(alert.buttons.map { .string($0.title) })]))
                 alert.suppressionButton?.state = params["suppress"] == .bool(true) ? .on : .off
                 if let path = params["screenshot"]?.string {
                     try? Self.captureWindow(alert.window.windowNumber, path: path)
                 }
-                let button = answer == "save" && alert.buttons.count > 2 ? 2 : answer == "terminate" ? 1 : 0
+                let button = answer == "save" && alert.buttons.count > 2 ? 2 : ["terminate", "discard"].contains(answer) ? 1 : 0
                 alert.buttons[button].performClick(nil)
             }
             defer { testConfirmationHandler = nil }
+            if params["settings"] == .bool(true) {
+                guard let window = settingsWindow?.window else { throw RPCFailure(code: -32000, message: "Settings is not open") }
+                if params["key"] == .bool(true) {
+                    _ = try call("debug.key", params: ["settings": .bool(true), "chord": .string("cmd+w")])
+                } else { window.performClose(nil) }
+                return .object(["visible": .bool(window.isVisible), "prompts": .array(prompts),
+                                "dirty": .bool(settingsModel?.layouts?.hasUnsavedChanges == true),
+                                "error": settingsModel?.layouts?.error.map(JSONValue.string) ?? .null,
+                                "section": .string(settingsModel?.selection?.rawValue ?? "")])
+            }
             if params["quit"] == .bool(true) { return .bool(confirmTermination()) }
             runUserCommand(params["id"]?.string ?? "pane.close", params: params)
             return .object([:])
@@ -2495,6 +2512,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 catch { self?.settingsModel?.error = (error as? RPCFailure)?.message ?? String(describing: error) }
             }
             settingsWindow = SettingsWindowController(model: model) { [weak self] in self?.refreshSettings(force: true) }
+            settingsWindow?.shouldClose = { [weak self] in self?.confirmSettingsClose() ?? true }
         }
         refreshSettings()
         if settingsModel?.layouts == nil {
@@ -2829,20 +2847,5 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                         "appearance": .string(NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? "dark" : "light"),
                         "appearanceFollowsSystem": .bool(NSApp.appearance == nil),
                         "applicationActive": .bool(NSApp.isActive), "terminalPreparationCount": .integer(terminalPreparationCount), "pendingTerminalRuns": .integer(terminalControl.pendingRuns), "pendingTerminalWaits": .integer(terminalControl.pendingWaits)])
-    }
-}
-
-@MainActor
-final class WorkspaceWindow: NSWindow {
-    let identity = "window-" + UUID().uuidString
-    var keybindingHandler: ((NSEvent) -> Bool)?
-    override func sendEvent(_ event: NSEvent) {
-        if event.type == .keyDown, keybindingHandler?(event) == true { return }
-        super.sendEvent(event)
-    }
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if keybindingHandler?(event) == true { return true }
-        if NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return true }
-        return super.performKeyEquivalent(with: event)
     }
 }

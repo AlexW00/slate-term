@@ -48,6 +48,7 @@ The menu/close-warning work has its own native gate, `python3 scripts/verify-men
 | `verify-model.sh` | Workspace topology/IDs/focus/zoom/equalization, protocol, actual sockets, shell/event/browser input contracts, TOML/watchers, private state/catalog/storage |
 | `verify-model-mutations.py` | Deliberate regressions rejected by assertions |
 | `verify-text-checking.sh` | Headless shared field-editor reuse, inherited detector flags disabled before editing, Unicode input preserved on focus resignation |
+| `verify-tab-overview.sh` | Production WorkspaceWindow with two owned native tabs: actual Show All Tabs context-menu dispatch, toggle close, Escape, reopen and thumbnail selection without changing membership |
 | `verify-terminal-keys.sh` | 74 physical SDK mappings × 8 modifier sets, parsing and byte bounds |
 | `verify-terminal-runs.sh` | Unique command markers, quoting, one-shot shell input claims, draft refusal, sequences, UTF-8 output bounds, deadlines/cancellation/replacement/capacity |
 | `verify-event-hub.sh` | Real suspension, replay/filtering, cursor advancement, cancellation, close, overload and deadline races |
@@ -62,6 +63,7 @@ The menu/close-warning work has its own native gate, `python3 scripts/verify-men
 | `verify-config-cli.py` | Offline configuration validation |
 | `verify-settings.py` | Live reload, native shortcuts, last-valid retention, tab reorder persistence, writer lease, restart and corruption recovery |
 | `verify-settings-window.py` | Native Settings navigation, shortcut recording/reset/conflicts, persistence, validation and captures |
+| `verify-settings-layout-close.py` | One owned app: Settings close/⌘W, all-selection Cancel/Discard/Save All, failure recovery, no stale draft prompts, no layout quit prompt and retained running-process quit protection |
 | `verify-saved-layouts.py` | Settings-embedded recipe editor, library repair/drafts/conflicts, tab model/drop operations and renumbering, per-template palette refresh/execution, focused plugin reload across CLI/page/service, new-window-only opening, startup/session ownership, launcher packaging and light/dark/narrow/AI Agents captures |
 | `verify-command-picker.py` | Centered native Liquid Glass, search/text input, keyboard/two-click execution, shortcut dismissal with frozen targets, rename command, contextual maximize/restore labels, Settings Cmd-W, hidden unavailable actions, stock copy-ID command, live catalog, focus/routing, shortcuts, windowless use and light/dark/context captures |
 | `verify-plugin-header-buttons.py` | Manifest all/built-in/widget selectors, clicked-pane routing, direct/overflow actions, busy state, no hidden service, persistence, replacement/removal and light/dark/narrow renders |

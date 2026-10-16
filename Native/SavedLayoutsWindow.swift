@@ -159,7 +159,10 @@ final class SavedLayoutsModel: ObservableObject {
                 self.error = layoutErrorText(error); refresh(); throw error
             }
         }
-        refresh(); didSave?()
+        error = nil; refresh(); didSave?()
+    }
+    func discardAll() {
+        drafts.removeAll(); error = nil; refresh()
     }
     func revert() {
         guard let selection else { return }

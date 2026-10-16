@@ -163,7 +163,10 @@ final class SettingsModel: ObservableObject {
 }
 
 @MainActor
-final class SettingsWindowController: NSWindowController {
+final class SettingsWindowController: NSWindowController, NSWindowDelegate {
+    var shouldClose: (() -> Bool)?
+    private var confirmingClose = false
+
     init(model: SettingsModel, reload: @escaping () -> Void) {
         let window = SettingsWindow(contentRect: NSRect(x: 0, y: 0, width: 1060, height: 680),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
@@ -173,9 +176,17 @@ final class SettingsWindowController: NSWindowController {
         window.minSize = NSSize(width: 1000, height: 560)
         window.contentViewController = NSHostingController(rootView: SettingsView(model: model, reload: reload))
         super.init(window: window)
+        window.delegate = self
         window.center()
     }
     required init?(coder: NSCoder) { nil }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard !confirmingClose else { return false }
+        confirmingClose = true
+        defer { confirmingClose = false }
+        return shouldClose?() ?? true
+    }
 
     func beginRecordingShortcut(action: String, shortcut: String?) -> Bool {
         func find(in view: NSView) -> ShortcutButton? {

@@ -23,6 +23,7 @@ run pane-movement-native bash scripts/verify-pane-movement-native.sh
 run text-checking bash scripts/verify-text-checking.sh
 run pane-titles-native bash scripts/verify-pane-titles-native.sh
 run dividers-native bash scripts/verify-dividers-native.sh
+run tab-overview bash scripts/verify-tab-overview.sh
 # GUI gates are deliberately sequential and own their windows/state/processes.
 run terminal bash scripts/verify-terminal.sh
 run build bash scripts/build-app.sh
@@ -34,6 +35,7 @@ run config-cli python3 scripts/verify-config-cli.py
 run settings python3 scripts/verify-settings.py
 run settings-window python3 scripts/verify-settings-window.py
 run saved-layouts python3 scripts/verify-saved-layouts.py
+run settings-layout-close python3 scripts/verify-settings-layout-close.py
 run command-picker python3 scripts/verify-command-picker.py
 run window-recovery python3 scripts/verify-window-recovery.py
 run appearance python3 scripts/verify-appearance.py

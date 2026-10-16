@@ -409,20 +409,21 @@ while True: time.sleep(1)
             rpc('debug.savedLayouts', width=1000, height=560)
             screenshot('final-narrow')
             rpc('debug.savedLayouts', revert=True)
-            # Quit accounts for dirty drafts in other library selections too.
-            rpc('debug.savedLayouts', name='Quit Draft')
+            # Settings close accounts for dirty drafts in other library selections too.
+            rpc('debug.savedLayouts', name='Close Draft')
             rpc('debug.savedLayouts', file=second['file'])
-            assert rpc('debug.closeConfirmation', quit=True, answer='cancel') is False
+            assert rpc('debug.closeConfirmation', quit=True, answer='cancel') is True
+            assert rpc('debug.closeConfirmation', settings=True, answer='cancel')['visible']
             assert rpc('debug.savedLayouts', file=file)['dirty']
-            external = json.loads(path.read_text()); external['name'] = 'External Quit Conflict'
+            external = json.loads(path.read_text()); external['name'] = 'External Close Conflict'
             path.write_text(json.dumps(external))
             rpc('debug.savedLayouts', file=second['file'])
-            assert rpc('debug.closeConfirmation', quit=True, answer='save') is False
+            assert rpc('debug.closeConfirmation', settings=True, answer='save')['visible']
             assert json.loads(path.read_text()) == external
             rpc('debug.savedLayouts', file=file, revert=True)
             rpc('debug.savedLayouts', name='Development')
             rpc('debug.savedLayouts', file=second['file'])
-            assert rpc('debug.closeConfirmation', quit=True, answer='save') is True
+            assert not rpc('debug.closeConfirmation', settings=True, answer='save')['visible']
             assert not rpc('debug.savedLayouts', file=file)['dirty']
             agent_screenshot('dark')
             agent_screenshot('light')
