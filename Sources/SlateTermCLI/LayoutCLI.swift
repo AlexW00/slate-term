@@ -4,15 +4,31 @@ import SlateTermCore
 
 struct Tabs: ParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Inspect, create, close, focus or safely rearrange native tabs.")
-    enum Action: String, ExpressibleByArgument { case list, new, close, focus, reorder, detach, move }
+    enum Action: String, ExpressibleByArgument {
+        case list, new, close, focus, reorder, detach, move
+        case setTitle = "set-title", clearTitle = "clear-title"
+        var commandID: String? {
+            switch self {
+            case .list: nil
+            case .setTitle: "tab.title.set"
+            case .clearTitle: "tab.title.clear"
+            default: "tab.\(rawValue)"
+            }
+        }
+    }
     @Argument var action: Action
     @OptionGroup var connection: Connection
     @OptionGroup var target: Target
+    @Option(help: "Manual tab name, at most 100 characters / 1024 UTF-8 bytes after trimming, without controls.") var title: String?
     @Option(help: "Destination group ID for move.") var group: String?
     @Option(help: "Zero-based final index; move appends when omitted.") var index: Int?
     @Option(help: "target or preserve (default) for rearrangement.") var focusPolicy: String?
     func run() throws {
         var params = try target.params(connection: connection)
+        if action == .setTitle {
+            guard let title else { throw ValidationError("set-title requires --title") }
+            params["title"] = .string(title)
+        } else if title != nil { throw ValidationError("--title requires set-title") }
         let mutation = [Action.reorder, .detach, .move].contains(action)
         if mutation {
             guard target.expectedWorkspaceRevision != nil else { throw ValidationError("Tab rearrangement requires --expected-workspace-revision") }
@@ -26,7 +42,7 @@ struct Tabs: ParsableCommand {
         } else if group != nil || index != nil || focusPolicy != nil { throw ValidationError("Rearrangement options require reorder, detach or move") }
         if action == .list { try connection.call("tabs.list", params: params) }
         else {
-            params["id"] = .string("tab.\(action.rawValue)")
+            params["id"] = .string(action.commandID!)
             try connection.call("command.run", params: params)
         }
     }
@@ -49,7 +65,7 @@ struct Panes: ParsableCommand {
     @Flag(help: "Split the entire tab root instead of a leaf.") var root = false
     @Option(help: "Fraction assigned to the new pane, independent of edge.") var newPaneFraction: Double?
     @Option(help: "new (default) or preserve for split focus.") var focusPolicy: String?
-    @Option(help: "Destination pane ID for move.") var destination: String?
+    @Option(help: "Destination pane ID in any tab/window of this app. Cross-tab moves additionally require --expected-workspace-revision.") var destination: String?
     @Option(help: "Manual pane title, at most 4096 UTF-8 bytes after trimming.") var title: String?
     @Option(help: "Literal input text for send. No shell escaping is added.") var text: String?
     @Option(help: "Content type for type/atomic split: terminal, browser or a registered panel.") var type: String?

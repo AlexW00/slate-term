@@ -8,6 +8,7 @@ struct EventHubLifecycle {
     static func main() async {
         setbuf(stdout, nil)
         do {
+            try await checkPaneTransferPollBarrier()
             try await checkReplayAndValidation()
             try await checkPreparedCommitAndLineageSnapshot()
             try await checkPreparedLifetimeBoundaries()
@@ -24,6 +25,34 @@ struct EventHubLifecycle {
             fputs("FAIL event hub lifecycle: \(error)\n", stderr)
             exit(1)
         }
+    }
+
+    static func checkPaneTransferPollBarrier() async throws {
+        let hub = try EventHub()
+        defer { hub.close() }
+        let sourceFilter = try EventFilter(topics: ["destination.changed"], tab: TabID(1))
+        let inherited = Task { try await hub.pollDelivery(filter: sourceFilter, inheritedPane: PaneID(1)) }
+        let explicit = Task { try await hub.pollDelivery(filter: sourceFilter) }
+        try await pending(hub, count: 2)
+        let head = hub.cursor
+        let prepared = try hub.prepare([EventPublication(topic: "destination.changed", payload: .null, source: .host, tab: TabID(2))])
+        enum Rejection: Error { case rejected }
+        do {
+            try hub.commit(prepared, rebindingPanes: [PaneID(1)], preparingEffects: { throw Rejection.rejected }, updatingModel: {})
+            throw Failure(message: "rejection accepted")
+        } catch Rejection.rejected { }
+        try require(hub.pendingCount == 2 && hub.cursor == head, "failed transfer changed inherited poll")
+        let accepted = try hub.prepare([EventPublication(topic: "destination.changed", payload: .null, source: .host, tab: TabID(2))])
+        try hub.commit(accepted, rebindingPanes: [PaneID(1)], updatingModel: {})
+        let empty = try await inherited.value.batch
+        try require(empty.events.isEmpty && empty.cursor == head, "rebound poll skipped committed destination traffic")
+        try require(hub.pendingCount == 1, "explicit query was rebound")
+        let destination = try await hub.poll(after: empty.cursor, filter: EventFilter(topics: ["destination.changed"], tab: TabID(2)), waitMilliseconds: 0)
+        try require(destination.events.count == 1 && destination.cursor == hub.cursor, "new owner lost destination event")
+        explicit.cancel()
+        do { _ = try await explicit.value; throw Failure(message: "explicit cancellation failed") }
+        catch is CancellationError { }
+        print("PASS pane transfer poll barrier: restrictive topics, pre-transfer cursor, explicit-filter isolation, failed publication")
     }
 
     static func checkReplayAndValidation() async throws {

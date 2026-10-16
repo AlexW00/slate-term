@@ -37,6 +37,20 @@ struct PaneMovementGate {
 
         let drop = PaneDropView(frame: bounds)
         let handle = PaneDragHandle(frame: NSRect(x: 0, y: 0, width: 20, height: 22))
+        var starts = 0
+        var ends = 0
+        handle.canDrag = { false }
+        handle.onDragStart = { starts += 1; return true }
+        handle.onDragEnd = { ends += 1 }
+        try require(!handle.beginPaneDrag() && starts == 0, "Disabled source admitted a drag")
+        handle.canDrag = { true }
+        handle.onDragStart = { starts += 1; return false }
+        try require(!handle.beginPaneDrag() && !handle.isDraggingPane, "Rejected context became active")
+        handle.onDragStart = { starts += 1; return true }
+        try require(handle.beginPaneDrag() && handle.isDraggingPane, "Live context did not activate")
+        try require(!handle.beginPaneDrag() && starts == 2, "Duplicate session recaptured identity")
+        handle.endPaneDrag()
+        try require(!handle.isDraggingPane && ends == 1, "Drag completion retained active context")
         // Preview geometry stays local even when source removal will expand the target.
         let offsetBounds = NSRect(x: 20, y: 30, width: 400, height: 300)
         for (direction, expected) in [

@@ -13,7 +13,7 @@ final class PluginInstance {
     private(set) var entryURL: URL
     var origin: PluginOrigin { try! PluginOrigin(url: entryURL) }
     let scopeKey: String
-    let tab: TabID?
+    private(set) var tab: TabID?
     let dataStore = WKWebsiteDataStore.nonPersistent()
     private let storage: PrivateJSONStore
     private let connection: PluginControlConnection
@@ -46,6 +46,10 @@ final class PluginInstance {
     func observe(_ callback: @escaping () -> Void) -> UUID { let token = UUID(); observers[token] = callback; callback(); return token }
     func removeObserver(_ token: UUID) { observers.removeValue(forKey: token) }
     func activate() { guard !activated else { return }; activated = true; start() }
+    func updatePaneOwner(_ tab: TabID) {
+        guard registration.scope == .pane else { return }
+        self.tab = tab
+    }
     var isReady: Bool { state == "ready" && ownsListener }
     private var ownsListener: Bool {
         guard registration.process != nil else { return true }
@@ -133,6 +137,7 @@ final class PluginInstance {
             environment["SLATE_TERM_CLI"] = connection.cliPath
             environment["SLATE_TERM_INSTANCE_ID"] = connection.appInstanceID
             environment["SLATE_TERM_PLUGIN_SCOPE"] = registration.scope.rawValue
+            // Captured at each process launch; a live process keeps its old environment.
             if let tab { environment["SLATE_TERM_TAB_ID"] = tab.description }
             if registration.scope == .pane { environment["SLATE_TERM_PANE_ID"] = scopeKey }
             let helperDirectory = URL(fileURLWithPath: connection.cliPath).deletingLastPathComponent().path

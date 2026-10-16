@@ -10,6 +10,16 @@ extension WorkspaceHost {
     }
 
     func validateAPIGuards(_ params: [String: JSONValue], method: String) throws {
+        var movePanes: [PaneID] = []
+        if method == "command.run", params["id"] == .string("pane.move") {
+            for key in ["pane", "target"] {
+                if let value = params[key] {
+                    guard let raw = value.string else { throw RPCFailure(code: -32602, message: "\(key) must be a pane ID") }
+                    guard let pane = try? PaneID(parsing: raw) else { throw RPCFailure(code: -32602, message: "\(key) must be a pane ID") }
+                    movePanes.append(pane)
+                }
+            }
+        }
         let contributed = method == "command.run" && params["id"]?.string?.hasPrefix("plugin.") == true
         if !contributed, let unknown = params.keys.sorted().first(where: { $0.hasPrefix("expected") && !Self.apiGuardKeys.contains($0) }) {
             throw RPCFailure(code: -32602, message: "Unknown safety guard: \(unknown)")
@@ -41,6 +51,9 @@ extension WorkspaceHost {
         }
         if let expected = try string("expectedInstanceId"), expected != instanceID {
             throw RPCFailure(code: APIError.conflict, message: "App instance changed; rediscover context")
+        }
+        for pane in movePanes where !workspace.panes.contains(where: { $0.id == pane }) {
+            throw RPCFailure(code: APIError.unavailable, message: "Pane \(pane) no longer exists")
         }
         if let expected = try string("expectedAnchorSessionId") {
             guard let pane = try string("pane"), shellSessions[try PaneID(parsing: pane)]?.instanceID == expected else {
@@ -133,6 +146,23 @@ extension WorkspaceHost {
                 "command": .string("plugins.reload"), "target": .string("pane"),
                 "resultFields": .array([.string("paneId"), .string("reloading")]), "completion": .string("acceptedNotDocumentReady")
             ]),
+            "tabTitle": .object([
+                "version": .integer(1), "defaultTitle": .string(TabTitle.defaultTitle),
+                "commands": .array(["tab.title.set", "tab.title.clear", "tab.rename"].map(JSONValue.string)),
+                "stateFields": .array(["manualTitle", "title"].map(JSONValue.string)),
+                "maximumCharacters": .integer(TabTitle.maximumCharacters), "maximumUTF8Bytes": .integer(TabTitle.maximumBytes),
+                "trimmed": .bool(true), "emptyClears": .bool(true), "controlCharacters": .bool(false),
+                "eventTopic": .string("host.tab.title.changed"), "persisted": .bool(true),
+                "savedLayoutOption": .bool(true), "changesLayoutRevision": .bool(false)
+            ]),
+            "paneMovement": .object([
+                "command": .string("pane.move"), "chooserCommand": .string("pane.move.chooseDestination"),
+                "sameAppCrossWindow": .bool(true), "sourceGuard": .string("expectedLayoutRevision"),
+                "crossTabGuard": .string("expectedWorkspaceRevision"), "placement": .string("besideDestinationPane"),
+                "tabScopedPluginContent": .string("recreatedInDestinationScope"), "closesEmptySourceTab": .bool(true),
+                "resultFields": .array(["paneId", "tabId", "layoutRevision", "path", "sourceTabId", "sourceTabClosed", "sourceLayoutRevision", "contentRecreated"].map(JSONValue.string)),
+                "errors": .object(["invalid": .integer(-32602), "conflict": .integer(APIError.conflict), "unavailable": .integer(APIError.unavailable)])
+            ]),
             "paneHeader": .object([
                 "version": .integer(1), "stateField": .string("headerVisible"),
                 "commands": .array(["pane.header.show", "pane.header.hide", "pane.header.toggle"].map(JSONValue.string)),
@@ -193,6 +223,7 @@ extension WorkspaceHost {
             "groups": try .encoding(workspace.groups.filter { $0.tabs.contains { id in tabs.contains { $0.id == id } } }),
             "tabs": .array(try tabs.map { tab in .object([
                 "id": .string(tab.id.description), "focusedPaneId": .string(tab.focusedPane.description),
+                "manualTitle": tab.manualTitle.map(JSONValue.string) ?? .null, "title": .string(tab.title),
                 "layoutRevision": .string(revisions.layoutRevision(tab.id)!), "layout": try .encoding(tab.layout)
             ]) }),
             "panes": .array(try page.map { try inspectPane($0.id) })

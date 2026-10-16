@@ -7,14 +7,27 @@ extension WorkspaceHost {
         if WorkspaceMutationCommand.layoutGuarded.contains(id), params["expectedLayoutRevision"]?.string == nil {
             throw RPCFailure(code: -32602, message: "expectedLayoutRevision is required; inspect the target layout first")
         }
+        if id == "pane.move" {
+            guard let raw = params["target"]?.string else { throw RPCFailure(code: -32602, message: "target pane is required") }
+            let target = try PaneID(parsing: raw)
+            let source = try targetTab(params)
+            let destination: Tab
+            do { destination = try workspace.resolvedTab(pane: target) }
+            catch { throw RPCFailure(code: APIError.unavailable, message: "Destination pane no longer exists") }
+            if source.id != destination.id, params["expectedWorkspaceRevision"]?.string == nil {
+                throw RPCFailure(code: -32602, message: "Cross-tab pane.move requires expectedWorkspaceRevision; inspect the workspace first")
+            }
+        }
         if WorkspaceMutationCommand.workspaceGuarded.contains(id), params["expectedWorkspaceRevision"]?.string == nil {
             throw RPCFailure(code: -32602, message: "expectedWorkspaceRevision is required; inspect the workspace first")
         }
     }
 
     func mutationFrames(layout: Layout, tab: TabID) -> [PaneID: NSRect]? {
-        guard dividerGesture?.tab != tab, let window = windows[tab],
-              let content = (window.tabGroup?.selectedWindow ?? window).contentView,
+        guard dividerGesture?.tab != tab, !nativeGeometryUnavailable(tab), let window = windows[tab],
+              let displayed = window.tabGroup?.selectedWindow ?? windows[tab],
+              displayed.isVisible, !displayed.isMiniaturized,
+              let content = displayed.contentView,
               content.bounds.width.isFinite, content.bounds.height.isFinite,
               content.bounds.width > 0, content.bounds.height > 0 else { return nil }
         let divider = (window.contentViewController as? WorkspaceSplitController)?.splitView.dividerThickness
@@ -24,7 +37,13 @@ extension WorkspaceHost {
 
     func validateMutationGeometry(_ id: String, params: [String: JSONValue], next: Workspace, result: JSONValue) throws {
         guard WorkspaceMutationCommand.layoutGuarded.contains(id) || id.hasPrefix("split.") else { return }
-        let tab = try targetTab(params)
+        let sourceTab = try targetTab(params)
+        let tab: Tab
+        if id == "pane.move" {
+            guard mutationFrames(layout: sourceTab.layout, tab: sourceTab.id) != nil,
+                  let raw = params["target"]?.string else { throw RPCFailure(code: APIError.unavailable, message: "Source layout is unavailable") }
+            tab = try workspace.resolvedTab(pane: PaneID(parsing: raw))
+        } else { tab = sourceTab }
         guard let layout = next.tabs.first(where: { $0.id == tab.id })?.layout,
               let frames = mutationFrames(layout: layout, tab: tab.id) else {
             throw RPCFailure(code: APIError.unavailable, message: "Native layout geometry is unavailable")
@@ -58,6 +77,9 @@ extension WorkspaceHost {
     func mutationResponse(_ id: String, result: JSONValue) -> JSONValue {
         guard WorkspaceMutationCommand.ids.contains(id), var value = result.object else { return result }
         value["workspaceRevision"] = .string(revisions.revision)
+        if id == "pane.move", let raw = value["sourceTabId"]?.string, let source = try? TabID(parsing: raw) {
+            value["sourceLayoutRevision"] = revisions.layoutRevision(source).map(JSONValue.string) ?? .null
+        }
         if let raw = value["tabId"]?.string, let tab = try? TabID(parsing: raw), let model = workspace.tabs.first(where: { $0.id == tab }) {
             value["layoutRevision"] = revisions.layoutRevision(tab).map(JSONValue.string)
             if let raw = value["paneId"]?.string, let pane = try? PaneID(parsing: raw) {
@@ -108,6 +130,7 @@ extension WorkspaceHost {
     func nativeWindowInfo(_ window: WorkspaceWindow, tab: TabID) -> JSONValue {
         let frame = window.frame
         return .object(["windowId": .string(window.identity), "tabId": .string(tab.description),
+                        "title": .string(workspace.tabs.first { $0.id == tab }?.title ?? TabTitle.defaultTitle),
                         "groupId": workspace.groups.first(where: { $0.tabs.contains(tab) }).map { .string($0.id.description) } ?? .null,
                         "nativeWindowNumber": .integer(window.windowNumber), "visible": .bool(window.isVisible),
                         "selected": .bool(window.tabGroup?.selectedWindow === window), "key": .bool(window.isKeyWindow),

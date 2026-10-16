@@ -108,6 +108,7 @@ public struct WorkspaceRevisions: Sendable {
         }
         for tab in workspace.tabs {
             guard let old = oldTabs[tab.id] else { continue }
+            if old.manualTitle != tab.manualTitle { append("host.tab.title.changed", tab: tab.id) }
             if old.layout != tab.layout { append("host.layout.changed", tab: tab.id) }
             if old.focusedPane != tab.focusedPane || old.zoomedPane != tab.zoomedPane {
                 append("host.focus.changed", tab: tab.id, pane: tab.focusedPane)

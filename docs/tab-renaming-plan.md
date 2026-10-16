@@ -1,12 +1,12 @@
 # Tab renaming implementation plan
 
-Status: proposed; independently reviewed and reconciled. No feature implementation.
+Status: implementation in `feature/tab-renaming`; independent plan review reconciled. Implementation verification is tracked in [API progress](api-extension-progress.md#tab-renaming-featuretab-renaming-worktree) and [verification](verification.md#tab-renaming-worktree). The sections below retain the reviewed design.
 
 ## Goal and boundaries
 
 Let users rename live tabs through native UI and the shared trusted API, with CLI, registered-page and service parity. Names belong to stable tab identities and survive restoration, rearrangement and pane changes. Implement once in the authoritative model; native UI is a client of that operation.
 
-Do not replace AppKit's tab bar, invent dynamic process-derived tab titles, change pane naming, rename tab/group IDs, or ship/deploy anything. Preserve the existing uncommitted tab-overview work (`Native/WorkspaceWindow.swift`, its host extraction, tests and build wiring). This document is the only change made for planning.
+Do not replace AppKit's tab bar, invent dynamic process-derived tab titles, change pane naming, rename tab/group IDs, or ship/deploy anything. Preserve the existing uncommitted tab-overview work (`Native/WorkspaceWindow.swift`, its host extraction, tests and build wiring). The planning task changed only this document; implementation is isolated in its own worktree.
 
 ## Repository findings
 

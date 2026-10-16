@@ -63,10 +63,11 @@ final class EventHub {
     /// and revision values. Readers resume only after all three authoritative values agree.
     // preparingEffects is reserved for short synchronous, failure-atomic prerequisites (such
     // as catalog replacement). It must not publish, mutate the model or spin a run loop.
-    func commit(_ prepared: PreparedBatch, preparingEffects: () throws -> Void = {}, updatingModel: () -> Void) throws {
+    func commit(_ prepared: PreparedBatch, rebindingPanes: Set<PaneID> = [], preparingEffects: () throws -> Void = {}, updatingModel: () -> Void) throws {
         guard !isClosed else { throw EventHubError.closed }
         guard !committing, prepared.owner == identity, prepared.expectedCursor == cursor,
               prepared.generation == publicationGeneration else { throw EventHubError.preparationConflict }
+        let reboundDelivery = delivery(try journal.batch(after: cursor, filter: .all, limit: 128))
         committing = true
         defer {
             committing = false
@@ -77,6 +78,13 @@ final class EventHub {
         publicationGeneration = UUID()
         try preparingEffects()
         updatingModel()
+        // A default-tab poll must restart at the old head before scanning destination
+        // traffic. Explicit filters and failed preparations remain untouched.
+        for id in Array(pending.keys) {
+            if let pane = pending[id]?.inheritedPane, rebindingPanes.contains(pane) {
+                finish(id, with: .success(reboundDelivery))
+            }
+        }
         journal = prepared.journal
         resumeReaders()
     }
@@ -137,7 +145,7 @@ final class EventHub {
     }
 
     func pollDelivery(after: String? = nil, filter: EventFilter = .all, limit: Int = 128,
-                      waitMilliseconds: Int = 20_000) async throws -> DeliveryBatch {
+                      waitMilliseconds: Int = 20_000, inheritedPane: PaneID? = nil) async throws -> DeliveryBatch {
         guard !isClosed else { throw EventHubError.closed }
         guard (0...Self.maximumWaitMilliseconds).contains(waitMilliseconds) else {
             throw EventHubError.invalidTimeout(waitMilliseconds)
@@ -164,7 +172,7 @@ final class EventHub {
                     self?.expire(id)
                 }
                 pending[id] = PendingPoll(
-                    cursor: batch.cursor, filter: filter, limit: limit,
+                    cursor: batch.cursor, filter: filter, limit: limit, inheritedPane: inheritedPane,
                     continuation: continuation, timer: timer
                 )
             }
@@ -203,6 +211,7 @@ final class EventHub {
         var cursor: String
         let filter: EventFilter
         let limit: Int
+        let inheritedPane: PaneID?
         let continuation: CheckedContinuation<DeliveryBatch, Error>
         let timer: Task<Void, Never>
     }

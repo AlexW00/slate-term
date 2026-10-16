@@ -7,6 +7,7 @@ final class PaneDragHandle: NSButton, NSDraggingSource {
     static let pasteboardType = NSPasteboard.PasteboardType("app.slate-term.pane-move")
     var canDrag: (() -> Bool)?
     var dragTitle: (() -> String)?
+    var onDragStart: (() -> Bool)?
     var onDragEnd: (() -> Void)?
     private(set) var isDraggingPane = false
 
@@ -27,7 +28,7 @@ final class PaneDragHandle: NSButton, NSDraggingSource {
         contentTintColor = .secondaryLabelColor
         toolTip = "Move Pane — drag to another pane’s edge, or click for options"
         setAccessibilityLabel("Move Pane")
-        setAccessibilityHelp("Drag to an edge of another pane in this tab, or press to choose a destination.")
+        setAccessibilityHelp("Drag to an edge of another pane in any Slate window, or press to choose a destination.")
     }
     required init?(coder: NSCoder) { nil }
 
@@ -48,7 +49,7 @@ final class PaneDragHandle: NSButton, NSDraggingSource {
                 return
             }
             guard hypot(next.locationInWindow.x - origin.x, next.locationInWindow.y - origin.y) >= 5 else { continue }
-            guard canDrag?() == true else { return }
+            guard beginPaneDrag() else { return }
             let item = NSPasteboardItem()
             item.setString("pane", forType: Self.pasteboardType)
             let draggingItem = NSDraggingItem(pasteboardWriter: item)
@@ -67,11 +68,21 @@ final class PaneDragHandle: NSButton, NSDraggingSource {
             }
             let point = convert(next.locationInWindow, from: nil)
             draggingItem.setDraggingFrame(NSRect(x: point.x - 10, y: point.y - 14, width: size.width, height: size.height), contents: preview)
-            isDraggingPane = true
             let session = beginDraggingSession(with: [draggingItem], event: next, source: self)
             session.animatesToStartingPositionsOnCancelOrFail = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
             return
         }
+    }
+
+    /// Shared session admission also exercised by integration-only native callback fixtures.
+    func beginPaneDrag() -> Bool {
+        guard !isDraggingPane, canDrag?() == true, onDragStart?() != false else { return false }
+        isDraggingPane = true
+        return true
+    }
+    func endPaneDrag() {
+        isDraggingPane = false
+        onDragEnd?()
     }
 
     func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
@@ -79,8 +90,7 @@ final class PaneDragHandle: NSButton, NSDraggingSource {
     }
     func ignoreModifierKeys(for session: NSDraggingSession) -> Bool { true }
     func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
-        isDraggingPane = false
-        onDragEnd?()
+        endPaneDrag()
     }
 }
 
@@ -135,10 +145,11 @@ final class PaneDropView: NSView {
         return rect
     }
 
-    func showPreview(direction: Direction) {
+    func showPreview(direction: Direction, recreatesContent: Bool = false) {
         preview.frame = bounds
         preview.autoresizingMask = [.width, .height]
         preview.direction = direction
+        preview.recreatesContent = recreatesContent
         if preview.superview == nil { addSubview(preview, positioned: .above, relativeTo: nil) }
         preview.needsDisplay = true
     }
@@ -174,6 +185,7 @@ final class PaneDropView: NSView {
 @MainActor
 private final class PaneDropPreview: NSView {
     var direction: Direction = .left
+    var recreatesContent = false
     override var isOpaque: Bool { false }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override func draw(_ dirtyRect: NSRect) {
@@ -204,7 +216,7 @@ private final class PaneDropPreview: NSView {
             .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
             .foregroundColor: NSColor.labelColor,
         ]
-        var text = "\(arrow)  \(title)" as NSString
+        var text = "\(arrow)  \(recreatesContent ? "Move & Reload Plugin" : title)" as NSString
         // Keep the directional cue legible even at the minimum pane size.
         if text.size(withAttributes: attributes).width + 32 > destination.width { text = arrow as NSString }
         let size = text.size(withAttributes: attributes)

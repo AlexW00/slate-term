@@ -1,6 +1,6 @@
 # Cross-window pane movement — implementation plan
 
-Status: proposed; no feature implementation. Independently reviewed; verified finding incorporated (see review record below).
+Status: implemented in the isolated `feature/cross-window-pane-movement` worktree. This document preserves the reviewed baseline plan; see the [implementation/review record](cross-window-pane-movement-implementation-review.md) for actual verification and remaining manual checks.
 
 ## Outcome and decisions
 

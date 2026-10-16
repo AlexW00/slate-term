@@ -57,7 +57,6 @@ func movingNonTerminalPreservesTerminalHistory(type: PaneType) throws {
     let otherTab = try workspace.newTab()
     let other = try #require(workspace.tabs.first { $0.id == otherTab }).focusedPane
     let before = workspace
-    #expect(throws: WorkspaceError.self) { try workspace.move(PaneID(1), beside: other, direction: .left) }
     #expect(throws: WorkspaceError.self) { try workspace.move(PaneID(999), beside: other, direction: .left) }
     #expect(throws: WorkspaceError.self) { try workspace.move(other, beside: PaneID(999), direction: .left) }
     try workspace.move(PaneID(1), beside: PaneID(1), direction: .down)

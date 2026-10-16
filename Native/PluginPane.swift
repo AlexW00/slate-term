@@ -378,6 +378,8 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
           }),
           layout:Object.freeze({get:(params={})=>call('layout.get',params),resize:(path,firstChildFraction,params={},options={})=>call('command.run',{...params,id:'layout.resize',path,firstChildFraction},options)}),
           tabs:Object.freeze({
+            setTitle:(title,params={},options={})=>call('command.run',{...params,id:'tab.title.set',title},options),
+            clearTitle:(params={},options={})=>call('command.run',{...params,id:'tab.title.clear'},options),
             reorder:(index,params={},options={})=>call('command.run',{...params,id:'tab.reorder',index},options),
             move:(group,params={},options={})=>call('command.run',{...params,id:'tab.move',group},options),
             detach:(params={},options={})=>call('command.run',{...params,id:'tab.detach'},options)

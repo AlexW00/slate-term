@@ -53,6 +53,58 @@ struct ServiceCommandsTest {
         }
         print("PASS six header-equivalent short commands: exact context, exit report, lifecycle and busy-state notifications")
     }
+    static func checkDeferredTransferLaunch(connection: PluginControlConnection, directory: URL) async throws {
+        let runner = PluginCommands()
+        defer { runner.close() }
+        let marker = directory.appendingPathComponent("stale-launch")
+        let plugin = try registration([["id": "deferred", "title": "Deferred", "executable": "/bin/sh",
+            "arguments": ["-c", "printf launched > \"$MARKER\"; /bin/sleep 0.1"],
+            "environment": ["MARKER": marker.path]]])
+        var workspace = Workspace()
+        _ = try workspace.newTab()
+        let validate = {
+            guard (try? workspace.resolvedTab(pane: PaneID(1)).id) == TabID(1) else {
+                throw RPCFailure(code: APIError.conflict, message: "Captured target moved")
+            }
+        }
+        // Prepared context becomes stale before execution, including sole-pane tab retirement.
+        try workspace.move(PaneID(1), beside: PaneID(2), direction: .right)
+        do {
+            _ = try await runner.execute(plugin: plugin, command: plugin.commands[0], connection: connection,
+                tab: TabID(1), pane: PaneID(1), params: [:], settings: [:],
+                lifecycle: lifecycle(.init(origin: .native)), validateTarget: validate)
+            throw Failure(message: "Stale prepared command launched")
+        } catch let error as RPCFailure { try require(error.code == APIError.conflict, "Wrong deferred rejection") }
+        try require(runner.all.isEmpty && !FileManager.default.fileExists(atPath: marker.path), "Stale launch created runtime work")
+        // A start-publication callback can change topology before actual spawning.
+        workspace = Workspace(); _ = try workspace.newTab()
+        runner.onLifecycle = { record, _ in
+            if record.phase == .started { try workspace.move(PaneID(1), beside: PaneID(2), direction: .left) }
+        }
+        do {
+            _ = try await runner.execute(plugin: plugin, command: plugin.commands[0], connection: connection,
+                tab: TabID(1), pane: PaneID(1), params: [:], settings: [:],
+                lifecycle: lifecycle(.init(origin: .native)), validateTarget: validate)
+            throw Failure(message: "Post-callback stale command spawned")
+        } catch let error as RPCFailure { try require(error.code == APIError.conflict, "Lost pre-spawn conflict") }
+        try require(!FileManager.default.fileExists(atPath: marker.path), "Pre-spawn target rejection still launched process")
+        // Once launched, movement does not become an ongoing cancellation predicate.
+        runner.onLifecycle = nil
+        workspace = Workspace(); _ = try workspace.newTab()
+        runner.onChange = {
+            if runner.all.contains(where: { $0.object?["state"] == .string("running") }) {
+                try? workspace.move(PaneID(1), beside: PaneID(2), direction: .right)
+            }
+        }
+        let result = try await runner.execute(plugin: plugin, command: plugin.commands[0], connection: connection,
+            tab: TabID(1), pane: PaneID(1), params: [:], settings: [:],
+            lifecycle: lifecycle(.init(origin: .native)), validateTarget: validate)
+        try require(result.object?["state"] == .string("succeeded"), "Transfer cancelled already-running independent command")
+        try require(FileManager.default.fileExists(atPath: marker.path), "Accepted command never spawned")
+        runner.onChange = nil
+        print("PASS deferred transfer launch: stale prepare, callback-to-spawn barrier, sole-pane closure and already-running survival")
+    }
+
     static func main() async throws {
         let cli = CommandLine.arguments[1]
         let owner = try ServiceIdentity(appInstanceID: "app", pluginID: "controller", serviceID: "runtime", generation: "g1")
@@ -147,6 +199,7 @@ struct ServiceCommandsTest {
             try require(result.object?["stdout"]?.string == "environment verified\n", "Command ownership environment was incorrect")
         }
         try await checkShortCommandCompletion(connection: root, directory: directory)
+        try await checkDeferredTransferLaunch(connection: root, directory: directory)
         // Even a missing host resolver cannot accidentally launch service work with the admin socket.
         do {
             _ = try await runner.execute(plugin: plugin, command: plugin.commands[1], connection: root,

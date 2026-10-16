@@ -36,6 +36,7 @@ public struct SavedLayoutDefinition: Equatable, Codable, Sendable {
         guard (1...8).contains(tabs.count) else { throw invalidSavedLayout("A saved layout needs 1...8 tabs") }
         var identities = Set<PaneID>()
         for tab in tabs {
+            _ = try TabTitle.canonical(tab.manualTitle)
             guard !tab.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw invalidSavedLayout("Tab name is required") }
             try checkSavedText(tab.name, field: "Tab name")
             guard (1...8).contains(tab.panes.count) else { throw invalidSavedLayout("Each tab needs 1...8 panes") }
@@ -71,6 +72,7 @@ public struct SavedLayoutDefinition: Equatable, Codable, Sendable {
             let groupID = result.groups.first(where: { $0.tabs.contains(firstTab) })!.id
             for (index, tab) in tabs.enumerated() {
                 let tabID = index == 0 ? firstTab : try result.newTab(in: groupID)
+                try result.setManualTabTitle(tab.manualTitle ?? "", for: tabID)
                 let seed = result.tabs.first(where: { $0.id == tabID })!.focusedPane
                 let recipes = Dictionary(uniqueKeysWithValues: tab.panes.map { ($0.id, $0) })
                 try buildSavedTree(tab.layout, seed: seed, tab: tabID, path: [], recipes: recipes,
@@ -95,20 +97,23 @@ public struct SavedLayoutDefinition: Equatable, Codable, Sendable {
 
 public struct SavedLayoutTab: Equatable, Codable, Sendable {
     public var name: String
+    public var manualTitle: String?
     public var layout: Layout
     public var panes: [SavedLayoutPane]
 
-    public init(name: String, layout: Layout, panes: [SavedLayoutPane]) {
+    public init(name: String, layout: Layout, panes: [SavedLayoutPane], manualTitle: String? = nil) {
         self.name = name
+        self.manualTitle = manualTitle
         self.layout = layout
         self.panes = panes
     }
 
-    private enum CodingKeys: String, CodingKey { case name, layout, panes }
+    private enum CodingKeys: String, CodingKey { case name, manualTitle, layout, panes }
     public init(from decoder: any Decoder) throws {
-        try requireSavedKeys(decoder, allowed: ["name", "layout", "panes"])
+        try requireSavedKeys(decoder, allowed: ["name", "manualTitle", "layout", "panes"])
         let values = try decoder.container(keyedBy: CodingKeys.self)
         name = try values.decode(String.self, forKey: .name)
+        manualTitle = try TabTitle.canonical(values.decodeIfPresent(String.self, forKey: .manualTitle))
         layout = try values.decode(SavedLayoutTree.self, forKey: .layout).layout
         panes = try values.decode([SavedLayoutPane].self, forKey: .panes)
     }

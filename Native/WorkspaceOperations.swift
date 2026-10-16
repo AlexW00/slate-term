@@ -6,8 +6,20 @@ extension WorkspaceHost {
                          additionalPublications: [EventPublication] = [], beforeCommit: () throws -> Void = {}) throws {
         try operation.validateCaller()
         try transition.requireCurrentBase(workspace: workspace, revisions: revisions)
-        let publications = transition.changes.map(operation.publication) + additionalPublications
-        try events.commitWorkspace(publications, beforeCommit: {
+        let previous = workspace
+        let rebindings = Set(workspace.panes.compactMap { pane -> PaneID? in
+            guard let before = try? workspace.resolvedTab(pane: pane.id),
+                  let after = try? transition.workspace.resolvedTab(pane: pane.id), before.id != after.id else { return nil }
+            return pane.id
+        })
+        let publications = transition.changes.map { change in
+            var fields = change.payload
+            if change.topic == "host.pane.moved", let pane = change.pane {
+                fields["contentRecreated"] = .bool(rebindings.contains(pane) && (leaves[pane] as? PluginPane)?.instance.registration.scope == .tab)
+            }
+            return operation.publication(topic: change.topic, payload: fields, tab: change.tab, pane: change.pane)
+        } + additionalPublications
+        try events.commitWorkspace(publications, rebindingPanes: rebindings, beforeCommit: {
             if case .native = operation.origin {} else if rejectNextWorkspacePublication && !publications.isEmpty {
                 rejectNextWorkspacePublication = false
                 throw RPCFailure(code: APIError.unavailable, message: "Injected workspace publication rejection")
@@ -17,6 +29,7 @@ extension WorkspaceHost {
             workspace = transition.workspace
             revisions = transition.revisions
         }
+        invalidateTabRename(from: previous)
     }
 
     func operationResult(_ result: JSONValue, transition: WorkspaceTransition,

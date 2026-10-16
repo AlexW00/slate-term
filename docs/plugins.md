@@ -205,7 +205,9 @@ For example, tmux users can implement discovery, control-mode clients, inner-pan
 - `tab`: views within one tab share an instance, which lasts until that tab closes.
 - `global`: one instance per registered type, created on first use and retained until app shutdown or unregister.
 
-Every visible pane has a fresh web view. Logical instances share their own ephemeral WebKit data store and private key/value store. Data files persist across app launches; browser/DOM history is not restored. Pane and tab IDs determine persisted storage scope.
+Cross-tab/window pane movement retains pane/global-scoped views, documents and instances. A pane-scoped instance's live owning tab changes, but its running backend's environment remains its launch context; pane-anchored CLI calls resolve current membership. Explicit stale pane/tab pairs fail. **Tab-scoped moves recreate the moved page against the destination tab's instance/store/backend** (reuse that instance if present); unsaved DOM state may reset and source storage is not copied. The source instance lives until its source tab closes. A self-moving tab-plugin may lose its reply when its old document retires; inspect placement rather than retry. New default calls and inherited event subscriptions follow retained panes; explicit event filters stay fixed.
+
+Every newly created pane has a fresh web view. Logical instances share their own ephemeral WebKit data store and private key/value store. Data files persist across app launches; browser/DOM history is not restored. Pane and tab IDs determine persisted storage scope.
 
 ## Page API
 
@@ -227,6 +229,10 @@ await workspace.storage.delete("draft");
 Terminal operations use the active terminal in the plugin's context; an explicit terminal `pane` overrides that history. A nonterminal focus does not erase it. Run/wait accept `{signal}` as a final options argument. Run requires authenticated zsh prompt/empty-buffer checks; it is not a generic TUI command runner. See [automation](automation.md) for limits, deadlines and the distinction between current-screen text and command stdout. `workspace.plugin` contains the type ID, logical `instanceId`, `viewId`, `paneId`, and scope.
 
 Guarded pane split/move/resize, manual titles and native tab rearrangement are available through `workspace.panes`, `workspace.layout` and `workspace.tabs`; see [layout/page adapters](layout-api.md#registered-page-adapters). They use captured/live validated targets and explicit revisions rather than retargeting current focus. Window operations are available through the same `workspace.call`/`command.run` route.
+
+### Tab names
+
+`workspace.tabs.setTitle(title, params={}, options={})` and `clearTitle(params={}, options={})` control the owning or explicitly targeted tab's persistent manual name through shared `tab.title.set/clear` commands. Final options accept `{signal,cause}`; normal target/guards apply. Names are trimmed, at most 100 characters / 1024 UTF-8 bytes without controls; empty clears to `Slate Terminal`. This is separate from document/pane automatic titles and `workspace.setTitle`. `workspace.command('tab.rename', params)` opens the native editor only for an eligible selected visible tab. See [tab names](layout-api.md#tab-names).
 
 ### Saved layouts
 

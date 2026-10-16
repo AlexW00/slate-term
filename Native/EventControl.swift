@@ -19,10 +19,10 @@ final class EventControl {
 
     /// Workspace values and their prepared journal are assigned without suspension. Do not
     /// place renderer callbacks, persistence or other fallible work in updatingModel.
-    func commitWorkspace(_ publications: [EventPublication], beforeCommit: () throws -> Void = {}, updatingModel: () -> Void) throws {
+    func commitWorkspace(_ publications: [EventPublication], rebindingPanes: Set<PaneID> = [], beforeCommit: () throws -> Void = {}, updatingModel: () -> Void) throws {
         do {
             let prepared = try hub.prepare(publications)
-            try hub.commit(prepared, preparingEffects: beforeCommit, updatingModel: updatingModel)
+            try hub.commit(prepared, rebindingPanes: rebindingPanes, preparingEffects: beforeCommit, updatingModel: updatingModel)
         } catch { throw Self.failure(error) }
     }
 
@@ -37,7 +37,7 @@ final class EventControl {
         try commitWorkspace([publication], updatingModel: {})
     }
 
-    func poll(_ params: [String: JSONValue], audience: CausationAudience, boundTab: TabID? = nil,
+    func poll(_ params: [String: JSONValue], audience: CausationAudience, boundTab: TabID? = nil, boundPane: PaneID? = nil,
               validateCaller: @MainActor () throws -> Void = {}) async throws -> JSONValue {
         do {
             try Self.checkKeys(params, allowed: ["after", "topics", "tab", "pane", "scope", "recipient", "limit", "waitMilliseconds"])
@@ -68,7 +68,8 @@ final class EventControl {
             let filter = try EventFilter(topics: topics, tab: selectedTab, pane: pane, observer: observer)
             let delivery = try await hub.pollDelivery(after: after, filter: filter,
                 limit: Self.integer("limit", in: params, default: 128),
-                waitMilliseconds: Self.integer("waitMilliseconds", in: params, default: 20_000))
+                waitMilliseconds: Self.integer("waitMilliseconds", in: params, default: 20_000),
+                inheritedPane: tab == nil && pane == nil && scope != "global" && selectedTab != nil ? boundPane : nil)
             try Task.checkCancellation()
             try validateCaller()
             let events = try delivery.batch.events.map { event in

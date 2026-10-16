@@ -17,7 +17,8 @@ struct PaneHeaderAction {
 /// Stable chrome around retained content; split reparenting never recreates a surface.
 @MainActor
 final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDelegate {
-    let content: NSViewController
+    private(set) var content: NSViewController
+    private var contentConstraints: [NSLayoutConstraint] = []
     private let typeName: String
     private let typeID: String
     private let actionStrip = NSStackView()
@@ -129,8 +130,30 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
             titleField.widthAnchor.constraint(greaterThanOrEqualToConstant: 0),
             actionStrip.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -2), actionStrip.centerYAnchor.constraint(equalTo: header.centerYAnchor), actionStrip.heightAnchor.constraint(equalToConstant: 22),
             closeButton.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -5), closeButton.centerYAnchor.constraint(equalTo: header.centerYAnchor), closeButton.widthAnchor.constraint(equalToConstant: 22), closeButton.heightAnchor.constraint(equalToConstant: 22),
-            content.view.topAnchor.constraint(equalTo: header.bottomAnchor), content.view.leadingAnchor.constraint(equalTo: view.leadingAnchor), content.view.trailingAnchor.constraint(equalTo: view.trailingAnchor), content.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
+        constrainContent()
+    }
+
+    private func constrainContent() {
+        contentConstraints = [content.view.topAnchor.constraint(equalTo: header.bottomAnchor),
+            content.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            content.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            content.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)]
+        NSLayoutConstraint.activate(contentConstraints)
+    }
+
+    /// A tab-scoped plugin changes logical instances on transfer; chrome/drag identity stays live.
+    func replaceContent(with controller: NSViewController) {
+        _ = view
+        renamePopover?.close()
+        NSLayoutConstraint.deactivate(contentConstraints)
+        content.view.removeFromSuperview()
+        content.removeFromParent()
+        content = controller
+        addChild(controller)
+        controller.view.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(controller.view, positioned: .below, relativeTo: inactiveShade)
+        constrainContent()
     }
 
     func setHeaderVisible(_ visible: Bool) {
@@ -254,7 +277,7 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
         return menu
     }
 
-    @objc private func showMoveMenu() {
+    @objc func showMoveMenu() {
         guard let menu = moveMenu?() else { return }
         presentMoveMenu(menu)
     }

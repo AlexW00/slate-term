@@ -61,7 +61,7 @@ with tempfile.TemporaryDirectory(prefix="slate-pane-move-", dir="/tmp") as tempo
             def panes():
                 return {pane["paneId"]: pane for pane in rpc("debug.inspect")["panes"]}
 
-            assert not move("p1", "p1")["canDrag"]
+            assert move("p1", "p1")["canDrag"], "A sole pane must be draggable into another window"
             p2 = cli("panes", "split", "--right")["paneId"]
             # Regression: moving the right sibling left/above used to paint the whole
             # left pane or span both current panes using projected window geometry.
@@ -107,9 +107,9 @@ with tempfile.TemporaryDirectory(prefix="slate-pane-move-", dir="/tmp") as tempo
 
             other_tab = cli("tabs", "new")["tabId"]
             other = cli("tabs", "list")[-1]["focusedPane"]
-            cross = state()
-            assert not move(p3, other, drop=True)["accepted"]
-            assert state() == cross
+            assert move(p3, other, drop=True)["accepted"]
+            assert rpc("pane.inspect", pane=p3)["tabId"] == other_tab
+            assert move(p3, p2, .5, .05, drop=True)["accepted"]
             cli("tabs", "close", "--tab", other_tab, "--force")
             cli("command", "run", "pane.zoom", "--pane", "p1")
             zoomed = state()
@@ -158,7 +158,7 @@ with tempfile.TemporaryDirectory(prefix="slate-pane-move-", dir="/tmp") as tempo
             capture("dark")
             persisted = json.loads((directory / "state/workspace.json").read_text())
             assert persisted["tabs"][0]["layout"] == state()["tabs"][0]["layout"]
-            print("PASS pane movement: all edges, cancellation/invalid/self/cross-tab/zoom rejection, nested collapse, retained surfaces/sessions/browser state, focus, menu, persistence, grip placement and light/dark previews")
+            print("PASS pane movement: all edges, cancellation/invalid/self/zoom rejection, cross-tab round trip, nested collapse, retained surfaces/sessions/browser state, focus, menu, persistence, grip placement and light/dark previews")
         finally:
             if app.poll() is None:
                 os.killpg(app.pid, signal.SIGTERM)

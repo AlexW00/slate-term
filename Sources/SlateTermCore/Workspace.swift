@@ -63,6 +63,8 @@ public struct Pane: Equatable, Codable, Sendable, Identifiable {
 
 public struct Tab: Equatable, Codable, Sendable, Identifiable {
     public let id: TabID
+    public internal(set) var manualTitle: String? = nil
+    public var title: String { manualTitle ?? TabTitle.defaultTitle }
     public internal(set) var layout: Layout
     public internal(set) var focusedPane: PaneID
     public internal(set) var zoomedPane: PaneID? = nil
@@ -147,13 +149,44 @@ public struct Workspace: Equatable, Sendable {
         return id
     }
 
-    /// Move an existing pane beside another pane in the same tab, retaining its contents.
+    /// Move an existing pane beside another pane, retaining its identity across tabs.
     /// Validate the complete replacement before committing so rejected moves are atomic.
     public mutating func move(_ pane: PaneID, beside target: PaneID, direction: Direction) throws {
         let index = try tabIndex(containing: pane)
         let destination = try tabIndex(containing: target)
-        guard index == destination else { throw WorkspaceError.invalidLayout("Panes can only move within the same tab") }
         guard pane != target else { return }
+        if index != destination {
+            var next = self
+            let sourceTab = tabs[index].id
+            let destinationTab = tabs[destination].id
+            let replacement = Layout.split(axis: direction.axis, fraction: 0.5,
+                first: .pane(direction.insertsBefore ? pane : target),
+                second: .pane(direction.insertsBefore ? target : pane))
+            let layout = tabs[destination].layout.replacing(target, with: replacement)
+            _ = try layout.checkedPaneIDs()
+            if let remaining = tabs[index].layout.removing(pane) {
+                _ = try remaining.checkedPaneIDs()
+                next.tabs[index].layout = remaining
+                next.tabs[index].terminalHistory.removeAll { $0 == pane }
+                if next.tabs[index].zoomedPane == pane { next.tabs[index].zoomedPane = nil }
+                if next.tabs[index].focusedPane == pane {
+                    next.tabs[index].focusedPane = next.tabs[index].activeTerminal ?? remaining.paneIDs[0]
+                }
+            } else {
+                // Retire membership, never the transferred pane record or identity counters.
+                next.tabs.remove(at: index)
+                for group in next.groups.indices { next.groups[group].tabs.removeAll { $0 == sourceTab } }
+                next.groups.removeAll { $0.tabs.isEmpty }
+            }
+            let destinationIndex = next.tabs.firstIndex { $0.id == destinationTab }!
+            next.tabs[destinationIndex].layout = layout
+            next.tabs[destinationIndex].zoomedPane = nil
+            next.focus(pane, in: destinationIndex)
+            // The source terminal may not have existed in destination history yet.
+            // focus inserts terminals; nonterminal transfers leave it unchanged.
+            self = next
+            return
+        }
         let remaining = tabs[index].layout.removing(pane)!
         let replacement = Layout.split(axis: direction.axis, fraction: 0.5,
                                        first: .pane(direction.insertsBefore ? pane : target),
@@ -184,6 +217,11 @@ public struct Workspace: Equatable, Sendable {
         let text = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard text.utf8.count <= 4096 else { throw WorkspaceError.invalidLayout("Manual titles must not exceed 4096 UTF-8 bytes") }
         panes[index].manualTitle = text.isEmpty ? nil : text
+    }
+
+    public mutating func setManualTabTitle(_ title: String, for tab: TabID) throws {
+        guard let index = tabs.firstIndex(where: { $0.id == tab }) else { throw WorkspaceError.tabNotFound(tab) }
+        tabs[index].manualTitle = try TabTitle.normalized(title)
     }
 
     public mutating func setHeaderVisible(_ visible: Bool, for pane: PaneID) throws {
@@ -389,6 +427,7 @@ public struct Workspace: Equatable, Sendable {
         }
         var leaves: [PaneID] = []
         for tab in snapshot.tabs {
+            _ = try TabTitle.canonical(tab.manualTitle)
             let ids = try tab.layout.checkedPaneIDs()
             let terminalIDs = Set(snapshot.panes.filter { ids.contains($0.id) && $0.type == .terminal }.map(\.id))
             guard ids.contains(tab.focusedPane), tab.zoomedPane == nil || tab.zoomedPane == tab.focusedPane,

@@ -99,10 +99,25 @@ public struct WorkspaceTransition: Sendable {
             facts.append(WorkspaceChange(topic: topic, tab: tab, pane: pane, payload: payload))
         }
         let panes = Dictionary(uniqueKeysWithValues: next.panes.map { ($0.id, $0) })
+        // Transfer precedes source-tab retirement, without pane destruction/creation.
+        if let move, let source = previous.tabs.first(where: { $0.layout.paneIDs.contains(move.pane) }),
+           let destination = next.tabs.first(where: { $0.layout.paneIDs.contains(move.pane) }),
+           source.id != destination.id || source.layout != destination.layout {
+            append("host.pane.moved", tab: source.id == destination.id ? destination.id : nil, pane: move.pane,
+                extra: ["destinationPaneId": .string(move.destination.description), "direction": .string(move.direction),
+                    "sourceTabId": .string(source.id.description), "destinationTabId": .string(destination.id.description),
+                    "beforeSourceLayoutRevision": beforeRevisions.layoutRevision(source.id).map(JSONValue.string) ?? .null,
+                    "sourceLayoutRevision": ledger.layoutRevision(source.id).map(JSONValue.string) ?? .null,
+                    "beforeDestinationLayoutRevision": beforeRevisions.layoutRevision(destination.id).map(JSONValue.string) ?? .null,
+                    "destinationLayoutRevision": ledger.layoutRevision(destination.id).map(JSONValue.string) ?? .null])
+        }
         // Closures precede owning-tab closure; creation reverses that dependency.
-        for topic in ["host.pane.closed", "host.tab.closed", "host.tab.created", "host.pane.created", "host.pane.type.changed", "host.pane.title.changed", "host.pane.header.changed"] {
+        for topic in ["host.pane.closed", "host.tab.closed", "host.tab.created", "host.tab.title.changed", "host.pane.created", "host.pane.type.changed", "host.pane.title.changed", "host.pane.header.changed"] {
             for fact in compatibility where fact.topic == topic {
                 var extra: [String: JSONValue] = [:]
+                if topic == "host.tab.title.changed", let tab = next.tabs.first(where: { $0.id == fact.tab }) {
+                    extra["hasManualTitle"] = .bool(tab.manualTitle != nil)
+                }
                 if let pane = fact.pane.flatMap({ panes[$0] }) {
                     if topic == "host.pane.created" || topic == "host.pane.type.changed" { extra["type"] = .string(Self.typeName(pane.type)) }
                     if topic == "host.pane.title.changed" { extra["hasManualTitle"] = .bool(pane.manualTitle != nil) }
@@ -115,11 +130,6 @@ public struct WorkspaceTransition: Sendable {
                 }
                 append(fact.topic, tab: fact.tab, pane: fact.pane, extra: extra)
             }
-        }
-        if let move, let tab = next.tabs.first(where: { $0.layout.paneIDs.contains(move.pane) }),
-           previous.tabs.first(where: { $0.id == tab.id })?.layout != tab.layout {
-            append("host.pane.moved", tab: tab.id, pane: move.pane,
-                   extra: ["destinationPaneId": .string(move.destination.description), "direction": .string(move.direction)])
         }
         // A path is a resize only while the same two pane partitions still identify its split.
         // Creation, collapse and relocation must not masquerade as a divider resize.

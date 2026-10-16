@@ -70,9 +70,10 @@ final class PluginCommands {
 
     func execute(plugin: PluginRegistration, command: PluginCommand, connection: PluginControlConnection,
                  tab: TabID?, pane: PaneID?, params: [String: JSONValue], settings: [String: JSONValue],
-                 lifecycle: CommandLifecycleContext) async throws -> JSONValue {
+                 lifecycle: CommandLifecycleContext, validateTarget: @MainActor () throws -> Void = {}) async throws -> JSONValue {
         try Task.checkCancellation()
         try lifecycle.operation.validateCaller()
+        try validateTarget()
         let controlEnvironment = try connection.commandEnvironment(owner: lifecycle.operation.serviceOwner)
         let commandID = command.namespacedID(plugin: plugin.id)
         guard !runs.contains(where: { $0.command == commandID && ($0.state == .running || $0.cleanupPending) }) else {
@@ -109,6 +110,7 @@ final class PluginCommands {
             // Publication callbacks cannot grant a retired generation permission to spawn.
             do { try lifecycle.operation.validateCaller() }
             catch { throw CancellationError() }
+            try validateTarget()
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
             directoryCreated = true
             let process = try PluginProcess(executable: connection.cliPath,
@@ -149,7 +151,7 @@ final class PluginCommands {
             if run.state == .running {
                 finish(run, state: error is CancellationError ? .cancelled : .failed,
                        reason: error is CancellationError ? .cancelled : .spawnFailure, message: String(describing: error),
-                       code: error is CancellationError ? -32022 : -32025)
+                       code: (error as? RPCFailure)?.code ?? (error is CancellationError ? -32022 : -32025))
             }
         }
         if let failure = run.failure { throw failure }

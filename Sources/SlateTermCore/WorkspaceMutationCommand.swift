@@ -5,7 +5,7 @@ import Foundation
 public enum WorkspaceMutationCommand {
     public static let ids: Set<String> = ["pane.split", "pane.move", "layout.resize", "pane.title.set", "pane.title.clear",
                                          "pane.header.show", "pane.header.hide", "pane.header.toggle",
-                                         "tab.reorder", "tab.detach", "tab.move", "tab.detachCurrent"]
+                                         "tab.title.set", "tab.title.clear", "tab.reorder", "tab.detach", "tab.move", "tab.detachCurrent"]
     public static let layoutGuarded: Set<String> = ["pane.split", "pane.move", "layout.resize"]
     public static let workspaceGuarded: Set<String> = ["tab.reorder", "tab.detach", "tab.move"]
 
@@ -57,8 +57,13 @@ public enum WorkspaceMutationCommand {
         case "pane.move":
             guard tab.zoomedPane == nil else { throw RPCFailure(code: APIError.unavailable, message: "Unzoom the tab before moving a pane") }
             let target = try PaneID(parsing: string("target"))
+            let destination = try workspace.resolvedTab(pane: target)
+            guard destination.zoomedPane == nil else { throw RPCFailure(code: APIError.unavailable, message: "Unzoom the destination tab before moving a pane") }
             try next.move(targetPane, beside: target, direction: direction())
             result["paneId"] = .string(targetPane.description)
+            result["tabId"] = .string(destination.id.description)
+            result["sourceTabId"] = .string(tab.id.description)
+            result["sourceTabClosed"] = .bool(!next.tabs.contains { $0.id == tab.id })
         case "layout.resize":
             guard tab.zoomedPane == nil else { throw RPCFailure(code: APIError.unavailable, message: "Unzoom the tab before resizing its layout") }
             guard case .array(let raw) = params["path"], raw.count <= 64 else { throw invalid("path must be an array of at most 64 first/second branches") }
@@ -75,6 +80,11 @@ public enum WorkspaceMutationCommand {
         case "pane.title.set", "pane.title.clear":
             try next.setManualTitle(id == "pane.title.clear" ? "" : string("title"), for: targetPane)
             result["paneId"] = .string(targetPane.description)
+        case "tab.title.set", "tab.title.clear":
+            try next.setManualTabTitle(id == "tab.title.clear" ? "" : string("title"), for: tab.id)
+            let renamed = next.tabs.first { $0.id == tab.id }!
+            result["manualTitle"] = renamed.manualTitle.map(JSONValue.string) ?? .null
+            result["title"] = .string(renamed.title)
         case "tab.reorder", "tab.move", "tab.detach", "tab.detachCurrent":
             let focus = try string("focus", default: id == "tab.detachCurrent" ? "target" : "preserve")
             guard ["target", "preserve"].contains(focus) else { throw invalid("focus must be target or preserve") }

@@ -44,6 +44,13 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     var windows: [TabID: WorkspaceWindow] = [:]
     var leaves: [PaneID: NSViewController] = [:]
     var containers: [PaneID: PaneContainer] = [:]
+    private struct PaneDragContext {
+        let pane: PaneID
+        let tab: TabID
+        let handle: PaneDragHandle
+        let leaf: NSViewController
+    }
+    private var paneDragContext: PaneDragContext?
     private let processTitles = TerminalProcessTitles()
     private var titleTimer: DispatchSourceTimer?
     private var processNames: [PaneID: String] = [:]
@@ -109,6 +116,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     private let layoutStartup = LayoutStartup()
     private var layoutRecipes: [PaneID: SavedLayoutPane] = [:]
     private var commandPicker: CommandPicker?
+    private var tabRename: TabRenameController?
     private var pickerTarget: [String: JSONValue] = [:]
     private var pickerReturnPane: PaneID?
     private var testPasteboard: NSPasteboard?
@@ -455,7 +463,16 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             return try await self.pluginCommands.execute(plugin: registration, command: command, connection: connection,
                 tab: tab, pane: pane, params: invocation, settings: preferences,
                 lifecycle: CommandLifecycleContext(operation: operation, launchWorkspaceRevision: self.revisions.revision,
-                                                   launchLayoutRevision: tab.flatMap(self.revisions.layoutRevision)))
+                                                   launchLayoutRevision: tab.flatMap(self.revisions.layoutRevision)),
+                validateTarget: { [weak self] in
+                    guard let self else { throw CancellationError() }
+                    if let pane, let tab {
+                        guard (try? self.workspace.resolvedTab(pane: pane).id) == tab else {
+                            throw RPCFailure(code: APIError.conflict, message: "Captured command target moved before launch")
+                        }
+                    }
+                    try self.validateAPIGuards(invocation, method: "command.run")
+                })
         }
     }
 
@@ -542,7 +559,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 return events.head
             case "events.poll":
                 return try await events.poll(params, audience: caller?.audience ?? operations.administrativeAudience,
-                    boundTab: caller?.defaults.scope == "global" ? nil : caller?.defaults.tab, validateCaller: operation.validateCaller)
+                    boundTab: caller?.defaults.scope == "global" ? nil : caller?.defaults.tab,
+                    boundPane: caller?.defaults.pane, validateCaller: operation.validateCaller)
             case "events.emit":
                 let source: EventSource
                 switch operation.origin {
@@ -746,6 +764,25 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 return .object(["paneId": .string(paneID.description), "reloading": .bool(true)])
             }
             if id == "command.picker" { try toggleCommandPicker(params); return .object([:]) }
+            if id == "tab.rename" {
+                guard Set(withoutAPIGuards(params).keys).isSubset(of: ["id", "pane", "tab"]) else {
+                    throw RPCFailure(code: -32602, message: "Unknown tab.rename parameter")
+                }
+                return try beginTabRename(params)
+            }
+            if id == "pane.move.chooseDestination" {
+                guard Set(withoutAPIGuards(params).keys).isSubset(of: ["id", "pane", "tab"]) else {
+                    throw RPCFailure(code: -32602, message: "Unknown move chooser parameters")
+                }
+                let pane = try targetPaneID(params)
+                guard let container = containers[pane], container.headerVisible, let window = container.view.window,
+                      window.isVisible, !window.isMiniaturized,
+                      try workspace.resolvedTab(pane: pane).zoomedPane == nil, workspace.panes.count > 1 else {
+                    throw RPCFailure(code: APIError.unavailable, message: "Move chooser requires a visible unzoomed pane bar and another pane")
+                }
+                container.showMoveMenu()
+                return .object(["paneId": .string(pane.description)])
+            }
             if id == "pane.rename" {
                 let pane = try targetPaneID(params)
                 guard let container = containers[pane], container.headerVisible, let window = container.view.window,
@@ -789,14 +826,25 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             try validateMutationAdmission(id, params: params)
             let transition = try WorkspaceTransition.command(id, parameters: params, workspace: workspace, revisions: revisions)
             let next = transition.workspace
-            let result = transition.result
+            var result = transition.result
+            if id == "pane.move", var value = result.object {
+                let pane = try targetPaneID(params)
+                value["contentRecreated"] = .bool(value["sourceTabId"] != value["tabId"] && (leaves[pane] as? PluginPane)?.instance.registration.scope == .tab)
+                result = .object(value)
+            }
             try validateMutationGeometry(id, params: params, next: next, result: result)
             let remaining = Set(next.panes.filter { pane in workspace.panes.contains(where: { $0.id == pane.id && $0.type == pane.type }) }.map(\.id))
             if params["force"] != .bool(true), terminals.contains(where: { !remaining.contains($0.key) && $0.value.needsConfirmClose }) {
                 throw RPCFailure(code: -32010, message: "The terminal may have a running process; pass --force to terminate it")
             }
             let persistence: WorkspacePersistence
-            if ["pane.title.set", "pane.title.clear", "pane.header.show", "pane.header.hide", "pane.header.toggle"].contains(id) {
+            if ["tab.title.set", "tab.title.clear"].contains(id) {
+                try commitWorkspace(transition, operation: operation)
+                let tab = try targetTab(params)
+                windows[tab.id]?.title = tab.title
+                refreshCommandPicker()
+                persistence = persistWorkspace()
+            } else if ["pane.title.set", "pane.title.clear", "pane.header.show", "pane.header.hide", "pane.header.toggle"].contains(id) {
                 try commitWorkspace(transition, operation: operation)
                 let pane = try targetPaneID(params)
                 updatePaneTitle(pane)
@@ -852,6 +900,15 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             testConfirmationHandler = { alert in
                 shown = .object(["message": .string(alert.messageText), "explanation": .string(alert.informativeText),
                                  "warning": .bool(alert.alertStyle == .warning)])
+                if params["probeTabRename"] == .bool(true) {
+                    do { _ = try self.call("command.run", params: ["id": .string("tab.rename")]) }
+                    catch let failure as RPCFailure {
+                        var value = shown.object ?? [:]
+                        value["tabRenameError"] = .integer(failure.code)
+                        shown = .object(value)
+                    }
+                    catch { shown = .string("Unexpected rename probe failure") }
+                }
                 if let path = params["screenshot"]?.string { try? Self.captureWindow(alert.window.windowNumber, path: path) }
                 if let focus = params["focusPane"] { _ = try? self.call("command.run", params: ["id": .string("pane.focus"), "pane": focus]) }
                 alert.buttons[params["answer"] == .string("clear") ? 1 : 0].performClick(nil)
@@ -930,6 +987,22 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             if let captureError { throw captureError }
             guard captured else { throw RPCFailure(code: -32000, message: "Menu closed before capture") }
             return .object([:])
+        case "debug.tabRename" where integration:
+            if params["minimize"] == .bool(true) { windows[try targetTab(params).id]?.miniaturize(nil) }
+            if params["probeSheet"] == .bool(true), let window = windows[try targetTab(params).id] {
+                let sheet = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+                sheet.isReleasedWhenClosed = false
+                window.beginSheet(sheet)
+                defer { window.endSheet(sheet); sheet.orderOut(nil) }
+                do { return try call("command.run", params: ["id": .string("tab.rename"), "tab": .string(try targetTab(params).id.description)]) }
+                catch let failure as RPCFailure { return .object(["errorCode": .integer(failure.code)]) }
+            }
+            if params["begin"] == .bool(true) { _ = try beginTabRename(params.filter { ["pane", "tab"].contains($0.key) }) }
+            try tabRename?.editForTesting(params["draft"]?.string, finish: params["finish"]?.string)
+            if let path = params["screenshot"]?.string, let editor = tabRename {
+                try Self.captureWindow(editor.window.windowNumber, path: path)
+            }
+            return tabRename?.info ?? .object(["editing": .bool(false)])
         case "debug.paneHeader" where integration:
             let pane = try targetPaneID(params)
             guard let header = containers[pane] else { throw RPCFailure(code: -32004, message: "Pane header not found") }
@@ -951,13 +1024,17 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                   let target = containers[try PaneID(parsing: targetValue)] else {
                 throw RPCFailure(code: -32602, message: "Source pane and target pane are required")
             }
+            if params["beginDrag"] == .bool(true) { return .object(["began": .bool(source.beginPaneDrag())]) }
             if params["cancel"] == .bool(true) {
-                source.onDragEnd?()
+                source.endPaneDrag()
                 return .object(["preview": .bool(containers.values.contains { $0.dropView.previewFrame != nil })])
             }
             if params["menu"] == .bool(true), let direction = params["direction"]?.string {
                 let menu = makeMoveMenu(for: sourceID)
-                let choice = menu.items.compactMap(\.submenu).flatMap(\.items).first {
+                func choices(_ menu: NSMenu) -> [NSMenuItem] {
+                    menu.items.flatMap { [$0] + ($0.submenu.map(choices) ?? []) }
+                }
+                let choice = choices(menu).first {
                     guard let values = $0.representedObject as? [String: String] else { return false }
                     return values["target"] == targetValue && values["direction"] == direction
                 }
@@ -980,7 +1057,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             var accepted = false
             if params["drop"] == .bool(true) {
                 if let direction { accepted = drop.onMove?(source, direction) ?? false }
-                source.onDragEnd?()
+                source.endPaneDrag()
             }
             return .object(["accepted": .bool(accepted), "direction": direction.map { .string($0.rawValue) } ?? .null,
                             "preview": .bool(containers.values.contains { $0.dropView.previewFrame != nil }),
@@ -1183,7 +1260,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             let controlLetter = chord.modifiers.contains(.ctrl) && !chord.modifiers.contains(.cmd) && (97...122).contains(scalar)
             let text = controlLetter ? String(UnicodeScalar(scalar & 0x1f)!) : key
             let menuOnly = params["menu"] == .bool(true)
-            let window = menuOnly ? nil : (params["layouts"] == .bool(true) ? settingsWindow?.window : (params["picker"] == .bool(true) ? commandPicker?.window : (params["settings"] == .bool(true) ? settingsWindow?.window : windows[try targetTab(params).id])))
+            let window = menuOnly ? nil : (params["tabRename"] == .bool(true) ? tabRename?.window : (params["layouts"] == .bool(true) ? settingsWindow?.window : (params["picker"] == .bool(true) ? commandPicker?.window : (params["settings"] == .bool(true) ? settingsWindow?.window : windows[try targetTab(params).id]))))
             guard let code = ["d": UInt16(2), "j": UInt16(38), "h": 4, "k": 40, "l": 37, "1": 18, "2": 19, "=": 24, "left": 123, "right": 124, "up": 126, "down": 125, "e": 14, "r": 15, "return": 36, "t": 17, "n": 45, "w": 13, "[": 33, "]": 30, ",": 43, "q": 12, "s": 1, "escape": 53, "delete": 51][chord.key],
                   let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: chord.nativeModifiers, timestamp: ProcessInfo.processInfo.systemUptime,
                                                windowNumber: window?.windowNumber ?? 0, context: nil, characters: text,
@@ -1367,7 +1444,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 }
                 return SavedLayoutPane(id: id, type: type, title: pane.manualTitle ?? "", headerVisible: pane.headerVisible, configuration: configuration)
             }
-            return SavedLayoutTab(name: "Tab \(group.tabs.firstIndex(of: tabID)! + 1)", layout: tab.layout, panes: panes)
+            return SavedLayoutTab(name: "Tab \(group.tabs.firstIndex(of: tabID)! + 1)", layout: tab.layout, panes: panes, manualTitle: tab.manualTitle)
         }
         return try SavedLayoutDefinition(name: "Untitled Layout", tabs: tabs).validated()
     }
@@ -1531,6 +1608,12 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             if case .registered(let type) = pane.type, !pluginCatalog.activeRegistrations.contains(where: { $0.id == type && $0.hasPanel }) { throw RPCFailure(code: -32602, message: "Pane type is not registered: \(type)") }
         }
         let replacements = Set(next.panes.filter { pane in workspace.panes.contains(where: { $0.id == pane.id && $0.type != pane.type }) }.map(\.id))
+        let transfers = Set(next.panes.compactMap { pane -> PaneID? in
+            guard let before = try? workspace.resolvedTab(pane: pane.id),
+                  let after = try? next.resolvedTab(pane: pane.id), before.id != after.id else { return nil }
+            return pane.id
+        })
+        let pluginRebindings = transfers.filter { (leaves[$0] as? PluginPane)?.instance.registration.scope == .tab }
         var created: [PaneID: TerminalView] = [:]
         var sessions: [PaneID: ShellSession] = [:]
         var createdPlugins: [PaneID: PluginPane] = [:]
@@ -1568,7 +1651,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 if integration { terminalPreparationCount += 1 }
                 sessions[pane.id] = session
             }
-            for pane in next.panes where leaves[pane.id] == nil || replacements.contains(pane.id) {
+            for pane in next.panes where leaves[pane.id] == nil || replacements.contains(pane.id) || pluginRebindings.contains(pane.id) {
                 guard case .registered(let type) = pane.type, let registration = pluginCatalog.activeRegistrations.first(where: { $0.id == type && $0.hasPanel }) else { continue }
                 let tab = next.tabs.first { $0.layout.paneIDs.contains(pane.id) }!
                 let instance = try pluginInstances.acquire(registration, pane: pane.id, tab: tab.id)
@@ -1604,6 +1687,29 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             finishPendingPaneRenames()
         }
         let changedTabs = next.tabs.filter { rendered[$0.id] != $0.layout || renderedZoom[$0.id] != $0.zoomedPane || !replacements.isDisjoint(with: $0.layout.paneIDs) }.map(\.id)
+        // Detach every affected old root before attaching either replacement root.
+        // In particular, closing an empty source must not take a transferred view with it.
+        let retiredTabs = Set(windows.keys).subtracting(next.tabs.map(\.id))
+        let affectedTabs = Set(changedTabs).union(retiredTabs)
+        let windowFrames = windows.mapValues(\.frame)
+        for tab in affectedTabs {
+            nativeLayoutPending.removeValue(forKey: tab)
+            nativeLayoutInvalid.removeValue(forKey: tab)
+        }
+        for container in containers.values where container.view.window.map({ window in affectedTabs.contains { windows[$0] === window } }) == true {
+            container.dropView.clearPreview()
+            container.view.removeFromSuperview()
+            container.removeFromParent()
+        }
+        for tab in affectedTabs { windows[tab]?.contentViewController = nil }
+        for id in pluginRebindings {
+            let old = leaves[id] as? PluginPane
+            if let controller = createdPlugins[id] { containers[id]?.replaceContent(with: controller) }
+            old?.close()
+        }
+        for id in transfers {
+            if let tab = try? next.resolvedTab(pane: id) { (leaves[id] as? PluginPane)?.instance.updatePaneOwner(tab.id) }
+        }
         for id in replacements {
             terminalControl.remove(pane: id)
             let container = containers.removeValue(forKey: id)
@@ -1699,9 +1805,19 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 }
                 container.dragHandle.canDrag = { [weak self] in
                     guard let tab = self?.workspace.tabs.first(where: { $0.layout.paneIDs.contains(pane.id) }) else { return false }
-                    return tab.zoomedPane == nil && tab.layout.paneIDs.count > 1
+                    return tab.zoomedPane == nil
                 }
-                container.dragHandle.onDragEnd = { [weak self] in self?.clearPaneMovePreviews() }
+                container.dragHandle.onDragStart = { [weak self, weak container] in
+                    guard let self, let container, self.containers[pane.id] === container,
+                          let leaf = self.leaves[pane.id], let tab = try? self.workspace.resolvedTab(pane: pane.id),
+                          tab.zoomedPane == nil else { return false }
+                    self.paneDragContext = PaneDragContext(pane: pane.id, tab: tab.id, handle: container.dragHandle, leaf: leaf)
+                    return true
+                }
+                container.dragHandle.onDragEnd = { [weak self] in
+                    self?.clearPaneMovePreviews()
+                    self?.paneDragContext = nil
+                }
                 container.moveMenu = { [weak self] in self?.makeMoveMenu(for: pane.id) ?? NSMenu() }
                 container.dropView.canMove = { [weak self] source, direction in
                     self?.proposedMove(source: source, target: pane.id, direction: direction) != nil
@@ -1738,7 +1854,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             else {
                 window = WorkspaceWindow(contentRect: NSRect(x: 160, y: 160, width: 1000, height: 650),
                                          styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-                window.title = "Slate Terminal"
+                window.title = tab.title
                 window.isReleasedWhenClosed = false
                 window.tabbingMode = .preferred
                 window.tabbingIdentifier = "slate-term"
@@ -1769,8 +1885,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 }
                 windows[tab.id] = window
             }
+            window.title = tab.title
             if rendered[tab.id] != tab.layout {
-                let frame = window.frame
+                let frame = windowFrames[tab.id] ?? window.frame
                 for id in tab.layout.paneIDs {
                     containers[id]?.view.removeFromSuperview()
                     containers[id]?.removeFromParent()
@@ -1786,7 +1903,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             }
         }
         reconcileNativeGroups()
-        if commandPicker?.isVisible != true, let tab = next.tabs.first(where: { $0.id == next.keyTabID }), let window = windows[tab.id] {
+        if commandPicker?.isVisible != true, tabRename == nil, let tab = next.tabs.first(where: { $0.id == next.keyTabID }), let window = windows[tab.id] {
             window.makeKeyAndOrderFront(nil)
             focusResponder(tab.focusedPane, in: window)
         }
@@ -1795,7 +1912,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             (windows[id]?.contentViewController as? WorkspaceSplitController)?.applyInitialFractions()
         }
         // Rebuilding a background tab can remove its first responder too.
-        if commandPicker?.isVisible != true {
+        if commandPicker?.isVisible != true, tabRename == nil {
             for tab in next.tabs {
                 if let window = windows[tab.id] { focusResponder(tab.focusedPane, in: window) }
             }
@@ -1850,10 +1967,21 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     private func proposedMove(source: PaneDragHandle, target: PaneID, direction: Direction) -> Workspace? {
         guard let pane = containers.first(where: { $0.value.dragHandle === source })?.key,
               pane != target, let tab = workspace.tabs.first(where: { $0.layout.paneIDs.contains(pane) }),
-              tab.zoomedPane == nil, tab.layout.paneIDs.contains(target) else { return nil }
+              tab.zoomedPane == nil, let destination = try? workspace.resolvedTab(pane: target),
+              destination.zoomedPane == nil else { return nil }
+        if source.isDraggingPane {
+            guard let context = paneDragContext, context.handle === source, context.pane == pane,
+                  context.tab == tab.id, leaves[pane] === context.leaf,
+                  let sourceWindow = windows[tab.id], containers[pane]?.view.window === sourceWindow,
+                  sourceWindow.isVisible, !sourceWindow.isMiniaturized,
+                  sourceWindow.tabGroup.map({ $0.selectedWindow === sourceWindow }) ?? true,
+                  let targetView = containers[target]?.view, let window = targetView.window,
+                  window.isVisible, !window.isMiniaturized,
+                  window.tabGroup.map({ $0.selectedWindow === window }) ?? true else { return nil }
+        }
         var next = workspace
         do {
-            try next.move(pane, beside: target, direction: direction)
+            _ = try CommandRegistry.execute("pane.move", params: ["pane": .string(pane.description), "target": .string(target.description), "direction": .string(direction.rawValue)], workspace: &next)
             try validateMutationGeometry("pane.move", params: ["pane": .string(pane.description), "target": .string(target.description)], next: next, result: .object([:]))
             return next
         } catch { return nil }
@@ -1868,7 +1996,11 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     private func previewPaneMove(source: PaneDragHandle, target: PaneID, direction: Direction) {
         clearPaneMovePreviews()
         guard proposedMove(source: source, target: target, direction: direction) != nil else { return }
-        containers[target]?.dropView.showPreview(direction: direction)
+        let pane = containers.first(where: { $0.value.dragHandle === source })?.key
+        let recreates = pane.flatMap { leaves[$0] as? PluginPane }.map { plugin in
+            plugin.instance.registration.scope == .tab && (try? workspace.resolvedTab(pane: plugin.paneID).id) != (try? workspace.resolvedTab(pane: target).id)
+        } ?? false
+        containers[target]?.dropView.showPreview(direction: direction, recreatesContent: recreates)
     }
 
     @discardableResult
@@ -1877,7 +2009,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
               let tab = try? workspace.resolvedTab(pane: pane), proposedMove(source: source, target: target, direction: direction) != nil else { return false }
         do {
             _ = try call("command.run", params: ["id": .string("pane.move"), "pane": .string(pane.description), "target": .string(target.description),
-                                                "direction": .string(direction.rawValue), "expectedLayoutRevision": .string(revisions.layoutRevision(tab.id)!)])
+                                                "direction": .string(direction.rawValue), "expectedLayoutRevision": .string(revisions.layoutRevision(tab.id)!),
+                                                "expectedWorkspaceRevision": .string(revisions.revision)])
             return true
         } catch { present(error); return false }
     }
@@ -1885,23 +2018,40 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     private func makeMoveMenu(for pane: PaneID) -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
-        guard let tab = workspace.tabs.first(where: { $0.layout.paneIDs.contains(pane) }),
-              tab.zoomedPane == nil, tab.layout.paneIDs.count > 1 else {
-            let item = menu.addItem(withTitle: "Move requires another visible pane in this tab", action: nil, keyEquivalent: "")
+        guard let tab = try? workspace.resolvedTab(pane: pane), tab.zoomedPane == nil, workspace.panes.count > 1 else {
+            let item = menu.addItem(withTitle: "Unzoom and open another pane to move here", action: nil, keyEquivalent: "")
             item.isEnabled = false
             return menu
         }
-        for target in tab.layout.paneIDs where target != pane {
-            let title = containers[target]?.info.object?["title"]?.string ?? target.description
-            let item = menu.addItem(withTitle: "\(title) (\(target))", action: nil, keyEquivalent: "")
-            let submenu = NSMenu()
-            submenu.autoenablesItems = false
-            item.submenu = submenu
-            for (direction, label) in [(Direction.left, "Move to Left"), (.right, "Move to Right"), (.up, "Move Above"), (.down, "Move Below")] {
-                let choice = submenu.addItem(withTitle: label, action: #selector(movePaneFromMenu(_:)), keyEquivalent: "")
-                choice.target = self
-                choice.representedObject = ["pane": pane.description, "target": target.description, "direction": direction.rawValue]
-                choice.isEnabled = containers[pane].flatMap { proposedMove(source: $0.dragHandle, target: target, direction: direction) } != nil
+        for group in workspace.groups {
+            let destinations = workspace.tabs.filter { group.tabs.contains($0.id) && $0.layout.paneIDs.contains(where: { $0 != pane }) }
+            guard !destinations.isEmpty else { continue }
+            let heading = menu.addItem(withTitle: "Window \(group.id)", action: nil, keyEquivalent: "")
+            heading.isEnabled = false
+            for destination in destinations {
+                let targets = destination.layout.paneIDs.filter { $0 != pane }
+                guard !targets.isEmpty else { continue }
+                let tabItem = menu.addItem(withTitle: "Tab \(destination.id)\(destination.id == tab.id ? " — Current" : "")", action: nil, keyEquivalent: "")
+                let tabMenu = NSMenu()
+                tabMenu.autoenablesItems = false
+                tabItem.submenu = tabMenu
+                for target in targets {
+                    let title = containers[target]?.info.object?["title"]?.string ?? target.description
+                    let item = tabMenu.addItem(withTitle: "\(title) (\(target))", action: nil, keyEquivalent: "")
+                    let submenu = NSMenu()
+                    submenu.autoenablesItems = false
+                    item.submenu = submenu
+                    let reloads = tab.id != destination.id && (leaves[pane] as? PluginPane)?.instance.registration.scope == .tab
+                    for (direction, label) in [(Direction.left, "Move to Left"), (.right, "Move to Right"), (.up, "Move Above"), (.down, "Move Below")] {
+                        let choice = submenu.addItem(withTitle: label + (reloads ? " — Reloads Plugin" : ""), action: #selector(movePaneFromMenu(_:)), keyEquivalent: "")
+                        choice.target = self
+                        choice.representedObject = ["pane": pane.description, "tab": tab.id.description, "target": target.description,
+                            "direction": direction.rawValue, "expectedLayoutRevision": revisions.layoutRevision(tab.id)!,
+                            "expectedWorkspaceRevision": revisions.revision]
+                        choice.isEnabled = containers[pane].flatMap { proposedMove(source: $0.dragHandle, target: target, direction: direction) } != nil
+                        if !choice.isEnabled { choice.toolTip = "Destination must be unzoomed with settled layout and enough space" }
+                    }
+                }
             }
         }
         return menu
@@ -1909,11 +2059,14 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
 
     @objc private func movePaneFromMenu(_ sender: NSMenuItem) {
         guard let values = sender.representedObject as? [String: String],
-              let pane = try? PaneID(parsing: values["pane"] ?? ""),
-              let target = try? PaneID(parsing: values["target"] ?? ""),
-              let direction = Direction(rawValue: values["direction"] ?? ""),
-              let source = containers[pane]?.dragHandle else { return }
-        movePane(source: source, target: target, direction: direction)
+              (try? PaneID(parsing: values["pane"] ?? "")) != nil,
+              (try? PaneID(parsing: values["target"] ?? "")) != nil,
+              Direction(rawValue: values["direction"] ?? "") != nil else { return }
+        do {
+            var params = values.mapValues(JSONValue.string)
+            params["id"] = .string("pane.move")
+            _ = try call("command.run", params: params)
+        } catch { present(error) }
     }
 
     private func refreshTerminalTitles() {
@@ -1952,6 +2105,51 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                   containers[pane.id] === container, pane.manualTitle == rename.expectedManualTitle else { continue }
             do { try setManualPaneTitle(rename.title, for: pane.id) }
             catch { NSLog("Deferred pane-title completion rejected: %@", String(describing: error)) }
+        }
+    }
+
+    private func beginTabRename(_ params: [String: JSONValue]) throws -> JSONValue {
+        let tab = try targetTab(params)
+        let window = windows[tab.id]
+        if let reason = TabRenameController.unavailableReason(window: window, editor: tabRename) {
+            throw RPCFailure(code: APIError.unavailable, message: reason)
+        }
+        if let editor = tabRename, editor.tab == tab.id, editor.isEditing {
+            editor.selectDraft()
+        } else {
+            tabRename?.cancelForLifecycle()
+            guard let window else { throw WorkspaceError.tabNotFound(tab.id) }
+            let editor = TabRenameController(tab: tab.id, window: window, originalTitle: tab.manualTitle) { [weak self, weak window] title in
+                guard let self, let window else { throw RPCFailure(code: APIError.unavailable, message: "Rename target closed") }
+                try self.synchronizeNativeGroups()
+                guard !self.reconciling, !self.settlingNativeLayouts,
+                      self.tabRename?.isEditing == true, self.tabRename?.owner === window,
+                      self.windows[tab.id] === window,
+                      let current = self.workspace.tabs.first(where: { $0.id == tab.id }),
+                      current.manualTitle == tab.manualTitle else {
+                    throw RPCFailure(code: APIError.conflict, message: "Tab name changed; cancel and reopen Rename Tab")
+                }
+                if let reason = TabRenameController.unavailableReason(window: window, editor: self.tabRename) {
+                    throw RPCFailure(code: APIError.unavailable, message: reason)
+                }
+                _ = try self.call("command.run", params: ["id": .string("tab.title.set"), "tab": .string(tab.id.description), "title": .string(title)])
+            }
+            editor.onFinish = { [weak self, weak editor] in
+                if self?.tabRename === editor { self?.tabRename = nil }
+            }
+            tabRename = editor
+            editor.show()
+        }
+        return .object(["tabId": .string(tab.id.description), "editing": .bool(true)])
+    }
+
+    func invalidateTabRename(from previous: Workspace) {
+        guard let editor = tabRename else { return }
+        let currentGroup = previous.groups.first { $0.tabs.contains(editor.tab) }
+        let nextGroup = workspace.groups.first { $0.tabs.contains(editor.tab) }
+        if !workspace.tabs.contains(where: { $0.id == editor.tab }) || currentGroup != nextGroup
+            || (workspace.keyTabID != previous.keyTabID && workspace.keyTabID != editor.tab) {
+            editor.cancelForLifecycle()
         }
     }
 
@@ -2160,7 +2358,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         addCommands(["layouts.edit", "layouts.openWindow", "layouts.captureWindow", "plugins.reload"], to: workspaceMenu)
         workspaceMenu.addItem(.separator())
         for (title, commands) in [
-            ("Tabs", ["tab.new", "tab.close", "tab.previous", "tab.next"]),
+            ("Tabs", ["tab.new", "tab.rename", "tab.title.clear", "tab.close", "tab.previous", "tab.next"]),
             ("Browser", ["browser.back", "browser.forward", "browser.focusAddress", "browser.reload", "browser.clearSiteData", "browser.clearData"]),
             ("Split Pane", ["split.left", "split.right", "split.up", "split.down"]),
             ("Focus Pane", ["focus.left", "focus.right", "focus.up", "focus.down"]),
@@ -2183,7 +2381,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         workspaceMenu.addItem(.separator())
         addCommands(["pane.header.show", "pane.header.hide", "pane.header.toggle"], to: workspaceMenu)
         workspaceMenu.addItem(.separator())
-        addCommands(["pane.rename", "pane.copyID", "pane.close"], to: workspaceMenu)
+        addCommands(["pane.move.chooseDestination", "pane.rename", "pane.copyID", "pane.close"], to: workspaceMenu)
         workspaceMenu.addItem(.separator())
         addCommands(["config.reload"], to: workspaceMenu)
         let contributed = pluginCatalog.activeRegistrations.flatMap(\.workspaceCommands)
@@ -2360,7 +2558,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 case "pane.copyID": symbol = "doc.on.doc"; keywords = "clipboard panel identifier"
                 case "pane.header.show", "pane.header.hide", "pane.header.toggle":
                     symbol = "rectangle.topthird.inset.filled"; keywords = "panel header chrome title bar show hide toggle"
+                case "tab.rename": detail = "Tabs"; symbol = "pencil"; keywords = "name title rename"
+                case "tab.title.clear": detail = "Tabs"; symbol = "textformat"; keywords = "reset rename manual title"
                 case "pane.rename": symbol = "pencil"; keywords = "name title panel"
+                case "pane.move.chooseDestination": symbol = "arrow.up.and.down.and.arrow.left.and.right"; keywords = "move panel window tab insert"
                 case "pane.title.clear": symbol = "textformat"; keywords = "reset rename manual title"
                 case "tab.detachCurrent": detail = "Tabs"; symbol = "macwindow"; keywords = "detach move new window"
                 case "split.left": detail = "Layout"; symbol = "rectangle.lefthalf.inset.filled"; keywords = "pane panel"
@@ -2384,7 +2585,13 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                     else if command.id.hasPrefix("browser."), pane?.type.isBrowser != true { unavailable = "Focus a browser pane to use this command" }
                     else if command.id == "browser.clearSiteData", let pane,
                             (leaves[pane.id] as? BrowserPane)?.currentURL.flatMap({ try? BrowserDataRequest.siteHost($0) }) == nil { unavailable = "Open an HTTP or HTTPS site to clear its data" }
+                    else if command.id == "tab.title.clear", tab?.manualTitle == nil { unavailable = "This tab has no manual name" }
+                    else if command.id == "tab.rename" { unavailable = TabRenameController.unavailableReason(window: tab.flatMap { windows[$0.id] }, editor: tabRename) }
                     else if command.id == "pane.title.clear", pane?.manualTitle == nil { unavailable = "This pane has no manual title" }
+                    else if command.id == "pane.move.chooseDestination", let pane,
+                            !pane.headerVisible || containers[pane.id]?.view.window?.isVisible != true || tab?.zoomedPane != nil || workspace.panes.count < 2 {
+                        unavailable = "Requires a visible, unzoomed pane bar and another pane"
+                    }
                     else if command.id == "pane.rename", let pane, !pane.headerVisible { unavailable = "Show the pane bar to rename it" }
                     else if command.id == "pane.rename", let pane, containers[pane.id]?.view.window?.isVisible != true { unavailable = "Rename requires a visible pane" }
                     else if command.id == "tab.detachCurrent", let tab,
@@ -2675,12 +2882,21 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             menuItem.title = (try? targetTab([:]))?.zoomedPane == nil ? "Maximize Pane" : "Restore Pane Size"
         }
         if id.map({ CommandContract.forCommand($0).workspaceIndependent }) == true || id == "tab.new" || id?.hasPrefix("plugin.") == true { return true }
+        if id == "tab.rename", let editor = tabRename, NSApp.keyWindow === editor.window {
+            return TabRenameController.unavailableReason(window: editor.owner, editor: editor) == nil
+        }
         guard NSApp.keyWindow is WorkspaceWindow else { return false }
         if id == "plugins.reload" { return (try? targetPaneID([:])).flatMap { leaves[$0] as? PluginPane } != nil }
         if id == "browser.clearSiteData" { return focusedBrowser?.currentURL.flatMap { try? BrowserDataRequest.siteHost($0) } != nil }
         if id?.hasPrefix("browser.") == true { return focusedBrowser != nil }
         if let id, id.hasPrefix("split.") { return splitUnavailableReason(id, params: [:]) == nil }
         if id == "tab.detachCurrent", let tab = try? targetTab([:]) { return (workspace.groups.first { $0.tabs.contains(tab.id) }?.tabs.count ?? 0) > 1 }
+        if id == "tab.rename" { return TabRenameController.unavailableReason(window: (try? targetTab([:])).flatMap { windows[$0.id] }, editor: tabRename) == nil }
+        if id == "tab.title.clear" { return (try? targetTab([:]))?.manualTitle != nil }
+        if id == "pane.move.chooseDestination", let pane = try? targetPaneID([:]) {
+            return workspace.panes.first { $0.id == pane }?.headerVisible == true
+                && (try? workspace.resolvedTab(pane: pane).zoomedPane) == nil && workspace.panes.count > 1
+        }
         if id == "pane.rename", let pane = try? targetPaneID([:]) { return workspace.panes.first { $0.id == pane }?.headerVisible == true }
         if id == "pane.title.clear", let pane = try? targetPaneID([:]) { return workspace.panes.first { $0.id == pane }?.manualTitle != nil }
         return true
@@ -2689,7 +2905,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     @objc private func runMenuCommand(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
         if commandPicker?.isVisible == true, id != "command.picker" { runPickerCommand(id) }
-        else { runUserCommand(id, params: [:]) }
+        else if id == "tab.rename", let editor = tabRename, NSApp.keyWindow === editor.window {
+            runUserCommand(id, params: ["tab": .string(editor.tab.description)])
+        } else { runUserCommand(id, params: [:]) }
     }
 
     private func runUserCommand(_ id: String, params: [String: JSONValue], capturedWithoutWorkspace: Bool = false) {
