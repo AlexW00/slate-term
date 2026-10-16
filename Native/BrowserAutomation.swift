@@ -139,36 +139,62 @@ enum BrowserAutomation {
     }
     if(action==='key'){
       focus();
-      const names={enter:'Enter',tab:'Tab',escape:'Escape',space:' ',backspace:'Backspace',delete:'Delete',
+      const names={enter:'Enter',tab:'Tab',escape:'Escape',space:' ',plus:'+',backspace:'Backspace',delete:'Delete',
         home:'Home',end:'End',arrowleft:'ArrowLeft',arrowright:'ArrowRight',arrowup:'ArrowUp',arrowdown:'ArrowDown',pageup:'PageUp',pagedown:'PageDown'};
       const mods=new Set(args.modifiers),key=names[args.key]??(mods.has('shift')?args.key.toUpperCase():args.key);
       const init={key,bubbles:true,cancelable:true,composed:true,ctrlKey:mods.has('ctrl'),altKey:mods.has('alt'),shiftKey:mods.has('shift'),metaKey:mods.has('meta')};
-      let candidates=[];
+      let candidates=[],documentCandidates=[];
       if(key==='Tab'){
-        const nodes=document.querySelectorAll('a[href],button,input,select,textarea,[tabindex],[contenteditable]');
+        const nodes=document.querySelectorAll('a[href],area[href],button,input,select,textarea,summary,[tabindex],[contenteditable]');
         if(nodes.length>4000)throw new Error('Too many focus candidates');
-        candidates=Array.from(nodes).filter(e=>e.tabIndex>=0&&shown(e)&&!disabled(e)).sort((a,b)=>{
+        documentCandidates=Array.from(nodes).filter(e=>e.tabIndex>=0&&shown(e)&&!disabled(e));
+        candidates=[...documentCandidates].sort((a,b)=>{
           const ai=a.tabIndex===0?Infinity:a.tabIndex,bi=b.tabIndex===0?Infinity:b.tabIndex;return ai-bi;
         });
       }
+      const unmodified=!mods.has('ctrl')&&!mods.has('alt')&&!mods.has('meta');
+      const eligible=()=>element.isConnected&&document.activeElement===element&&!disabled(element)&&shown(element);
+      const activatable=()=>element instanceof HTMLButtonElement||element instanceof HTMLInputElement&&['button','submit','reset','checkbox','radio'].includes(element.type);
       const accepted=element.dispatchEvent(new KeyboardEvent('keydown',init));
-      let defaultAction='none';
-      // Synthetic events do not cause WebKit's editing/navigation defaults. Implement
-      // only these bounded, documented defaults; page handlers own other keys.
-      if(accepted&&element.isConnected&&document.activeElement===element&&!disabled(element)&&shown(element)&&!mods.has('ctrl')&&!mods.has('alt')&&!mods.has('meta')){
+      let defaultAction='none',released=false;
+      // Always balance a submitted press, even if a default action fails. Synthetic
+      // events have no native editing defaults beyond those explicitly handled here.
+      try {
+      if(accepted&&eligible()&&unmodified){
         if(key==='Tab'&&candidates.length){
           const index=candidates.indexOf(element),delta=mods.has('shift')?-1:1;
-          const next=candidates[(index+delta+candidates.length)%candidates.length];
-          if(next?.isConnected&&!disabled(next)&&shown(next)){next.focus();defaultAction='focus';}
-        }else if((key==='Enter'||key===' ')&&(element instanceof HTMLButtonElement||element instanceof HTMLInputElement&&['button','submit','reset','checkbox','radio'].includes(element.type))){
+          const direction=mods.has('shift')?Node.DOCUMENT_POSITION_PRECEDING:Node.DOCUMENT_POSITION_FOLLOWING;
+          const relatives=documentCandidates.filter(e=>element.compareDocumentPosition(e)&direction);
+          const next=index>=0?candidates[(index+delta+candidates.length)%candidates.length]:
+            (mods.has('shift')?relatives.at(-1)??candidates.at(-1):relatives[0]??candidates[0]);
+          if(next?.isConnected&&!disabled(next)&&shown(next)){
+            next.focus();
+            if(!next.isConnected||document.activeElement!==next)throw new Error('Tab destination did not retain focus');
+            defaultAction='focus';
+          }
+        }else if(key==='Enter'&&activatable()){
           element.click();defaultAction='activate';
         }else if(key==='Enter'&&element instanceof HTMLInputElement&&['text','search','email','url','tel','password','number'].includes(element.type)&&element.form){
-          element.form.requestSubmit();defaultAction='submit';
+          const form=element.form,controls=document.querySelectorAll('input,button');
+          if(controls.length>4000)throw new Error('Too many form controls');
+          const owned=Array.from(controls).filter(e=>e.form===form);
+          const submitter=owned.find(e=>e instanceof HTMLButtonElement&&e.type==='submit'||e instanceof HTMLInputElement&&['submit','image'].includes(e.type));
+          if(submitter){
+            if(!disabled(submitter)){submitter.click();defaultAction='submit';}
+          }else{
+            const blocking=owned.filter(e=>e instanceof HTMLInputElement&&['text','search','email','url','tel','password','number','date','time','datetime-local','month','week'].includes(e.type));
+            if(blocking.length<=1){HTMLFormElement.prototype.requestSubmit.call(form);defaultAction='submit';}
+          }
         }
       }
-      // Balance against the original element, never a newly focused sibling.
-      element.dispatchEvent(new KeyboardEvent('keyup',init));
-      return {dispatched:true,defaultPrevented:!accepted,defaultAction,synthetic:true,viewId:state.viewId,documentId:epoch};
+      } finally {
+        // Balance against the original element, never a newly focused sibling.
+        released=element.dispatchEvent(new KeyboardEvent('keyup',init));
+      }
+      if(key===' '&&accepted&&released&&eligible()&&unmodified&&activatable()){
+        actionable(element);element.click();defaultAction='activate';
+      }
+      return {dispatched:true,defaultPrevented:!accepted||!released,defaultAction,synthetic:true,viewId:state.viewId,documentId:epoch};
     }
     if(action==='check'){
       if(!(element instanceof HTMLInputElement)||!['checkbox','radio'].includes(element.type))throw new Error('Check requires a native checkbox or radio input');
@@ -180,7 +206,7 @@ enum BrowserAutomation {
       return {performed:changedState,checked:element.checked,viewId:state.viewId,documentId:epoch};
     }
     if(action==='setValue'){
-      if(!(element instanceof HTMLInputElement)||!['number','date','time','datetime-local','month','week','range'].includes(element.type))throw new Error('SetValue requires a supported typed input');
+      if(!(element instanceof HTMLInputElement)||!['number','date','time','datetime-local','range'].includes(element.type))throw new Error('SetValue requires a supported typed input');
       if(element.readOnly)throw new Error('Element is read-only');
       actionable(element);
       const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;

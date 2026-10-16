@@ -51,7 +51,7 @@ ORDER = (
     'config-cli', 'settings', 'settings-window', 'saved-layouts', 'settings-layout-close',
     'notifications', 'command-picker', 'window-recovery', 'appearance', 'palettes',
     'menu-ui', 'shell', 'web-operations', 'browser-data', 'browser-navigation',
-    'browser-profiles', 'browser', 'web', 'context', 'api-context', 'api-settings',
+    'browser-profiles', 'browser', 'web', 'context', 'api-context', 'api-settings', 'api-parity',
     'theme-api', 'agent-skills', 'welcome', 'api-negotiation', 'service-session',
     'service-commands', 'service-generation', 'background-services', 'plugin-settings-api',
     'layout-api', 'semantic-events', 'semantic-editor', 'divider-events',

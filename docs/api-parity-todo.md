@@ -1,8 +1,10 @@
 # API parity TODOs
 
-Follow-ups selected from the UI/API capability audit. These are pending tasks,
-not implemented capabilities. This document records work to plan; it does not
-change application behavior.
+Follow-ups selected from the UI/API capability audit. The first-pass tasks below
+are implemented and independently reviewed in `feature/api-parity-first-pass`,
+with focused VM verification. See [contracts](api-parity-first-pass.md) and
+[executed checks and limitations](api-extension-progress.md#first-pass-api-parity-featureapi-parity-first-pass).
+Workflow-dependent next additions remain pending; this is not a full-suite certification.
 
 Terminal mouse/selection/scrollback/clipboard API additions were declined and are
 not part of this backlog. Keep terminal clipboard consent and macOS notification
@@ -10,7 +12,7 @@ authorization boundaries unchanged.
 
 ## 1. Native window controls
 
-- [ ] Expose native window frame changes, minimize/restore, and explicit fullscreen
+- [x] Expose native window frame changes, minimize/restore, and explicit fullscreen
   state through the shared public API and applicable CLI/page/service adapters.
 
 **Why:** agents can inspect and focus windows today, but cannot arrange or enlarge
@@ -48,11 +50,11 @@ adding a separate browser-only automation path.
 
 ### First additions
 
-- [ ] Add targeted focus and bounded key/chord input for keyboard-driven plugin
+- [x] Add targeted focus and bounded key/chord input for keyboard-driven plugin
   widgets, editors, form submission, and Escape/Tab/arrow-key interactions.
-- [ ] Add explicit desired-state checkbox/radio operations with verified resulting
+- [x] Add explicit desired-state checkbox/radio operations with verified resulting
   state, rather than requiring callers to infer state and blindly toggle.
-- [ ] Extend typed input editing to useful non-text controls, starting with number,
+- [x] Extend typed input editing to useful non-text controls, starting with number,
   date/time, and range inputs. Define supported types, validation, and readback;
   do not silently broaden `fill` to arbitrary elements or file inputs.
 
@@ -90,9 +92,9 @@ first-pass requirements; scope them separately if a real workflow justifies them
 
 ## 3. Warning-suppression preference parity
 
-- [ ] Add explicit Boolean setters for close-warning and pane-type-warning
+- [x] Add explicit Boolean setters for close-warning and pane-type-warning
   suppression, using the same authoritative preference writers as native
-  confirmation checkboxes. Final public command names remain to be chosen.
+  confirmation checkboxes: `warnings.close.set` and `warnings.type.set`.
 
 ### Acceptance
 

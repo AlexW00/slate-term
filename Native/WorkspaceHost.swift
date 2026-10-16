@@ -847,7 +847,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 try browser.performCommand(id)
                 return .object([:])
             }
-            if NativeWindowAction.commands.contains(id) { return try runWindowCommand(id, params: params) }
+            if NativeWindowAction.commands.contains(id) { return try runWindowCommand(id, params: params, operation: operation) }
             if id == "window.focus" {
                 let target = try targetNativeWindow(params, focusing: true)
                 if let activate = params["activate"], case .bool = activate {} else if params["activate"] != nil { throw RPCFailure(code: -32602, message: "activate must be a boolean") }

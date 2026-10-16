@@ -34,7 +34,7 @@ public struct BrowserAction: Sendable {
             let chord = try Self.string("key", in: params, maximumBytes: 128, allowEmpty: false)
             let pieces = chord.lowercased().split(separator: "+", omittingEmptySubsequences: false).map(String.init)
             let modifiers = Array(pieces.dropLast())
-            let named = ["enter", "tab", "escape", "space", "backspace", "delete", "home", "end",
+            let named = ["enter", "tab", "escape", "space", "plus", "backspace", "delete", "home", "end",
                          "arrowleft", "arrowright", "arrowup", "arrowdown", "pageup", "pagedown"]
             guard let key = pieces.last,
                   named.contains(key) || (key.utf8.count == 1 && key.utf8.allSatisfy({ (33...126).contains($0) })),

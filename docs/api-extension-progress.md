@@ -1,5 +1,53 @@
 # API extension implementation progress
 
+## First-pass API parity (feature/api-parity-first-pass)
+
+Implemented in `~/.worktrees/local/slate-term-a42fd7a1/api-parity-first-pass`, initially
+from `60118b5`, then integrated updated main `1706a08` and its current VM inventory.
+Original checkout remains untouched. See [contracts and examples](api-parity-first-pass.md)
+and [selected backlog](api-parity-todo.md).
+
+Delivered stable-target native window frame/minimize/restore/fullscreen commands;
+guarded shared web focus, synthetic key input, checkbox/radio desired-state and
+number/date/time/datetime-local/range editing; and strict Boolean warning-suppression
+setters reusing native stores. API discovery, CLI, registered-page and service
+dispatch, docs and shipped skill are updated. Explicit window IDs remain required;
+argument-taking operations are not added as parameterless picker actions. No
+terminal mouse/selection/scrollback/clipboard additions, hover/drag, frame/shadow
+traversal, uploads, arbitrary plugin eval, permission bypasses or deployment.
+
+Independent review identified and corrected default-submitter semantics, native
+settlement reporting, negative-tabindex traversal, Space keyup cancellation,
+balanced release on error, summary tab stops, form-method shadowing and literal
+plus syntax (explicit `plus` alias). Final bounded follow-up found no remaining
+actionable issues in those corrections. Reviewer did not execute tests.
+
+Executed verification (host builds/quiet tests; all UI execution in VMPal):
+- **308 package tests**: 194 core, 81 settings, 22 IPC, 11 CLI.
+- **35 VM runner/inventory tests**, Python/fixture-JavaScript syntax and whitespace checks.
+- Final production API parity gate **passed**, including native fullscreen enter/exit,
+  frame/no-op/events/stale targets, retained terminal session, warning persistence,
+  no-op/write failure and destructive-consent separation, browser/plugin input
+  behavior/guards, and CLI/registered-page/managed-service invocation.
+  Receipt: `artifacts/vm/20261016T073612Z-f9ff407d/receipt.json`.
+- Existing **web** and **layout-api** gates passed on the final production-code
+  snapshot in `20261016T073215Z-ea37b7d6`; package/runner results are in that run too.
+  **api-settings** subsequently passed in `20261016T073454Z-fc300eb4`.
+  Only parity-fixture corrections followed those production-code checks.
+
+Earlier parity runs exposed fixture errors (echo mistaken for running state,
+unsupported optional month/week inputs, a test-helper expression syntax error,
+and restoring a private preference file without mode 0600); corrections were
+verified by the final successful gate. An earlier api-settings run completed its
+assertions but failed temporary WebKit profile deletion (`Failed to delete files
+on disk`); its failed receipt is retained, and a later gate passed. This is not a
+claim to have fixed that intermittent cleanup failure.
+
+No full-suite pass or `artifacts/verification.json` certification is claimed.
+Fullscreen failure/interruption, cross-display behavior, physical input/VoiceOver
+and exhaustive native-tab transition races remain unverified. The final documentation
+status update follows the cited stable-source receipts; it changes no implementation.
+
 Authorized scope: implement the reviewed API-extension plan iteratively with high-value tests, including post-operation lifecycle hooks (not veto hooks). Checkpoint before implementation: `2763ce9`; working tree was clean after that commit. Future capability-parity requirements live in `AGENTS.md`.
 
 ## Inline welcome (feature/inline-welcome worktree)

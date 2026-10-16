@@ -1,5 +1,7 @@
 # Agent identity, inspection and shared commands
 
+[First-pass parity](api-parity-first-pass.md) documents window frame/state commands, guarded web input additions, and warning-suppression setters shared by trusted clients.
+
 These production interfaces extend the existing [control protocol](control.md), [terminal/browser automation](automation.md) and [event journal](events.md). The complete roadmap and outstanding verification are tracked in [implementation progress](api-extension-progress.md); unimplemented roadmap items are not implied by this document.
 
 ## Discovery and identity

@@ -39,6 +39,8 @@ A plugin defaults to its declared context. Explicit terminal IDs override its te
 
 ## Shared web panes
 
+[First-pass web input](api-parity-first-pass.md#shared-web-input) adds guarded `web.focus`, `web.key`, `web.check`, and `web.setValue`, including synthetic-key limitations and typed-value validation.
+
 `api.describe.webAutomation` advertises structured automation for browser and registered-plugin panes. The canonical RPCs are `web.get`, `.snapshot`, `.click`, `.fill`, `.select`, `.scroll`, `.wait`, and `.screenshot`, shared by all trusted clients. Socket requests require an explicit pane; the CLI accepts `--pane` or a validated launching pane, not `--tab`/`--active` alone. These parameterized operations are not menu/picker actions.
 
 | Capability | Native menu / picker / shortcut | CLI / socket | Registered page |

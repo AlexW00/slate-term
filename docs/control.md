@@ -25,6 +25,8 @@ The CLI's `--cause` negotiates support and dispatches on the same handshaken con
 
 ## Discovery and methods
 
+See [first-pass parity](api-parity-first-pass.md) for native window controls, shared web focus/key/desired-state/typed-value actions, and Boolean warning-suppression setters.
+
 ```sh
 slate-term command list
 slate-term rpc workspace.get

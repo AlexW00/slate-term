@@ -99,7 +99,7 @@ slate-term windows focus --window-id window-UUID --activate
 
 List accepts `limit` (1–64, default 32) and `cursor`, with `nextCursor`, `eventCursor`, `totalWindows` and workspace revision in its envelope. Pages follow model tab order; a changed workspace revision or different query requires restarting enumeration. The envelope is capped at 256 KiB. Window get/focus require `windowId`; only focus accepts the optional Boolean `activate` (default false). Focus selects/orders the owned window and restores it if minimized; activating the application is explicit.
 
-Results include group/tab identity, selected/key/visible/minimized/fullscreen state and sampled frame/screen metadata. Frames use **screen-global bottom-left points**; they are not pane content rectangles and are not transactional geometry. OS focus/animation state may settle after the request. Geometry writes/minimize/fullscreen commands are not introduced by this slice.
+Results include group/tab identity, selected/key/visible/minimized/fullscreen state and sampled frame/screen metadata. Frames use **screen-global bottom-left points**; they are not pane content rectangles and are not transactional geometry. OS focus/animation state may settle after the request. Frame writes and minimize/restore/fullscreen setters now use the [first-pass window controls](api-parity-first-pass.md#native-windows).
 
 ## Registered page adapters
 

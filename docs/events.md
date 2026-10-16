@@ -95,6 +95,8 @@ Automation admission allows 10 mutations/second with a burst of 20 per plugin ID
 
 ## Native topics
 
+`host.window.changed` is a bounded native presentation invalidation for frame, minimization, and fullscreen callbacks. It carries `windowId`, opaque `presentationRevision`, sampled `workspaceRevision`, and native observation attribution. Read `window.get` for state. This is separate from workspace-model commits and does not imply synchronous fullscreen completion; see [window controls](api-parity-first-pass.md#native-windows).
+
 - `host.workspace.changed`: model/layout/focus/native-tab changes; read `workspace.get`/`context.get` for current state. Single-tab changes carry that tab when groups and the key tab are unchanged; cross-tab/group/key-tab changes remain broadcasts. Unfiltered/global readers still receive every committed invalidation.
 - `host.context.changed`: authenticated shell reports or effective terminal-engine metadata changes. Equal title/PWD reports and engine PWD overridden by authenticated shell context emit nothing. Engine command-finished callbacks still invalidate context even with equal results; secure-input ownership is not public context. Includes session/sequence identifiers, not the command text; read context for details.
 - `host.plugins.changed`: successful registration/unregistration or enable/disable. Payload includes `type`, `registered` and `enabled`; enable/disable/removal also carry operation attribution and workspace revisions. No-op enable/disable publishes nothing. Read `plugins.list` for current registrations and enabled state.

@@ -106,7 +106,7 @@ extension WorkspaceHost {
                 "selectorMutationGuardsRequired": .bool(true), "mainDocumentOnly": .bool(true),
                 "pendingActionsPerView": .integer(32), "pendingWebKitOperationsPerView": .integer(32), "resultByteLimit": .integer(900_000),
                 "actions": .array(["focus", "key", "check", "setValue"].map(JSONValue.string)),
-                "keyEvents": .string("syntheticWithLimitedDefaults"), "typedInputs": .array(["number", "date", "time", "datetime-local", "month", "week", "range"].map(JSONValue.string)),
+                "keyEvents": .string("syntheticWithLimitedDefaults"), "typedInputs": .array(["number", "date", "time", "datetime-local", "range"].map(JSONValue.string)),
                 "screenshot": .bool(true), "screenshotInactiveTabs": .bool(true),
                 "screenshotRequiresAttachedLayout": .bool(true), "screenshotViewportOnly": .bool(true),
                 "domRequiresVisiblePane": .bool(true), "pluginEvaluation": .bool(false)

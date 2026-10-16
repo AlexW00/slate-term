@@ -24,7 +24,7 @@ import Testing
     for key in ["", "ctrl+ctrl+a", "cmd+a", "shift+", "unknown", "enter\n", String(repeating: "a", count: 129)] {
         #expect(throws: RPCFailure.self) { try BrowserAction(kind: "key", params: ["selector": .string("input"), "key": .string(key)]) }
     }
-    for key in ["enter", "shift+tab", "ctrl+a", "ArrowDown", "escape", "space"] {
+    for key in ["enter", "shift+tab", "ctrl+a", "ArrowDown", "escape", "space", "plus", "ctrl+plus"] {
         #expect(try BrowserAction(kind: "key", params: ["selector": .string("input"), "key": .string(key)]).parameters["key"] != nil)
     }
     #expect(throws: RPCFailure.self) { try BrowserAction(kind: "setValue", params: ["selector": .string("input"), "value": .integer(1)]) }

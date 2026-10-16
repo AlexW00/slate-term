@@ -197,6 +197,8 @@ Application shortcuts run before pane input. Be careful with unmodified characte
 
 ## Close warnings
 
+[Warning preference setters](api-parity-first-pass.md#warning-preferences) provide strict Boolean `warnings.close.set` / `warnings.type.set` commands and `slate-term warnings close|type --suppressed true|false`. Existing reset commands remain supported; these preferences never waive API `force` requirements.
+
 The native termination dialog includes **Don’t ask again**. Checking it and choosing **Terminate** suppresses subsequent close/quit prompts for this app state directory, including after restart. Choosing **Cancel** does not save the checkbox. **Slate Terminal → Reset Close Warnings** restores prompting.
 
 This preference is stored privately in `state/suppress-close-warning.json`, separately from TOML and workspace restoration. Missing or unreadable preferences default to showing warnings; read errors appear in configuration status. CLI/API destructive commands still require `--force` when a process may be running, regardless of this UI preference. Pane-type replacement remains immediate; only the disabled menu explanation was removed.

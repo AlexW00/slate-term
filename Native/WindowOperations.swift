@@ -35,7 +35,7 @@ extension WorkspaceHost {
     }
 
     /// Presentation operations never rebuild the workspace or implicitly activate the app.
-    func runWindowCommand(_ id: String, params: [String: JSONValue]) throws -> JSONValue {
+    func runWindowCommand(_ id: String, params: [String: JSONValue], operation: WorkspaceOperationContext) throws -> JSONValue {
         let request = try NativeWindowAction(command: id, params: withoutAPIGuards(params))
         let target = try targetNativeWindow(["windowId": .string(request.windowID)])
         // An inactive tab is not permission to mutate another tab's presentation.
@@ -78,10 +78,20 @@ extension WorkspaceHost {
             changed = window.isMiniaturized
             if changed { window.deminiaturize(nil) }
         }
+        try operation.validateCaller()
+        guard windows[target.tab] === window else {
+            throw RPCFailure(code: APIError.conflict, message: "Native window retired during presentation; inspect before further changes")
+        }
         var result = nativeWindowInfo(window, tab: target.tab).object!
         result["accepted"] = .bool(true)
         result["changed"] = .bool(changed)
-        result["settled"] = .bool(!window.fullscreenTransitionPending && (request.fullscreen == nil || window.styleMask.contains(.fullScreen) == request.fullscreen!))
+        let matches: Bool
+        if let frame = request.frame {
+            matches = window.frame == NSRect(x: frame.x, y: frame.y, width: frame.width, height: frame.height)
+        } else if let desired = request.fullscreen {
+            matches = window.styleMask.contains(.fullScreen) == desired
+        } else { matches = window.isMiniaturized == (id == "window.minimize") }
+        result["settled"] = .bool(!window.fullscreenTransitionPending && matches)
         return .object(result)
     }
 }
