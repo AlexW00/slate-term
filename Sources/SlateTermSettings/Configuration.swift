@@ -134,6 +134,7 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
     public let restoreWorkspace: Bool
     public let keyBindings: [KeyChord: String]
     public var plugins: [String: [String: JSONValue]] = [:]
+    public var notifications = NotificationPolicy()
 
     public static let defaults = AppConfiguration(
         browser: Browser(searchURL: "https://www.google.com/search?q={query}"),
@@ -215,7 +216,7 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
             throw ConfigurationError.invalid("Invalid plugin settings namespace or settings exceed 64 KiB / 64 plugins")
         }
         return AppConfiguration(browser: try Browser.parse(raw.browser?.searchURL ?? defaults.browser.searchURL), theme: raw.appearance?.theme ?? defaults.theme, terminal: terminal,
-                                restoreWorkspace: raw.layout?.restoreWorkspace ?? defaults.restoreWorkspace, keyBindings: bindings, plugins: plugins)
+                                restoreWorkspace: raw.layout?.restoreWorkspace ?? defaults.restoreWorkspace, keyBindings: bindings, plugins: plugins, notifications: raw.notifications ?? NotificationPolicy())
     }
 
     public static func load(from url: URL) throws -> AppConfiguration {
@@ -233,6 +234,14 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
 
     public func changedKeys(from previous: AppConfiguration) -> [String] {
         var keys: [String] = []
+        let notificationValues: [(String, Bool)] = [
+            ("automatic", notifications.automatic != previous.notifications.automatic),
+            ("minimum_seconds", notifications.minimumSeconds != previous.notifications.minimumSeconds),
+            ("tools", notifications.tools != previous.notifications.tools),
+            ("banners", notifications.banners != previous.notifications.banners),
+            ("sound", notifications.sound != previous.notifications.sound),
+            ("command_details", notifications.commandDetails != previous.notifications.commandDetails)]
+        keys += notificationValues.filter(\.1).map { "notifications." + $0.0 }
         if browser != previous.browser { keys.append("browser.search_url") }
         if theme != previous.theme { keys.append("appearance.theme") }
         if keyBindings != previous.keyBindings { keys.append("keybind") }
@@ -260,11 +269,12 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
     }
 
     public func encode(to encoder: any Encoder) throws {
-        enum Keys: String, CodingKey { case appearance, terminal, layout, keybind, browser, plugins }
+        enum Keys: String, CodingKey { case appearance, terminal, layout, keybind, browser, plugins, notifications }
         var container = encoder.container(keyedBy: Keys.self)
         try container.encode(["theme": theme.rawValue], forKey: .appearance)
         try container.encode(terminal, forKey: .terminal)
         try container.encode(browser, forKey: .browser)
+        try container.encode(notifications, forKey: .notifications)
         try container.encode(plugins, forKey: .plugins)
         try container.encode(["restore_workspace": restoreWorkspace], forKey: .layout)
         try container.encode(Dictionary(uniqueKeysWithValues: keyBindings.map { ($0.key.description, $0.value) }), forKey: .keybind)
@@ -277,7 +287,8 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
         let layout: LayoutValues?
         let keybind: [String: String]?
         let plugins: TOMLTable?
-        enum Keys: String, CodingKey, CaseIterable { case appearance, terminal, layout, keybind, browser, plugins }
+        let notifications: NotificationPolicy?
+        enum Keys: String, CodingKey, CaseIterable { case appearance, terminal, layout, keybind, browser, plugins, notifications }
         init(from decoder: any Decoder) throws {
             let c = try checkedContainer(decoder, Keys.self)
             browser = try c.decodeIfPresent(BrowserValues.self, forKey: .browser)
@@ -286,6 +297,7 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
             layout = try c.decodeIfPresent(LayoutValues.self, forKey: .layout)
             keybind = try c.decodeIfPresent([String: String].self, forKey: .keybind)
             plugins = try c.decodeIfPresent(TOMLTable.self, forKey: .plugins)
+            notifications = try c.decodeIfPresent(NotificationPolicy.self, forKey: .notifications)
         }
     }
     private struct BrowserValues: Decodable {

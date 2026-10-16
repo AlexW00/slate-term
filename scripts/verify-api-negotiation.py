@@ -25,7 +25,7 @@ def exercise(capabilities, params, expected_error=None, drop_after_capabilities=
                     while not stop.is_set():
                         try:
                             peer, _ = listener.accept()
-                        except TimeoutError:
+                        except socket.timeout:
                             continue
                         connection = []
                         connections.append(connection)

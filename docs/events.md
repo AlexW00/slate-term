@@ -13,6 +13,8 @@ slate-term events poll --after CURSOR --topic 'build.*' --limit 20 --wait-millis
 
 Topics use dot-separated lowercase ASCII components beginning with a letter, followed by letters, digits, `_` or `-`; at most 128 bytes. Filters accept exact topics or a trailing namespace wildcard, such as `build.*`. Repeat `--topic` to OR filters. Omit topics to receive all events. Invalid filters are rejected, not widened.
 
+The [inline welcome](welcome.md) publishes `host.welcome.changed` after a successful persisted acknowledgement/unread/reset change. Its bounded payload is `{operationId,beforeRevision,revision,acknowledged}`, with host source and no pane/tab target. No-op operations publish nothing. Resnapshot with `welcome.get` after expiry; welcome revisions are separate from workspace revisions.
+
 ## Cursors and recovery
 
 A cursor is `<app-epoch UUID>:<sequence>`. Omitting `after` starts at the current head, not the retained beginning. `<epoch>:0` requests replay from the beginning if it is still retained.
@@ -101,6 +103,8 @@ Automation admission allows 10 mutations/second with a burst of 20 per plugin ID
 - `host.service.state.changed`: separate manual background-service state, public registration/runtime/generation identity, operation attribution and current workspace revision. See [manual services](background-services.md).
 - `host.plugin.storage.changed`: changed key, directed to the owning logical instance after successful persistence. Equal writes and deletion of an absent key neither persist nor publish; stored JSON null is distinct from deletion.
 - `host.layout.startup.failed`: saved-recipe startup failure, with bounded state, current workspace revision and original operation attribution. Command text and diagnostic messages remain outside the event; use `layouts.startupStatus`.
+
+`host.notifications.changed` is a value-free invalidation with `outstanding`; read `notifications.list/status` rather than reconstructing state from events. It does not include notification titles/bodies or command text, and inherits admitted causation where applicable. [Notification state](notifications.md) is separate from this event journal and is not persistent history.
 
 ## Workspace commit facts
 

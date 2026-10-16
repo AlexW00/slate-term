@@ -34,7 +34,7 @@ def exercise(reply=hello, overrides=None, options=(), error=None, connects=True)
                     while not stop.is_set():
                         try:
                             peer, _ = listener.accept()
-                        except TimeoutError:
+                        except socket.timeout:
                             continue
                         with peer, peer.makefile('rb') as stream:
                             peer.settimeout(2)

@@ -386,10 +386,17 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
           }),
           command:(id,params={},options={})=>call('command.run',{...params,id},options),
           settings:()=>call('settings.get'),
+          welcome:Object.freeze({
+            get:(options={})=>call('welcome.get',{},options),
+            read:(options={})=>call('command.run',{id:'welcome.read'},options),
+            unread:(options={})=>call('command.run',{id:'welcome.unread'},options),
+            reset:(options={})=>call('command.run',{id:'welcome.reset'},options)
+          }),
           appearance:Object.freeze({
             get:()=>call('appearance.get'),
             onChange:(handler,options={})=>workspace.subscribe(handler,{...options,topics:['host.appearance.changed']})
           }),
+          notifications:methodsFor('notifications.'),
           pluginSettings:Object.freeze({get:()=>call('plugins.settings.get'),patch:(operations,expectedWriteRevision,options={})=>call('plugins.settings.patch',{operations,expectedWriteRevision},options)}),
           windows:Object.freeze({
             ...methodsFor('window.'),

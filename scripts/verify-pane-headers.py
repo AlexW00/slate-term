@@ -31,6 +31,9 @@ with AppFixture('pane-headers', configuration) as app:
         time.sleep(.4)  # Capture settled rendering, not proof of operation success.
         app.rpc('debug.screenshot', path=str(ARTIFACTS / f'pane-headers-{name}.png'), **params)
 
+    # The gate requires an authenticated idle shell. Establish that prerequisite
+    # before native activation/plugin preparation can occupy the main queue.
+    eventually('initial shell prompt', lambda: inspect()['state'] == 'prompt')
     app.rpc('debug.activate', tab='t1')
     command('pane.title.set', pane='p1', title='Build')
     panel = command('split.right', pane='p1')['paneId']

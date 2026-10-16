@@ -44,7 +44,9 @@ with AppFixture('semantic-events') as app:
     eventually('registered page bridge ready', lambda: evaluate('typeof workspace === "object"'))
     identity = evaluate('workspace.plugin')
     contract = evaluate('workspace.call("api.describe")')['workspaceCommit']
-    assert contract['version'] == 1 and set(contract['additionalMethods']) == {'plugins.unregister', 'layouts.open'}
+    assert contract['version'] == 1 and set(contract['additionalMethods']) == {
+        'plugins.unregister', 'plugins.enable', 'plugins.disable', 'layouts.open'
+    }, contract
     start = head()
     page = evaluate('workspace.panes.setTitle("private semantic title")')
     emitted = [e for e in facts(start) if e['payload'].get('operationId') == page['operationId']]

@@ -29,6 +29,16 @@ final class NavigationCallbacks: NSObject, WKNavigationDelegate {
     }
 }
 
+@MainActor
+private final class BrowserNavigationApplication: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        Task { @MainActor in
+            await BrowserNavigationChecks.runChecks()
+            exit(0)
+        }
+    }
+}
+
 @main
 @MainActor
 struct BrowserNavigationChecks {
@@ -254,8 +264,17 @@ struct BrowserNavigationChecks {
         try require(pane.info.object?["type"] == .string(mode.identifier) && pane.info.object?["persistent"] == .bool(mode == .browser), "Local navigation changed the browser mode/store")
         print("PASS \(mode.identifier): local HTML, relative CSS/JS/image/video, standalone PNG/MP4, links/popups, history/reload, native address, recipe and bridge isolation")
     }
-    static func main() async {
-        NSApplication.shared.setActivationPolicy(.prohibited)
+    static func main() {
+        // Real WebKit navigation needs AppKit's launched application/run loop,
+        // not only the dispatch loop supplied by an async command-line main.
+        let app = NSApplication.shared
+        let delegate = BrowserNavigationApplication()
+        app.delegate = delegate
+        app.setActivationPolicy(.prohibited)
+        app.run()
+        withExtendedLifetime(delegate) {}
+    }
+    static func runChecks() async {
         do {
             if CommandLine.arguments[1] == "--remove-profile" {
                 // Run only after the owning fixture exits: AppKit/WebKit can retain

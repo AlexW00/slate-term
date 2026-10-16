@@ -144,8 +144,12 @@ with tempfile.TemporaryDirectory(prefix='slate-picker-', dir='/tmp') as temporar
             cli('tabs', 'close', '--tab', other, '--force')
             activate_workspace()
             rpc('debug.key', chord='cmd+k')
-            picker(query='browser')
-            assert picker()['results'] == [], 'Browser commands must be hidden for terminals'
+            state = picker(query='browser')
+            assert [r['id'] for r in state['results']] == ['browser.clearData'], state
+            assert state['results'][0]['enabled'], 'App-wide browser data clearing remains available from terminals'
+            # Pane-specific browser actions are unavailable, unlike the global profile command.
+            state = picker(query='reload page')
+            assert state['results'] == [], 'Browser page commands must be hidden for terminals'
             capture('command-picker-unavailable.png')
             key('return')
             assert picker()['visible'], 'Empty results must not execute or close'

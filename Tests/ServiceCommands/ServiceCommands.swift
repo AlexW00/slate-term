@@ -5,6 +5,7 @@ import SlateTermCore
 @main
 @MainActor
 struct ServiceCommandsTest {
+    static let python = ProcessInfo.processInfo.environment["SLATE_TEST_PYTHON"] ?? ""
     struct Failure: Error { let message: String }
     final class Lifetime { var alive = true }
     static func require(_ value: Bool, _ message: String) throws {
@@ -106,6 +107,7 @@ struct ServiceCommandsTest {
     }
 
     static func main() async throws {
+        try require(FileManager.default.isExecutableFile(atPath: python), "Run the gate script with SLATE_TEST_PYTHON set to its runtime interpreter")
         let cli = CommandLine.arguments[1]
         let owner = try ServiceIdentity(appInstanceID: "app", pluginID: "controller", serviceID: "runtime", generation: "g1")
         let successor = try ServiceIdentity(appInstanceID: "app", pluginID: "controller", serviceID: "runtime", generation: "g2")
@@ -189,7 +191,7 @@ struct ServiceCommandsTest {
         print('environment verified')
         """
         let commands: [[String: Any]] = ["owned", "admin"].map { id in
-            ["id": id, "title": id, "executable": "/usr/bin/python3", "arguments": ["-c", script],
+            ["id": id, "title": id, "executable": python, "arguments": ["-c", script],
              "environment": ["SLATE_TERM_SERVICE_TOKEN": "poison", "SLATE_TERM_SERVICE_PLUGIN_ID": "attacker", "SLATE_TERM_SOCKET": "/bad"]]
         }
         let plugin = try registration(commands)

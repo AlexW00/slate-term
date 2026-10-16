@@ -5,7 +5,7 @@ extension ServiceGenerationTest {
     static func managerLifecycle(cli: String) async throws {
         let script = "import os,subprocess,time; subprocess.run([os.environ['SLATE_TERM_CLI'],'rpc','service.ready','--params','{\"version\":1}'],check=True); print('service-output',flush=True); time.sleep(20)"
         let registration = try JSONDecoder().decode(PluginRegistration.self, from: JSONSerialization.data(withJSONObject: [
-            "id": "managed", "title": "Managed", "service": ["executable": "/usr/bin/python3", "arguments": ["-c", script], "readyTimeoutSeconds": 5]
+            "id": "managed", "title": "Managed", "service": ["executable": python, "arguments": ["-c", script], "readyTimeoutSeconds": 5]
         ]))
         var catalog = [registration]
         var rejectPublication = true

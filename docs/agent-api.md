@@ -65,6 +65,10 @@ These operations reuse the native Settings writer, validation, palette preparati
 
 Application configuration writes, appearance, palette import and font-default commands are available to every trusted client through the same API and `command.run` route. Existing `workspace.command('config.reload')` remains compatible. Trust is established at the registered-origin/main-frame/document or same-user transport boundary; this is not an OS sandbox.
 
+## Notifications
+
+`notifications.post/list/dismiss/status` are shared trusted-client operations, also exposed as `workspace.notifications.*` and `slate-term notify` / `slate-term notifications …`. Posts capture the original content lifetime and never request OS permission. Replies distinguish native submission from policy/authorization suppression; neither proves display. Records and unread state are bounded/in-memory. `notifications.next` and `notifications.open` commands navigate without retargeting stale sessions. See [notification contracts, defaults and bounds](notifications.md).
+
 ## Own-plugin settings
 
 ```js

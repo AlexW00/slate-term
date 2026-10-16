@@ -100,7 +100,10 @@ with tempfile.TemporaryDirectory(prefix='slate-menu-', dir='/tmp') as temporary:
                     else:
                         if item.get('command') in {'layouts.edit', 'layouts.openWindow', 'layouts.captureWindow', 'plugins.reload',
                                                    'pane.header.show', 'pane.header.hide', 'pane.header.toggle',
-                                                   'pane.rename', 'pane.copyID', 'appearance.auto', 'appearance.light', 'appearance.dark',
+                                                   'pane.rename', 'pane.copyID', 'pane.move.chooseDestination', 'tab.rename', 'tab.title.clear', 'appearance.auto', 'appearance.light', 'appearance.dark',
+                                                   'notifications.next', 'notifications.open', 'notifications.settings',
+                                                   'welcome.read', 'welcome.unread', 'welcome.reset',
+                                                   'browser.clearData', 'browser.clearSiteData',
                                                    'terminal.font.increase', 'terminal.font.decrease', 'terminal.font.reset'}:
                             assert item['key'] == '', 'This action intentionally has no default shortcut'
                             continue

@@ -22,6 +22,96 @@ spec.loader.exec_module(runner)
 
 
 class VMRunnerTests(unittest.TestCase):
+    def test_host_build_does_not_adopt_shared_sdk_services(self):
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(runner, 'ROOT', Path(temporary)), \
+                mock.patch.object(runner, 'capture_owned') as capture, mock.patch.object(runner, 'cleanup_apps') as cleanup:
+            self.assertEqual(runner.run_gate([sys.executable, '-c', 'pass'], Path(temporary) / 'build.log', 5,
+                                             track_descendants=False), 0)
+            capture.assert_not_called()
+            cleanup.assert_not_called()
+
+    def test_host_build_timeout_still_stops_its_process_group(self):
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(runner, 'ROOT', Path(temporary)), \
+                mock.patch.object(runner, 'capture_owned') as capture:
+            self.assertEqual(runner.run_gate([sys.executable, '-c', 'import time; time.sleep(30)'],
+                                             Path(temporary) / 'build.log', .1, track_descendants=False), 124)
+            capture.assert_not_called()
+
+    def test_full_certificate_is_withheld_after_cleanup_cancellation(self):
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(runner, 'ROOT', Path(temporary)), \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            root = Path(temporary)
+            (root / 'artifacts').mkdir()
+            receipt = {'exitCode': 0, '_fullCertificate': {'checks': ['gate']}}
+            with runner.finalization_guard(receipt, root, lambda: False):
+                os.kill(os.getpid(), signal.SIGTERM)
+            self.assertEqual(receipt['exitCode'], 143)
+            self.assertFalse((root / 'artifacts/verification.json').exists())
+            self.assertNotIn('PASS complete suite', output.getvalue())
+            self.assertNotIn('_fullCertificate', json.loads((root / 'receipt.json').read_text()))
+
+    def test_full_certificate_is_withdrawn_after_publication_cancellation(self):
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(runner, 'ROOT', Path(temporary)), \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            root = Path(temporary)
+            (root / 'artifacts').mkdir()
+            original_replace = Path.replace
+            def replace(path, destination):
+                result = original_replace(path, destination)
+                if Path(destination).name == 'verification.json':
+                    os.kill(os.getpid(), signal.SIGTERM)
+                return result
+            receipt = {'exitCode': 0, '_fullCertificate': {'checks': ['gate']}}
+            with mock.patch.object(Path, 'replace', replace), runner.finalization_guard(receipt, root, lambda: False):
+                pass
+            self.assertEqual(receipt['exitCode'], 143)
+            self.assertFalse((root / 'artifacts/verification.json').exists())
+            self.assertFalse((root / 'artifacts/verification-checks.txt').exists())
+            self.assertNotIn('PASS complete suite', output.getvalue())
+
+    def test_full_certificate_is_withdrawn_after_publication_io_failure(self):
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(runner, 'ROOT', Path(temporary)), \
+                contextlib.redirect_stdout(io.StringIO()):
+            root = Path(temporary)
+            (root / 'artifacts').mkdir()
+            original_write = Path.write_text
+            def write(path, *args, **kwargs):
+                if path.name == 'verification-checks.txt':
+                    raise OSError('injected publication failure')
+                return original_write(path, *args, **kwargs)
+            receipt = {'exitCode': 0, '_fullCertificate': {'checks': ['gate']}}
+            with mock.patch.object(Path, 'write_text', write), runner.finalization_guard(receipt, root, lambda: False):
+                pass
+            self.assertEqual(receipt['exitCode'], 1)
+            self.assertFalse((root / 'artifacts/verification.json').exists())
+            self.assertEqual(receipt['finalizationError'], 'injected publication failure')
+
+    def test_full_certificate_commits_after_successful_finalization(self):
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(runner, 'ROOT', Path(temporary)), \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            root = Path(temporary)
+            (root / 'artifacts').mkdir()
+            receipt = {'exitCode': 0, '_fullCertificate': {'checks': ['gate']}}
+            with runner.finalization_guard(receipt, root, lambda: False):
+                pass
+            self.assertEqual(receipt['exitCode'], 0)
+            self.assertEqual(json.loads((root / 'artifacts/verification.json').read_text())['checks'], ['gate'])
+            self.assertIn('PASS complete suite: all 1 inventory gates', output.getvalue())
+
+    def test_layout_capture_requires_exact_usable_display_clamp(self):
+        source = ast.parse((REPO / 'scripts/verify-saved-layouts.py').read_text())
+        function = next(node for node in source.body if isinstance(node, ast.FunctionDef) and node.name == 'expected_content_size')
+        namespace = {}
+        exec(compile(ast.Module(body=[function], type_ignores=[]), '<layout-fixture>', 'exec'), namespace)
+        expected = namespace['expected_content_size']
+        frame = {'maximumVisibleContentWidth': 1249, 'maximumVisibleContentHeight': 672}
+        self.assertEqual(expected(frame, (1060, 680)), (1060, 672))
+        self.assertEqual(expected(frame, (1000, 560)), (1000, 560))
+        self.assertEqual(expected(dict(frame, maximumVisibleContentHeight=900), (1060, 680)), (1060, 680))
+        for changes in [{'maximumVisibleContentWidth': 1059}, {'maximumVisibleContentHeight': 559}]:
+            with self.assertRaises(AssertionError):
+                expected(dict(frame, **changes), (1060, 680))
+
     def test_list_is_side_effect_free(self):
         args = argparse.Namespace(list=True, tests=[])
         with mock.patch.object(runner, 'checked') as execute, contextlib.redirect_stdout(io.StringIO()) as output:
@@ -35,7 +125,7 @@ class VMRunnerTests(unittest.TestCase):
     def test_unknown_test_never_starts_vm(self):
         args = argparse.Namespace(list=False, tests=['not-a-test'])
         with mock.patch.object(runner, 'checked') as execute:
-            with self.assertRaisesRegex(SystemExit, 'Unknown tests'):
+            with self.assertRaisesRegex(SystemExit, 'Unknown test'):
                 runner.host_main(args)
         execute.assert_not_called()
 
@@ -175,6 +265,12 @@ class VMRunnerTests(unittest.TestCase):
                 root = Path(temporary)
                 (root / 'scripts').mkdir()
                 shutil.copy2(REPO / 'scripts' / script, root / 'scripts' / script)
+                shutil.copy2(REPO / 'scripts/native-gate.sh', root / 'scripts/native-gate.sh')
+                for relative in ['Tests/TerminalRuns/TerminalRuns.swift', 'Native/WorkspaceWindow.swift',
+                                 'Tests/TabOverview/TabOverview.swift']:
+                    path = root / relative
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text('// fake compiler input\n')
                 fake_bin = root / 'fake-bin'
                 fake_bin.mkdir()
                 marker = root / 'test-was-executed'
@@ -190,6 +286,13 @@ class VMRunnerTests(unittest.TestCase):
                 swift.chmod(0o755)
                 (root / '.build/fake').mkdir(parents=True)
                 (root / '.build/fake/SlateTermSettings.o').touch()
+                cli = root / '.build/fake/slate-term'
+                cli.write_text('#!/bin/sh\nprintf launched >> ' + str(marker) + '\n')
+                cli.chmod(0o755)
+                for name, message in [('git', 'fixture-commit'), ('xcrun', 'fixture Swift version')]:
+                    tool = fake_bin / name
+                    tool.write_text('#!/bin/sh\necho ' + message + '\n')
+                    tool.chmod(0o755)
                 framework = root / '.build/bootstrap/ghostty/macos/GhosttyKit.xcframework/macos-arm64'
                 framework.mkdir(parents=True)
                 (framework / 'libghostty-internal.a').touch()
@@ -232,9 +335,19 @@ class VMRunnerTests(unittest.TestCase):
             if cancelled:
                 guest_process.wait.side_effect = [runner.Interrupted(signal.SIGTERM), 130]
                 guest_process.poll.return_value = None
-            hashes = (mock.patch.object(runner, 'source_hashes', side_effect=[{'file': 'old'}, {'file': 'new'}])
+            hash_calls = []
+            def changed_hashes(_files):
+                hash_calls.append(1)
+                return {'file': 'old' if len(hash_calls) == 1 else 'new'}
+            hashes = (mock.patch.object(runner, 'source_hashes', side_effect=changed_hashes)
                       if source_changes else contextlib.nullcontext())
+            def prepare(command, _log, _timeout, **kwargs):
+                calls.append((command, kwargs))
+                return 0
             with hashes, mock.patch.object(runner, 'ROOT', root), \
+                    mock.patch.object(runner, 'validate'), \
+                    mock.patch.object(runner, 'run_gate', side_effect=prepare), \
+                    mock.patch('vm_test_bundle.stage_products', return_value=({}, {})), \
                     mock.patch.object(runner, 'gates', return_value={'text-checking': ['bash', 'scripts/verify-text-checking.sh']}), \
                     mock.patch.object(runner, 'source_files', return_value=[]), \
                     mock.patch.object(runner, 'checked', side_effect=execute), \

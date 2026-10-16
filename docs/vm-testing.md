@@ -1,56 +1,53 @@
-# UI tests in VMPal
+# Tests in VMPal
 
 Run from the repository root:
 
 ```sh
-python3 scripts/verify-vm.py --list
-python3 scripts/verify-vm.py terminal text-checking browser
-python3 scripts/verify-vm.py --vm slate-term browser
+python3 scripts/verify-vm.py --list                  # Discover every gate
+python3 scripts/verify-vm.py terminal browser        # Select gates
+python3 scripts/verify-vm.py --vm slate-term context # Choose a prepared VM
+bash scripts/verify-all.sh                          # Complete suite
+# Equivalent: python3 scripts/verify-vm.py --all
 ```
 
-Names select existing test gates; no arguments only lists them. The runner **builds on the host but executes UI tests only in the VM**. It never falls back to host execution or compiles in the guest. Quiet package/static tests can still run on the host.
+No selection only lists tests; it does not build or launch anything. `scripts/verification_gates.py` is the shared inventory for selection, full execution and completeness checks: **79 invocations**, including six host checks, all 19 native recipes and three separate app iterations. `app` aliases `app-1`; `--all` includes `app-1`, `app-2` and `app-3`. Unregistered verification scripts fail inventory validation rather than being silently omitted.
 
-## Prepared environment
+**Build on the host; execute native/UI tests sequentially only in the VM.** The six host-classified gates are engine build, package tests, runner tests, mutation checks, app build and whitespace. There is no guest compilation or host GUI fallback. Direct native shell scripts normally compile and execute on the same machine; use the VM runner instead.
 
-- VMPal installed on the host; no global CLI installation is needed. The bundled helper is used when `vmpal` is not on PATH. `--vmpal` overrides it.
-- The `slate-term` macOS VM, signed in and unlocked, with VMPal Tools agent control enabled. `--vm` or `SLATE_TEST_VM` selects another prepared VM.
-- **Inside the guest**, VMPal Tools has Screen & System Audio Recording permission. This requires user approval once; host permission is separate.
-- Guest execution runtime at `~/Developer/slate-vm/runtime/bin`: Python 3.9+, Node and tmux. This VM has a copied, relocatable runtime; it does not require guest Xcode. A missing runtime fails explicitly rather than installing tools or falling back.
-- Host Xcode/Metal tools and the pinned Ghostty build dependencies. Existing incremental build caches are reused.
+## Prerequisites
 
-Validation used macOS 27.0.1 with **2 CPUs and 4 GB RAM**, without increasing its allocation. The runner starts/resumes the VM in background mode and keeps its virtual display awake during tests. Keep the VM window hidden if you do not want to see its desktop; closing it may suspend the VM. The runner leaves the VM running afterward.
+- Host VMPal and Xcode/Metal tools, plus pinned Ghostty build dependencies. Existing host build caches are reused. The runner uses VMPal's bundled helper without a global CLI installation; `--vmpal` overrides it.
+- A signed-in, unlocked macOS VM with VMPal Tools agent control enabled. Default: `slate-term`; override with `--vm` or `SLATE_TEST_VM`.
+- **Inside the guest**, VMPal Tools needs Screen & System Audio Recording permission. The user approves this once; host permission is separate.
+- Execution runtime at `~/Developer/slate-vm/runtime/bin`: Python 3.9+, Node and tmux. The prepared VM uses a copied relocatable runtime, not guest Xcode. A missing runtime fails explicitly instead of installing development tools.
 
-## What gets transferred
+Execution has been exercised on macOS 27.0.1 with **two CPUs and 4 GB RAM**. The runner starts/resumes the VM in background mode and keeps its virtual display awake. Its window can remain hidden; closing it may suspend the VM. The VM remains running afterward.
 
-The current app/native test binaries, resources, test scripts and fixtures travel in a temporary bundle. Small source inputs are included for fixture use and provenance, **not guest compilation**; host build caches and the development toolchain are not transferred. Source changes during build/packaging abort the run. Source/binary hashes are checked again in the guest.
+## Build and transfer
 
-Python gates are selectable except the compilation-based model mutation gate. Native shell gates currently ported are `terminal`, `text-checking`, and `browser-navigation`. The `web` gate receives a precompiled screenshot pixel checker. Other shell gates and the complete `verify-all.sh` sequence are not ported; do not execute that sequence on the host to compensate.
+Selected native recipes compile with `SLATE_VM_BUILD_ONLY=1`; their packaged executables run with `SLATE_VM_PREBUILT=1`. The bundle includes required app/CLI/native products, relocatable local libraries, Ghostty resources, scripts and fixtures. Compiler modules, debug symbols, build caches and the development toolchain are excluded. Compiler commands are blocked in the guest.
 
-## Results and failures
+Source inputs travel for fixtures and provenance, not compilation. Source changes during the run invalidate completion. Separate host-product and transferred-product hashes bind receipts to actual binaries; guest verification checks transferred source/product hashes before starting tests. Native dependencies must resolve to packaged gate-local libraries or system libraries.
 
-Each run prints its host output directory under `artifacts/vm/<run-id>/`:
+## Evidence and failures
 
-- `host-build.log`, `vm-exec.log`, per-test logs and screenshots.
-- `receipt.json`: selected VM/tests, source and artifact hashes, guest directory, exit/cleanup/retrieval status.
-- `results.json`: guest gate statuses when the guest runner completes normally.
+Every invocation prints `artifacts/vm/<run-id>/` containing:
 
-Tests run sequentially under a VM-wide lock. A failed gate stays failed; a timeout returns **124**. SIGINT/SIGTERM cancellation is forwarded to VMPal, followed by a separate guest teardown check. The runner monitors owned process descendants and verifies their identities during cleanup; this is not containment for deliberately daemonizing or malicious code.
+- `receipt.json`: selection, source/binary hashes, host and guest statuses, completion, exit and cleanup/retrieval information.
+- `host-build.log` and host-gate logs; `vm-exec.log` and individual VM-gate logs.
+- `results.json`: checkpointed guest statuses, including partial results when available.
+- `gates/<gate>/`: changed per-gate artifacts, preserving the three app iterations separately.
 
-A forced cancellation may kill the guest runner before it writes `results.json`. The host still records a nonzero receipt and attempts to retrieve partial artifacts. Guest files are retained if retrieval/cleanup is incomplete, or with `--keep-guest`. If teardown cannot be confirmed, the lock at `/tmp/slate-ui-tests.lock` is retained. Inspect the receipt and owned guest processes before recovery; never break another run's lock automatically. `--timeout` sets the per-test deadline (600 seconds by default).
+`completed` means every selected gate has a status, **not** that every gate passed. Check `exitCode` and individual results. Failures remain failures; subsequent gates normally continue so the run collects their outcomes. Timeouts return **124**; SIGINT/SIGTERM cancellation returns **130/143** with bounded owned teardown and a receipt. Host compiler jobs use process-group cancellation without adopting persistent shared SDK build services as test processes.
 
-## Proven coverage and current limits
+Only `--all` can publish `artifacts/verification.json` and `verification-checks.txt`, after every inventory gate succeeds, evidence retrieval/teardown succeeds, and sources/binaries still match. Cancellation or finalization failure withholds/withdraws that certificate. Starting another full run archives the preceding certificate/check list in its run directory. A selected pass is not full-suite certification.
 
-The actual runner passed `terminal`, `text-checking`, and `browser`, including real Ghostty/Metal rendering, native tabs/reparenting/input/cleanup, native text editing, and production WebKit navigation/JS/snapshots/store isolation. Captures were retrieved and the terminal pixels inspected. Evidence: `artifacts/vm/20261016T031205Z-55d6457a/`. A deliberate browser timeout returned 124; an actual host-runner SIGTERM returned 143, confirmed guest teardown and released the lock. Those receipts are `20261016T031250Z-02ce1790` and `20261016T031305Z-f737e0a2`.
+VM execution holds `/tmp/slate-ui-tests.lock`. Cleanup tracks owned process identities/descendants, not arbitrary processes with similar names. Failed runs preserve guest bundle/ownership evidence; `--keep-guest` also preserves successful runs. Incomplete retrieval or teardown is reported, and unconfirmed teardown retains the lock. Inspect the receipt and owned guest processes before recovery; never automatically break another run's lock. Process tracking is not containment against malicious same-user code.
 
-The follow-up run `artifacts/vm/20261016T040246Z-61937331/` passed **both `browser-navigation` and `command-picker`** through the same host-build/guest-run workflow:
-
-- `browser-navigation`: the standalone fixture now starts WebKit checks after AppKit finishes launching and runs its real application event loop. The existing five-second assertions and overall watchdog are unchanged. Delayed welcome/recipe callbacks, RPC/page supersession, cancellation, history, local HTML/CSS/JS/images/video in both browser modes, native address/recipe loading, bridge isolation and persistent-profile cleanup all passed.
-- `command-picker`: the fixture now distinguishes the globally available `browser.clearData` action from pane-specific browser actions. It explicitly requires global clearing to remain enabled from a terminal, then checks an empty `reload page` query and verifies Return cannot execute it. The full picker gate passed, including focus/targets, mouse/keyboard execution, shortcuts, catalog/busy states, themes and windowless use.
-
-These were fixture corrections, not product-behavior changes or relaxed deadlines. This is **not a full-suite pass**: other listed gates remain selectable but are not certified by these focused runs, and unported shell gates still need a host-build/prebuilt-guest split.
-
-Window-free runner checks:
+`--timeout` sets each VM gate's deadline (600 seconds by default). Quiet runner regressions can also run directly on the host:
 
 ```sh
 python3 -m unittest discover -s Tests/VMRunner -v
 ```
+
+Historical focused evidence includes successful terminal/text-checking/browser execution (`20261016T031205Z-55d6457a`), actual timeout/cancellation receipts (`20261016T031250Z-02ce1790`, `20261016T031305Z-f737e0a2`), and browser-navigation/command-picker (`20261016T040246Z-61937331`). These establish those particular runs, not a fresh full-suite pass. Use the current full certificate and its linked run receipt for current-source verification.

@@ -124,7 +124,13 @@ http.server.ThreadingHTTPServer(('127.0.0.1',port),Handler).serve_forever()
 
                 register("shared", scope="global", mode="ignore")
                 shared = open_plugin("shared")
-                eventually("Managed global service", lambda: loaded("shared"))
+                try:
+                    eventually("Managed global service", lambda: loaded("shared"))
+                except AssertionError:
+                    print('SERVICE_STARTUP_DIAGNOSTIC', statuses('shared'), flush=True)
+                    for item in statuses('shared'):
+                        print('SERVICE_STARTUP_LOG', cli('plugins', 'logs', '--instance-id', item['instanceId']), flush=True)
+                    raise
                 eventually("Managed server bridge", lambda: evaluate(shared, "window.fixtureReady===true"))
                 evaluate(shared, "(window.historyMarker='original',location.href='/second',true)")
                 eventually("same-origin second document", lambda: evaluate(shared, "location.pathname==='/second' && window.fixtureReady===true"))

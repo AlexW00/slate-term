@@ -199,6 +199,8 @@ A backend can run its own local tools/control protocols, interpret their results
 
 For example, tmux users can implement discovery, control-mode clients, inner-pane capture and prompt interpretation entirely in an extension. Core does not recognize tmux commands or infer its state. `scripts/verify-extension-interop.py` exercises such an external adapter against a private test server.
 
+Plugins and services can send attention/completion notifications with the shared `notifications.post/list/dismiss/status` API; registered pages have `workspace.notifications.*` helpers and executable tools use `slate-term notify`. Requests obey user focus/sound/permission policy and capture the original source lifetime. See [notifications](notifications.md) for bounds, coalescing, unread state and safe source navigation. Emitting a custom event does not implicitly create a desktop notification.
+
 ## Scope and lifetime
 
 - `pane` (default): separate instance for each pane, stopped when its view is removed.
@@ -210,6 +212,8 @@ Cross-tab/window pane movement retains pane/global-scoped views, documents and i
 Every newly created pane has a fresh web view. Logical instances share their own ephemeral WebKit data store and private key/value store. Data files persist across app launches; browser/DOM history is not restored. Pane and tab IDs determine persisted storage scope.
 
 ## Page API
+
+`workspace.welcome.get/read/unread/reset(options)` exposes the global [inline welcome](welcome.md) through the shared API. Reading never acknowledges it; `unread` and its `reset` alias re-enable future terminal sessions without replacing existing content. Options accept `cause`/`signal`; native services use the same `welcome.get` and `command.run` operations.
 
 The main frame receives `window.workspace`. Native access checks the current view, main frame, registered origin and document lifetime. Other-origin navigation is blocked.
 

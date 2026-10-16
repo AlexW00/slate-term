@@ -2,6 +2,10 @@
 
 All methods use the same local JSON-RPC interface as the bundled CLI. Pass a pane explicitly when targeting a particular surface. See [the control protocol](control.md) and [plugins](plugins.md) for connection and trust boundaries.
 
+## Inline welcome
+
+`slate-term welcome` reads current copy without acknowledging it. `welcome --read` persists acknowledgement; `welcome --unread` (alias `--reset`) re-enables the native welcome in future terminal sessions. Shared API, page/service parity, persistence and error details are in [Inline welcome](welcome.md). It is shell-independent native content, not part of `terminal.capture` or terminal scrollback.
+
 ## Terminals
 
 ```sh

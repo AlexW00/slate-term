@@ -19,6 +19,7 @@ HTML = '''<!doctype html><title>Shared web fixture</title>
 
 navigation_gates = {path: (threading.Event(), threading.Event()) for path in ['/held-a', '/held-b']}
 
+
 def screenshot_checker():
     prebuilt = os.environ.get('SLATE_VM_SCREENSHOT_CHECK')
     return [prebuilt] if prebuilt else ['swift', str(ROOT / 'Tests/WebOperations/CheckScreenshot.swift')]
