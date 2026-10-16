@@ -116,14 +116,12 @@ extension WorkspaceHost {
             default: size = .number(AppConfiguration.defaults.terminal.fontSize)
             }
             return try writeConfiguration(["terminal.font_size": size], expected: params["expectedSourceRevision"]?.string, operation: operation)
-        case "warnings.close.reset":
-            try settings.setSuppressCloseWarning(false)
+        case "warnings.close.reset", "warnings.close.set", "warnings.type.reset", "warnings.type.set":
+            let value = try WarningSuppression.value(command: id, params: withoutAPIGuards(params))
+            if id.hasPrefix("warnings.close.") { try settings.setSuppressCloseWarning(value) }
+            else { try settings.setSuppressTypeWarning(value) }
             updateStatusMenu()
-            return .object(["suppressed": .bool(false)])
-        case "warnings.type.reset":
-            try settings.setSuppressTypeWarning(false)
-            updateStatusMenu()
-            return .object(["suppressed": .bool(false)])
+            return .object(["suppressed": .bool(value)])
         default: return nil
         }
     }

@@ -135,6 +135,12 @@ extension WorkspaceHost {
                         "nativeWindowNumber": .integer(window.windowNumber), "visible": .bool(window.isVisible),
                         "selected": .bool(window.tabGroup?.selectedWindow === window), "key": .bool(window.isKeyWindow),
                         "minimized": .bool(window.isMiniaturized), "fullscreen": .bool(window.styleMask.contains(.fullScreen)),
+                        "presentationRevision": .string(window.presentationRevision),
+                        "fullscreenTransition": .string(window.fullscreenTransition),
+                        "fullscreenTransitionPending": .bool(window.fullscreenTransitionPending),
+                        "visibleScreenFrame": window.screen.map { screen in .object([
+                            "x": .number(screen.visibleFrame.minX), "y": .number(screen.visibleFrame.minY),
+                            "width": .number(screen.visibleFrame.width), "height": .number(screen.visibleFrame.height)]) } ?? .null,
                         "screenName": window.screen.map { .string(String($0.localizedName.prefix(512))) } ?? .null,
                         "frame": .object(["x": .number(frame.minX), "y": .number(frame.minY), "width": .number(frame.width), "height": .number(frame.height),
                                           "coordinateSpace": .string("screen-global-bottom-left-points")])])

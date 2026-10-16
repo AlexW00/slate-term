@@ -26,6 +26,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
     case eventsHead = "events.head", eventsPoll = "events.poll", eventsEmit = "events.emit"
     case webGet = "web.get", webSnapshot = "web.snapshot", webClick = "web.click", webFill = "web.fill"
     case webSelect = "web.select", webScroll = "web.scroll", webWait = "web.wait", webScreenshot = "web.screenshot"
+    case webFocus = "web.focus", webKey = "web.key", webCheck = "web.check", webSetValue = "web.setValue"
     case browserClearData = "browser.clearData", browserClearSiteData = "browser.clearSiteData"
     case browserGet = "browser.get", browserNavigate = "browser.navigate", browserSnapshot = "browser.snapshot"
     case browserClick = "browser.click", browserFill = "browser.fill", browserSelect = "browser.select"
@@ -46,7 +47,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
         case .terminalSend, .terminalKey, .terminalCapture, .terminalRun, .terminalWait: .terminal
         case .browserGet, .browserNavigate, .browserSnapshot, .browserClick, .browserFill, .browserSelect,
              .browserScroll, .browserWait, .browserEval, .browserScreenshot, .browserClearData, .browserClearSiteData: .browser
-        case .webGet, .webSnapshot, .webClick, .webFill, .webSelect, .webScroll, .webWait, .webScreenshot: .web
+        case .webGet, .webSnapshot, .webClick, .webFill, .webSelect, .webScroll, .webWait, .webFocus, .webKey, .webCheck, .webSetValue, .webScreenshot: .web
         case .eventsHead, .eventsPoll, .eventsEmit: .events
         case .pluginsRestart: .pluginRuntime
         case .serviceStart, .serviceStop, .serviceList, .serviceStatus, .serviceLogs, .serviceReady: .services
@@ -69,7 +70,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
         case .layoutsCreate, .layoutsUpdate, .layoutsCapture, .layoutsOpen, .layoutsLauncher, .commandRun, .configReload, .configPatch, .paletteImport, .skillsInstall, .skillsUninstall, .pluginsRegister, .pluginsUnregister, .pluginsEnable, .pluginsDisable,
              .pluginsRestart, .pluginSettingsPatch, .storageSet, .storageDelete, .paneTitle, .terminalSend,
              .terminalKey, .terminalRun, .panesSend, .eventsEmit, .webClick, .webFill, .webSelect, .webScroll,
-             .webScreenshot, .browserNavigate, .browserClick, .browserFill, .browserSelect, .browserScroll,
+             .webFocus, .webKey, .webCheck, .webSetValue, .webScreenshot, .browserNavigate, .browserClick, .browserFill, .browserSelect, .browserScroll,
              .browserEval, .browserScreenshot, .browserClearData, .browserClearSiteData, .serviceStart: .mutation
         }
     }
@@ -92,7 +93,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
             inheritScope()
             if params["scope"] != .string("global") { inheritPane() }
         case .layoutConfiguration, .contextInspect, .layoutGet, .paneInspect, .paneTitle,
-             .webGet, .webSnapshot, .webClick, .webFill, .webSelect, .webScroll, .webWait, .webScreenshot,
+             .webGet, .webSnapshot, .webClick, .webFill, .webSelect, .webScroll, .webWait, .webFocus, .webKey, .webCheck, .webSetValue, .webScreenshot,
              .browserGet, .browserNavigate, .browserSnapshot, .browserClick, .browserFill, .browserSelect,
              .browserScroll, .browserWait, .browserEval, .browserScreenshot, .browserClearSiteData, .panesSend, .panesCapture:
             inheritPane()

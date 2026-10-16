@@ -391,6 +391,17 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
             onChange:(handler,options={})=>workspace.subscribe(handler,{...options,topics:['host.appearance.changed']})
           }),
           pluginSettings:Object.freeze({get:()=>call('plugins.settings.get'),patch:(operations,expectedWriteRevision,options={})=>call('plugins.settings.patch',{operations,expectedWriteRevision},options)}),
+          windows:Object.freeze({
+            ...methodsFor('window.'),
+            setFrame:(params,options={})=>call('command.run',{...params,id:'window.frame.set'},options),
+            minimize:(params,options={})=>call('command.run',{...params,id:'window.minimize'},options),
+            restore:(params,options={})=>call('command.run',{...params,id:'window.restore'},options),
+            setFullscreen:(params,options={})=>call('command.run',{...params,id:'window.fullscreen.set'},options)
+          }),
+          warnings:Object.freeze({
+            close:(suppressed,options={})=>call('command.run',{id:'warnings.close.set',suppressed},options),
+            type:(suppressed,options={})=>call('command.run',{id:'warnings.type.set',suppressed},options)
+          }),
           web:methodsFor('web.'),
           browser:methodsFor('browser.'),
           services:methodsFor('plugins.service.'),

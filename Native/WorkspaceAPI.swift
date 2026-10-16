@@ -49,6 +49,13 @@ extension WorkspaceHost {
             // The shared helper checks fresh native/DOM identity before submission;
             // parsing here must not substitute a cached document for that check.
         }
+        if method == "command.run", let id = params["id"]?.string,
+           NativeWindowAction.commands.contains(id) || id.hasPrefix("warnings.") {
+            let supported: Set<String> = id.hasPrefix("window.") ? ["expectedInstanceId", "expectedWorkspaceRevision"] : ["expectedInstanceId"]
+            if let unsupported = Set(params.keys).intersection(Self.apiGuardKeys).subtracting(supported).sorted().first {
+                throw RPCFailure(code: -32602, message: "\(unsupported) is not supported by \(id)")
+            }
+        }
         if let expected = try string("expectedInstanceId"), expected != instanceID {
             throw RPCFailure(code: APIError.conflict, message: "App instance changed; rediscover context")
         }
@@ -98,9 +105,20 @@ extension WorkspaceHost {
                 "identity": .array([.string("viewId"), .string("documentId")]),
                 "selectorMutationGuardsRequired": .bool(true), "mainDocumentOnly": .bool(true),
                 "pendingActionsPerView": .integer(32), "pendingWebKitOperationsPerView": .integer(32), "resultByteLimit": .integer(900_000),
+                "actions": .array(["focus", "key", "check", "setValue"].map(JSONValue.string)),
+                "keyEvents": .string("syntheticWithLimitedDefaults"), "typedInputs": .array(["number", "date", "time", "datetime-local", "month", "week", "range"].map(JSONValue.string)),
                 "screenshot": .bool(true), "screenshotInactiveTabs": .bool(true),
                 "screenshotRequiresAttachedLayout": .bool(true), "screenshotViewportOnly": .bool(true),
                 "domRequiresVisiblePane": .bool(true), "pluginEvaluation": .bool(false)
+            ]),
+            "windowControls": .object([
+                "version": .integer(1), "commands": .array(NativeWindowAction.commands.sorted().map(JSONValue.string)),
+                "target": .string("selectedNativeWindowId"), "framePolicy": .string("containedInOneVisibleScreen"),
+                "fullscreenCompletion": .string("asynchronousPollWindowGet"), "implicitActivation": .bool(false)
+            ]),
+            "warningSuppression": .object([
+                "commands": .array(["warnings.close.set", "warnings.type.set"].map(JSONValue.string)),
+                "parameter": .string("suppressed"), "type": .string("boolean"), "changesDestructiveConsent": .bool(false)
             ]),
             "browserData": .object([
                 "version": .integer(1), "persistentProfile": .string("appWide"), "privateProfile": .string("perPaneEphemeral"),

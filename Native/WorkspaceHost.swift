@@ -806,6 +806,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 try browser.performCommand(id)
                 return .object([:])
             }
+            if NativeWindowAction.commands.contains(id) { return try runWindowCommand(id, params: params) }
             if id == "window.focus" {
                 let target = try targetNativeWindow(params, focusing: true)
                 if let activate = params["activate"], case .bool = activate {} else if params["activate"] != nil { throw RPCFailure(code: -32602, message: "activate must be a boolean") }
@@ -862,7 +863,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         case .layoutConfiguration, .contextInspect, .settingsGet, .storageGet, .storageSet, .storageDelete, .paneTitle,
              .terminalSend, .terminalKey, .terminalCapture, .terminalRun, .terminalWait,
              .eventsHead, .eventsPoll, .eventsEmit, .pluginsRestart,
-             .webGet, .webSnapshot, .webClick, .webFill, .webSelect, .webScroll, .webWait, .webScreenshot,
+             .webGet, .webSnapshot, .webClick, .webFill, .webSelect, .webScroll, .webWait, .webFocus, .webKey, .webCheck, .webSetValue, .webScreenshot,
              .browserGet, .browserNavigate, .browserSnapshot, .browserClick, .browserFill, .browserSelect,
              .browserScroll, .browserWait, .browserEval, .browserScreenshot, .browserClearData, .browserClearSiteData,
              .serviceStart, .serviceStop, .serviceList, .serviceStatus, .serviceLogs, .serviceReady:

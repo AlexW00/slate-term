@@ -2,7 +2,7 @@ import Foundation
 
 /// Checked DOM-automation input. Routing belongs to the host, not page script arguments.
 public struct BrowserAction: Sendable {
-    public enum Kind: String, Sendable { case snapshot, click, fill, select, scroll, wait }
+    public enum Kind: String, Sendable { case snapshot, click, fill, select, scroll, wait, focus, key, check, setValue }
     public let kind: Kind
     public let parameters: [String: JSONValue]
     public let timeoutMilliseconds: Int
@@ -12,7 +12,7 @@ public struct BrowserAction: Sendable {
         self.kind = kind
         var allowed: Set<String> = ["pane", "tab"]
         var checked: [String: JSONValue] = [:]
-        let needsTarget = [.click, .fill, .select, .wait].contains(kind)
+        let needsTarget = [.click, .fill, .select, .wait, .focus, .key, .check, .setValue].contains(kind)
         if needsTarget || kind == .scroll {
             allowed.formUnion(["selector", "ref"])
             let targets = ["selector", "ref"].filter { params[$0] != nil }
@@ -28,7 +28,28 @@ public struct BrowserAction: Sendable {
         case .snapshot:
             allowed.insert("maxElements")
             checked["maxElements"] = .integer(try Self.integer("maxElements", in: params, default: 128, range: 1...256))
-        case .click: break
+        case .click, .focus: break
+        case .key:
+            allowed.insert("key")
+            let chord = try Self.string("key", in: params, maximumBytes: 128, allowEmpty: false)
+            let pieces = chord.lowercased().split(separator: "+", omittingEmptySubsequences: false).map(String.init)
+            let modifiers = Array(pieces.dropLast())
+            let named = ["enter", "tab", "escape", "space", "backspace", "delete", "home", "end",
+                         "arrowleft", "arrowright", "arrowup", "arrowdown", "pageup", "pagedown"]
+            guard let key = pieces.last,
+                  named.contains(key) || (key.utf8.count == 1 && key.utf8.allSatisfy({ (33...126).contains($0) })),
+                  Set(modifiers).count == modifiers.count, modifiers.allSatisfy({ ["ctrl", "alt", "shift", "meta"].contains($0) }) else {
+                throw Self.invalid("Use a named web key or ASCII character with unique ctrl/alt/shift/meta modifiers")
+            }
+            checked["key"] = .string(key)
+            checked["modifiers"] = .array(modifiers.map(JSONValue.string))
+        case .check:
+            allowed.insert("checked")
+            guard case .bool(let value) = params["checked"] else { throw Self.invalid("checked must be a Boolean") }
+            checked["checked"] = .bool(value)
+        case .setValue:
+            allowed.insert("value")
+            checked["value"] = .string(try Self.string("value", in: params, maximumBytes: 4096, allowEmpty: true))
         case .fill:
             allowed.insert("text")
             checked["text"] = .string(try Self.string("text", in: params, maximumBytes: 65_536, allowEmpty: true))

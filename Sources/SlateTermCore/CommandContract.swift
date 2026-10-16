@@ -36,6 +36,10 @@ public struct CommandContract: Codable, Sendable {
         case "pane.focus": parameters = ["pane": "pane-id"]; required = ["pane"]
         case "tab.focus": parameters = ["tab": "tab-id"]; required = ["tab"]
         case "window.focus": parameters = ["windowId": "native-window-id", "activate": "boolean"]; required = ["windowId"]
+        case "window.frame.set": parameters = ["windowId": "native-window-id", "x": "finite number", "y": "finite number", "width": "positive finite number", "height": "positive finite number"]; required = ["windowId", "x", "y", "width", "height"]
+        case "window.minimize", "window.restore": parameters = ["windowId": "native-window-id"]; required = ["windowId"]
+        case "window.fullscreen.set": parameters = ["windowId": "native-window-id", "fullscreen": "boolean"]; required = ["windowId", "fullscreen"]
+        case "warnings.close.set", "warnings.type.set": parameters = ["suppressed": "boolean"]; required = ["suppressed"]
         default: parameters = [:]; required = []
         }
         return Self(requiresArguments: !required.isEmpty,

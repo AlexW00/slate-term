@@ -157,7 +157,7 @@ struct LayoutCommand: ParsableCommand {
 
 struct WindowsCLI: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "windows", abstract: "Inspect or focus app-owned native windows by stable lifetime ID.")
-    enum Action: String, ExpressibleByArgument { case list, get, focus }
+    enum Action: String, ExpressibleByArgument { case list, get, focus, minimize, restore, frame, fullscreen }
     @Argument var action: Action
     @OptionGroup var connection: Connection
     @Option var windowId: String?
@@ -165,10 +165,25 @@ struct WindowsCLI: ParsableCommand {
     @Option(help: "Opaque revision-bound nextCursor from window.list.") var cursor: String?
     @Option var expectedWorkspaceRevision: String?
     @Flag(help: "Also activate the application when focusing.") var activate = false
+    @Option var x: Double?
+    @Option var y: Double?
+    @Option var width: Double?
+    @Option var height: Double?
+    @Option(help: "Desired fullscreen state: true or false.") var enabled: Bool?
     func run() throws {
         var params: [String: JSONValue] = [:]
         if let expectedWorkspaceRevision { params["expectedWorkspaceRevision"] = .string(expectedWorkspaceRevision) }
         if action != .focus && activate { throw ValidationError("--activate requires windows focus") }
+        if action != .frame && [x, y, width, height].contains(where: { $0 != nil }) { throw ValidationError("Geometry options require windows frame") }
+        if action != .fullscreen && enabled != nil { throw ValidationError("--enabled requires windows fullscreen") }
+        if action == .frame {
+            guard let x, let y, let width, let height else { throw ValidationError("frame requires --x --y --width --height") }
+            params.merge(["x": .number(x), "y": .number(y), "width": .number(width), "height": .number(height)]) { _, new in new }
+        }
+        if action == .fullscreen {
+            guard let enabled else { throw ValidationError("fullscreen requires --enabled true|false") }
+            params["fullscreen"] = .bool(enabled)
+        }
         if action != .list && (limit != nil || cursor != nil) { throw ValidationError("Pagination options require windows list") }
         if action == .list {
             guard windowId == nil else { throw ValidationError("list does not take --window-id") }
@@ -180,7 +195,9 @@ struct WindowsCLI: ParsableCommand {
             params["windowId"] = .string(windowId)
             if action == .get { try connection.call("window.get", params: params) }
             else {
-                params["id"] = .string("window.focus"); params["activate"] = .bool(activate)
+                let command = action == .frame ? "window.frame.set" : action == .fullscreen ? "window.fullscreen.set" : "window." + action.rawValue
+                params["id"] = .string(command)
+                if action == .focus { params["activate"] = .bool(activate) }
                 try connection.call("command.run", params: params)
             }
         }

@@ -52,7 +52,7 @@ public struct WebAction: Sendable {
             }
             identity = bound
         } else {
-            if [.click, .fill, .select, .scroll].contains(action.kind), expected == nil {
+            if [.click, .fill, .select, .scroll, .focus, .key, .check, .setValue].contains(action.kind), expected == nil {
                 throw RPCFailure(code: -32602, message: "Web mutations without a ref require expectedViewId and expectedDocumentId")
             }
             identity = expected

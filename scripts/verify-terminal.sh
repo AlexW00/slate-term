@@ -3,6 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 root="$PWD"
 framework="$root/.build/bootstrap/ghostty/macos/GhosttyKit.xcframework/macos-arm64"
+if [[ "${SLATE_VM_PREBUILT:-0}" != 1 ]]; then
 if [[ ! -f "$framework/libghostty-internal.a" ]]; then
   echo 'Missing pinned GhosttyKit. Run: bash scripts/build-ghostty.sh' >&2
   exit 1
@@ -15,6 +16,9 @@ swiftc -swift-version 6 -parse-as-library -g \
   -framework AppKit -framework Metal -framework MetalKit -framework QuartzCore \
   -framework CoreText -framework CoreGraphics -framework Carbon -framework IOKit \
   -lc++ -lz -o .build/terminal-gate/terminal-lifecycle
+fi
+[[ -x .build/terminal-gate/terminal-lifecycle ]] || { echo 'Missing prebuilt terminal gate' >&2; exit 1; }
+[[ "${SLATE_VM_BUILD_ONLY:-0}" != 1 ]] || exit 0
 # libghostty resolves terminfo and injected shell scripts relative to this directory.
 export GHOSTTY_RESOURCES_DIR="$root/.build/bootstrap/ghostty/zig-out/share/ghostty"
 [[ -d "$GHOSTTY_RESOURCES_DIR" ]] || { echo 'Ghostty runtime resources missing' >&2; exit 1; }

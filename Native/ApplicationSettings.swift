@@ -103,12 +103,14 @@ final class ApplicationSettings {
     }
 
     func setSuppressCloseWarning(_ suppress: Bool) throws {
+        guard suppressCloseWarning != suppress || preferenceError != nil else { return }
         try closeWarningStore.save(suppress)
         suppressCloseWarning = suppress
         preferenceError = nil
     }
 
     func setSuppressTypeWarning(_ suppress: Bool) throws {
+        guard suppressTypeWarning != suppress || typeWarningError != nil else { return }
         try typeWarningStore.save(suppress)
         suppressTypeWarning = suppress
         typeWarningError = nil

@@ -11,7 +11,7 @@ import SlateTermCore
         ("command", Commands.Action.allCases.map(\.rawValue)),
         ("terminal", TerminalCommand.Action.allCases.map(\.rawValue)),
         ("browser", BrowserCommand.Action.allCases.map { String($0.method.dropFirst("browser.".count)) }),
-        ("web", WebCLI.Action.allCases.map(\.rawValue)),
+        ("web", WebCLI.Action.allCases.map { String($0.method.dropFirst("web.".count)) }),
         ("plugins", Plugins.Action.allCases.filter { ![.validate, .settings, .service].contains($0) }.map(\.rawValue)),
         ("events", Events.Action.allCases.map { $0 == .watch ? "poll" : $0.rawValue }),
         ("config", ConfigCommand.Action.allCases.map { $0 == .set ? "patch" : $0.rawValue })

@@ -51,6 +51,7 @@ run web python3 scripts/verify-web.py
 run context python3 scripts/verify-context.py
 run api-context python3 scripts/verify-api-context.py
 run api-settings python3 scripts/verify-api-settings.py
+run api-parity python3 scripts/verify-api-parity.py
 run theme-api python3 scripts/verify-theme-api.py
 run agent-skills python3 scripts/verify-agent-skills.py
 run api-negotiation python3 scripts/verify-api-negotiation.py

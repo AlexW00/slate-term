@@ -100,6 +100,7 @@ enum BrowserAutomation {
           rect:{x:rect.x,y:rect.y,width:rect.width,height:rect.height},inViewport:rect.bottom>0&&rect.right>0&&rect.top<innerHeight&&rect.left<innerWidth};
         if('value' in element&&type!=='password')item.value=clip(element.value,512);
         if('checked' in element)item.checked=element.checked;
+        if(tag==='input'){item.type=element.type;for(const key of ['min','max','step'])if(element.hasAttribute(key))item[key]=clip(element.getAttribute(key),128);}
         if(element.hasAttribute('aria-expanded'))item.expanded=element.getAttribute('aria-expanded')==='true';
         elementBytes+=encoder.encode(JSON.stringify(item)).byteLength;
         if(elementBytes>350000){truncated=true;break;}
@@ -127,6 +128,69 @@ enum BrowserAutomation {
       return {x:element?element.scrollLeft:scrollX,y:element?element.scrollTop:scrollY,viewId:state.viewId,documentId:epoch};
     }
     const element=target();
+    const focus=()=>{
+      actionable(element);
+      element.focus({preventScroll:true});
+      if(!element.isConnected||document.activeElement!==element)throw new Error('Target did not retain focus');
+      actionable(element);
+    };
+    if(action==='focus'){
+      focus();return {focused:true,viewId:state.viewId,documentId:epoch};
+    }
+    if(action==='key'){
+      focus();
+      const names={enter:'Enter',tab:'Tab',escape:'Escape',space:' ',backspace:'Backspace',delete:'Delete',
+        home:'Home',end:'End',arrowleft:'ArrowLeft',arrowright:'ArrowRight',arrowup:'ArrowUp',arrowdown:'ArrowDown',pageup:'PageUp',pagedown:'PageDown'};
+      const mods=new Set(args.modifiers),key=names[args.key]??(mods.has('shift')?args.key.toUpperCase():args.key);
+      const init={key,bubbles:true,cancelable:true,composed:true,ctrlKey:mods.has('ctrl'),altKey:mods.has('alt'),shiftKey:mods.has('shift'),metaKey:mods.has('meta')};
+      let candidates=[];
+      if(key==='Tab'){
+        const nodes=document.querySelectorAll('a[href],button,input,select,textarea,[tabindex],[contenteditable]');
+        if(nodes.length>4000)throw new Error('Too many focus candidates');
+        candidates=Array.from(nodes).filter(e=>e.tabIndex>=0&&shown(e)&&!disabled(e)).sort((a,b)=>{
+          const ai=a.tabIndex===0?Infinity:a.tabIndex,bi=b.tabIndex===0?Infinity:b.tabIndex;return ai-bi;
+        });
+      }
+      const accepted=element.dispatchEvent(new KeyboardEvent('keydown',init));
+      let defaultAction='none';
+      // Synthetic events do not cause WebKit's editing/navigation defaults. Implement
+      // only these bounded, documented defaults; page handlers own other keys.
+      if(accepted&&element.isConnected&&document.activeElement===element&&!disabled(element)&&shown(element)&&!mods.has('ctrl')&&!mods.has('alt')&&!mods.has('meta')){
+        if(key==='Tab'&&candidates.length){
+          const index=candidates.indexOf(element),delta=mods.has('shift')?-1:1;
+          const next=candidates[(index+delta+candidates.length)%candidates.length];
+          if(next?.isConnected&&!disabled(next)&&shown(next)){next.focus();defaultAction='focus';}
+        }else if((key==='Enter'||key===' ')&&(element instanceof HTMLButtonElement||element instanceof HTMLInputElement&&['button','submit','reset','checkbox','radio'].includes(element.type))){
+          element.click();defaultAction='activate';
+        }else if(key==='Enter'&&element instanceof HTMLInputElement&&['text','search','email','url','tel','password','number'].includes(element.type)&&element.form){
+          element.form.requestSubmit();defaultAction='submit';
+        }
+      }
+      // Balance against the original element, never a newly focused sibling.
+      element.dispatchEvent(new KeyboardEvent('keyup',init));
+      return {dispatched:true,defaultPrevented:!accepted,defaultAction,synthetic:true,viewId:state.viewId,documentId:epoch};
+    }
+    if(action==='check'){
+      if(!(element instanceof HTMLInputElement)||!['checkbox','radio'].includes(element.type))throw new Error('Check requires a native checkbox or radio input');
+      if(element.type==='radio'&&!args.checked)throw new Error('Select another radio instead of clearing a radio');
+      actionable(element);
+      const changedState=element.checked!==args.checked;
+      if(changedState)element.click();
+      if(!element.isConnected||element.checked!==args.checked||element.indeterminate)throw new Error('Control did not retain the requested checked state');
+      return {performed:changedState,checked:element.checked,viewId:state.viewId,documentId:epoch};
+    }
+    if(action==='setValue'){
+      if(!(element instanceof HTMLInputElement)||!['number','date','time','datetime-local','month','week','range'].includes(element.type))throw new Error('SetValue requires a supported typed input');
+      if(element.readOnly)throw new Error('Element is read-only');
+      actionable(element);
+      const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;
+      const probe=element.cloneNode(false);
+      setter.call(probe,args.value);
+      if(probe.value!==args.value||!probe.validity.valid)throw new Error('Value is not canonical or violates input constraints');
+      setter.call(element,args.value);changed(element);
+      if(!element.isConnected||element.value!==args.value)throw new Error('Input did not retain the requested value');
+      return {performed:true,value:element.value,type:element.type,viewId:state.viewId,documentId:epoch};
+    }
     if(action==='click'){
       if(typeof element.click!=='function')throw new Error('Element does not support click');
       actionable(element);
