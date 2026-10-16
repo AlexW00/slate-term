@@ -32,12 +32,22 @@ elif mode == 'finish':
     changed = sorted(path for path in before.keys() | after.keys() if before.get(path) != after.get(path))
     if changed:
         raise SystemExit('FAIL source changed during verification: ' + ', '.join(changed))
+    from verification_gates import GATES, ORDER, validate
+    validate(root)
+    checks = (artifacts / 'verification-checks.txt').read_text().splitlines()
+    if checks != list(ORDER):
+        raise SystemExit('FAIL incomplete or reordered inventory; run bash scripts/verify-all.sh')
     app = root / '.derived/Build/Products/Debug/Slate Terminal.app/Contents'
+    products = [app / 'MacOS/Slate Terminal', app / 'Helpers/slate-term', app / 'Helpers/slate-layout-launcher']
+    for gate in GATES:
+        if gate.native:
+            products.append(root / gate.product)
+            products.extend((root / gate.native_directory).glob('*.dylib'))
     result = {
         'completedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        'checks': (artifacts / 'verification-checks.txt').read_text().splitlines(),
+        'checks': checks,
         'sources': after,
-        'binaries': {str(path.relative_to(root)): digest(path) for path in [app / 'MacOS/Slate Terminal', app / 'Helpers/slate-term', app / 'Helpers/slate-layout-launcher']},
+        'binaries': {str(path.relative_to(root)): digest(path) for path in products},
     }
     (artifacts / 'verification.json').write_text(json.dumps(result, indent=2) + '\n')
     print('PASS expanded verification; unchanged source and binary hashes recorded in artifacts/verification.json')

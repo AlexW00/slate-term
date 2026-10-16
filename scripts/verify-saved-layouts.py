@@ -29,6 +29,13 @@ def eventually(label, check):
     raise AssertionError(label)
 
 
+def expected_content_size(frame, requested):
+    # Require enough usable display for this fixture, then enforce AppKit's exact clamp.
+    assert frame['maximumVisibleContentWidth'] >= requested[0], frame
+    assert frame['maximumVisibleContentHeight'] >= 560, frame
+    return (requested[0], min(requested[1], frame['maximumVisibleContentHeight']))
+
+
 @contextlib.contextmanager
 def fixture_directory():
     directory = tempfile.TemporaryDirectory(prefix='slate-layouts-', dir='/tmp')
@@ -89,8 +96,8 @@ with fixture_directory() as temporary:
                 activate_owned()
                 frame = rpc('debug.savedLayouts')
                 time.sleep(.7)  # Render settling only, never an operation-success condition.
-                expected = (1000, 560) if name == 'final-narrow' else (1060, 680)
-                assert (frame['width'], frame['height']) == expected, (name, frame)
+                requested = (1000, 560) if name == 'final-narrow' else (1060, 680)
+                assert (frame['width'], frame['height']) == expected_content_size(frame, requested), (name, frame)
                 rpc('debug.screenshot', layouts=True, path=str(ROOT / f'artifacts/layouts-{name}.png'))
 
             def agent_screenshot(theme):
@@ -115,7 +122,8 @@ with fixture_directory() as temporary:
             assert 'required' in rpc('layouts.capture', fail=True, name='Unsafe')
             rpc('command.run', id='layouts.edit')
             frame = rpc('debug.savedLayouts', width=1060, height=680)
-            assert (frame['width'], frame['height']) == (1060, 680), frame
+            # AppKit clamps oversized windows to the guest's usable display, excluding chrome.
+            assert (frame['width'], frame['height']) == expected_content_size(frame, (1060, 680)), frame
             assert frame['settingsSection'] == 'Layouts'
             assert rpc('debug.settings', inspectOnly=True)['visible']
             screenshot('empty-dark')

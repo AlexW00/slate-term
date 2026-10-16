@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import shlex
 import shutil
 import sys
 import socket
@@ -42,7 +43,18 @@ class AppFixture:
         startup = self.root / 'startup'
         startup.mkdir()
         (startup / '.zshenv').write_text('export HISTFILE=/dev/null\n')
-        (startup / '.zshrc').write_text('HISTSIZE=0; SAVEHIST=0; PS1="API_TEST> "; RPS1=""; RPROMPT=""\n')
+        # Preserve the hook's behavior/deadline; retain otherwise-suppressed failures for diagnosis.
+        trace = shlex.quote(str(self.root / 'shell-reports.log'))
+        recording = '''
+if (( ${+functions[_slate_context_precmd]} )); then
+    _slate_fixture_body=${functions[_slate_context_precmd]}
+    _slate_fixture_old='> /dev/null 2>&1'
+    _slate_fixture_new='>> TRACE_PATH 2>&1'
+    functions[_slate_context_precmd]=${_slate_fixture_body//$_slate_fixture_old/$_slate_fixture_new}
+    unset _slate_fixture_body _slate_fixture_old _slate_fixture_new
+fi
+'''.replace('TRACE_PATH', trace)
+        (startup / '.zshrc').write_text('HISTSIZE=0; SAVEHIST=0; PS1="API_TEST> "; RPS1=""; RPROMPT=""\n' + recording)
         self.ready = self.root / 'ready'
         self.env = {k: v for k, v in os.environ.items() if not k.startswith('SLATE_TERM_')}
         self.env.update(SLATE_TERM_INTEGRATION='1', SLATE_TERM_TEST_REAL_SHELL='1',
@@ -56,10 +68,25 @@ class AppFixture:
             self.env['SLATE_TERM_SOCKET'] = self.path
             return self
         except BaseException:
-            self.__exit__(None, None, None)
+            self.__exit__(*sys.exc_info())
             raise
 
     def __exit__(self, *unused):
+        if unused and unused[0] is not None:
+            diagnostics = ROOT / f'artifacts/{self.name}-diagnostic'
+            diagnostics.mkdir(exist_ok=True)
+            for name in ['config.toml', 'state/workspace.json', 'shell-reports.log']:
+                source = self.root / name
+                if source.is_file():
+                    shutil.copy2(source, diagnostics / source.name)
+            (diagnostics / 'liveness.json').write_text(json.dumps(dict(pid=self.process.pid,
+                exitCode=self.process.poll(), ready=self.ready.exists())) + '\n')
+            if self.process.poll() is None:
+                try:
+                    subprocess.run(['/usr/bin/sample', str(self.process.pid), '1', '-file', str(diagnostics / 'app-sample.txt')],
+                                   stdout=self.log, stderr=self.log, timeout=5)
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
         if self.process.poll() is None:
             self.process.terminate()
             try:

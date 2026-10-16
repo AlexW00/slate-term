@@ -2,6 +2,7 @@
 """Identity, revision, pagination, environment, CLI error and native/legacy parity gate."""
 import json
 import shlex
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from api_fixture import AppFixture, eventually
 
@@ -33,8 +34,9 @@ with AppFixture('api-context') as app:
 
     # Check real shell exports without returning private authentication/run tokens.
     output = app.root / 'identity.json'
-    command = "python3 -c " + shlex.quote('import os,json; print(json.dumps({k:os.getenv(k) for k in ["SLATE_TERM_PANE_ID","SLATE_TERM_TAB_ID","SLATE_TERM_INSTANCE_ID","SLATE_TERM_SESSION_ID"]}))') + ' > ' + shlex.quote(str(output))
-    app.rpc('terminal.run', pane='p1', command=command, timeoutMilliseconds=10000)
+    command = shlex.quote(sys.executable) + " -c " + shlex.quote('import os,json; print(json.dumps({k:os.getenv(k) for k in ["SLATE_TERM_PANE_ID","SLATE_TERM_TAB_ID","SLATE_TERM_INSTANCE_ID","SLATE_TERM_SESSION_ID"]}))') + ' > ' + shlex.quote(str(output))
+    result = app.rpc('terminal.run', pane='p1', command=command, timeoutMilliseconds=10000)
+    assert result['exitCode'] == 0, result
     exported = json.loads(output.read_text())
     assert exported == dict(SLATE_TERM_PANE_ID='p1', SLATE_TERM_TAB_ID='t1', SLATE_TERM_INSTANCE_ID=epoch, SLATE_TERM_SESSION_ID=session), exported
 

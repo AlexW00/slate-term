@@ -4,6 +4,7 @@ import concurrent.futures
 import functools
 import http.server
 import json
+import os
 import subprocess
 import threading
 from api_fixture import AppFixture, ROOT, eventually
@@ -17,6 +18,12 @@ HTML = '''<!doctype html><title>Shared web fixture</title>
 <script>addEventListener('pageshow', e=>window.restored=e.persisted);</script>'''
 
 navigation_gates = {path: (threading.Event(), threading.Event()) for path in ['/held-a', '/held-b']}
+
+
+def screenshot_checker():
+    prebuilt = os.environ.get('SLATE_VM_SCREENSHOT_CHECK')
+    return [prebuilt] if prebuilt else ['swift', str(ROOT / 'Tests/WebOperations/CheckScreenshot.swift')]
+
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *args): pass
@@ -159,7 +166,7 @@ with AppFixture('web-conformance') as app:
                 assert focus_state() == before, 'Screenshot changed tab selection/focus/workspace'
                 pixel_args.extend([str(path), *map(str,rgb)])
             app.rpc('browser.eval' if pane == 'p1' else 'debug.pluginEval', pane=pane, script="(()=>{document.getElementById('capture-check').remove();return true})()")
-        checked = subprocess.run(['swift', str(ROOT / 'Tests/WebOperations/CheckScreenshot.swift'), *pixel_args],
+        checked = subprocess.run([*screenshot_checker(), *pixel_args],
                                  text=True, capture_output=True, timeout=60)
         assert checked.returncode == 0, checked.stderr
         (captures / 'pixels.json').write_text(checked.stdout)

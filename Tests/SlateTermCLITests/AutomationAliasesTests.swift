@@ -1,3 +1,4 @@
+import ArgumentParser
 import Foundation
 import Testing
 import SlateTermCore
@@ -52,6 +53,16 @@ import SlateTermCore
     #expect(throws: (any Error).self) { try SavedLayoutsCommand.parse(["open", "--id", "id", "--force"]) }
     let launcher = try SavedLayoutsCommand.parse(["launcher", "--id", "id", "--path", "/tmp/Test.app"])
     #expect(launcher.action == .launcher && launcher.path == "/tmp/Test.app")
+}
+
+@Test func notificationCLIParsesOnlyBoundedOperations() throws {
+    let post = try NotifyCLI.parse(["--title", "Done", "--body", "Tests passed", "--pane", "p2", "--session-id", "s"])
+    #expect(post.title == "Done" && post.target.pane == "p2" && post.sessionId == "s")
+    #expect(throws: (any Error).self) { try NotifyCLI.parse(["--body", "missing title"]) }
+    #expect(throws: (any Error).self) { try NotifyCLI.parse(["--title", "Done", "--action", "sh"]) }
+    let next = try NotificationsCLI.parse(["next"])
+    #expect(next.action == .next)
+    #expect(AutomationMethod.notificationsPost.isPublic)
 }
 
 @Test func eventRecipientOptionsMatchTheHostSelectors() throws {

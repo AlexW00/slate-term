@@ -1,16 +1,20 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-mkdir -p .build/plugin-process-gate
-swiftc -swift-version 6 -parse-as-library -g \
+source scripts/native-gate.sh
+slate_native_gate plugin-process
+if [[ "${SLATE_VM_PREBUILT:-0}" != 1 ]]; then
+slate_native_swiftc -swift-version 6 -parse-as-library -g \
   Native/PluginProcess.swift Tests/PluginProcess/ProcessLifecycle.swift \
-  -o .build/plugin-process-gate/process-lifecycle
+  -o "$gate/process-lifecycle"
 # Only this standalone harness and its explicitly owned children are launched.
-python3 - <<'PY'
+fi
+slate_native_ready "$gate/process-lifecycle"
+python3 - "$gate/process-lifecycle" <<'PY'
 import subprocess
 import sys
 try:
-    result = subprocess.run(['.build/plugin-process-gate/process-lifecycle'], timeout=40)
+    result = subprocess.run([sys.argv[1]], timeout=40)
     sys.exit(result.returncode)
 except subprocess.TimeoutExpired:
     print('FAIL plugin process lifecycle: deadline exceeded', file=sys.stderr)

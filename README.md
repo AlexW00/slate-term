@@ -84,6 +84,10 @@ External shells must pass `--socket <path>` or set `SLATE_TERM_SOCKET`. Socket f
 
 `--pane`/`--tab` override the corresponding `SLATE_TERM_PANE_ID`/`SLATE_TERM_TAB_ID` defaults. An explicit tab suppresses an inherited pane target; an explicit pane suppresses an inherited tab target. Closing a potentially busy terminal requires `--force` or confirmation in the native UI. All current CLI responses are JSON.
 
+## Notifications
+
+Slate supports shared API/CLI/plugin/service notifications, OSC 9/777, and automatic shell-command completion after 30 seconds. Native delivery is subject to macOS permission and focus policy; sound and command details are off by default. Unread pane/tab indicators and **Jump to Next Notification** work without a persistent inbox. See [notification controls and API](docs/notifications.md).
+
 ## Configuration
 
 Edit `~/.config/slate-term/config.toml`; valid changes reload automatically. Workspace structure is saved under `~/Library/Application Support/SlateTerm/state/`. Restored terminals are new processes, not resumed PTYs. See [configuration and recovery](docs/configuration.md) for fields, shortcut overrides, diagnostics, and limitations.
@@ -101,6 +105,7 @@ bash scripts/build-app.sh
 python3 scripts/verify-app.py            # own app/storage: drive and inspect it using the bundled CLI
 python3 scripts/verify-config-cli.py     # offline validation, no running app required
 python3 scripts/verify-settings.py       # live reload, native key routing, reorder, restart/recovery
+python3 scripts/verify-notifications.py   # owned notifications policy/API/engine/lifecycle fixture
 python3 scripts/verify-shell.py          # production zsh path, isolated dotfiles, OSC 133, UTF-8 input
 bash scripts/verify-browser-data.sh
 python3 scripts/verify-browser-profiles.py

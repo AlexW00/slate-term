@@ -36,6 +36,9 @@ public enum CommandRegistry {
     public static let commands: [WorkspaceCommand] = [
         .init(id: "command.picker", title: "Search Commands…", key: "k", shift: false),
         .init(id: "settings.open", title: "Open Settings", key: ",", shift: false),
+        .init(id: "notifications.next", title: "Jump to Next Notification", key: "", shift: false),
+        .init(id: "notifications.open", title: "Open Notification Source", key: "", shift: false),
+        .init(id: "notifications.settings", title: "Notification Settings…", key: "", shift: false),
         .init(id: "layouts.edit", title: "Layout Settings…", key: "", shift: false),
         .init(id: "layouts.openWindow", title: "Open Layout in New Window…", key: "", shift: false),
         .init(id: "layouts.captureWindow", title: "Save a Window as a Layout…", key: "", shift: false),
@@ -107,6 +110,9 @@ public enum CommandRegistry {
         .init(id: "terminal.font.reset", title: "Reset Application Terminal Font Size", key: "", shift: false),
         .init(id: "warnings.close.reset", title: "Re-enable Close Warnings", key: "", shift: false),
         .init(id: "warnings.type.reset", title: "Re-enable Pane Type Warnings", key: "", shift: false),
+        .init(id: "welcome.read", title: "Mark Welcome Message as Read", key: "", shift: false),
+        .init(id: "welcome.unread", title: "Mark Welcome Message as Unread", key: "", shift: false),
+        .init(id: "welcome.reset", title: "Reset Welcome Message (Mark Unread)", key: "", shift: false),
         .init(id: "skills.settings", title: "Install Agent Skill…", key: "", shift: false),
         .init(id: "skills.reveal", title: "Open Agent Skill Folder", key: "", shift: false),
     ]

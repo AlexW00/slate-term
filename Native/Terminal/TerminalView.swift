@@ -20,6 +20,7 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
     private(set) var context = Context()
     enum ContextChange { case title, workingDirectory, commandFinished }
     var onContextChange: ((Context, ContextChange) -> Void)?
+    var onDesktopNotification: ((String, String) -> Void)?
     struct ClipboardConfirmation {
         enum Kind { case read, write, paste }
         let kind: Kind
@@ -107,6 +108,7 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
         hasTerminalFocus = false
         onCloseRequest = nil
         onContextChange = nil
+        onDesktopNotification = nil
         onClipboardConfirmation = nil
         if let pending = pendingConfirmation { finishConfirmation(pending.id, approved: false) }
         if let keyUpMonitor { NSEvent.removeMonitor(keyUpMonitor); self.keyUpMonitor = nil }
@@ -498,6 +500,15 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
             change = .commandFinished
             let command = action.action.command_finished
             context.lastCommand = Context.Command(exitCode: command.exit_code < 0 ? nil : Int(command.exit_code), durationNanoseconds: command.duration)
+        case GHOSTTY_ACTION_DESKTOP_NOTIFICATION:
+            // The callback owns borrowed C strings only until it returns.
+            let title = action.action.desktop_notification.title.map { String(cString: $0) } ?? ""
+            let body = action.action.desktop_notification.body.map { String(cString: $0) } ?? ""
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.surface != nil else { return }
+                self.onDesktopNotification?(title, body)
+            }
+            return true
         case GHOSTTY_ACTION_SECURE_INPUT:
             switch action.action.secure_input {
             case GHOSTTY_SECURE_INPUT_ON: context.secureInput = true

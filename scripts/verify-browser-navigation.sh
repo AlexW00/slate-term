@@ -1,14 +1,17 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source scripts/native-gate.sh
+slate_native_gate browser-navigation
+if [[ "${SLATE_VM_PREBUILT:-0}" != 1 ]]; then
 bin="$(swift build --show-bin-path)"
-test -f "$bin/SlateTermSettings.o" || { echo 'Build the CLI before running browser-navigation verification' >&2; exit 1; }
-gate="$(mktemp -d "${TMPDIR:-/tmp}/slate-browser-navigation.XXXXXX")"
-trap 'rm -rf "$gate"' EXIT
-swiftc -swift-version 5 -default-isolation MainActor -parse-as-library -g \
+test -f "$bin/SlateTermSettings.o" || { echo "Build the CLI before browser-navigation verification" >&2; exit 1; }
+slate_native_swiftc -swift-version 5 -default-isolation MainActor -parse-as-library -g \
   -I "$bin" "$bin/SlateTermCore.o" "$bin/SlateTermSettings.o" "$bin/TOMLDecoder.o" \
   Native/LiteralTextCells.swift Native/BrowserAutomation.swift Native/WebPaneAutomation.swift Native/BrowserPane.swift \
   Tests/WebOperations/BrowserNavigation.swift -o "$gate/browser-navigation"
+fi
+slate_native_ready "$gate/browser-navigation"
 python3 - "$gate/browser-navigation" <<'PY'
 import http.server
 import subprocess

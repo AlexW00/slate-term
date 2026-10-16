@@ -6,6 +6,7 @@ import SlateTermIPC
 @main
 @MainActor
 struct ServiceGenerationTest {
+    static let python = ProcessInfo.processInfo.environment["SLATE_TEST_PYTHON"] ?? ""
     struct Failure: Error { let message: String }
     final class GenerationReference { weak var value: BackgroundServiceGeneration? }
     final class ManagerReference { weak var value: BackgroundServices? }
@@ -37,6 +38,7 @@ struct ServiceGenerationTest {
         catch { fputs("FAIL service generation: \(error)\n", stderr); exit(1) }
     }
     static func run() async throws {
+        try require(FileManager.default.isExecutableFile(atPath: python), "Run the gate script with SLATE_TEST_PYTHON set to its runtime interpreter")
         let cli = CommandLine.arguments[1]
         let directory = URL(fileURLWithPath: "/tmp/slate-generation-test-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
@@ -57,7 +59,7 @@ struct ServiceGenerationTest {
             time.sleep(20)
             """
             let spec = try JSONDecoder().decode(PluginProcessSpec.self, from: JSONSerialization.data(withJSONObject: [
-                "executable": exits ? "/usr/bin/true" : "/usr/bin/python3", "arguments": exits ? [] : ["-c", script],
+                "executable": exits ? "/usr/bin/true" : python, "arguments": exits ? [] : ["-c", script],
                 "readyTimeoutSeconds": timeout, "restartLimit": 0,
                 "environment": ["TEST_ENDPOINT": endpointFile.path, "SLATE_TERM_PANE_ID": "poison", "SLATE_TERM_TAB_ID": "poison"]
             ]))
@@ -164,7 +166,7 @@ struct ServiceGenerationTest {
         let endpointFile = directory.appendingPathComponent("nested-endpoint")
         let script = "import os,pathlib,time; pathlib.Path(os.environ['TEST_ENDPOINT']).write_text(os.environ['SLATE_TERM_SOCKET']); time.sleep(20)"
         let spec = try JSONDecoder().decode(PluginProcessSpec.self, from: JSONSerialization.data(withJSONObject: [
-            "executable": "/usr/bin/python3", "arguments": ["-c", script], "readyTimeoutSeconds": 5,
+            "executable": python, "arguments": ["-c", script], "readyTimeoutSeconds": 5,
             "environment": ["TEST_ENDPOINT": endpointFile.path]
         ]))
         let control = try OperationControl(epoch: UUID())

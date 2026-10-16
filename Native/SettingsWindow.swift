@@ -50,6 +50,23 @@ final class SettingsModel: ObservableObject {
     @Published var integration = "auto"
     @Published var restore = true
     @Published var searchURL = ""
+    @Published var notifyAutomatic = true
+    @Published var notifyMinimumSeconds = "30"
+    @Published var notifyTools = true
+    @Published var notifyBanners = NotificationPolicy.Banner.otherPanes
+    @Published var notifySound = false
+    @Published var notifyCommandDetails = false
+    @Published var notificationAuthorization = "Checking…"
+    var authorizeNotifications: (() -> Void)?
+    var notificationAuthorizationLabel: String {
+        switch notificationAuthorization {
+        case "authorized": "Allowed"
+        case "denied": "Not allowed"
+        case "notDetermined": "Not requested"
+        case "unavailable": "Unavailable"
+        default: "Checking…"
+        }
+    }
     @Published var shortcuts: [String: String] = [:]
     @Published var plugins: [Plugin] = []
     @Published var agentSkills: [AgentSkills.Entry] = []
@@ -85,7 +102,13 @@ final class SettingsModel: ObservableObject {
                       "terminal.dark_theme": AppConfiguration.quotedString(darkTheme),
                       "terminal.shell_integration": AppConfiguration.quotedString(integration),
                       "layout.restore_workspace": restore ? "true" : "false",
-                      "browser.search_url": AppConfiguration.quotedString(searchURL)]
+                      "browser.search_url": AppConfiguration.quotedString(searchURL),
+                      "notifications.automatic": notifyAutomatic ? "true" : "false",
+                      "notifications.minimum_seconds": notifyMinimumSeconds,
+                      "notifications.tools": notifyTools ? "true" : "false",
+                      "notifications.banners": AppConfiguration.quotedString(notifyBanners.rawValue),
+                      "notifications.sound": notifySound ? "true" : "false",
+                      "notifications.command_details": notifyCommandDetails ? "true" : "false"]
         for (chord, command) in shortcuts { values["keybind." + chord] = AppConfiguration.quotedString(command) }
         return values
     }
@@ -109,6 +132,12 @@ final class SettingsModel: ObservableObject {
         integration = configuration.terminal.shellIntegration.rawValue
         restore = configuration.restoreWorkspace
         searchURL = configuration.browser.searchURL
+        notifyAutomatic = configuration.notifications.automatic
+        notifyMinimumSeconds = String(configuration.notifications.minimumSeconds)
+        notifyTools = configuration.notifications.tools
+        notifyBanners = configuration.notifications.banners
+        notifySound = configuration.notifications.sound
+        notifyCommandDetails = configuration.notifications.commandDetails
         shortcuts = Dictionary(uniqueKeysWithValues: configuration.keyBindings.map { ($0.key.description, $0.value) })
         self.source = source
         if !preserveError { self.error = error }
@@ -201,7 +230,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 }
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general = "General", appearance = "Appearance", terminal = "Terminal", browser = "Browser", layouts = "Layouts", shortcuts = "Keyboard Shortcuts", plugins = "Plugins", agents = "AI Agents"
+    case general = "General", appearance = "Appearance", terminal = "Terminal", browser = "Browser", notifications = "Notifications", layouts = "Layouts", shortcuts = "Keyboard Shortcuts", plugins = "Plugins", agents = "AI Agents"
     var id: String { rawValue }
     var symbol: String {
         switch self {
@@ -209,6 +238,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .appearance: "circle.lefthalf.filled"
         case .terminal: "terminal"
         case .browser: "globe"
+        case .notifications: "bell.badge"
         case .layouts: "rectangle.split.2x2"
         case .shortcuts: "keyboard"
         case .plugins: "puzzlepiece.extension"
@@ -221,6 +251,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .appearance: .indigo
         case .terminal: .black
         case .browser: .blue
+        case .notifications: .red
         case .layouts: .teal
         case .shortcuts: .purple
         case .plugins: .orange
@@ -268,6 +299,7 @@ private struct SettingsView: View {
                         case .appearance: appearance
                         case .terminal: terminal
                         case .browser: browser
+                        case .notifications: notifications
                         case .layouts: Text(model.layoutsError ?? "Layouts are unavailable.").textSelection(.enabled)
                         case .shortcuts: keyboard
                         case .plugins: plugins
@@ -313,6 +345,40 @@ private struct SettingsView: View {
             Toggle("Restore workspace on launch", isOn: $model.restore)
         } footer: {
             Text("Restore tabs and split panes with new shell sessions.")
+        }
+    }
+
+    private var notifications: some View {
+        Group {
+            Section {
+                Toggle("Notify when long-running commands finish", isOn: $model.notifyAutomatic)
+                TextField("Minimum duration (seconds)", text: $model.notifyMinimumSeconds)
+                Toggle("Allow notifications from tools and plugins", isOn: $model.notifyTools)
+            } footer: {
+                Text("Command completion requires shell integration. Notifications from the focused pane are suppressed.")
+            }
+            Section {
+                Picker("Desktop banners", selection: $model.notifyBanners) {
+                    Text("From other panes").tag(NotificationPolicy.Banner.otherPanes)
+                    Text("Only while using another app").tag(NotificationPolicy.Banner.otherApps)
+                    Text("Off").tag(NotificationPolicy.Banner.off)
+                }
+                Toggle("Play notification sounds", isOn: $model.notifySound)
+                Toggle("Include command text in completion notifications", isOn: $model.notifyCommandDetails)
+            } footer: {
+                Text("Command text can contain sensitive information and may appear on your lock screen. Unread indicators work without desktop permission.")
+            }
+            Section {
+                LabeledContent("macOS permission", value: model.notificationAuthorizationLabel)
+                if model.notificationAuthorization == "notDetermined" {
+                    Button("Allow Desktop Notifications…") { model.authorizeNotifications?() }
+                }
+                Button("Open macOS Notification Settings") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") { NSWorkspace.shared.open(url) }
+                }
+            } footer: {
+                Text("Permission changes apply immediately. Other changes require Apply. macOS Focus and notification preferences control final delivery.")
+            }
         }
     }
 

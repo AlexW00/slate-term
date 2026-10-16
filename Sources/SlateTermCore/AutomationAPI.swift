@@ -16,6 +16,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
     case configGet = "config.get", configReload = "config.reload", configValidate = "config.validate", configPatch = "config.patch"
     case paletteList = "palette.list", paletteImport = "palette.import", appearanceGet = "appearance.get"
     case skillsList = "skills.list", skillsInstall = "skills.install", skillsUninstall = "skills.uninstall"
+    case welcomeGet = "welcome.get"
     case pluginsList = "plugins.list", pluginsRegister = "plugins.register", pluginsUnregister = "plugins.unregister"
     case pluginsEnable = "plugins.enable", pluginsDisable = "plugins.disable"
     case pluginsStatus = "plugins.status", pluginsRestart = "plugins.restart", pluginsLogs = "plugins.logs"
@@ -24,6 +25,8 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
     case terminalSend = "terminal.send", terminalKey = "terminal.key", terminalCapture = "terminal.capture"
     case terminalRun = "terminal.run", terminalWait = "terminal.wait", panesSend = "panes.send", panesCapture = "panes.capture"
     case eventsHead = "events.head", eventsPoll = "events.poll", eventsEmit = "events.emit"
+    case notificationsPost = "notifications.post", notificationsList = "notifications.list"
+    case notificationsDismiss = "notifications.dismiss", notificationsStatus = "notifications.status"
     case webGet = "web.get", webSnapshot = "web.snapshot", webClick = "web.click", webFill = "web.fill"
     case webSelect = "web.select", webScroll = "web.scroll", webWait = "web.wait", webScreenshot = "web.screenshot"
     case browserClearData = "browser.clearData", browserClearSiteData = "browser.clearSiteData"
@@ -34,14 +37,15 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
     case serviceStatus = "plugins.service.status", serviceLogs = "plugins.service.logs", serviceReady = "service.ready"
     case shellUpdate = "shell.update", shellRunInput = "shell.runInput"
 
-    public enum Family: String, Sendable { case synchronous, contextual, terminal, browser, web, events, pluginRuntime, services, integration }
+    public enum Family: String, Sendable { case synchronous, contextual, notifications, terminal, browser, web, events, pluginRuntime, services, integration }
     public var family: Family {
         switch self {
         case .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsCreate, .layoutsUpdate, .layoutsWindows, .layoutsCapture, .layoutsOpen, .layoutsLauncher, .layoutsStartupStatus,
              .describe, .version, .contextGet, .workspaceGet, .workspaceSnapshot, .layoutGet, .tabsList, .panesList, .paneInspect,
              .commandList, .commandRun, .windowList, .windowGet, .configGet, .configReload, .configValidate, .configPatch,
-             .paletteList, .paletteImport, .appearanceGet, .skillsList, .skillsInstall, .skillsUninstall, .pluginsList, .pluginsRegister, .pluginsUnregister, .pluginsEnable, .pluginsDisable, .pluginsStatus, .pluginsLogs,
+             .paletteList, .paletteImport, .appearanceGet, .welcomeGet, .skillsList, .skillsInstall, .skillsUninstall, .pluginsList, .pluginsRegister, .pluginsUnregister, .pluginsEnable, .pluginsDisable, .pluginsStatus, .pluginsLogs,
              .pluginSettingsGet, .pluginSettingsPatch, .panesSend, .panesCapture: .synchronous
+        case .notificationsPost, .notificationsList, .notificationsDismiss, .notificationsStatus: .notifications
         case .layoutConfiguration, .contextInspect, .settingsGet, .storageGet, .storageSet, .storageDelete, .paneTitle: .contextual
         case .terminalSend, .terminalKey, .terminalCapture, .terminalRun, .terminalWait: .terminal
         case .browserGet, .browserNavigate, .browserSnapshot, .browserClick, .browserFill, .browserSelect,
@@ -63,14 +67,16 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
         case .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsWindows, .layoutsStartupStatus, .layoutConfiguration,
              .describe, .version, .contextGet, .contextInspect, .workspaceGet, .workspaceSnapshot, .layoutGet,
              .tabsList, .panesList, .paneInspect, .commandList, .windowList, .windowGet, .configGet, .configValidate,
-             .paletteList, .appearanceGet, .skillsList, .pluginsList, .pluginsStatus, .pluginsLogs, .pluginSettingsGet, .settingsGet, .storageGet,
+             .paletteList, .appearanceGet, .welcomeGet, .skillsList, .pluginsList, .pluginsStatus, .pluginsLogs, .pluginSettingsGet, .settingsGet, .storageGet,
              .terminalCapture, .terminalWait, .panesCapture, .eventsHead, .eventsPoll, .webGet, .webSnapshot, .webWait,
-             .browserGet, .browserSnapshot, .browserWait, .serviceList, .serviceStatus, .serviceLogs: .read
+             .browserGet, .browserSnapshot, .browserWait, .serviceList, .serviceStatus, .serviceLogs,
+             .notificationsList, .notificationsStatus: .read
         case .layoutsCreate, .layoutsUpdate, .layoutsCapture, .layoutsOpen, .layoutsLauncher, .commandRun, .configReload, .configPatch, .paletteImport, .skillsInstall, .skillsUninstall, .pluginsRegister, .pluginsUnregister, .pluginsEnable, .pluginsDisable,
              .pluginsRestart, .pluginSettingsPatch, .storageSet, .storageDelete, .paneTitle, .terminalSend,
              .terminalKey, .terminalRun, .panesSend, .eventsEmit, .webClick, .webFill, .webSelect, .webScroll,
              .webScreenshot, .browserNavigate, .browserClick, .browserFill, .browserSelect, .browserScroll,
-             .browserEval, .browserScreenshot, .browserClearData, .browserClearSiteData, .serviceStart: .mutation
+             .browserEval, .browserScreenshot, .browserClearData, .browserClearSiteData, .serviceStart,
+             .notificationsPost, .notificationsDismiss: .mutation
         }
     }
 
@@ -91,6 +97,8 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
         case .contextGet, .workspaceSnapshot:
             inheritScope()
             if params["scope"] != .string("global") { inheritPane() }
+        case .notificationsPost:
+            if params["active"] != .bool(true) { inheritPane() }
         case .layoutConfiguration, .contextInspect, .layoutGet, .paneInspect, .paneTitle,
              .webGet, .webSnapshot, .webClick, .webFill, .webSelect, .webScroll, .webWait, .webScreenshot,
              .browserGet, .browserNavigate, .browserSnapshot, .browserClick, .browserFill, .browserSelect,
@@ -109,10 +117,11 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
             if params["instanceId"] == nil, !explicitTarget, let instance = defaults.instanceID { params["instanceId"] = .string(instance) }
         case .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsCreate, .layoutsUpdate, .layoutsWindows, .layoutsCapture, .layoutsOpen, .layoutsLauncher, .layoutsStartupStatus,
              .describe, .version, .workspaceGet, .tabsList, .panesList, .commandList, .windowList, .windowGet,
-             .configGet, .configReload, .configValidate, .configPatch, .paletteList, .paletteImport, .appearanceGet,
+             .configGet, .configReload, .configValidate, .configPatch, .paletteList, .paletteImport, .appearanceGet, .welcomeGet,
              .skillsList, .skillsInstall, .skillsUninstall, .pluginsList, .pluginsRegister, .pluginsUnregister, .pluginsEnable, .pluginsDisable, .pluginsStatus, .pluginsRestart, .pluginsLogs,
              .eventsHead, .eventsPoll, .eventsEmit, .serviceStart, .serviceStop, .serviceList, .serviceStatus,
-             .serviceLogs, .serviceReady, .shellUpdate, .shellRunInput, .browserClearData: break
+             .serviceLogs, .serviceReady, .shellUpdate, .shellRunInput, .browserClearData,
+             .notificationsList, .notificationsDismiss, .notificationsStatus: break
         }
         return params
     }

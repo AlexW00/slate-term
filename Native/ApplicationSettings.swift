@@ -14,6 +14,7 @@ final class ApplicationSettings {
     let paletteDirectory: URL
     let engineURL: URL
     private let shellDirectory: URL
+    let welcome: WelcomeStore
     private let store: WorkspaceStore
     private let closeWarningStore: PrivateJSONStore
     private let typeWarningStore: PrivateJSONStore
@@ -48,6 +49,7 @@ final class ApplicationSettings {
         agentHome = integration ? URL(fileURLWithPath: environment["SLATE_TERM_AGENT_HOME"] ?? base.appendingPathComponent("agent-home").path)
             : FileManager.default.homeDirectoryForCurrentUser
         store = try WorkspaceStore(directory: base.appendingPathComponent("state"))
+        welcome = WelcomeStore(url: base.appendingPathComponent("state/welcome.json"))
         closeWarningStore = try PrivateJSONStore(url: base.appendingPathComponent("state/suppress-close-warning.json"), maximumBytes: 128)
         do { suppressCloseWarning = try closeWarningStore.load(Bool.self) ?? false }
         catch { preferenceError = "Could not read the close-warning preference; warnings remain enabled. \(error)" }
@@ -179,6 +181,8 @@ final class ApplicationSettings {
 
     func status() throws -> JSONValue {
         .object(["path": .string(configURL.path), "current": try .encoding(current),
+                 "welcome": try .encoding(welcome.snapshot),
+                 "welcomeError": welcome.diagnostic.map(JSONValue.string) ?? .null,
                  "closeWarning": .object(["suppressed": .bool(suppressCloseWarning), "error": preferenceError.map(JSONValue.string) ?? .null]),
                  "typeWarning": .object(["suppressed": .bool(suppressTypeWarning), "error": typeWarningError.map(JSONValue.string) ?? .null]),
                  "error": error.map(JSONValue.string) ?? .null,

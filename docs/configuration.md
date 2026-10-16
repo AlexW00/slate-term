@@ -1,5 +1,7 @@
 # Configuration and restoration
 
+The [inline welcome](welcome.md) has a separate private acknowledgement in `state/welcome.json`, not a TOML option. Use `slate-term welcome --read` to stop automatic display or `--unread`/`--reset` to enable it for new terminal sessions. It is independent of shell integration and workspace persistence; `config.get` includes its state and storage diagnostic.
+
 Slate Terminal reads `~/.config/slate-term/config.toml`. A missing file uses defaults. `SLATE_TERM_CONFIG_FILE` can select a different file for an app instance.
 
 ```toml
@@ -22,6 +24,14 @@ shell_integration = "auto" # auto, off
 
 [browser]
 search_url = "https://www.google.com/search?q={query}"
+
+[notifications]
+automatic = true
+minimum_seconds = 30
+tools = true
+banners = "other_panes" # other_panes, other_apps, off
+sound = false
+command_details = false
 
 [layout]
 restore_workspace = true
@@ -48,6 +58,10 @@ Register, enable/disable, remove plugins and view their live status directly in 
 **⌘K** opens the [command picker](command-picker.md) for built-in and plugin commands. Its `command.picker` binding and **⌘,** (`settings.open`) are configurable like other actions.
 
 **Keyboard Shortcuts** lists each action with one editable shortcut and a **Reset** button. Click the shortcut (or **Record** for an unbound action) and press a replacement key combination. Escape cancels recording; Delete clears the binding. Reset restores the action's default shortcut. Assigning or resetting replaces that action's existing bindings. Conflicts are rejected without changing either action. Use **Apply** to save.
+
+## Notifications
+
+**Settings → Notifications** controls automatic long-command completion, tool/API notifications, banner focus policy, sound and optional command details. Defaults: automatic completion after 30 seconds, other-pane banners, no sound and no command text. Changes apply live and are available through `config.patch`. macOS permission is requested only through the native Allow Desktop Notifications button; denied permission does not disable unread source indicators. See [notifications](notifications.md) for API/CLI/OSC support, limits, suppression and source navigation.
 
 ## Terminal palettes
 

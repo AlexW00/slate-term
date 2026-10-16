@@ -19,6 +19,10 @@ struct PaneHeaderAction {
 final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDelegate {
     private(set) var content: NSViewController
     private var contentConstraints: [NSLayoutConstraint] = []
+    private let welcomeView: WelcomeView?
+    private var welcomeHeight: NSLayoutConstraint?
+    private var welcomeEnabled: Bool
+    var welcomeVisible: Bool { welcomeEnabled && (welcomeHeight?.constant ?? 0) > 0 }
     private let typeName: String
     private let typeID: String
     private let actionStrip = NSStackView()
@@ -35,6 +39,7 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
     private lazy var headerHeight = header.heightAnchor.constraint(equalToConstant: 28)
     private(set) var headerVisible = true
     private var latestTitle = ""
+    private var hasUnreadNotification = false
     private var renameTitle = ""
     private var renamePopover: NSPopover?
     private let renameField = LiteralTextField(string: "")
@@ -43,11 +48,21 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
     private var isActive = true
     var onClose: (() -> Void)?
     var onFocus: (() -> Void)?
+    var onInsertWelcomeCommand: (() -> Void)? {
+        didSet {
+            welcomeView?.onInsertCommand = onInsertWelcomeCommand == nil ? nil : { [weak self] in
+                guard let self, self.welcomeVisible else { return }
+                self.onInsertWelcomeCommand?()
+            }
+        }
+    }
     var onRename: ((String) -> Void)?
     var typeChoices: (() -> [(name: String, id: String)])?
     var onChangeType: ((String) -> Void)?
 
-    init(content: NSViewController, type: String, typeID: String) {
+    init(content: NSViewController, type: String, typeID: String, showWelcome: Bool = false) {
+        welcomeEnabled = showWelcome && typeID == "terminal"
+        welcomeView = showWelcome && typeID == "terminal" ? WelcomeView() : nil
         self.content = content
         self.typeName = type
         self.typeID = typeID
@@ -103,6 +118,18 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
         closeButton.toolTip = "Close Pane"
         for child in [dragHandle, typeButton, titleField, actionStrip, closeButton] { child.translatesAutoresizingMaskIntoConstraints = false; header.addSubview(child) }
         for child in [header, content.view] { child.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(child) }
+        if let welcomeView {
+            welcomeView.onFocus = { [weak self] in self?.onFocus?() }
+            welcomeView.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview(welcomeView)
+            let height = welcomeView.heightAnchor.constraint(equalToConstant: 0)
+            welcomeHeight = height
+            NSLayoutConstraint.activate([
+                welcomeView.topAnchor.constraint(equalTo: header.bottomAnchor),
+                welcomeView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                welcomeView.trailingAnchor.constraint(equalTo: view.trailingAnchor), height
+            ])
+        }
         inactiveShade.translatesAutoresizingMaskIntoConstraints = false
         inactiveShade.isHidden = true
         view.addSubview(inactiveShade)
@@ -135,7 +162,7 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
     }
 
     private func constrainContent() {
-        contentConstraints = [content.view.topAnchor.constraint(equalTo: header.bottomAnchor),
+        contentConstraints = [content.view.topAnchor.constraint(equalTo: welcomeView?.bottomAnchor ?? header.bottomAnchor),
             content.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             content.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             content.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)]
@@ -156,6 +183,24 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
         constrainContent()
     }
 
+    func clickWelcomeInsertForTesting() throws {
+        guard welcomeVisible, let welcomeView else {
+            throw RPCFailure(code: -32051, message: "Welcome message is not presented")
+        }
+        welcomeView.clickInsertCommandForTesting()
+    }
+
+    func dismissWelcome() {
+        guard welcomeEnabled else { return }
+        welcomeEnabled = false
+        welcomeView?.onInsertCommand = nil
+        _ = view
+        welcomeHeight?.constant = 0
+        welcomeView?.isHidden = true
+        view.needsLayout = true
+        view.layoutSubtreeIfNeeded()
+    }
+
     func setHeaderVisible(_ visible: Bool) {
         _ = view
         guard headerVisible != visible else { return }
@@ -173,11 +218,18 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
         renameTitle = title
         latestTitle = String(title.components(separatedBy: .controlCharacters).joined(separator: " ").prefix(512))
         // The header stays live; the separate rename draft is never overwritten.
-        titleField.stringValue = latestTitle
-        titleField.toolTip = latestTitle
+        titleField.stringValue = (hasUnreadNotification ? "● " : "") + latestTitle
+        titleField.toolTip = (hasUnreadNotification ? "Unread notification · " : "") + latestTitle
         header.setAccessibilityLabel("\(typeName): \(latestTitle)")
         closeButton.setAccessibilityLabel("Close \(typeName) Pane: \(latestTitle)")
         dragHandle.setAccessibilityLabel("Move \(typeName) Pane: \(latestTitle)")
+    }
+
+    func setUnreadNotification(_ unread: Bool) {
+        guard hasUnreadNotification != unread else { return }
+        hasUnreadNotification = unread
+        setTitle(renameTitle)
+        titleField.setAccessibilityLabel(unread ? "Unread notification. Rename Pane" : "Rename Pane")
     }
 
     override func viewWillDisappear() {
@@ -307,6 +359,14 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
     }
     override func viewDidLayout() {
         super.viewDidLayout()
+        if let welcomeView, let welcomeHeight {
+            let available = max(0, view.bounds.height - headerHeight.constant)
+            // Never impose a pane minimum. Give the live terminal at least 80pt where
+            // available and at least half of larger panes; longer copy can scroll.
+            let height = welcomeEnabled ? min(welcomeView.preferredHeight(for: view.bounds.width), available / 2, max(0, available - 80)) : 0
+            if abs(welcomeHeight.constant - height) > 0.5 { welcomeHeight.constant = height }
+            welcomeView.isHidden = height == 0
+        }
         let capacity = header.bounds.width >= 500 ? 3 : header.bounds.width >= 320 ? 1 : header.bounds.width >= 180 ? 0 : -1
         if capacity != actionCapacity { actionCapacity = capacity; rebuildHeaderActions() }
     }
@@ -408,7 +468,7 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
         // Constraints use alignment rects; NSTextField's frame has two-point side outsets.
         let titleRect = titleField.alignmentRect(forFrame: titleField.frame)
         return .object(["type": .string(typeName), "title": .string(latestTitle), "height": .number(header.bounds.height),
-                 "headerVisible": .bool(headerVisible), "contentHeight": .number(content.view.bounds.height),
+                 "headerVisible": .bool(headerVisible), "unreadNotification": .bool(hasUnreadNotification), "contentHeight": .number(content.view.bounds.height),
                  "headerWidth": .number(header.bounds.width), "titleCenterX": .number(titleRect.midX),
                  "titleLeadingX": .number(titleRect.minX), "titleTrailingX": .number(titleRect.maxX),
                  "typeTrailingX": .number(typeButton.frame.maxX), "actionsLeadingX": .number(actionStrip.frame.minX),

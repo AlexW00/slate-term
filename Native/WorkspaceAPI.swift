@@ -123,6 +123,8 @@ extension WorkspaceHost {
                 "listEnabledField": .string("enabled"), "enableStartsProcesses": .bool(false)
             ]),
             "appearance": Self.appearanceDescriptor,
+            "notifications": Self.notificationDescriptor,
+            "welcome": Self.welcomeDescriptor,
             "settingsLifecycle": .object([
                 "version": .integer(1), "scope": .string("configurationSourceAndApplied"),
                 "topics": .array(["host.settings.source.changed", "host.settings.changed", "host.plugin.settings.changed", "host.settings.failed"].map(JSONValue.string)),
@@ -224,6 +226,7 @@ extension WorkspaceHost {
             "tabs": .array(try tabs.map { tab in .object([
                 "id": .string(tab.id.description), "focusedPaneId": .string(tab.focusedPane.description),
                 "manualTitle": tab.manualTitle.map(JSONValue.string) ?? .null, "title": .string(tab.title),
+                "unreadNotificationCount": .integer(notificationStore.records.filter { $0.anchor.paneId.map(tab.layout.paneIDs.contains) ?? ($0.anchor.tabId == tab.id) }.count),
                 "layoutRevision": .string(revisions.layoutRevision(tab.id)!), "layout": try .encoding(tab.layout)
             ]) }),
             "panes": .array(try page.map { try inspectPane($0.id) })
@@ -286,6 +289,7 @@ extension WorkspaceHost {
             "paneId": .string(id.description), "type": .string(type), "tabId": .string(tab.id.description),
             "groupId": workspace.groups.first { $0.tabs.contains(tab.id) }.map { .string($0.id.description) } ?? .null,
             "headerVisible": .bool(pane.headerVisible),
+            "unreadNotificationCount": .integer(notificationStore.records.filter { $0.anchor.paneId == id }.count),
             "manualTitle": pane.manualTitle.map { .string(String($0.prefix(512))) } ?? .null,
             "manualTitleTruncated": .bool((pane.manualTitle?.count ?? 0) > 512),
             "windowId": windows[tab.id].map { .string($0.identity) } ?? .null,

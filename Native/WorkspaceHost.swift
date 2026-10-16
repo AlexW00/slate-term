@@ -14,6 +14,20 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     let operations: OperationControl
     lazy var revisions = WorkspaceRevisions(epoch: instanceID, workspace: workspace)
     var shellSessions: [PaneID: ShellSession] = [:]
+    var notificationStore = NotificationStore()
+    var notificationLifetimes: [PaneID: String] = [:]
+    var notificationCommandText: [PaneID: String] = [:]
+    var notificationsRunning = false
+    var notificationPending = 0
+    var notificationTesting: Bool { integration }
+    lazy var notificationDelivery = NotificationDelivery(epoch: instanceID,
+        stateRoot: settings.base.standardizedFileURL.resolvingSymlinksInPath().path, testing: integration)
+    func refreshNotificationCommandAvailability() { refreshCommandPicker() }
+    func reconcileNotificationFocus(_ next: Workspace, transition: WorkspaceTransition, operation: WorkspaceOperationContext) throws -> WorkspacePersistence {
+        // Explicit source navigation must release the rename sheet before focusing content.
+        tabRename?.cancelForLifecycle()
+        return try reconcile(next, transition: transition, operation: operation)
+    }
     private var pluginCatalog: PluginCatalog
     var pluginSettingsRecipients: [(id: String, plugin: String)] {
         pluginInstances.all.map { (id: $0.id, plugin: $0.registration.id) }
@@ -227,6 +241,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     func start() throws {
+        notificationsRunning = true
+        configureNotificationDelivery()
         if integration {
             // Owned integration windows must not execute the user's typing.
             integrationKeyboardMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [weak self] event in
@@ -271,6 +287,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     func close() {
+        notificationsRunning = false
+        notificationDelivery.close()
+        notificationStore = NotificationStore()
         if !windows.isEmpty {
             do { try synchronizeNativeGroups() }
             catch { NSLog("Final native tab synchronization failed: %@", String(describing: error)) }
@@ -316,7 +335,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         runtime.close()
     }
 
-    func setApplicationFocused(_ focused: Bool) { runtime.setFocused(focused) }
+    func setApplicationFocused(_ focused: Bool) {
+        runtime.setFocused(focused)
+        if focused { refreshNotifications() }
+    }
 
     func showWorkspaceWindow() {
         if let tab = workspace.keyTabID, let window = windows[tab] {
@@ -512,6 +534,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         try validateAPIGuards(params, method: method)
         let client = caller ?? AutomationCaller(origin: .administrative, audience: operations.administrativeAudience)
         let operation = try suppliedOperation ?? client.admit(method, metadata: metadata, through: operations)
+        if let contract, contract.family == .notifications {
+            return try await callNotifications(contract, params: params, operation: operation)
+        }
         if let contract, contract.family == .contextual {
             return try await callContextualAPI(contract, params: params, operation: operation, caller: caller)
         }
@@ -672,6 +697,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         case .pluginSettingsPatch: return try patchPluginSettings(params, operation: operation)
         case .paletteList: return try listPalettes()
         case .appearanceGet: return try appearanceInfo(params)
+        case .welcomeGet: return try welcomeInfo(params)
         case .skillsList: return try listAgentSkills(params)
         case .skillsInstall: return try changeAgentSkills(params, install: true)
         case .skillsUninstall: return try changeAgentSkills(params, install: false)
@@ -731,6 +757,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             let report = try JSONDecoder().decode(ShellReport.self, from: JSONEncoder().encode(JSONValue.object(params)))
             try session.accept(report, token: token)
             shellSessions[pane] = session
+            if report.state == .running { notificationCommandText[pane] = report.command }
             terminalControl.observe(pane: pane, sessionID: session.instanceID, report: report)
             layoutStartup.observe(pane: pane, session: session.instanceID, report: report)
             processTitles.bind(pane: pane, pid: pid_t(report.pid))
@@ -749,9 +776,23 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         case .configReload: return try reloadConfiguration(operation: operation)
         case .commandRun:
             guard let id = params["id"]?.string else { throw RPCFailure(code: -32602, message: "Command id is required") }
+            if ["welcome.read", "welcome.unread", "welcome.reset"].contains(id) {
+                var payload = params
+                payload.removeValue(forKey: "id")
+                return try changeWelcome(id == "welcome.read", params: payload, operation: operation)
+            }
             if let result = try runSettingsCommand(id, params: params, operation: operation) { return result }
             if id == "config.reload" { return try reloadConfiguration(operation: operation) }
             if id == "settings.open" { showSettings(); return .object([:]) }
+            if id == "notifications.settings" { showSettings(section: .notifications); return .object([:]) }
+            if id == "notifications.next" || id == "notifications.open" {
+                let allowed: Set<String> = id == "notifications.open" ? ["id", "notificationId"] : ["id"]
+                guard Set(withoutAPIGuards(params).keys).isSubset(of: allowed),
+                      id != "notifications.open" || params["notificationId"]?.string != nil else {
+                    throw RPCFailure(code: -32602, message: "Use notifications.next or notifications.open with notificationId")
+                }
+                return try openNotification(id: params["notificationId"]?.string, operation: operation)
+            }
             if id == "skills.settings" { showSettings(section: .agents); return .object([:]) }
             if id == "skills.reveal" { return try revealAgentSkill() }
             if id.hasPrefix("layouts.") { try savedLayouts.perform(id, operation: operation); return .object([:]) }
@@ -842,7 +883,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 try commitWorkspace(transition, operation: operation)
                 let tab = try targetTab(params)
                 windows[tab.id]?.title = tab.title
-                refreshCommandPicker()
+                updateNotificationIndicators()
                 persistence = persistWorkspace()
             } else if ["pane.title.set", "pane.title.clear", "pane.header.show", "pane.header.hide", "pane.header.toggle"].contains(id) {
                 try commitWorkspace(transition, operation: operation)
@@ -859,7 +900,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             try targetTerminal(params).send(text)
             return .object([:])
         case .panesCapture: return try .encoding(TerminalOutput(targetTerminal(params).capture()))
-        case .layoutConfiguration, .contextInspect, .settingsGet, .storageGet, .storageSet, .storageDelete, .paneTitle,
+        case .notificationsPost, .notificationsList, .notificationsDismiss, .notificationsStatus,
+             .layoutConfiguration, .contextInspect, .settingsGet, .storageGet, .storageSet, .storageDelete, .paneTitle,
              .terminalSend, .terminalKey, .terminalCapture, .terminalRun, .terminalWait,
              .eventsHead, .eventsPoll, .eventsEmit, .pluginsRestart,
              .webGet, .webSnapshot, .webClick, .webFill, .webSelect, .webScroll, .webWait, .webScreenshot,
@@ -873,6 +915,23 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     private func callDebug(_ method: String, params: [String: JSONValue], operation: WorkspaceOperationContext) throws -> JSONValue {
         switch method {
         case "debug.inspect" where integration: return inspect()
+        case "debug.welcomeInsert" where integration:
+            guard let container = containers[try targetPaneID(params)] else {
+                throw RPCFailure(code: -32051, message: "Pane container is unavailable")
+            }
+            try container.clickWelcomeInsertForTesting()
+            return .object([:])
+        case "debug.notifications" where integration:
+            if let authorization = params["authorization"]?.string {
+                guard ["authorized", "denied", "notDetermined", "unavailable"].contains(authorization) else { throw RPCFailure(code: -32602, message: "Invalid test authorization") }
+                notificationDelivery.testingAuthorization = authorization
+            }
+            if case .integer(let delay) = params["delayMilliseconds"], (0...2000).contains(delay) { notificationDelivery.testingAuthorizationDelayMilliseconds = delay }
+            if case .bool(let success) = params["submissionSucceeds"] { notificationDelivery.testingSubmissionSucceeds = success }
+            return .object(["pending": .integer(notificationPending), "authorizationInspections": .integer(notificationDelivery.authorizationInspectionCount),
+                "appActive": .bool(NSApp.isActive),
+                "keyTab": windows.first(where: { $0.value === NSApp.keyWindow }).map { .string($0.key.description) } ?? .null,
+                "tabTitles": .object(Dictionary(uniqueKeysWithValues: windows.map { ($0.key.description, .string($0.value.tab.title)) }))])
         case "debug.rejectNextWorkspacePublication" where integration:
             guard params.isEmpty else { throw RPCFailure(code: -32602, message: "This fixture takes no parameters") }
             rejectNextWorkspacePublication = true
@@ -1169,7 +1228,15 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 settingsWindow?.window?.setContentSize(NSSize(width: max(1000, width), height: max(560, height)))
             }
             let contentSize = settingsWindow?.window?.contentView?.frame.size ?? .zero
+            let maximumVisibleContent: NSSize
+            if let window = settingsWindow?.window, let screen = window.screen ?? NSScreen.main {
+                maximumVisibleContent = window.contentRect(forFrameRect: screen.visibleFrame).size
+            } else {
+                maximumVisibleContent = .zero
+            }
             return .object(["width": .number(contentSize.width), "height": .number(contentSize.height),
+                            "maximumVisibleContentWidth": .number(maximumVisibleContent.width),
+                            "maximumVisibleContentHeight": .number(maximumVisibleContent.height),
                             "dirty": .bool(model.isDirty), "conflict": .bool(model.conflict), "error": model.error.map(JSONValue.string) ?? .null,
                             "selectedTab": .integer(model.selectedTab), "settingsSection": .string(settingsModel?.selection?.rawValue ?? ""),
                             "tabDragID": .string(model.tabDragID(at: model.selectedTab)),
@@ -1181,7 +1248,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 let skills = (settingsModel?.agentSkills ?? []).map { ($0.target.id, JSONValue.string($0.status.rawValue)) }
                 return .object(["visible": .bool(settingsWindow?.window?.isVisible == true),
                                 "agentSkills": .object(Dictionary(uniqueKeysWithValues: skills)),
-                                "layoutsAvailable": .bool(settingsModel?.layouts != nil)])
+                                "layoutsAvailable": .bool(settingsModel?.layouts != nil),
+                                "notificationAuthorization": settingsModel.map { .string($0.notificationAuthorization) } ?? .null])
             }
             showSettings()
             guard let model = settingsModel else { throw RPCFailure(code: -32000, message: "Settings unavailable") }
@@ -1305,7 +1373,14 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             guard let path = params["path"]?.string, let window = params["layouts"] == .bool(true) ? settingsWindow?.window : (params["picker"] == .bool(true) ? commandPicker?.window : (params["settings"] == .bool(true) ? settingsWindow?.window : windows[workspace.keyTabID ?? TabID(1)])) else {
                 throw RPCFailure(code: -32602, message: "path and key window are required")
             }
-            try Self.captureWindow(window.windowNumber, path: path)
+            if params["renderContent"] == .bool(true), let view = window.contentView?.superview {
+                view.layoutSubtreeIfNeeded()
+                view.displayIfNeeded()
+                guard let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { throw RPCFailure(code: APIError.unavailable, message: "Owned view cannot be rendered") }
+                view.cacheDisplay(in: view.bounds, to: image)
+                guard let data = image.representation(using: .png, properties: [:]) else { throw RPCFailure(code: APIError.unavailable, message: "Owned render unavailable") }
+                try data.write(to: URL(fileURLWithPath: path))
+            } else { try Self.captureWindow(window.windowNumber, path: path) }
             return .object([:])
         default: throw RPCFailure(code: -32601, message: "Unknown method: \(method)")
         }
@@ -1703,6 +1778,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }
         for tab in affectedTabs { windows[tab]?.contentViewController = nil }
         for id in pluginRebindings {
+            // Only recreated tab-scoped content retires notification identity; retained moves do not.
+            notificationLifetimes.removeValue(forKey: id)
             let old = leaves[id] as? PluginPane
             if let controller = createdPlugins[id] { containers[id]?.replaceContent(with: controller) }
             old?.close()
@@ -1711,6 +1788,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             if let tab = try? next.resolvedTab(pane: id) { (leaves[id] as? PluginPane)?.instance.updatePaneOwner(tab.id) }
         }
         for id in replacements {
+            notificationLifetimes.removeValue(forKey: id)
+            notificationCommandText.removeValue(forKey: id)
             terminalControl.remove(pane: id)
             let container = containers.removeValue(forKey: id)
             container?.view.removeFromSuperview(); container?.removeFromParent()
@@ -1734,8 +1813,15 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             }
             terminals[id] = terminal
             shellNames[id] = integration && ProcessInfo.processInfo.environment["SLATE_TERM_TEST_REAL_SHELL"] != "1" ? "sh" : URL(fileURLWithPath: settings.current.terminal.shell).lastPathComponent
-            terminal.onContextChange = { [weak self] _, change in
-                guard let self else { return }
+            terminal.onDesktopNotification = { [weak self, weak terminal] title, body in
+                guard let self, let terminal, self.terminals[id] === terminal else { return }
+                self.queueTerminalNotification(pane: id, title: title, body: body)
+            }
+            terminal.onContextChange = { [weak self, weak terminal] context, change in
+                guard let self, let terminal, self.terminals[id] === terminal else { return }
+                if change == .commandFinished, let command = context.lastCommand {
+                    self.queueCommandNotification(pane: id, command: command)
+                }
                 // Authenticated reports own the effective directory returned by context.get.
                 if change == .workingDirectory, self.shellSessions[id]?.report != nil { return }
                 self.updatePaneTitle(id)
@@ -1762,6 +1848,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }
         let retainedPanes = Set(next.panes.map(\.id))
         for id in Array(leaves.keys) where !retainedPanes.contains(id) {
+            notificationLifetimes.removeValue(forKey: id)
+            notificationCommandText.removeValue(forKey: id)
             terminalControl.remove(pane: id)
             let container = containers.removeValue(forKey: id)
             container?.view.removeFromSuperview(); container?.removeFromParent()
@@ -1777,6 +1865,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         shellNames = shellNames.filter { terminals[$0.key] != nil }
         processNames = processNames.filter { terminals[$0.key] != nil }
         for pane in next.panes {
+            if notificationLifetimes[pane.id] == nil { notificationLifetimes[pane.id] = shellSessions[pane.id]?.instanceID ?? UUID().uuidString }
             if containers[pane.id] == nil {
                 let typeID: String
                 switch pane.type {
@@ -1786,7 +1875,17 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 case .registered(let id): typeID = id
                 }
                 let type = availablePaneTypes.first { $0.id == typeID }!.name
-                let container = PaneContainer(content: leaves[pane.id]!, type: type, typeID: typeID)
+                let container = PaneContainer(content: leaves[pane.id]!, type: type, typeID: typeID,
+                                              showWelcome: pane.type == .terminal && settings.welcome.snapshot.automaticDisplayEnabled)
+                container.onInsertWelcomeCommand = { [weak self, weak container, weak terminal = terminals[pane.id]] in
+                    guard let self, let container, let terminal,
+                          self.containers[pane.id] === container, self.terminals[pane.id] === terminal,
+                          let window = container.view.window else { return }
+                    self.focused(pane.id)
+                    self.focusResponder(pane.id, in: window)
+                    do { try terminal.send(WelcomeContent.readCommand) }
+                    catch { self.present(error) }
+                }
                 container.onClose = { [weak self] in self?.runUserCommand("pane.close", params: ["pane": .string(pane.id.description)]) }
                 container.onRename = { [weak self, weak container] title in
                     guard let self, let container, self.containers[pane.id] === container,
@@ -2182,6 +2281,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         for tab in workspace.tabs {
             for id in tab.layout.paneIDs { containers[id]?.setActive(id == tab.focusedPane) }
         }
+        refreshNotifications()
     }
 
     func windowDidResignKey(_ notification: Notification) {
@@ -2351,7 +2451,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 }
             }
         }
-        addCommands(["command.picker"], to: workspaceMenu)
+        addCommands(["command.picker", "notifications.next", "notifications.settings"], to: workspaceMenu)
         workspaceMenu.addItem(.separator())
         addCommands(["window.new"], to: workspaceMenu)
         workspaceMenu.addItem(.separator())
@@ -2463,7 +2563,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         commandPicker?.show(commands: pickerEntries, relativeTo: NSApp.keyWindow ?? workspace.keyTabID.flatMap { windows[$0] })
     }
 
-    private func runPickerCommand(_ id: String) {
+    private func runPickerCommand(_ requestedID: String) {
+        let id = requestedID == "welcome.reset" ? "welcome.unread" : requestedID
         guard pickerEntries.contains(where: { $0.item.id == id && $0.unavailable == nil }) else { NSSound.beep(); return }
         // Freeze before restoring focus; background clients must not redirect
         // shortcuts away from the same context used by Return/click execution.
@@ -2511,7 +2612,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }
     }
 
-    private func refreshCommandPicker() {
+    func refreshCommandPicker() {
         guard commandPicker?.isVisible == true else { return }
         commandPicker?.update(commands: pickerEntries)
     }
@@ -2529,7 +2630,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         let contributions = Dictionary(uniqueKeysWithValues: pluginCatalog.activeRegistrations.flatMap { registration in
             registration.commands.map { ($0.namespacedID(plugin: registration.id), (title: $0.title, plugin: registration.title)) }
         })
-        let excluded: Set<String> = ["command.picker", "layouts.openWindow", "layouts.launcher", "layouts.folder"]
+        let excluded: Set<String> = ["command.picker", "layouts.openWindow", "layouts.launcher", "layouts.folder", "welcome.reset"]
         let commands = availableCommands.filter { !excluded.contains($0.id) && !$0.contract.requiresArguments }.map { command in
             var title = command.title
             var detail = "Workspace"
@@ -2548,8 +2649,16 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 switch command.id {
                 case let id where id.hasPrefix("layouts."): detail = "Saved Layouts"; symbol = "rectangle.split.2x2"; keywords = "recipe template save launch spotlight"
                 case "settings.open": detail = "Application"; symbol = "gearshape"; keywords = "preferences configuration"
+                case "notifications.next":
+                    detail = "Notifications"; symbol = "bell.badge"; keywords = "unread attention jump next"
+                    if notificationStore.records.isEmpty { unavailable = "No outstanding notifications" }
+                case "notifications.settings": detail = "Notifications"; symbol = "bell"; keywords = "alerts sound permission"
                 case "config.reload": detail = "Application"; symbol = "arrow.clockwise"; keywords = "settings refresh"
                 case "plugins.reload": detail = "Plugin"; symbol = "arrow.clockwise"; keywords = "refresh widget panel"
+                case "welcome.read", "welcome.unread":
+                    detail = "Welcome Message"; symbol = "text.alignleft"; keywords = "onboarding welcome message read unread dismiss reset"
+                    if command.id == "welcome.read", settings.welcome.acknowledged == true { unavailable = "Welcome message is already marked as read" }
+                    if command.id == "welcome.unread", settings.welcome.acknowledged == false { unavailable = "Welcome message is already enabled for new terminals" }
                 case "skills.settings": detail = "AI"; symbol = "sparkles"; keywords = "agent skill claude codex install"
                 case "skills.reveal": detail = "AI"; symbol = "folder"; keywords = "agent skill finder show"
                 case "window.new": symbol = "macwindow.badge.plus"; keywords = "create"
@@ -2714,6 +2823,13 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 catch { self.settingsModel?.error = (error as? RPCFailure)?.message ?? String(describing: error) }
             }
             model.refreshAgentSkills = { [weak self] in self?.refreshAgentSkillsSettings() }
+            model.authorizeNotifications = { [weak self] in
+                Task { [weak self] in
+                    guard let self else { return }
+                    await self.notificationDelivery.requestAuthorization()
+                    self.settingsModel?.notificationAuthorization = await self.notificationDelivery.authorization()
+                }
+            }
             model.revealAgentSkill = { [weak self] in
                 do { _ = try self?.revealAgentSkill() }
                 catch { self?.settingsModel?.error = (error as? RPCFailure)?.message ?? String(describing: error) }
@@ -2722,6 +2838,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             settingsWindow?.shouldClose = { [weak self] in self?.confirmSettingsClose() ?? true }
         }
         refreshSettings()
+        Task { [weak self] in
+            guard let self else { return }
+            self.settingsModel?.notificationAuthorization = await self.notificationDelivery.authorization()
+        }
         if settingsModel?.layouts == nil {
             do {
                 settingsModel?.layouts = try savedLayouts.makeEditorModel()
@@ -2881,6 +3001,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         if id == "pane.zoom" {
             menuItem.title = (try? targetTab([:]))?.zoomedPane == nil ? "Maximize Pane" : "Restore Pane Size"
         }
+        if id == "notifications.next" { return !notificationStore.records.isEmpty }
         if id.map({ CommandContract.forCommand($0).workspaceIndependent }) == true || id == "tab.new" || id?.hasPrefix("plugin.") == true { return true }
         if id == "tab.rename", let editor = tabRename, NSApp.keyWindow === editor.window {
             return TabRenameController.unavailableReason(window: editor.owner, editor: editor) == nil
@@ -3047,6 +3168,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             info["browser"] = (leaves[pane.id] as? BrowserPane)?.focusInfo ?? .null
             info["plugin"] = (leaves[pane.id] as? PluginPane)?.info ?? .null
             info["header"] = containers[pane.id]?.info ?? .null
+            info["welcomeVisible"] = .bool(containers[pane.id]?.welcomeVisible ?? false)
             return .object(info)
         }
         let groups = nativeTabGroups().map { group in JSONValue.array(group.map { .string($0.description) }) }
