@@ -36,6 +36,9 @@ command_details = false
 [layout]
 restore_workspace = true
 
+[agents]
+show_activity = true # frames and tags on panes while an agent acts on them
+
 [keybind]
 "cmd+d" = "split.right"
 "cmd+shift+d" = "split.down"
@@ -62,6 +65,10 @@ Register, enable/disable, remove plugins and view their live status directly in 
 ## Notifications
 
 **Settings → Notifications** controls automatic long-command completion, tool/API notifications, banner focus policy, sound and optional command details. Defaults: automatic completion after 30 seconds, other-pane banners, no sound and no command text. Changes apply live and are available through `config.patch`. macOS permission is requested only through the native Allow Desktop Notifications button; denied permission does not disable unread source indicators. See [notifications](notifications.md) for API/CLI/OSC support, limits, suppression and source navigation.
+
+## Agent activity
+
+**Settings → AI Agents → Show agent activity on panes** (`agents.show_activity`, default `true`) controls whether panes show agent activity frames and tags. The same switch is available as `agents.activity.show`, `agents.activity.hide` and `agents.activity.toggle` in the ⌘K picker and through `command.run`, as `slate-term agent-activity show|hide|toggle`, and through `config.patch`. It changes presentation only; it does not change what agents can do, and `presence.list`, holds and events keep working. Activity is shown only for agents that identify themselves; see [agent presence](presence.md).
 
 ## Terminal palettes
 

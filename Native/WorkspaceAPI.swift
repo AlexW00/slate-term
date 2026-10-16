@@ -75,6 +75,7 @@ extension WorkspaceHost {
         if let expected = try string("expectedSourceRevision") {
             let id = params["id"]?.string ?? ""
             let configurationCommand = id == "config.reload" || id.hasPrefix("appearance.") || id.hasPrefix("terminal.font.") || id == "terminal.palette.set"
+                || id.hasPrefix("agents.activity.")
             guard ["config.patch", "config.reload"].contains(method) || (method == "command.run" && configurationCommand) else {
                 throw RPCFailure(code: -32602, message: "expectedSourceRevision is not supported by this operation")
             }
@@ -133,6 +134,7 @@ extension WorkspaceHost {
                 "fileReadAccess": .string("containingDirectory"), "pluginBridge": .bool(false)
             ]),
             "causation": OperationControl.descriptor,
+            "presence": PresenceController.descriptor,
             "backgroundServices": Self.serviceDescriptor,
             "pluginManagement": .object([
                 "version": .integer(1), "enableMethod": .string("plugins.enable"), "disableMethod": .string("plugins.disable"),

@@ -11,7 +11,7 @@ public struct CommandContract: Codable, Sendable {
 
     public static func forCommand(_ id: String) -> Self {
         let global = id.hasPrefix("appearance.") || id.hasPrefix("terminal.font.") || id.hasPrefix("terminal.palette.")
-            || id.hasPrefix("warnings.") || id.hasPrefix("skills.") || id.hasPrefix("welcome.") || (id.hasPrefix("plugins.") && id != "plugins.reload") || id.hasPrefix("window.frame.")
+            || id.hasPrefix("warnings.") || id.hasPrefix("skills.") || id.hasPrefix("agents.activity.") || id.hasPrefix("welcome.") || (id.hasPrefix("plugins.") && id != "plugins.reload") || id.hasPrefix("window.frame.")
             || ["window.focus", "window.minimize", "window.restore", "window.fullscreen.set", "tab.detachCurrent"].contains(id)
         let independent = id.hasPrefix("notifications.") || id.hasPrefix("layouts.") || (global && id != "tab.detachCurrent") || ["window.new", "settings.open", "config.reload", "command.picker", "browser.clearData"].contains(id)
         let parameters: [String: String]

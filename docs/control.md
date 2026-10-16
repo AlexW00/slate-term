@@ -23,6 +23,10 @@ When `api.describe.causation.version` is `1`, requests may include `"metadata":{
 
 The CLI's `--cause` negotiates support and dispatches on the same handshaken connection, without reconnect/retry fallback. Administrative references work across same-user connections within the app epoch; page references are restricted to their issuing view/document. Registered plugins remain trusted controllers, not a sandbox. See [events](events.md#causation-and-loop-admission) for expiry, rate limits and recovery.
 
+## Agent presence metadata
+
+When `api.describe.presence.version` is `1`, administrative requests may also carry `"actor":{"name":"claude","note":"…","home":"p1"}` in the same `metadata` object. The CLI fills it from `SLATE_TERM_ACTOR`/`--actor`, `--note` and the launching pane, and drops it for hosts without presence support. A malformed actor rejects the request like other malformed metadata. The actor is display only: it never changes admission, routing or authorization, and it is ignored for plugin pages, services and requests with a `cause`. See [agent presence](presence.md).
+
 ## Discovery and methods
 
 See [first-pass parity](api-parity-first-pass.md) for native window controls, shared web focus/key/desired-state/typed-value actions, and Boolean warning-suppression setters.

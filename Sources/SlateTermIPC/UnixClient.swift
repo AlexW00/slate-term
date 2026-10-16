@@ -45,11 +45,18 @@ public struct UnixClient: Sendable {
         private var descriptor: Int32?
         private var nextID = 2
         private var supportsMetadata: Bool?
+        private var supportsPresence = false
         fileprivate init(descriptor: Int32) { self.descriptor = descriptor }
         deinit { if let descriptor { Darwin.close(descriptor) } }
 
-        public func call(_ method: String, params: [String: JSONValue] = [:], metadata: RPCMetadata? = nil) throws -> JSONValue {
+        public func call(_ method: String, params: [String: JSONValue] = [:], metadata requested: RPCMetadata? = nil) throws -> JSONValue {
             guard let descriptor else { throw SocketError.disconnected }
+            var metadata = requested
+            if metadata?.actor != nil {
+                if supportsMetadata == nil { _ = try? call("api.describe") }
+                // An actor is presentation-only, so an older host silently skips it.
+                if !(supportsMetadata == true && supportsPresence) { metadata = metadata?.withoutActor }
+            }
             if metadata != nil {
                 if supportsMetadata == nil {
                     do { _ = try call("api.describe") }
@@ -66,7 +73,10 @@ public struct UnixClient: Sendable {
             nextID += 1
             do {
                 let result = try UnixClient.exchange(request, descriptor)
-                if method == "api.describe" { supportsMetadata = result.object?["causation"]?.object?["version"] == .integer(1) }
+                if method == "api.describe" {
+                    supportsMetadata = result.object?["causation"]?.object?["version"] == .integer(1)
+                    supportsPresence = result.object?["presence"]?.object?["version"] == .integer(1)
+                }
                 return result
             }
             catch let failure as RPCFailure { throw failure }

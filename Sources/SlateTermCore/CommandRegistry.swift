@@ -121,6 +121,9 @@ public enum CommandRegistry {
         .init(id: "welcome.reset", title: "Reset Welcome Message (Mark Unread)", key: "", shift: false),
         .init(id: "skills.settings", title: "Install Agent Skill…", key: "", shift: false),
         .init(id: "skills.reveal", title: "Open Agent Skill Folder", key: "", shift: false),
+        .init(id: "agents.activity.show", title: "Show Agent Activity", key: "", shift: false),
+        .init(id: "agents.activity.hide", title: "Hide Agent Activity", key: "", shift: false),
+        .init(id: "agents.activity.toggle", title: "Toggle Agent Activity", key: "", shift: false),
     ]
 
     public static func execute(_ id: String, params: [String: JSONValue], workspace: inout Workspace) throws -> JSONValue {

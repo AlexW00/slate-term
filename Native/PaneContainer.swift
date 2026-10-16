@@ -45,6 +45,8 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
     private let renameField = LiteralTextField(string: "")
     private var editingOriginal: String?
     private let inactiveShade = PaneInactiveShade()
+    /// Created with the view so later presence updates never add views or constraints.
+    private let presenceOverlay = PresenceOverlayView()
     private var isActive = true
     var onClose: (() -> Void)?
     var onFocus: (() -> Void)?
@@ -133,11 +135,17 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
         inactiveShade.translatesAutoresizingMaskIntoConstraints = false
         inactiveShade.isHidden = true
         view.addSubview(inactiveShade)
+        presenceOverlay.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(presenceOverlay, positioned: .above, relativeTo: inactiveShade)
         NSLayoutConstraint.activate([
             inactiveShade.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             inactiveShade.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             inactiveShade.topAnchor.constraint(equalTo: view.topAnchor),
             inactiveShade.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            presenceOverlay.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            presenceOverlay.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            presenceOverlay.topAnchor.constraint(equalTo: view.topAnchor),
+            presenceOverlay.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
         // Fill the largest symmetric title region without compressing the type control.
         let preferredTitleWidth = titleField.widthAnchor.constraint(equalTo: header.widthAnchor)
@@ -209,6 +217,7 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
         headerVisible = visible
         header.isHidden = !visible
         headerHeight.constant = visible ? 28 : 0
+        presenceOverlay.headerInset = visible ? 28 : 0
         view.needsLayout = true
         view.layoutSubtreeIfNeeded()
     }
@@ -224,6 +233,15 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
         closeButton.setAccessibilityLabel("Close \(typeName) Pane: \(latestTitle)")
         dragHandle.setAccessibilityLabel("Move \(typeName) Pane: \(latestTitle)")
     }
+
+    /// Shows agent frames and tags above everything else in the pane.
+    func setPresence(_ items: [PresenceOverlayItem], contentTop: CGFloat? = nil) {
+        _ = view
+        presenceOverlay.contentTop = contentTop
+        presenceOverlay.update(items)
+    }
+
+    var presenceTestingState: JSONValue { presenceOverlay.testingState }
 
     func setUnreadNotification(_ unread: Bool) {
         guard hasUnreadNotification != unread else { return }

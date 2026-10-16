@@ -17,6 +17,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
     case paletteList = "palette.list", paletteImport = "palette.import", appearanceGet = "appearance.get"
     case skillsList = "skills.list", skillsInstall = "skills.install", skillsUninstall = "skills.uninstall"
     case welcomeGet = "welcome.get"
+    case presenceList = "presence.list", presenceHold = "presence.hold", presenceRelease = "presence.release"
     case pluginsList = "plugins.list", pluginsRegister = "plugins.register", pluginsUnregister = "plugins.unregister"
     case pluginsEnable = "plugins.enable", pluginsDisable = "plugins.disable"
     case pluginsStatus = "plugins.status", pluginsRestart = "plugins.restart", pluginsLogs = "plugins.logs"
@@ -45,7 +46,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
              .describe, .version, .contextGet, .workspaceGet, .workspaceSnapshot, .layoutGet, .tabsList, .panesList, .paneInspect,
              .commandList, .commandRun, .windowList, .windowGet, .configGet, .configReload, .configValidate, .configPatch,
              .paletteList, .paletteImport, .appearanceGet, .welcomeGet, .skillsList, .skillsInstall, .skillsUninstall, .pluginsList, .pluginsRegister, .pluginsUnregister, .pluginsEnable, .pluginsDisable, .pluginsStatus, .pluginsLogs,
-             .pluginSettingsGet, .pluginSettingsPatch, .panesSend, .panesCapture: .synchronous
+             .pluginSettingsGet, .pluginSettingsPatch, .panesSend, .panesCapture, .presenceList, .presenceHold, .presenceRelease: .synchronous
         case .notificationsPost, .notificationsList, .notificationsDismiss, .notificationsStatus: .notifications
         case .layoutConfiguration, .contextInspect, .settingsGet, .storageGet, .storageSet, .storageDelete, .paneTitle: .contextual
         case .terminalSend, .terminalKey, .terminalCapture, .terminalRun, .terminalWait: .terminal
@@ -71,7 +72,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
              .paletteList, .appearanceGet, .welcomeGet, .skillsList, .pluginsList, .pluginsStatus, .pluginsLogs, .pluginSettingsGet, .settingsGet, .storageGet,
              .terminalCapture, .terminalWait, .panesCapture, .eventsHead, .eventsPoll, .webGet, .webSnapshot, .webWait,
              .browserGet, .browserSnapshot, .browserWait, .serviceList, .serviceStatus, .serviceLogs,
-             .notificationsList, .notificationsStatus: .read
+             .notificationsList, .notificationsStatus, .presenceList, .presenceHold, .presenceRelease: .read
         case .layoutsCreate, .layoutsUpdate, .layoutsCapture, .layoutsOpen, .layoutsLauncher, .commandRun, .configReload, .configPatch, .paletteImport, .skillsInstall, .skillsUninstall, .pluginsRegister, .pluginsUnregister, .pluginsEnable, .pluginsDisable,
              .pluginsRestart, .pluginSettingsPatch, .storageSet, .storageDelete, .paneTitle, .terminalSend,
              .terminalKey, .terminalRun, .panesSend, .eventsEmit, .webClick, .webFill, .webSelect, .webScroll,
@@ -122,7 +123,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
              .skillsList, .skillsInstall, .skillsUninstall, .pluginsList, .pluginsRegister, .pluginsUnregister, .pluginsEnable, .pluginsDisable, .pluginsStatus, .pluginsRestart, .pluginsLogs,
              .eventsHead, .eventsPoll, .eventsEmit, .serviceStart, .serviceStop, .serviceList, .serviceStatus,
              .serviceLogs, .serviceReady, .shellUpdate, .shellRunInput, .browserClearData,
-             .notificationsList, .notificationsDismiss, .notificationsStatus: break
+             .notificationsList, .notificationsDismiss, .notificationsStatus, .presenceList, .presenceHold, .presenceRelease: break
         }
         return params
     }

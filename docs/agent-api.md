@@ -55,6 +55,8 @@ slate-term palette set --slot dark --name 'My Palette'
 slate-term command run terminal.font.set --params '{"size":15}'
 slate-term config get
 slate-term config set --key terminal.font_size --value 15 --expected-source-revision TOKEN
+slate-term agent-activity hide
+slate-term command run agents.activity.toggle
 ```
 
 Fixed appearance aliases and application-font increase/decrease/reset are available in native menus, the picker and configurable shortcuts. No default shortcuts steal pane-local font zoom. Parameterized commands require validated arguments and are excluded from one-click picker results. `warnings.close.reset` and `warnings.type.reset` re-enable the existing native warnings.
@@ -66,6 +68,18 @@ These operations reuse the native Settings writer, validation, palette preparati
 `config.get` exposes opaque `sourceRevision`, `appliedRevision`, `sourceValid` and `appliedMatchesSource`. Source and applied tokens have distinct meanings; they are not file hashes or expected to equal each other. A source token changes with observed source text; an applied token changes with runtime configuration. A supplied `expectedSourceRevision` is enforced on configuration patch/reload and relevant settings commands, and rejected on unrelated methods. External non-cooperating editor races cannot be given a filesystem compare-and-swap guarantee; apply/rollback errors must be inspected, not blindly retried.
 
 Application configuration writes, appearance, palette import and font-default commands are available to every trusted client through the same API and `command.run` route. Existing `workspace.command('config.reload')` remains compatible. Trust is established at the registered-origin/main-frame/document or same-user transport boundary; this is not an OS sandbox.
+
+## Agent presence
+
+```sh
+export SLATE_TERM_ACTOR=claude
+slate-term terminal capture --pane p2 --note "reading failing test output"
+slate-term presence hold --pane p4 --ttl 60 --note "triaging the board"
+slate-term presence release --pane p4
+slate-term presence list
+```
+
+Agents that name themselves get a frame and tag on the panes and elements they touch. `presence.list/hold/release` are shared catalog methods; holds require an agent identity, which only CLI callers can supply. `host.presence.changed` reports activity transitions without notes. See [agent presence](presence.md).
 
 ## Notifications
 

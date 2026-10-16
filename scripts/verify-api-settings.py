@@ -32,6 +32,19 @@ with AppFixture('api-settings', source) as app:
     assert app.rpc('config.get')['current']['terminal']['font_size'] == 15
     app.cli('command', 'run', 'terminal.font.reset')
     assert app.rpc('config.get')['current']['terminal']['font_size'] == 13
+    # Agent activity: typed CLI, command.run and config.patch share one writer.
+    def agent_activity():
+        return app.rpc('config.get')['current']['agents']['show_activity']
+    assert agent_activity() is True
+    app.cli('agent-activity', 'hide')
+    assert agent_activity() is False
+    app.rpc('command.run', id='agents.activity.toggle')
+    assert agent_activity() is True
+    revision = app.rpc('config.get')['sourceRevision']
+    app.cli('config', 'set', '--key', 'agents.show_activity', '--value', 'false', '--expected-source-revision', revision)
+    assert agent_activity() is False
+    app.cli('command', 'run', 'agents.activity.show')
+    assert agent_activity() is True
     assert app.cli('palette', 'list')
     # Fail after the new config reaches disk: rollback must restore the original source.
     before_apply_failure = app.config.read_text()

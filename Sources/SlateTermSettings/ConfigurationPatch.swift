@@ -10,7 +10,7 @@ public enum ConfigurationPatch {
         var result: [String: String] = [:]
         for (key, value) in values {
             guard let section = key.split(separator: ".").first,
-                  ["appearance", "terminal", "browser", "layout", "keybind", "notifications"].contains(String(section)) else {
+                  ["appearance", "terminal", "browser", "layout", "keybind", "notifications", "agents"].contains(String(section)) else {
                 throw ConfigurationError.invalid("Application settings require a supported section; use plugins.settings.patch for plugin namespaces")
             }
             switch value {

@@ -71,10 +71,15 @@ enum BrowserAutomation {
       if(required&&!element)throw new Error('No attached element matches the target');
       return element??null;
     };
+    // The acted-on element's viewport rectangle, returned so hosts can frame it.
+    let located=null;
+    const bounds=element=>{const r=element.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height};};
+    const placed=result=>located?Object.assign(result,{rect:located,viewport:{width:innerWidth,height:innerHeight}}):result;
     const actionable=element=>{
       if(!shown(element)||disabled(element))throw new Error('Element is hidden, disabled or inert');
       element.scrollIntoView({block:'center',inline:'center',behavior:'instant'});
       const rect=element.getBoundingClientRect();
+      located={x:rect.x,y:rect.y,width:rect.width,height:rect.height};
       const left=Math.max(0,rect.left),right=Math.min(innerWidth,rect.right);
       const top=Math.max(0,rect.top),bottom=Math.min(innerHeight,rect.bottom);
       if(right<=left||bottom<=top)throw new Error('Element is outside the viewport');
@@ -120,12 +125,14 @@ enum BrowserAutomation {
     if(action==='probe'){
       const element=target(false),visible=shown(element);
       const matched={attached:!!element,detached:!element,visible,hidden:!visible}[args.state];
-      return {matched,state:args.state,viewId:state.viewId,documentId:epoch};
+      if(matched&&visible)located=bounds(element);
+      return placed({matched,state:args.state,viewId:state.viewId,documentId:epoch});
     }
     if(action==='scroll'){
       const element=target(args.ref!==undefined||args.selector!==undefined);
       (element??window).scrollBy({left:args.x,top:args.y,behavior:'instant'});
-      return {x:element?element.scrollLeft:scrollX,y:element?element.scrollTop:scrollY,viewId:state.viewId,documentId:epoch};
+      if(element&&shown(element))located=bounds(element);
+      return placed({x:element?element.scrollLeft:scrollX,y:element?element.scrollTop:scrollY,viewId:state.viewId,documentId:epoch});
     }
     const element=target();
     const focus=()=>{
@@ -135,7 +142,7 @@ enum BrowserAutomation {
       actionable(element);
     };
     if(action==='focus'){
-      focus();return {focused:true,viewId:state.viewId,documentId:epoch};
+      focus();return placed({focused:true,viewId:state.viewId,documentId:epoch});
     }
     if(action==='key'){
       focus();
@@ -194,7 +201,7 @@ enum BrowserAutomation {
       if(key===' '&&accepted&&released&&eligible()&&unmodified&&activatable()){
         actionable(element);element.click();defaultAction='activate';
       }
-      return {dispatched:true,defaultPrevented:!accepted||!released,defaultAction,synthetic:true,viewId:state.viewId,documentId:epoch};
+      return placed({dispatched:true,defaultPrevented:!accepted||!released,defaultAction,synthetic:true,viewId:state.viewId,documentId:epoch});
     }
     if(action==='check'){
       if(!(element instanceof HTMLInputElement)||!['checkbox','radio'].includes(element.type))throw new Error('Check requires a native checkbox or radio input');
@@ -203,7 +210,7 @@ enum BrowserAutomation {
       const changedState=element.checked!==args.checked;
       if(changedState)element.click();
       if(!element.isConnected||element.checked!==args.checked||element.indeterminate)throw new Error('Control did not retain the requested checked state');
-      return {performed:changedState,checked:element.checked,viewId:state.viewId,documentId:epoch};
+      return placed({performed:changedState,checked:element.checked,viewId:state.viewId,documentId:epoch});
     }
     if(action==='setValue'){
       if(!(element instanceof HTMLInputElement)||!['number','date','time','datetime-local','range'].includes(element.type))throw new Error('SetValue requires a supported typed input');
@@ -215,12 +222,12 @@ enum BrowserAutomation {
       if(probe.value!==args.value||!probe.validity.valid)throw new Error('Value is not canonical or violates input constraints');
       setter.call(element,args.value);changed(element);
       if(!element.isConnected||element.value!==args.value)throw new Error('Input did not retain the requested value');
-      return {performed:true,value:element.value,type:element.type,viewId:state.viewId,documentId:epoch};
+      return placed({performed:true,value:element.value,type:element.type,viewId:state.viewId,documentId:epoch});
     }
     if(action==='click'){
       if(typeof element.click!=='function')throw new Error('Element does not support click');
       actionable(element);
-      element.click();return {performed:true,viewId:state.viewId,documentId:epoch};
+      element.click();return placed({performed:true,viewId:state.viewId,documentId:epoch});
     }
     if(action==='fill'){
       if(element.readOnly)throw new Error('Element is read-only');
@@ -232,7 +239,7 @@ enum BrowserAutomation {
       element.focus({preventScroll:true});
       if(prototype)Object.getOwnPropertyDescriptor(prototype,'value').set.call(element,args.text);
       else element.textContent=args.text;
-      changed(element);return {performed:true,viewId:state.viewId,documentId:epoch};
+      changed(element);return placed({performed:true,viewId:state.viewId,documentId:epoch});
     }
     if(action==='select'){
       if(!(element instanceof HTMLSelectElement))throw new Error('Select requires a select element');
@@ -245,7 +252,7 @@ enum BrowserAutomation {
       }
       actionable(element);
       for(const option of options)option.selected=selected.has(option);
-      changed(element);return {performed:true,values:Array.from(element.selectedOptions,option=>option.value),viewId:state.viewId,documentId:epoch};
+      changed(element);return placed({performed:true,values:Array.from(element.selectedOptions,option=>option.value),viewId:state.viewId,documentId:epoch});
     }
     throw new Error('Unsupported browser action');
     """#

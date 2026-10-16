@@ -13,7 +13,7 @@ extension AppConfiguration {
             }
             let section = String(path[..<dot])
             let name = String(path[path.index(after: dot)...])
-            guard ["appearance", "terminal", "browser", "layout", "keybind", "notifications"].contains(section) else {
+            guard ["appearance", "terminal", "browser", "layout", "keybind", "notifications", "agents"].contains(section) else {
                 throw ConfigurationError.invalid("Use the path-aware plugin settings writer for namespaces; unsupported application section: \(section)")
             }
             guard !literal.contains("\n"), !literal.contains("\r") else {

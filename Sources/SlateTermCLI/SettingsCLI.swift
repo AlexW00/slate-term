@@ -24,6 +24,16 @@ struct AppearanceCLI: ParsableCommand {
     }
 }
 
+struct AgentActivityCLI: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "agent-activity", abstract: "Show, hide or toggle agent activity frames and tags on panes. Read the current value with config get.")
+    enum Action: String, ExpressibleByArgument { case show, hide, toggle }
+    @Argument var action: Action
+    @OptionGroup var connection: Connection
+    func run() throws {
+        try connection.call("command.run", params: ["id": .string("agents.activity.\(action.rawValue)")])
+    }
+}
+
 struct PaletteCLI: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "palette", abstract: "List palettes or import validated colors without activating them.")
     enum Action: String, ExpressibleByArgument { case list, `import`, set }

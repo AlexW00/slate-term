@@ -106,6 +106,8 @@ Automation admission allows 10 mutations/second with a burst of 20 per plugin ID
 - `host.plugin.storage.changed`: changed key, directed to the owning logical instance after successful persistence. Equal writes and deletion of an absent key neither persist nor publish; stored JSON null is distinct from deletion.
 - `host.layout.startup.failed`: saved-recipe startup failure, with bounded state, current workspace revision and original operation attribution. Command text and diagnostic messages remain outside the event; use `layouts.startupStatus`.
 
+`host.presence.changed` reports an agent activity beginning or ending on a pane, once per activity rather than per call. The payload is value-free (`activityId`, `phase`, `actionKind`, claimed `actor.name`, `pane`, `count`, `leased`, optional `result`); notes stay out of the journal and are read with `presence.list`. Event-caused calls never create presence. See [agent presence](presence.md).
+
 `host.notifications.changed` is a value-free invalidation with `outstanding`; read `notifications.list/status` rather than reconstructing state from events. It does not include notification titles/bodies or command text, and inherits admitted causation where applicable. [Notification state](notifications.md) is separate from this event journal and is not persistent history.
 
 ## Workspace commit facts

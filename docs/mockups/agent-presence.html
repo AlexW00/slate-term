@@ -1,0 +1,942 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Agent Presence</title>
+<meta name="description" content="Mockup v2: per-pane frame and tag presence for AI agents acting on Slate panes through the CLI.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Visual language borrowed from website-designs/b-canvas.html. */
+:root {
+  color-scheme: dark;
+  --bg: #121417; --bg-2: #0d0f11;
+  --line: rgba(255,255,255,.08); --line-2: rgba(255,255,255,.14);
+  --fg: #eceef0; --fg-2: #b4b9c0; --muted: #7d838c;
+  --accent: #6ef0c0; --accent-ink: #062218;
+  --note: #e8c37a;
+  --claude: #ff9466; --codex: #b79cff; --gemini: #5ec8f0;
+  --display: "Inter Tight", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --gutter: clamp(16px, 4vw, 56px);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 400 16px/1.6 var(--display); -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+.wrap { width: min(1240px, 100% - 2 * var(--gutter)); margin-inline: auto; }
+.eyebrow { display: flex; align-items: center; gap: 12px; margin: 0 0 18px; font: 500 12px/1.4 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.eyebrow b { color: var(--accent); font-weight: 500; }
+.eyebrow::after { content: ""; flex: 0 1 64px; height: 1px; background: var(--line-2); }
+h1, h2 { margin: 0; letter-spacing: -.04em; line-height: .98; font-weight: 800; }
+h1 { font-size: clamp(40px, 6vw, 80px); }
+h2 { font-size: clamp(28px, 3.6vw, 44px); font-weight: 700; }
+h3 { margin: 0 0 8px; font-size: 19px; letter-spacing: -.02em; font-weight: 600; }
+p { margin: 0; }
+.lede { font-size: clamp(17px, 1.5vw, 20px); color: var(--fg-2); max-width: 64ch; line-height: 1.5; margin-top: 18px; }
+code { font-family: var(--mono); font-size: .88em; color: var(--accent); }
+header.top { padding: clamp(40px, 7vh, 80px) 0 28px; }
+
+/* Controls */
+.bar { width: min(1400px, 100% - 2 * var(--gutter)); margin: 0 auto 14px; display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.seg { display: inline-flex; padding: 3px; border: 1px solid var(--line-2); border-radius: 999px; background: rgba(255,255,255,.02); }
+.seg button { all: unset; cursor: pointer; padding: 7px 14px; border-radius: 999px; font: 500 13px/1 var(--display); color: var(--fg-2); transition: background-color .2s, color .2s; }
+.seg button:hover { color: var(--fg); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.seg button:focus-visible, .ctl:focus-visible, .chap:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.seg-label { font: 500 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-right: 6px; }
+.grp { display: inline-flex; align-items: center; }
+.ctl { all: unset; cursor: pointer; width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--line-2); display: grid; place-items: center; color: var(--fg); }
+.ctl:hover { border-color: var(--accent); }
+.ctl svg { width: 14px; height: 14px; }
+.clock { margin-left: auto; font: 500 12px/1 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* Stage */
+.stage { padding: 6px 0 28px; background: radial-gradient(60% 50% at 50% 30%, rgba(110,240,192,.07), transparent 70%), linear-gradient(var(--bg) 0, var(--bg-2) 30%, var(--bg-2) 85%, var(--bg) 100%); }
+.screen-outer { width: min(1400px, 100% - 2 * var(--gutter)); margin: 0 auto; }
+.fit { position: relative; width: 100%; height: calc(800px * var(--s, .5)); }
+.fit > .scaler { position: absolute; left: 0; top: 0; width: 1280px; height: 800px; transform-origin: 0 0; transform: scale(var(--s, .5)); border-radius: 14px; box-shadow: 0 40px 120px -30px rgba(0,0,0,.9), 0 0 0 1px rgba(255,255,255,.06); }
+
+/* Chapters */
+.chapters { width: min(1400px, 100% - 2 * var(--gutter)); margin: 16px auto 0; list-style: none; padding: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
+.chap { all: unset; box-sizing: border-box; display: block; width: 100%; cursor: pointer; padding: 6px 0 4px; }
+.chap .barx { display: block; height: 3px; border-radius: 3px; background: rgba(255,255,255,.12); overflow: hidden; }
+.chap .barx i { display: block; height: 100%; width: 0; background: var(--fg-2); }
+.chap.active .barx i { background: var(--accent); }
+.chap .lab { display: flex; gap: 8px; margin-top: 9px; font: 500 11px/1.3 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chap .lab b { color: var(--fg-2); font-weight: 500; }
+.chap.active .lab { color: var(--fg); } .chap.active .lab b { color: var(--accent); }
+@media (max-width: 760px) { .chap .lab span { display: none; } }
+
+/* Now playing + feed */
+.under { width: min(1400px, 100% - 2 * var(--gutter)); margin: 18px auto 0; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 18px; }
+@media (max-width: 860px) { .under { grid-template-columns: 1fr; } }
+.card-ui { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; background: rgba(255,255,255,.02); min-width: 0; }
+.card-ui h3 { margin: 0 0 10px; font: 600 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.now-who { display: flex; align-items: center; gap: 10px; font-size: 15px; min-height: 24px; flex-wrap: wrap; }
+.now-who .av { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.now-who .note { color: var(--fg-2); }
+.now-cmd { margin-top: 10px; font: 400 12.5px/1.55 var(--mono); color: var(--fg-2); background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; overflow-x: auto; white-space: pre; }
+.now-cmd .k { color: var(--muted); } .now-cmd .n { color: var(--note); } .now-cmd .e { color: var(--accent); }
+.feed { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font: 400 12px/1.5 var(--mono); }
+.feed li { display: grid; grid-template-columns: 44px 10px minmax(0,1fr); gap: 8px; align-items: center; color: var(--fg-2); animation: feedin .35s ease; }
+.feed li span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.feed li i { width: 7px; height: 7px; border-radius: 50%; }
+.feed li .t { color: var(--muted); font-variant-numeric: tabular-nums; }
+@keyframes feedin { from { opacity: 0; transform: translateY(-4px); } }
+
+/* ===== Mock window (design pixels) ===== */
+.win {
+  --w-bg: #1d1f23; --p-bg: #141619; --p-hd: #1c1f23; --p-fg: #c8ccd2; --p-dim: #747a83; --p-ac: #8ab4f8; --p-line: rgba(255,255,255,.07); --p-ok: #7fd18b; --p-warn: #e7b35a; --p-err: #f07178;
+  position: relative; width: 1280px; height: 800px; border-radius: 14px; overflow: hidden;
+  background: var(--w-bg); color: var(--p-fg); font: 400 13px/1.5 var(--mono);
+}
+.titlebar { height: 38px; display: flex; align-items: center; padding: 0 14px; position: relative; }
+.lights { display: flex; gap: 8px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; }
+.lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+.tabs { position: absolute; left: 50%; transform: translateX(-50%); display: flex; gap: 4px; font: 500 12px/1 var(--display); }
+.tabs span { padding: 7px 16px; border-radius: 7px; color: var(--p-dim); }
+.tabs span.on { background: rgba(255,255,255,.07); color: var(--p-fg); }
+.content { position: absolute; left: 6px; right: 6px; top: 38px; bottom: 6px; }
+.pane { position: absolute; padding: 3px; }
+.pbox { position: absolute; inset: 3px; background: var(--p-bg); border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; border: 1px solid var(--p-line); }
+.phd { height: 28px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--p-hd); border-bottom: 1px solid var(--p-line); font: 500 11.5px/1 var(--display); color: var(--p-dim); position: relative; }
+.phd .ptype::after { content: " ⌄"; font-size: 10px; }
+.phd .ptitle { position: absolute; left: 50%; transform: translateX(-50%); color: var(--p-fg); white-space: nowrap; }
+.phd .x { margin-left: auto; opacity: .5; }
+.phd .pid { font: 500 10px/1 var(--mono); opacity: .6; }
+.pbody { flex: 1; min-height: 0; position: relative; overflow: hidden; }
+.term { padding: 10px 12px; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; overflow: hidden; white-space: pre-wrap; word-break: break-word; font-size: 12.5px; line-height: 1.55; }
+.term .d { color: var(--p-dim); } .term .a { color: var(--p-ac); } .term .ok { color: var(--p-ok); } .term .w { color: var(--p-warn); } .term .e { color: var(--p-err); } .term .u { color: #fff; }
+.term .cur { display: inline-block; width: 7px; height: 15px; background: var(--p-fg); vertical-align: -3px; animation: blink 1s steps(1) infinite; }
+.term .tool { color: var(--p-fg); } .term .tool::before { content: "⏺ "; color: var(--p-ac); }
+.term .sub { color: var(--p-dim); padding-left: 16px; }
+.term .box { border: 1px solid var(--p-line); border-radius: 6px; padding: 6px 10px; margin: 2px 0 6px; }
+.term > div { animation: linein .25s ease; }
+@keyframes linein { from { opacity: 0; } }
+@keyframes blink { 50% { opacity: 0; } }
+/* Input an agent typed keeps a thin bar in its color. */
+.win[data-mode="on"] .term .byag { margin-left: -12px; padding-left: 10px; border-left: 2px solid var(--ag); }
+
+/* Browser pane */
+.urlbar { height: 30px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 10px; border-bottom: 1px solid var(--p-line); font-size: 11.5px; color: var(--p-dim); }
+.urlbar .u { flex: 1; background: rgba(255,255,255,.05); border-radius: 6px; padding: 4px 10px; color: var(--p-fg); }
+.site { position: absolute; inset: 30px 0 0; background: #f4f1ea; color: #1b1d1f; font-family: var(--display); padding: 16px 26px; overflow: hidden; }
+.site nav { display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; }
+.site nav span:last-child { font-weight: 500; color: #777; }
+.site .login { width: 300px; margin: 8px auto 0; }
+.site h4 { font-size: 24px; letter-spacing: -.03em; margin: 0 0 8px; font-weight: 800; }
+.site label { display: block; font-size: 11px; font-weight: 600; color: #666; margin: 8px 0 4px; }
+.site .in { border: 1px solid #d8d3c8; background: #fff; border-radius: 8px; padding: 8px 10px; font-size: 12px; min-height: 33px; }
+.site .in .ph { color: #aaa; }
+.site .go { margin-top: 12px; background: #1b1d1f; color: #fff; font-size: 12px; font-weight: 600; text-align: center; padding: 9px 12px; border-radius: 8px; transition: transform .12s, filter .12s; }
+.site .go.press { transform: scale(.96); filter: brightness(1.4); }
+.site .err { margin-top: 10px; background: #fde4e1; color: #a2271c; border: 1px solid #f3b8b0; border-radius: 8px; padding: 8px 10px; font-size: 11.5px; font-weight: 600; display: none; }
+.site .err.on { display: block; animation: linein .3s ease; }
+
+/* Tasks plugin */
+.plug { padding: 12px 14px; height: 100%; font-family: var(--display); font-size: 12px; display: flex; flex-direction: column; gap: 10px; }
+.plug h5 { margin: 0; font: 600 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--p-dim); }
+.kb { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; flex: 1; min-height: 0; }
+.col { background: rgba(255,255,255,.02); border-radius: 8px; padding: 8px; }
+.col h6 { margin: 0 0 8px; font: 600 10.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--p-dim); }
+.tk { position: relative; background: rgba(255,255,255,.045); border: 1px solid var(--p-line); border-radius: 7px; padding: 8px 9px; margin-bottom: 6px; color: var(--p-fg); line-height: 1.3; }
+.tk small { display: block; margin-top: 5px; font: 500 10px/1 var(--mono); color: var(--p-dim); }
+.tk small.new { color: var(--codex); }
+
+/* ===== Presence ===== */
+.win[data-mode="off"] .pframe, .win[data-mode="off"] .pgroup, .win[data-mode="off"] .layer { display: none; }
+
+/* Frame. One agent gets a solid ring; several share a gradient ring. */
+.pframe { position: absolute; inset: 3px; border-radius: 8px; pointer-events: none; z-index: 3; opacity: 0; transition: opacity .5s ease; }
+.pframe.on { opacity: 1; }
+.pframe::before, .eframe::before { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1.5px; background: var(--grad); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
+.pframe::after, .eframe::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: 0 0 26px color-mix(in srgb, var(--glow) 30%, transparent); opacity: .7; }
+.pframe.pulse::after, .eframe.pulse::after { animation: fpulse 1.1s ease-out; }
+@keyframes fpulse { 0% { opacity: 1; box-shadow: 0 0 44px color-mix(in srgb, var(--glow) 55%, transparent); } 100% { opacity: .7; } }
+
+/* Element frame: same ring, hugging the smallest known target. */
+.layer { position: absolute; inset: 0; pointer-events: none; z-index: 10; }
+.eframe { position: absolute; border-radius: 9px; opacity: 0; transition: opacity .5s ease; }
+.eframe.on { opacity: 1; animation: ein .35s cubic-bezier(.2,.8,.2,1); }
+@keyframes ein { from { transform: scale(1.08); } }
+
+/* Tag group */
+.pgroup { position: absolute; z-index: 4; display: flex; flex-direction: row-reverse; gap: 4px; pointer-events: none; }
+/* Pane tags hang from the bottom edge of the pane header, like a tab. */
+.pane > .pgroup { top: 31px; right: 14px; }
+.eframe > .pgroup { left: -1.5px; bottom: calc(100% + 5px); flex-direction: row; }
+
+.ptag { display: inline-flex; align-items: center; height: 20px; padding: 0 8px 0 7px; border-radius: 999px; background: color-mix(in srgb, var(--ag) 20%, #15171a); border: 1px solid color-mix(in srgb, var(--ag) 45%, transparent); color: var(--p-fg); font: 500 10.5px/1 var(--mono); white-space: nowrap; box-shadow: 0 4px 14px rgba(0,0,0,.35); animation: tagin .22s cubic-bezier(.2,.8,.2,1); transition: opacity .5s ease, transform .5s ease; }
+.ptag.out { opacity: 0; transform: translateY(-2px); }
+@keyframes tagin { from { opacity: 0; transform: translateY(-4px); } }
+.pane > .pgroup .ptag { border-radius: 0 0 8px 8px; border-top: 0; height: 21px; padding-top: 1px; }
+.pane > .pgroup .ptag.out { transform: translateY(-4px); }
+.ptag b { font-weight: 600; color: var(--ag); }
+.ptag em { font-style: normal; color: var(--p-fg); margin-left: 6px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; transition: max-width .4s cubic-bezier(.2,.8,.2,1), margin-left .4s, opacity .3s; }
+.ptag em.swap { animation: swap .35s ease; }
+@keyframes swap { from { opacity: 0; } }
+.ptag small { font: 500 10px/1 var(--mono); color: var(--p-dim); margin-left: 7px; font-variant-numeric: tabular-nums; }
+.ptag small:empty { display: none; }
+.ptag.ok small { color: var(--p-ok); } .ptag.fail small { color: var(--p-err); }
+/* Crowded: three or more tags. Everyone but the newest collapses to name only. */
+.pgroup.crowded .ptag:not(.newest) em, .pgroup.crowded .ptag:not(.newest) small { max-width: 0; margin-left: 0; opacity: 0; }
+.ic { width: 7px; height: 7px; margin-right: 6px; flex: none; border-radius: 50%; background: var(--ag); }
+.ic.spin { width: 9px; height: 9px; background: none; border: 1.5px solid color-mix(in srgb, var(--ag) 30%, transparent); border-top-color: var(--ag); animation: spin .8s linear infinite; }
+.ic.ok, .ic.fail { width: auto; height: auto; background: none; border-radius: 0; font-weight: 700; font-size: 11px; }
+.ic.ok { color: var(--p-ok); } .ic.ok::before { content: "✓"; }
+.ic.fail { color: var(--p-err); } .ic.fail::before { content: "✕"; }
+.ic.pin { border-radius: 2px; transform: rotate(45deg) scale(.85); }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.paused *, .paused *::before, .paused *::after { animation-play-state: paused !important; }
+@media (prefers-reduced-motion: reduce) {
+  .eframe.on, .ptag, .ptag em.swap, .pframe.pulse::after, .eframe.pulse::after { animation: none; }
+  .ic.spin { animation-duration: 2.4s; }
+}
+
+/* ===== Explainer sections ===== */
+section.block { padding: clamp(56px, 8vw, 100px) 0; border-top: 1px solid var(--line); }
+.cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 32px 48px; margin-top: 32px; }
+.cols3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 32px; }
+@media (max-width: 860px) { .cols, .cols3 { grid-template-columns: 1fr; } }
+.opt { border: 1px solid var(--line); border-radius: 12px; padding: 18px; background: rgba(255,255,255,.02); }
+.opt.rec { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.opt .badge { display: inline-block; font: 600 10.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; padding: 4px 7px; border-radius: 5px; margin-bottom: 12px; background: rgba(255,255,255,.06); color: var(--fg-2); }
+.opt.rec .badge { background: var(--accent); color: var(--accent-ink); }
+.opt p { color: var(--fg-2); font-size: 15px; }
+.tablewrap { overflow-x: auto; margin-top: 28px; border: 1px solid var(--line); border-radius: 12px; }
+table.map { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 720px; }
+table.map th { text-align: left; font: 600 11px/1.2 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding: 12px 14px; border-bottom: 1px solid var(--line-2); background: rgba(255,255,255,.02); }
+table.map td { padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: top; color: var(--fg-2); }
+table.map tr:last-child td { border-bottom: 0; }
+table.map td:first-child { color: var(--fg); font-weight: 600; }
+table.map td code { font-size: 12px; }
+pre.snip { margin: 0; font: 400 12.5px/1.6 var(--mono); color: var(--fg-2); background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; overflow-x: auto; }
+pre.snip .c { color: var(--muted); } pre.snip .s { color: var(--accent); } pre.snip .n { color: var(--note); }
+ul.pts { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 14px; }
+ul.pts li { padding-left: 18px; position: relative; color: var(--fg-2); }
+ul.pts li::before { content: ""; position: absolute; left: 0; top: .62em; width: 6px; height: 6px; border-radius: 2px; background: var(--accent); }
+ul.pts b { color: var(--fg); font-weight: 600; }
+
+/* Lifecycle diagram */
+.life { margin-top: 32px; display: flex; flex-direction: column; gap: 22px; }
+.life-row { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 18px; align-items: center; }
+@media (max-width: 760px) { .life-row { grid-template-columns: 1fr; gap: 8px; } }
+.life-row .lbl b { display: block; color: var(--fg); font-weight: 600; font-size: 15px; }
+.life-row .lbl span { color: var(--muted); font: 400 12px/1.4 var(--mono); }
+.track { position: relative; height: 30px; border-radius: 6px; background: rgba(255,255,255,.03); }
+.track .sg { position: absolute; top: 4px; bottom: 4px; border-radius: 4px; display: flex; align-items: center; padding: 0 8px; font: 500 11px/1 var(--mono); white-space: nowrap; overflow: hidden; color: var(--fg); }
+.sg.hold { background: rgba(110,240,192,.18); }
+.sg.live { background: rgba(110,240,192,.32); }
+.sg.res { background: rgba(127,209,139,.28); }
+.sg.fade { background: linear-gradient(90deg, rgba(110,240,192,.18), transparent); color: var(--muted); }
+.sg.held { background: repeating-linear-gradient(135deg, rgba(110,240,192,.22) 0 6px, rgba(110,240,192,.12) 6px 12px); }
+.track .op { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--note); border-radius: 2px; }
+.track .op::after { content: attr(data-l); position: absolute; top: -16px; left: 4px; font: 500 10px/1 var(--mono); color: var(--note); white-space: nowrap; }
+.axis { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 18px; font: 500 10.5px/1 var(--mono); color: var(--muted); }
+.axis div:last-child { display: flex; justify-content: space-between; }
+@media (max-width: 760px) { .axis { grid-template-columns: 1fr; } .axis div:first-child { display: none; } }
+footer { padding: 40px 0 60px; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+
+<header class="top wrap">
+  <p class="eyebrow"><b>Mockup v2</b> agent presence</p>
+  <h1>Frame and tag, nothing else.</h1>
+  <p class="lede">When an agent touches a pane, Slate highlights the smallest target it knows about: the exact element if possible, otherwise the whole pane. A tag says who is acting and why. Tags show for a minimum time, stay while the work is actually running, and fade once the agent is done. The demo below walks through six cases. Click a chapter to jump to it.</p>
+</header>
+
+<div class="bar" role="toolbar" aria-label="Demo controls">
+  <span class="grp"><span class="seg-label">Presence</span>
+    <span class="seg" id="mode">
+      <button type="button" data-v="off" aria-pressed="false">Off</button>
+      <button type="button" data-v="on" aria-pressed="true">On</button>
+    </span>
+  </span>
+  <button class="ctl" id="play" type="button" aria-label="Pause"><svg viewBox="0 0 14 14" fill="currentColor"><rect x="2" y="1" width="3.5" height="12" rx="1"/><rect x="8.5" y="1" width="3.5" height="12" rx="1"/></svg></button>
+  <button class="ctl" id="restart" type="button" aria-label="Restart"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2.5 7a4.5 4.5 0 1 0 1.4-3.3"/><path d="M2.2 1.6v2.6h2.6"/></svg></button>
+  <span class="clock" id="clock">00.0s</span>
+</div>
+
+<div class="stage">
+  <div class="screen-outer">
+    <div class="fit" id="fit">
+      <div class="scaler">
+        <div class="win" id="win" data-mode="on">
+          <div class="titlebar">
+            <div class="lights"><i></i><i></i><i></i></div>
+            <div class="tabs"><span class="on">acme-web</span><span>api</span><span>notes</span></div>
+          </div>
+          <div class="content" id="content"></div>
+          <div class="layer" id="layer"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <ol class="chapters" id="chapters"></ol>
+
+  <div class="under">
+    <div class="card-ui" aria-live="polite">
+      <h3>Command that triggered it</h3>
+      <div class="now-who" id="now-who"><span class="note">Waiting for the first command…</span></div>
+      <div class="now-cmd" id="now-cmd"><span class="k"># actor comes from the environment, set once per agent session</span>
+<span class="e">SLATE_TERM_ACTOR</span>=claude</div>
+    </div>
+    <div class="card-ui">
+      <h3>Presence feed</h3>
+      <ol class="feed" id="feed"></ol>
+    </div>
+  </div>
+</div>
+
+<template id="tpl">
+  <div class="pane" id="p1" style="left:0;top:0;width:520px;height:470px">
+    <div class="pbox">
+      <div class="phd"><span class="ptype">Terminal</span><span class="pid">p1</span><span class="ptitle">claude · acme-web</span><span class="x">×</span></div>
+      <div class="pbody"><div class="term" id="p1t">
+<div class="box"><span class="a">✻</span> <span class="u">Claude Code</span>  <span class="d">~/src/acme-web</span></div><div><span class="d">&gt;</span> <span class="u">login 500s since the auth refactor. find it and fix it</span></div><div> </div><div class="tool">I'll start with the failing test in the tests pane.</div></div></div>
+    </div>
+    <div class="pframe"></div><div class="pgroup"></div>
+  </div>
+
+  <div class="pane" id="p4" style="left:0;top:470px;width:520px;height:286px">
+    <div class="pbox">
+      <div class="phd"><span class="ptype">Tasks</span><span class="pid">p4</span><span class="ptitle">sprint 14</span><span class="x">×</span></div>
+      <div class="pbody"><div class="plug">
+        <h5>Plugin · acme.tasks</h5>
+        <div class="kb">
+          <div class="col" id="col-prog"><h6>In progress</h6>
+            <div class="tk" id="auth12">AUTH-12 · token refresh returns 500<small>claude · 2h</small></div>
+            <div class="tk" id="ui31">UI-31 · empty state copy<small>unassigned</small></div>
+          </div>
+          <div class="col" id="col-rev"><h6>Review</h6>
+            <div class="tk" id="api7">API-7 · rate limit headers<small>codex · 3h</small></div>
+          </div>
+        </div>
+      </div></div>
+    </div>
+    <div class="pframe"></div><div class="pgroup"></div>
+  </div>
+
+  <div class="pane" id="p2" style="left:520px;top:0;width:374px;height:378px">
+    <div class="pbox">
+      <div class="phd"><span class="ptype">Terminal</span><span class="pid">p2</span><span class="ptitle">tests</span><span class="x">×</span></div>
+      <div class="pbody"><div class="term" id="p2t">
+<div><span class="a">~/acme-web</span> <span class="d">$</span> pnpm test</div><div> <span class="e">FAIL</span> src/auth/session.test.ts</div><div>  <span class="e">✕</span> refreshes expired token</div><div>    <span class="e">TypeError: reading 'exp'</span></div><div class="d">      at decode (jwt.ts:18:22)</div><div> Tests <span class="e">1 failed</span> | <span class="ok">46 passed</span></div><div class="prompt"><span class="a">~/acme-web</span> <span class="d">$</span> <span class="typed"></span><span class="cur"></span></div></div></div>
+    </div>
+    <div class="pframe"></div><div class="pgroup"></div>
+  </div>
+
+  <div class="pane" id="p5" style="left:894px;top:0;width:374px;height:378px">
+    <div class="pbox">
+      <div class="phd"><span class="ptype">Terminal</span><span class="pid">p5</span><span class="ptitle">server logs</span><span class="x">×</span></div>
+      <div class="pbody"><div class="term" id="p5t"><div><span class="a">~/acme-web</span> <span class="d">$</span> pnpm dev:api</div><div class="d">[api] listening on :8787</div><div class="d">[api] GET /health 200 1ms</div></div></div>
+    </div>
+    <div class="pframe"></div><div class="pgroup"></div>
+  </div>
+
+  <div class="pane" id="p3" style="left:520px;top:378px;width:748px;height:378px">
+    <div class="pbox">
+      <div class="phd"><span class="ptype">Browser</span><span class="pid">p3</span><span class="ptitle">Acme · Sign in</span><span class="x">×</span></div>
+      <div class="pbody">
+        <div class="urlbar"><span>‹ ›</span><span class="u">localhost:5173/login</span><span>↻</span></div>
+        <div class="site">
+          <nav><span>acme</span><span>Pricing · Docs</span></nav>
+          <div class="login">
+            <h4>Welcome back</h4>
+            <label>Email</label><div class="in" id="email"><span class="ph">you@company.com</span></div>
+            <label>Password</label><div class="in">••••••••••</div>
+            <div class="go" id="signin">Sign in</div>
+            <div class="err" id="err">Something went wrong (500). Try again.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="pframe"></div><div class="pgroup"></div>
+  </div>
+</template>
+
+<section class="block">
+  <div class="wrap">
+    <p class="eyebrow"><b>01</b> how long a tag stays</p>
+    <h2>Minimum hold, then follow the work.</h2>
+    <p class="lede">Most agent calls finish in milliseconds, which is too short to see. Some run for seconds or minutes. The tag's lifetime tracks the real operation, with a floor so short calls stay readable.</p>
+    <div class="life" aria-label="Tag lifecycle diagram">
+      <div class="axis"><div></div><div><span>0s</span><span>1s</span><span>2s</span><span>3s</span><span>4s</span><span>5s</span><span>6s</span></div></div>
+      <div class="life-row"><div class="lbl"><b>Instant call</b><span>terminal capture · 40 ms</span></div>
+        <div class="track"><i class="op" style="left:0" data-l="call"></i><span class="sg hold" style="left:0;width:26.6%">hold 1.6s</span><span class="sg fade" style="left:26.6%;width:8.4%">fade</span></div></div>
+      <div class="life-row"><div class="lbl"><b>Repeat within hold</b><span>same agent, same target</span></div>
+        <div class="track"><i class="op" style="left:0" data-l="call"></i><i class="op" style="left:15%" data-l="again"></i><span class="sg hold" style="left:0;width:41.6%">merged, hold extends, note swaps</span><span class="sg fade" style="left:41.6%;width:8.4%">fade</span></div></div>
+      <div class="life-row"><div class="lbl"><b>Running operation</b><span>terminal run · 4.2 s</span></div>
+        <div class="track"><i class="op" style="left:0" data-l="start"></i><i class="op" style="left:70%" data-l="exit 1"></i><span class="sg live" style="left:0;width:70%">live: spinner + elapsed time</span><span class="sg res" style="left:70%;width:21.6%">result</span><span class="sg fade" style="left:91.6%;width:8.4%">fade</span></div></div>
+      <div class="life-row"><div class="lbl"><b>Lease</b><span>presence hold … release</span></div>
+        <div class="track"><i class="op" style="left:0" data-l="hold"></i><i class="op" style="left:30%" data-l="call"></i><i class="op" style="left:55%" data-l="call"></i><i class="op" style="left:83%" data-l="release"></i><span class="sg held" style="left:0;width:83%">held until release, or TTL with no calls</span><span class="sg fade" style="left:83%;width:8.4%">fade</span></div></div>
+    </div>
+    <div class="cols">
+      <ul class="pts">
+        <li><b>Floor of about 1.6 s.</b> Long enough to read "claude · reading test output" once, short enough not to linger. It fades over 0.5 s instead of disappearing abruptly.</li>
+        <li><b>Real duration when there is one.</b> <code>terminal run</code>, <code>terminal wait</code>, <code>web wait</code> and navigation already have deadlines in the API. The tag shows a spinner and elapsed time until they settle, then a short ✓ or ✕.</li>
+      </ul>
+      <ul class="pts">
+        <li><b>Leases for "I'm working here".</b> <code>presence hold</code> keeps the tag up across many short calls. Any call from that agent to that pane refreshes it. A TTL (default 60 s) clears it if the agent crashes, so tags never go stale.</li>
+        <li><b>No resting state.</b> Once an agent is done, the pane looks exactly like it did before. Nothing marks where an agent lives.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="wrap">
+    <p class="eyebrow"><b>02</b> where the tag goes</p>
+    <h2>Anchored to the header, or to the element.</h2>
+    <p class="lede">A pane tag hangs from the bottom edge of the pane header at the top right, like a tab attached to the frame. An element tag sits on the element's own frame, top left. Both are overlays: anything that takes a row of layout space would change a terminal's size.</p>
+    <div class="cols3">
+      <div class="opt rec"><span class="badge">Chosen</span><h3>Header bottom edge</h3><p>Reads as part of the frame. It covers a small corner of content that is usually empty in terminals, and the header itself stays untouched. The same tag style is used on element frames.</p></div>
+      <div class="opt"><span class="badge">Rejected</span><h3>Inside the header</h3><p>Competes with the pane title, the type menu and plugin header controls. Narrow panes have no room, and two or three agents push into the title.</p></div>
+      <div class="opt"><span class="badge">Rejected</span><h3>Bottom overlay / own line</h3><p>As an overlay it sits on the prompt, where the user and the agent type. As a separate line it resizes the terminal each time an agent shows up, so full-screen programs like vim or Claude Code would reflow.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="wrap">
+    <p class="eyebrow"><b>03</b> smallest known target</p>
+    <h2>Frame the element, not the pane, when we can.</h2>
+    <p class="lede">The pane frame is the fallback. Each canonical <code>web.*</code> action already resolves a selector or ref to one element, and snapshots report element rectangles. That works for browser panes <em>and</em> registered plugin pages, so plugins get element frames without writing code.</p>
+    <div class="tablewrap">
+      <table class="map">
+        <thead><tr><th>Call</th><th>Frame drawn on</th><th>Tag sits on</th><th>Source of the rectangle</th></tr></thead>
+        <tbody>
+          <tr><td><code>terminal capture / send</code></td><td>Pane</td><td>Pane corner</td><td>Pane ID. Capture is the whole screen</td></tr>
+          <tr><td><code>terminal run / wait</code></td><td>Pane, live until it settles</td><td>Pane corner</td><td>Pane ID. A later step could frame the matched line</td></tr>
+          <tr><td><code>web snapshot / screenshot</code></td><td>Pane</td><td>Pane corner</td><td>Whole document</td></tr>
+          <tr><td><code>web click / fill / select / wait --selector</code></td><td>Element</td><td>Element, top left</td><td>Ref or selector → element rect. Browser and plugin pages</td></tr>
+          <tr><td><code>browser eval</code></td><td>Pane</td><td>Pane corner</td><td>None. Arbitrary script has no single target</td></tr>
+          <tr><td><code>command run</code> (plugin command)</td><td>Element if the plugin reports one, else pane</td><td>Element or pane</td><td>Plugin calls <code>workspace.presence.target(el)</code> while handling the invocation</td></tr>
+          <tr><td><code>layout split / pane new</code></td><td>New pane, with the website's entrance glow</td><td>Pane corner</td><td>Workspace commit</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="wrap">
+    <p class="eyebrow"><b>04</b> several agents, one pane</p>
+    <h2>Stack, then compress.</h2>
+    <div class="cols">
+      <ul class="pts">
+        <li><b>One frame, shared.</b> With one agent the ring is its color. With several, the ring becomes a gradient through their colors in arrival order. No second ring and no flicker between colors.</li>
+        <li><b>Stable order.</b> The first tag sits in the corner and later ones line up to its left. Tags never reshuffle. Each leaves on its own timer.</li>
+      </ul>
+      <ul class="pts">
+        <li><b>Color per agent type.</b> Known agents keep one color, so orange always means Claude. Unknown names get a stable hashed color from a palette that avoids the known colors and the red/green used for results.</li>
+        <li><b>Suffix only when ambiguous.</b> With one Claude active the tag says <code>claude</code>. With two at once, each gains its home pane from <code>SLATE_TERM_PANE_ID</code>: <code>claude · p1</code>, <code>claude · p7</code>.</li>
+        <li><b>Compress at three.</b> From three tags up, everyone except the newest collapses to just the name. The group stays narrow and the latest "why" is still readable.</li>
+        <li><b>A new action pulses, it doesn't replay.</b> A call to an already-framed pane brightens the glow once. That's the "something happened" signal from the website, without restarting the entrance animation.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="wrap">
+    <p class="eyebrow"><b>05</b> API</p>
+    <h2>An env var, an optional flag, and a value-free event.</h2>
+    <p class="lede">Every typed CLI command already sends through one connection object, so actor support is one change in the CLI plus the host. Nothing is required from agents: a call without an actor shows no presence, which keeps humans and scripts unaffected.</p>
+    <div class="cols">
+<pre class="snip"><span class="c"># once per agent session; the Slate skill or the</span>
+<span class="c"># agent's own setup exports it</span>
+export <span class="s">SLATE_TERM_ACTOR</span>=claude
+
+<span class="c"># optional on any command</span>
+slate-term terminal capture --pane p2 \
+  --note <span class="n">"reading failing test output"</span>
+
+<span class="c"># optional lease for multi-step work</span>
+slate-term presence hold --pane p4 --ttl 60s \
+  --note <span class="n">"triaging the sprint board"</span>
+slate-term presence release --pane p4
+
+<span class="c"># read current presence (names + notes)</span>
+slate-term presence list --tab t1 --json
+
+<span class="c"># on the wire: request metadata, next to "cause"</span>
+"metadata":{"version":1,
+  "actor":{"name":"claude","note":"reading failing test output"}}</pre>
+      <ul class="pts">
+        <li><b>Optional, not required.</b> A required flag would break people, scripts and every agent that doesn't know about it. <code>SLATE_TERM_ACTOR</code> names the agent once; <code>--note</code> adds the why per call.</li>
+        <li><b>Metadata, not params.</b> The actor rides in the request <code>metadata</code> next to <code>cause</code>, so every command gets it without new arguments. Host decoding is strict today, so this needs a new <code>api.describe</code> capability. The CLI only sends the actor to hosts that advertise it.</li>
+        <li><b>Agents only.</b> Calls without <code>SLATE_TERM_ACTOR</code> show nothing: plain scripts, shell tools, plugin pages and services, with no guessing from process names. An agent that runs a plugin command through the CLI still shows as that agent.</li>
+        <li><b>One switch.</b> <b>Settings → AI Agents → Show agent activity on panes</b> (<code>agents.show_activity</code>) hides it all. Also in ⌘K, <code>command run agents.activity.toggle</code> and <code>slate-term agent-activity hide</code>.</li>
+        <li><b>Display only.</b> The actor is self-declared and never affects admission or authorization. That is also why reading it from the environment is acceptable, unlike <code>cause</code>.</li>
+      </ul>
+    </div>
+    <div class="cols" style="margin-top:40px">
+<pre class="snip"><span class="c"># host.presence.changed, published on transitions only</span>
+{"topic":"host.presence.changed",
+ "tab":"t1","pane":"p5",
+ "payload":{
+   "activityId":"a42", "phase":"began",
+   "actionKind":"wait",
+   "actor":{"name":"gemini","claimed":true},
+   "origin":"administrative",
+   "target":{"pane":"p5"}}}
+
+<span class="c"># later: phase "ended", result "ok", count 1</span></pre>
+      <ul class="pts">
+        <li><b>A subscribable event, but value-free.</b> Existing <code>host.*</code> events never carry free text such as titles or notification bodies. The event says who started or stopped what, where. The note lives in <code>presence list</code>, like titles and notifications.</li>
+        <li><b>Transitions, not calls.</b> The journal keeps 1,024 events. An agent polling capture ten times a second would push everything else out within a minute. One <code>began</code> when an activity starts and one <code>ended</code> after it goes idle, with a call <code>count</code>, keeps it bounded.</li>
+        <li><b>No feedback loops.</b> Reads aren't rate-limited, so a subscriber that reacts to presence with a read could loop. Calls that carry a <code>cause</code> don't create presence. Presence is also rate-limited per actor.</li>
+        <li><b>Plugin elements get a directed copy.</b> When the target is an element in a plugin page, the owning page also receives the event, so it can react in its own UI.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="block">
+  <div class="wrap">
+    <p class="eyebrow"><b>06</b> feasibility</p>
+    <h2>Mostly existing patterns.</h2>
+    <div class="tablewrap">
+      <table class="map">
+        <thead><tr><th>Piece</th><th>Effort</th><th>What already exists</th></tr></thead>
+        <tbody>
+          <tr><td>Pane frame + tag</td><td>Easy</td><td><code>PaneInactiveShade</code> and <code>PaneDropPreview</code> already paint over Metal and WebKit content with <code>hitTest</code> returning nil. Presence is one more sibling view on top, so layout and terminal size don't change.</td></tr>
+          <tr><td>Presence state + timers</td><td>Easy</td><td>A transient per-pane dictionary beside <code>leaves</code>/<code>containers</code> in <code>WorkspaceHost</code>, pushed to pane chrome the way notification indicators are.</td></tr>
+          <tr><td>Begin/end for every call</td><td>Easy–moderate</td><td><code>dispatchAPI</code> is the single path for CLI, plugin and service calls. Every handler is awaited, so wrapping it gives real durations for run, wait and navigate.</td></tr>
+          <tr><td>Actor in requests</td><td>Moderate</td><td>One <code>Connection.request</code> for all CLI commands. Needs the metadata key, capability negotiation and docs.</td></tr>
+          <tr><td>Element frames</td><td>Moderate</td><td>click/fill/select already compute <code>getBoundingClientRect</code> and scroll the element into view. They need to return it. Snapshots already report rects. Wait needs a rect added.</td></tr>
+          <tr><td>Event + presence list</td><td>Moderate</td><td>Journal, routing and directed delivery exist. The new parts are transition coalescing and the per-actor rate limit.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="lede" style="font-size:15px">Risks: element frames go stale if the page scrolls or navigates, so keep them short-lived. Glows must stay inside the pane bounds or neighbours clip them. Pane replacement and zoom must keep the overlay on top. Very narrow panes need a name-only tag.</p>
+  </div>
+</section>
+
+<footer class="wrap">Mockup only. Scripted, not wired to the app. The presence logic in the script (hold floor, merging, leases, crowding) follows the rules above.</footer>
+
+<script>
+(() => {
+  const win = document.getElementById('win');
+  const content = document.getElementById('content');
+  const layer = document.getElementById('layer');
+  const fit = document.getElementById('fit');
+  const feed = document.getElementById('feed');
+  const tpl = document.getElementById('tpl');
+
+  const AG = {
+    claude: { color: 'var(--claude)' },
+    codex: { color: 'var(--codex)' },
+    gemini: { color: 'var(--gemini)' },
+  };
+  const PANES = ['p1', 'p2', 'p3', 'p4', 'p5'];
+  const HOLD = 1.6, RESULT = 1.3, FADE = .5, LOOP = 42;
+  const CHAPTERS = [
+    { t: 0, n: '01', l: 'Quick read' },
+    { t: 3.5, n: '02', l: 'Long-running command' },
+    { t: 12, n: '03', l: 'Browser elements' },
+    { t: 19.5, n: '04', l: 'Plugin element' },
+    { t: 23, n: '05', l: 'Three agents, one pane' },
+    { t: 31, n: '06', l: 'Working lease' },
+  ];
+  const state = { mode: 'on', playing: true };
+
+  /* ---------- virtual clock, so pause also stops scripted timers ---------- */
+  const clock = { now: 0, q: [], last: null };
+  const after = (ms, fn) => clock.q.push({ at: clock.now + ms / 1000, fn });
+  const atTime = (sec, fn) => clock.q.push({ at: sec, fn });
+  function drain(until) {
+    for (;;) {
+      clock.q.sort((a, b) => a.at - b.at);
+      if (!clock.q.length || clock.q[0].at > until) break;
+      const it = clock.q.shift();
+      clock.now = Math.max(clock.now, it.at);
+      it.fn();
+    }
+  }
+  function tick(ts) {
+    const dt = clock.last == null ? 0 : Math.min(.1, (ts - clock.last) / 1000);
+    clock.last = ts;
+    if (state.playing) {
+      const target = clock.now + dt;
+      drain(target);
+      clock.now = target;
+      render();
+      document.getElementById('clock').textContent = clock.now.toFixed(1).padStart(4, '0') + 's';
+      drawChapters();
+    }
+    requestAnimationFrame(tick);
+  }
+
+  /* ---------- geometry ---------- */
+  const scale = () => parseFloat(getComputedStyle(fit).getPropertyValue('--s')) || 1;
+  function rectIn(el) {
+    const r = el.getBoundingClientRect(), w = win.getBoundingClientRect(), s = scale();
+    return { x: (r.left - w.left) / s, y: (r.top - w.top) / s, w: r.width / s, h: r.height / s };
+  }
+  function resize() { fit.style.setProperty('--s', fit.clientWidth / 1280); }
+  addEventListener('resize', resize);
+  resize();
+
+  /* ---------- presence model: what the host would track ---------- */
+  // One record per (actor, target). Targets are pane IDs or "el:<element id>".
+  const acts = new Map();
+  let seq = 0;
+  function begin(actor, target, note, kind = 'instant', ttl = 60) {
+    const now = clock.now;
+    for (const r of acts.values()) {
+      if (r.actor !== actor || r.target !== target || r.gone) continue;
+      // Calls inside a lease refresh it but keep the lease's note.
+      if (r.kind === 'lease' && !r.ended && kind !== 'lease') { r.leaseUntil = now + ttl; r.pulse = true; return r; }
+      r.note = note; r.pulse = true;
+      r.minUntil = Math.max(r.minUntil, now + HOLD);
+      if (kind !== 'instant') Object.assign(r, { kind, start: now, ended: false, result: null });
+      return r;
+    }
+    const r = { id: ++seq, actor, target, note, kind, start: now, minUntil: now + HOLD, ended: kind === 'instant', result: null, pulse: true };
+    if (kind === 'lease') r.leaseUntil = now + ttl;
+    acts.set(r.id, r);
+    return r;
+  }
+  function end(r, result, text) {
+    r.ended = true; r.result = result || null; r.resultText = text;
+    r.minUntil = Math.max(r.minUntil, clock.now + (result ? RESULT : 0));
+  }
+  function visible(r, now) {
+    if (r.kind === 'lease' && !r.ended && now > r.leaseUntil) end(r);
+    return !r.ended || now < r.minUntil;
+  }
+
+  /* ---------- rendering ---------- */
+  const tagEls = new Map();
+  const color = (actor) => AG[actor].color;
+  function gradient(actors) {
+    if (actors.length === 1) return `linear-gradient(${color(actors[0])}, ${color(actors[0])})`;
+    return `linear-gradient(90deg, ${actors.map(color).join(', ')})`;
+  }
+  function tagFor(r) {
+    let t = tagEls.get(r.id);
+    if (!t) {
+      t = document.createElement('span');
+      t.className = 'ptag';
+      t.innerHTML = '<i class="ic"></i><b></b><em></em><small></small>';
+      t.style.setProperty('--ag', color(r.actor));
+      t.querySelector('b').textContent = r.actor;
+      tagEls.set(r.id, t);
+    }
+    const em = t.querySelector('em');
+    if (em.textContent !== r.note) {
+      if (em.textContent) { em.classList.remove('swap'); void em.offsetWidth; em.classList.add('swap'); }
+      em.textContent = r.note;
+    }
+    const ic = t.querySelector('i'), sm = t.querySelector('small');
+    let icon = 'ic', small = '';
+    if (r.kind === 'lease' && !r.ended) { icon = 'ic pin'; small = 'held'; }
+    else if (r.kind === 'op' && !r.ended) { icon = 'ic spin'; small = (clock.now - r.start).toFixed(1) + 's'; }
+    else if (r.result) { icon = 'ic ' + r.result; small = r.resultText || ''; }
+    if (ic.className !== icon) ic.className = icon;
+    if (sm.textContent !== small) sm.textContent = small;
+    t.classList.toggle('ok', r.result === 'ok');
+    t.classList.toggle('fail', r.result === 'fail');
+    return t;
+  }
+  function drawGroup(group, recs) {
+    const live = recs.filter((r) => !r.gone);
+    const newest = live.reduce((a, r) => (!a || r.start >= a.start ? r : a), null);
+    group.classList.toggle('crowded', live.length >= 3);
+    for (const r of recs) {
+      const t = tagFor(r);
+      if (t.parentNode !== group) group.append(t);
+      t.classList.toggle('newest', r === newest);
+      t.classList.toggle('out', !!r.gone);
+    }
+  }
+  function drawFrame(frame, recs) {
+    const live = recs.filter((r) => !r.gone);
+    if (!live.length) { frame.classList.remove('on'); return; }
+    const actors = [...new Set([...live].sort((a, b) => a.id - b.id).map((r) => r.actor))];
+    frame.style.setProperty('--grad', gradient(actors));
+    frame.style.setProperty('--glow', color(live.reduce((a, r) => (r.start >= a.start ? r : a)).actor));
+    frame.classList.add('on');
+    if (live.some((r) => r.pulse)) {
+      frame.classList.remove('pulse'); void frame.offsetWidth; frame.classList.add('pulse');
+      live.forEach((r) => (r.pulse = false));
+    }
+  }
+  function render() {
+    const now = clock.now;
+    const byTarget = new Map();
+    for (const r of [...acts.values()]) {
+      if (!r.gone && !visible(r, now)) {
+        // A record that expired before it was ever drawn (after a jump) just disappears.
+        if (!tagEls.has(r.id)) { acts.delete(r.id); continue; }
+        r.gone = true; r.goneAt = now;
+      }
+      if (r.gone && now - r.goneAt > FADE) { acts.delete(r.id); tagEls.get(r.id)?.remove(); tagEls.delete(r.id); continue; }
+      if (!byTarget.has(r.target)) byTarget.set(r.target, []);
+      byTarget.get(r.target).push(r);
+    }
+    for (const id of PANES) {
+      const p = document.getElementById(id);
+      if (!p) continue;
+      const recs = byTarget.get(id) || [];
+      drawFrame(p.querySelector('.pframe'), recs);
+      drawGroup(p.querySelector('.pgroup'), recs);
+    }
+    // Element frames live in an overlay layer and follow their element.
+    for (const ef of [...layer.children]) {
+      if (byTarget.has(ef.dataset.target) || ef._dying) continue;
+      ef._dying = true;
+      ef.classList.remove('on');
+      after(500, () => ef.remove());
+    }
+    for (const [target, recs] of byTarget) {
+      if (!target.startsWith('el:')) continue;
+      const node = document.getElementById(target.slice(3));
+      if (!node) continue;
+      let ef = [...layer.children].find((n) => n.dataset.target === target && !n._dying);
+      if (!ef) {
+        ef = document.createElement('div');
+        ef.className = 'eframe';
+        ef.dataset.target = target;
+        ef.innerHTML = '<div class="pgroup"></div>';
+        layer.append(ef);
+      }
+      const r = rectIn(node);
+      Object.assign(ef.style, { left: r.x - 4 + 'px', top: r.y - 4 + 'px', width: r.w + 8 + 'px', height: r.h + 8 + 'px' });
+      drawFrame(ef, recs);
+      drawGroup(ef.querySelector('.pgroup'), recs);
+    }
+  }
+
+  /* ---------- content helpers ---------- */
+  const $ = (sel, root = document) => root.querySelector(sel);
+  function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
+  function line(termId, html, cls) {
+    const t = document.getElementById(termId);
+    const d = el('div', cls || '', html);
+    const prompt = $('.prompt', t);
+    prompt ? t.insertBefore(d, prompt) : t.append(d);
+    return d;
+  }
+  const tool = (txt, sub) => { line('p1t', txt, 'tool'); if (sub) line('p1t', '⎿  ' + sub, 'sub'); };
+  function typeInto(termId, text, actor, then) {
+    const prompt = $(`#${termId} .prompt`);
+    const typed = $('.typed', prompt);
+    prompt.style.setProperty('--ag', color(actor));
+    prompt.classList.add('byag');
+    let i = 0;
+    const step = () => {
+      typed.textContent = text.slice(0, ++i);
+      if (i < text.length) return after(38, step);
+      after(300, () => { $('.cur', prompt).remove(); prompt.classList.remove('prompt'); then(); });
+    };
+    step();
+  }
+  function newPrompt(termId) {
+    document.getElementById(termId).append(el('div', 'prompt', '<span class="a">~/acme-web</span> <span class="d">$</span> <span class="typed"></span><span class="cur"></span>'));
+  }
+  let logGen = 0;
+  function streamLogs() {
+    const g = logGen;
+    const paths = ['GET /api/me 200 8ms', 'GET /health 200 1ms', 'GET /api/flags 200 5ms', 'GET /assets/app.js 304 2ms'];
+    let i = 0;
+    const loop = () => { if (g !== logGen) return; line('p5t', '[api] ' + paths[i++ % paths.length], 'd'); after(2300, loop); };
+    after(1500, loop);
+  }
+  function flipMove(node, into, before) {
+    const s = scale(), first = node.getBoundingClientRect();
+    into.insertBefore(node, before);
+    const last = node.getBoundingClientRect();
+    node.style.transition = 'none';
+    node.style.transform = `translate(${(first.left - last.left) / s}px, ${(first.top - last.top) / s}px)`;
+    void node.offsetWidth;
+    node.style.transition = 'transform .6s cubic-bezier(.2,.8,.2,1)';
+    node.style.transform = '';
+  }
+
+  /* ---------- the script ---------- */
+  const SCRIPT = [
+    // 01 Quick read: a 40 ms call held for 1.6 s.
+    { t: 1, a: 'claude', target: 'p2', note: 'reading failing test output', cmd: 'terminal capture --pane p2',
+      go() { tool('Read pane p2 · tests', '1 failed · refreshes expired token'); } },
+
+    // 02 Long-running command: live tag until exit.
+    { t: 4, a: 'claude', target: 'p2', kind: 'op', note: 'rerunning auth tests', cmd: "terminal run --pane p2 --command 'pnpm test src/auth'",
+      go(r) {
+        tool('Run in p2: pnpm test src/auth');
+        typeInto('p2t', 'pnpm test src/auth', 'claude', () => {
+          line('p2t', ' <span class="d">RUN</span> v2.1.4');
+          after(1100, () => line('p2t', ' <span class="d">·</span> session.test.ts <span class="d">(13)</span>'));
+          after(2200, () => line('p2t', ' <span class="d">·</span> refresh.test.ts <span class="d">(6)</span>'));
+          after(3300, () => line('p2t', '  <span class="e">✕</span> refreshes expired token'));
+          after(4200, () => {
+            line('p2t', ' Tests <span class="e">1 failed</span> | <span class="ok">18 passed</span>');
+            newPrompt('p2t');
+            end(r, 'fail', 'exit 1');
+            tool('Exit 1', 'still failing in decode()');
+          });
+        });
+      } },
+
+    // 03 Browser: pane for a snapshot, elements for fill and click.
+    { t: 12.4, a: 'claude', target: 'p3', note: 'looking at the login page', cmd: 'web snapshot --pane p3',
+      go() { tool('Snapshot p3', '3 inputs, 1 button'); } },
+    { t: 14.5, a: 'claude', target: 'el:email', pane: 'p3', note: 'filling the test account', cmd: "web fill --pane p3 --selector '#email' --text dev@acme.test",
+      go() {
+        const e = document.getElementById('email'), txt = 'dev@acme.test';
+        let i = 0; e.textContent = '';
+        const step = () => { e.textContent = txt.slice(0, ++i); if (i < txt.length) after(30, step); };
+        step();
+      } },
+    { t: 16.6, a: 'claude', target: 'el:signin', pane: 'p3', note: 'submitting the form', cmd: 'web click --pane p3 --ref e14',
+      go() {
+        const b = document.getElementById('signin'); b.classList.add('press'); after(160, () => b.classList.remove('press'));
+        after(350, () => {
+          document.getElementById('err').classList.add('on');
+          line('p5t', '[api] POST /auth/refresh <span class="e">500</span> 12ms');
+          line('p5t', '<span class="e">[api] TypeError: reading \'exp\'</span>');
+          tool('Click "Sign in" in p3', 'POST /auth/refresh → 500');
+        });
+      } },
+
+    // 04 Plugin command: the plugin reports the card it touched.
+    { t: 20, a: 'claude', target: 'el:auth12', pane: 'p4', note: 'moving to review', cmd: "command run tasks.move --params '{\"id\":\"AUTH-12\",\"to\":\"review\"}'",
+      go() {
+        after(500, () => { flipMove(document.getElementById('auth12'), document.getElementById('col-rev'), $('#col-rev .tk')); tool('tasks.move AUTH-12 → Review'); });
+      } },
+
+    // 05 Three agents on the server logs within a second.
+    { t: 23.4, a: 'gemini', target: 'p5', kind: 'op', note: 'waiting for a clean refresh', cmd: "terminal wait --pane p5 --contains 'refresh 200' --timeout-milliseconds 20000",
+      go(r) { state.waitRec = r; } },
+    { t: 23.8, a: 'codex', target: 'p5', note: 'tracing the 500 from the api side', cmd: 'terminal capture --pane p5', go() {} },
+    { t: 24.2, a: 'claude', target: 'p5', note: 'checking server logs', cmd: 'terminal capture --pane p5', go() {} },
+    { t: 25.6, go() { tool('Update src/auth/jwt.ts', 'guard tokens without exp (+3 −1)'); } },
+    { t: 27, go() { line('p5t', '[api] reloaded src/auth/jwt.ts', 'ok'); } },
+    { t: 27.8, go() {
+        line('p5t', '[api] POST /auth/refresh <span class="ok">200</span> 9ms');
+        if (state.waitRec) end(state.waitRec, 'ok', '4.4s');
+      } },
+    { t: 28.3, a: 'codex', target: 'p5', note: 'confirming the 200', cmd: 'terminal capture --pane p5', go() {} },
+
+    // 06 Lease: codex holds the tasks pane across several calls.
+    { t: 31.4, a: 'codex', target: 'p4', kind: 'lease', note: 'triaging the sprint board', cmd: 'presence hold --pane p4 --ttl 60s',
+      go(r) { state.lease = r; } },
+    { t: 33.2, a: 'codex', target: 'p4', note: 'reading the board', cmd: 'web snapshot --pane p4', go() {} },
+    { t: 34.8, a: 'codex', target: 'el:api7', pane: 'p4', note: 'opening API-7', cmd: 'web click --pane p4 --ref e5', go() {} },
+    { t: 36.6, a: 'codex', target: 'el:ui31', pane: 'p4', note: 'assigning UI-31', cmd: 'web click --pane p4 --ref e9',
+      go() { after(300, () => { const s = $('#ui31 small'); s.textContent = 'codex · now'; s.classList.add('new'); }); } },
+    { t: 39.4, a: 'codex', target: 'p4', note: 'done', cmd: 'presence release --pane p4', release: true },
+  ];
+
+  function report(ev) {
+    const who = document.getElementById('now-who');
+    who.innerHTML = '';
+    const av = el('span', 'av'); av.style.background = color(ev.a);
+    const nm = el('b'); nm.textContent = ev.a; nm.style.color = color(ev.a);
+    const pane = ev.pane || ev.target;
+    const where = ev.target.startsWith('el:') ? `${pane} › #${ev.target.slice(3)}` : pane;
+    const nt = el('span', 'note'); nt.textContent = `→ ${where} · ${ev.note}`;
+    who.append(av, nm, nt);
+    const esc = (s) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+    const why = ev.kind === 'op' ? 'tag stays live until the command settles'
+      : ev.kind === 'lease' ? 'tag stays until release or TTL'
+      : ev.release ? 'ends the lease; the tag fades'
+      : ev.target.startsWith('el:') ? 'smallest known target: one element'
+      : 'instant call, held for 1.6 s';
+    const noteArg = ev.release ? '' : ` \\\n  --note <span class="n">"${esc(ev.note)}"</span>`;
+    document.getElementById('now-cmd').innerHTML =
+      `<span class="k"># ${why}</span>\n<span class="e">SLATE_TERM_ACTOR</span>=${ev.a} slate-term ${esc(ev.cmd)}${noteArg}`;
+    const li = el('li');
+    const t = el('span', 't', clock.now.toFixed(1) + 's');
+    const dot = el('i'); dot.style.background = color(ev.a);
+    const tx = el('span'); tx.textContent = `${ev.a} · ${where} · ${ev.note}`;
+    li.append(t, dot, tx);
+    feed.prepend(li);
+    while (feed.children.length > 8) feed.lastChild.remove();
+  }
+
+  /* ---------- lifecycle ---------- */
+  function reset() {
+    logGen++;
+    clock.q = []; clock.now = 0;
+    acts.clear(); tagEls.clear();
+    state.waitRec = state.lease = null;
+    content.innerHTML = '';
+    content.append(tpl.content.cloneNode(true));
+    layer.innerHTML = '';
+    feed.innerHTML = '';
+    streamLogs();
+    for (const ev of SCRIPT) {
+      atTime(ev.t, () => {
+        if (!ev.a) return ev.go();
+        report(ev);
+        if (ev.release) { if (state.lease) end(state.lease); return; }
+        const r = begin(ev.a, ev.target, ev.note, ev.kind);
+        after(ev.kind === 'op' ? 250 : 300, () => ev.go(r));
+      });
+    }
+    atTime(LOOP, reset);
+  }
+  function jump(t) {
+    reset();
+    drain(t);
+    clock.now = t;
+    render();
+    drawChapters();
+  }
+
+  const chapEl = document.getElementById('chapters');
+  CHAPTERS.forEach((c) => {
+    const li = el('li');
+    const b = el('button', 'chap', `<span class="barx"><i></i></span><span class="lab"><b>${c.n}</b><span>${c.l}</span></span>`);
+    b.type = 'button';
+    b.addEventListener('click', () => jump(c.t));
+    li.append(b);
+    chapEl.append(li);
+  });
+  function drawChapters() {
+    const btns = chapEl.querySelectorAll('.chap');
+    CHAPTERS.forEach((c, i) => {
+      const endT = i + 1 < CHAPTERS.length ? CHAPTERS[i + 1].t : LOOP;
+      const p = Math.max(0, Math.min(1, (clock.now - c.t) / (endT - c.t)));
+      btns[i].querySelector('i').style.width = p * 100 + '%';
+      btns[i].classList.toggle('active', clock.now >= c.t && clock.now < endT);
+    });
+  }
+
+  function seg(id, key, onChange) {
+    const root = document.getElementById(id);
+    root.addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      root.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+      state[key] = b.dataset.v;
+      onChange();
+    });
+  }
+  seg('mode', 'mode', () => { win.dataset.mode = state.mode; });
+
+  const playBtn = document.getElementById('play');
+  const PAUSE = playBtn.innerHTML;
+  const PLAY = '<svg viewBox="0 0 14 14" fill="currentColor"><path d="M3 1.5v11l9.5-5.5z"/></svg>';
+  playBtn.addEventListener('click', () => {
+    state.playing = !state.playing;
+    document.querySelector('.scaler').classList.toggle('paused', !state.playing);
+    playBtn.innerHTML = state.playing ? PAUSE : PLAY;
+    playBtn.setAttribute('aria-label', state.playing ? 'Pause' : 'Play');
+  });
+  document.getElementById('restart').addEventListener('click', () => jump(0));
+
+  reset();
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>

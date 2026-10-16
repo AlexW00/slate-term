@@ -116,6 +116,9 @@ extension WorkspaceHost {
             default: size = .number(AppConfiguration.defaults.terminal.fontSize)
             }
             return try writeConfiguration(["terminal.font_size": size], expected: params["expectedSourceRevision"]?.string, operation: operation)
+        case "agents.activity.show", "agents.activity.hide", "agents.activity.toggle":
+            let visible = id == "agents.activity.toggle" ? !settings.current.showAgentActivity : id == "agents.activity.show"
+            return try writeConfiguration(["agents.show_activity": .bool(visible)], expected: params["expectedSourceRevision"]?.string, operation: operation)
         case "warnings.close.reset", "warnings.close.set", "warnings.type.reset", "warnings.type.set":
             let value = try WarningSuppression.value(command: id, params: withoutAPIGuards(params))
             if id.hasPrefix("warnings.close.") { try settings.setSuppressCloseWarning(value) }

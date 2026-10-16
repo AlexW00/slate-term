@@ -56,6 +56,7 @@ final class SettingsModel: ObservableObject {
     @Published var notifyBanners = NotificationPolicy.Banner.otherPanes
     @Published var notifySound = false
     @Published var notifyCommandDetails = false
+    @Published var showAgentActivity = true
     @Published var notificationAuthorization = "Checking…"
     var authorizeNotifications: (() -> Void)?
     var notificationAuthorizationLabel: String {
@@ -108,7 +109,8 @@ final class SettingsModel: ObservableObject {
                       "notifications.tools": notifyTools ? "true" : "false",
                       "notifications.banners": AppConfiguration.quotedString(notifyBanners.rawValue),
                       "notifications.sound": notifySound ? "true" : "false",
-                      "notifications.command_details": notifyCommandDetails ? "true" : "false"]
+                      "notifications.command_details": notifyCommandDetails ? "true" : "false",
+                      "agents.show_activity": showAgentActivity ? "true" : "false"]
         for (chord, command) in shortcuts { values["keybind." + chord] = AppConfiguration.quotedString(command) }
         return values
     }
@@ -138,6 +140,7 @@ final class SettingsModel: ObservableObject {
         notifyBanners = configuration.notifications.banners
         notifySound = configuration.notifications.sound
         notifyCommandDetails = configuration.notifications.commandDetails
+        showAgentActivity = configuration.showAgentActivity
         shortcuts = Dictionary(uniqueKeysWithValues: configuration.keyBindings.map { ($0.key.description, $0.value) })
         self.source = source
         if !preserveError { self.error = error }
@@ -573,6 +576,11 @@ private struct SettingsView: View {
 
     private var agents: some View {
         Group {
+            Section {
+                Toggle("Show agent activity on panes", isOn: $model.showAgentActivity)
+            } footer: {
+                Text("Highlight panes and elements while a coding agent works on them through the Slate Terminal CLI. Only agents that identify themselves are shown.")
+            }
             Section {
                 ForEach(model.agentSkills, id: \.target.id) { entry in
                     LabeledContent {

@@ -58,6 +58,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     var windows: [TabID: WorkspaceWindow] = [:]
     var leaves: [PaneID: NSViewController] = [:]
     var containers: [PaneID: PaneContainer] = [:]
+    lazy var presence = PresenceController(host: self)
     private struct PaneDragContext {
         let pane: PaneID
         let tab: TabID
@@ -369,6 +370,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             if engineChanged { try runtime.reload(from: url) }
         }
         applyAppearance()
+        presence.render()
         for browser in leaves.values.compactMap({ $0 as? BrowserPane }) { browser.browserConfiguration = settings.current.browser }
         persistWorkspace()
         return result
@@ -534,6 +536,33 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         try validateAPIGuards(params, method: method)
         let client = caller ?? AutomationCaller(origin: .administrative, audience: operations.administrativeAudience)
         let operation = try suppliedOperation ?? client.admit(method, metadata: metadata, through: operations)
+        let presenceCall = beginPresence(method, contract: contract, params: params, operation: operation)
+        do {
+            let result = try await routeAdmitted(method, contract: contract, params: params, operation: operation, caller: caller)
+            if let presenceCall { presence.end(presenceCall, result: result, failed: false) }
+            return result
+        } catch {
+            if let presenceCall { presence.end(presenceCall, result: nil, failed: true) }
+            throw error
+        }
+    }
+
+    /// Resolves the pane an agent's call acts on. Unresolvable targets just show no presence.
+    private func beginPresence(_ method: String, contract: AutomationMethod?, params: [String: JSONValue],
+                               operation: WorkspaceOperationContext) -> PresenceController.Handle? {
+        guard let actor = operation.actor,
+              let action = PresenceAction.forMethod(method, commandID: method == "command.run" ? params["id"]?.string : nil) else { return nil }
+        let pane: PaneID?
+        if contract?.family == .terminal { pane = try? terminalPane(params) }
+        else if params["pane"] != nil { pane = try? targetPaneID(params) }
+        else { pane = nil }
+        guard let pane else { return nil }
+        return presence.begin(actor: actor, pane: pane, method: method, action: action)
+    }
+
+    private func routeAdmitted(_ method: String, contract: AutomationMethod?, params input: [String: JSONValue],
+                               operation: WorkspaceOperationContext, caller: AutomationCaller?) async throws -> JSONValue {
+        var params = input
         if let contract, contract.family == .notifications {
             return try await callNotifications(contract, params: params, operation: operation)
         }
@@ -698,6 +727,18 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         case .paletteList: return try listPalettes()
         case .appearanceGet: return try appearanceInfo(params)
         case .welcomeGet: return try welcomeInfo(params)
+        case .presenceList:
+            guard withoutAPIGuards(params).isEmpty else { throw RPCFailure(code: -32602, message: "presence.list takes no payload parameters") }
+            return presence.list()
+        case .presenceHold, .presenceRelease:
+            let payload = withoutAPIGuards(params)
+            let allowed: Set<String> = contract == .presenceHold ? ["pane", "ttlSeconds"] : ["pane"]
+            guard payload["pane"] != nil, Set(payload.keys).isSubset(of: allowed) else {
+                throw RPCFailure(code: -32602, message: "\(method) requires pane\(contract == .presenceHold ? " and accepts ttlSeconds" : "")")
+            }
+            let pane = try targetPaneID(params)
+            return contract == .presenceHold ? try presence.hold(pane: pane, params: payload, actor: operation.actor)
+                : try presence.release(pane: pane, actor: operation.actor)
         case .skillsList: return try listAgentSkills(params)
         case .skillsInstall: return try changeAgentSkills(params, install: true)
         case .skillsUninstall: return try changeAgentSkills(params, install: false)
@@ -916,6 +957,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     private func callDebug(_ method: String, params: [String: JSONValue], operation: WorkspaceOperationContext) throws -> JSONValue {
         switch method {
         case "debug.inspect" where integration: return inspect()
+        case "debug.presence" where integration: return presence.testingState()
         case "debug.welcomeInsert" where integration:
             guard let container = containers[try targetPaneID(params)] else {
                 throw RPCFailure(code: -32051, message: "Pane container is unavailable")
@@ -2662,6 +2704,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                     if command.id == "welcome.unread", settings.welcome.acknowledged == false { unavailable = "Welcome message is already enabled for new terminals" }
                 case "skills.settings": detail = "AI"; symbol = "sparkles"; keywords = "agent skill claude codex install"
                 case "skills.reveal": detail = "AI"; symbol = "folder"; keywords = "agent skill finder show"
+                case "agents.activity.show", "agents.activity.hide", "agents.activity.toggle":
+                    detail = "AI"; symbol = "sparkles"; keywords = "agent presence highlight frame tag claude codex show hide toggle"
+                    if command.id == "agents.activity.show", settings.current.showAgentActivity { unavailable = "Agent activity is already shown" }
+                    if command.id == "agents.activity.hide", !settings.current.showAgentActivity { unavailable = "Agent activity is already hidden" }
                 case "window.new": symbol = "macwindow.badge.plus"; keywords = "create"
                 case "tab.new": symbol = "plus.square"; keywords = "create"
                 case "tab.close", "pane.close": symbol = "xmark.square"; keywords = "remove close"
