@@ -5,12 +5,13 @@ import Foundation
 public struct WelcomeContent: Codable, Equatable, Sendable {
     public let title: String
     public let paragraphs: [String]
+    public static let skillCommand = "slate-term skill setup"
     public static let readCommand = "slate-term welcome --read"
     public static let current = WelcomeContent(
         title: "Welcome to Slate Terminal",
         paragraphs: [
             "Start with a terminal. Build your own workspace with apps, widgets, and your coding agent.",
-            "Install the Slate Terminal skill in Settings → AI Agents so your agent knows how to build and work here.",
+            "Give your coding agent the Slate Terminal skill. Choose where to install it with \(skillCommand)",
             "To stop showing this message, run \(readCommand)"
         ])
 

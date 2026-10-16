@@ -1,18 +1,23 @@
 import AppKit
 import SlateTermCore
 
-/// Native content; only the explicit insert button sends terminal input. Frame-based document sizing avoids
+/// Native content; only explicit insert buttons send terminal input. Frame-based document sizing avoids
 /// imposing text's intrinsic width/height on the split tree's geometry constraints.
 @MainActor
 final class WelcomeView: NSScrollView {
-    private let text = WelcomeLabel(wrappingLabelWithString: "")
-    private let command = WelcomeLabel(wrappingLabelWithString: WelcomeContent.readCommand)
-    private let insertButton = NSButton()
+    private struct Row {
+        let label: WelcomeLabel
+        let button: NSButton?
+        let command: String?
+    }
+    private var rows: [Row] = []
     private let document = WelcomeDocument()
     private let boundary = NSBox()
     private let inset: CGFloat = 16
-    var onFocus: (() -> Void)? { didSet { text.onFocus = onFocus; command.onFocus = onFocus } }
-    var onInsertCommand: (() -> Void)? { didSet { insertButton.isEnabled = onInsertCommand != nil } }
+    var onFocus: (() -> Void)? { didSet { for row in rows { row.label.onFocus = onFocus } } }
+    var onInsertCommand: ((String) -> Void)? {
+        didSet { for row in rows { row.button?.isEnabled = onInsertCommand != nil } }
+    }
 
     init() {
         super.init(frame: .zero)
@@ -24,44 +29,17 @@ final class WelcomeView: NSScrollView {
         hasHorizontalScroller = false
         // Keep an overflow cue visible when a small pane needs local scrolling.
         scrollerStyle = .legacy
-        text.isSelectable = false
-        text.isEditable = false
-        text.setContentCompressionResistancePriority(.init(1), for: .horizontal)
-        text.setContentCompressionResistancePriority(.init(1), for: .vertical)
         let content = WelcomeContent.current
-        let style = NSMutableParagraphStyle()
-        style.paragraphSpacing = 6
-        style.lineSpacing = 2
-        // Keep the shared copy, but lay out the command and its insert control as a row.
-        let source = ([content.title] + content.paragraphs).joined(separator: "\n")
-            .replacingOccurrences(of: " " + WelcomeContent.readCommand, with: "")
-        let attributed = NSMutableAttributedString(string: source, attributes: [
-            .font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.labelColor,
-            .paragraphStyle: style
-        ])
-        attributed.addAttribute(.font, value: NSFont.systemFont(ofSize: 13, weight: .semibold), range: (source as NSString).range(of: content.title))
-        text.attributedStringValue = attributed
-        let commandStyle = NSMutableParagraphStyle()
-        commandStyle.lineSpacing = 2
-        command.attributedStringValue = NSAttributedString(string: WelcomeContent.readCommand, attributes: [
-            .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
-            .foregroundColor: NSColor.labelColor, .paragraphStyle: commandStyle
-        ])
-        command.isSelectable = false
-        command.isEditable = false
-        insertButton.image = NSImage(systemSymbolName: "play.fill", accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(pointSize: 10, weight: .medium))
-        insertButton.isBordered = false
-        insertButton.setButtonType(.momentaryPushIn)
-        insertButton.refusesFirstResponder = true
-        insertButton.contentTintColor = .secondaryLabelColor
-        insertButton.toolTip = "Insert command into terminal (does not run it)"
-        insertButton.setAccessibilityLabel("Insert welcome command into terminal")
-        insertButton.setAccessibilityHelp("Inserts the command at the terminal cursor without pressing Return.")
-        insertButton.isEnabled = false
-        insertButton.target = self
-        insertButton.action = #selector(insertCommand)
-        for child in [text, command, insertButton] { document.addSubview(child) }
+        let intro = content.title + "\n" + content.paragraphs[0]
+        addRow(intro)
+        let attributed = NSMutableAttributedString(attributedString: rows[0].label.attributedStringValue)
+        attributed.addAttribute(.font, value: NSFont.systemFont(ofSize: 13, weight: .semibold),
+                                range: (intro as NSString).range(of: content.title))
+        rows[0].label.attributedStringValue = attributed
+        for (paragraph, command) in zip(content.paragraphs.dropFirst(), [WelcomeContent.skillCommand, WelcomeContent.readCommand]) {
+            addRow(paragraph.replacingOccurrences(of: " " + command, with: ""))
+            addRow(command, command: command)
+        }
         documentView = document
         // Separate clipped native text from live terminal output without a panel.
         boundary.boxType = .separator
@@ -73,6 +51,43 @@ final class WelcomeView: NSScrollView {
     required init?(coder: NSCoder) { nil }
     override var acceptsFirstResponder: Bool { false }
 
+    private func addRow(_ value: String, command: String? = nil) {
+        let label = WelcomeLabel(wrappingLabelWithString: "")
+        let style = NSMutableParagraphStyle()
+        style.paragraphSpacing = command == nil ? 6 : 0
+        style.lineSpacing = 2
+        label.attributedStringValue = NSAttributedString(string: value, attributes: [
+            .font: command == nil ? NSFont.systemFont(ofSize: 12) : NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
+            .foregroundColor: NSColor.labelColor, .paragraphStyle: style
+        ])
+        label.isSelectable = false
+        label.isEditable = false
+        label.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        label.setContentCompressionResistancePriority(.init(1), for: .vertical)
+        var button: NSButton?
+        if let command {
+            let insert = NSButton()
+            insert.image = NSImage(systemSymbolName: "play.fill", accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(pointSize: 10, weight: .medium))
+            insert.isBordered = false
+            insert.setButtonType(.momentaryPushIn)
+            insert.refusesFirstResponder = true
+            insert.contentTintColor = .secondaryLabelColor
+            insert.toolTip = "Insert command into terminal (does not run it)"
+            insert.setAccessibilityLabel(command == WelcomeContent.skillCommand
+                ? "Insert skill setup command into terminal" : "Insert welcome command into terminal")
+            insert.setAccessibilityHelp("Inserts the command at the terminal cursor without pressing Return.")
+            insert.isEnabled = false
+            insert.tag = rows.count
+            insert.target = self
+            insert.action = #selector(insertCommand(_:))
+            document.addSubview(insert)
+            button = insert
+        }
+        document.addSubview(label)
+        rows.append(Row(label: label, button: button, command: command))
+    }
+
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         updateScrollerContrast()
@@ -82,35 +97,39 @@ final class WelcomeView: NSScrollView {
         scrollerKnobStyle = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? .light : .dark
     }
 
-    private func rowMetrics(for width: CGFloat) -> (bodyHeight: CGFloat, commandWidth: CGFloat, rowHeight: CGFloat) {
-        let available = max(1, width - inset * 2 - 10)
-        func height(_ value: NSAttributedString, width: CGFloat) -> CGFloat {
-            ceil(value.boundingRect(with: NSSize(width: width, height: .greatestFiniteMagnitude),
-                                    options: [.usesLineFragmentOrigin, .usesFontLeading]).height) + 2
-        }
-        let commandWidth = min(ceil(command.attributedStringValue.size().width) + 4, max(1, available - 28))
-        return (height(text.attributedStringValue, width: available), commandWidth,
-                max(22, height(command.attributedStringValue, width: commandWidth) + 3))
+    private func rowMetrics(_ row: Row, width: CGFloat) -> (width: CGFloat, height: CGFloat) {
+        let available = max(1, width - inset * 2 - 10 - (row.button == nil ? 0 : 28))
+        let labelWidth = row.button == nil ? available : min(ceil(row.label.attributedStringValue.size().width) + 4, available)
+        let height = ceil(row.label.attributedStringValue.boundingRect(
+            with: NSSize(width: labelWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading]).height) + 2
+        return (labelWidth, max(row.button == nil ? 0 : 22, height + 3))
     }
 
     func preferredHeight(for width: CGFloat) -> CGFloat {
-        let row = rowMetrics(for: width)
-        return row.bodyHeight + row.rowHeight + inset * 2
+        rows.reduce(inset * 2) { $0 + rowMetrics($1, width: width).height + 4 }
     }
 
-    @objc private func insertCommand() { onInsertCommand?() }
-    func clickInsertCommandForTesting() { insertButton.performClick(nil) }
+    @objc private func insertCommand(_ sender: NSButton) {
+        if let command = rows[sender.tag].command { onInsertCommand?(command) }
+    }
+    func clickInsertCommandForTesting(_ command: String = WelcomeContent.readCommand) {
+        rows.first { $0.command == command }?.button?.performClick(nil)
+    }
 
     override func layout() {
         super.layout()
         let width = contentSize.width
         let height = max(contentSize.height, preferredHeight(for: width))
         document.frame = NSRect(x: 0, y: 0, width: width, height: height)
-        let row = rowMetrics(for: width)
-        text.frame = NSRect(x: inset, y: inset, width: max(1, width - inset * 2 - 10), height: row.bodyHeight)
-        let rowY = inset + row.bodyHeight
-        command.frame = NSRect(x: inset, y: rowY + 3, width: row.commandWidth, height: row.rowHeight - 3)
-        insertButton.frame = NSRect(x: command.frame.maxX + 6, y: rowY, width: 22, height: 22)
+        var y = inset
+        for row in rows {
+            let metrics = rowMetrics(row, width: width)
+            row.button?.frame = NSRect(x: inset, y: y, width: 22, height: 22)
+            row.label.frame = NSRect(x: inset + (row.button == nil ? 0 : 28), y: y + 3,
+                                     width: metrics.width, height: metrics.height - 3)
+            y += metrics.height + 4
+        }
         boundary.isHidden = height <= contentSize.height
         boundary.frame = NSRect(x: 0, y: isFlipped ? bounds.height - 1 : 0, width: bounds.width, height: 1)
     }

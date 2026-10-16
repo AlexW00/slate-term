@@ -6,6 +6,7 @@ import json
 import subprocess
 import shlex
 import sys
+import time
 from api_fixture import APP, CLI, ROOT, AppFixture, eventually
 
 with AppFixture('welcome', '[terminal]\nshell="/bin/zsh"\nshell_integration="off"\n[keybind]\n"cmd+shift+r"="welcome.reset"\n') as app:
@@ -60,6 +61,25 @@ with AppFixture('welcome', '[terminal]\nshell="/bin/zsh"\nshell_integration="off
     eventually('insert preserves draft', lambda: 'echo ' + read_command in app.rpc('terminal.capture', pane='p1')['text'])
     assert app.rpc('welcome.get') == initial
     app.rpc('terminal.key', pane='p1', key='ctrl+u')
+    # The second native play button opens the real interactive installer, still
+    # using the same isolated skill operations as Settings and parameterized CLI.
+    command('pane.focus', pane=other)
+    app.rpc('debug.welcomeInsert', pane='p1', skillSetup=True)
+    eventually('skill button inserts', lambda: app.rpc('terminal.capture', pane='p1')['text'].strip().endswith('slate-term skill setup'))
+    assert app.rpc('terminal.capture', pane=other)['text'] == other_text
+    assert native()['firstResponder'] and app.rpc('welcome.get') == initial
+    app.rpc('terminal.send', pane='p1', text='\r')
+    eventually('interactive agent selection', lambda: 'Enter to cancel' in app.rpc('terminal.capture', pane='p1')['text'])
+    app.rpc('terminal.send', pane='p1', text='1, 2\r')
+    eventually('interactive install confirmation', lambda: 'Install? [y/N]:' in app.rpc('terminal.capture', pane='p1')['text'])
+    assert all(agent['status'] == 'notInstalled' for agent in app.rpc('skills.list')['agents'])
+    time.sleep(0.3)  # Allow the compositor to present the confirmation already observed in capture.
+    app.rpc('debug.screenshot', path=str(ROOT / 'artifacts/welcome-skill-setup.png'))
+    app.rpc('terminal.send', pane='p1', text='y\r')
+    eventually('interactive install completes', lambda: 'Skill installed for' in app.rpc('terminal.capture', pane='p1')['text'])
+    statuses = {agent['id']: agent['status'] for agent in app.rpc('skills.list')['agents']}
+    assert statuses['agents'] == statuses['claude'] == 'installed' and statuses['codex'] == 'notInstalled', statuses
+    assert app.rpc('welcome.get') == initial and native()['welcomeVisible'], 'Skill setup acknowledged welcome'
     command('pane.close', pane=other, force=True)
     before = native()
 

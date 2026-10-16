@@ -82,11 +82,14 @@ The app ships the Slate Terminal agent skill (`skills/slate-terminal` in the rep
 Install in the shared folder plus Claude Code for most setups; installing in both the shared folder and an agent's own folder can show the skill twice. An existing file, folder or foreign link named `slate-terminal` is a conflict: install and uninstall fail with `-32050` and never replace or remove it. Uninstall removes only the link.
 
 ```sh
+slate-term skill setup         # interactive agent selection and install confirmation
 slate-term skill list --json
 slate-term skill install --agent agents --agent claude
 slate-term skill uninstall --agent claude
 slate-term skill reveal        # command.run skills.reveal; shows the managed copy in Finder
 ```
+
+`skill setup` requires an interactive terminal (no `--json` or `--agent`). It lists destinations, detection and install status, accepts numbers or IDs separated by spaces/commas, then asks for confirmation. Enter/EOF cancels without writes. Conflicting destinations cannot be selected; the host revalidates installation and never replaces foreign items. The wizard pins the app instance across prompts and never retries a failed mutation. Parameterized commands remain available for automation.
 
 `skills.list`, `skills.install {agents: [ID]}` and `skills.uninstall {agents: [ID]}` are shared API methods, so plugins and services can call them too. The command picker offers **Install Agent Skill…** (`skills.settings`) and **Open Agent Skill Folder** (`skills.reveal`). Integration runs link into `SLATE_TERM_AGENT_HOME`, or `agent-home` in the state folder, never the real home folder.
 

@@ -920,7 +920,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             guard let container = containers[try targetPaneID(params)] else {
                 throw RPCFailure(code: -32051, message: "Pane container is unavailable")
             }
-            try container.clickWelcomeInsertForTesting()
+            try container.clickWelcomeInsertForTesting(skillSetup: params["skillSetup"] == .bool(true))
             return .object([:])
         case "debug.notifications" where integration:
             if let authorization = params["authorization"]?.string {
@@ -1878,13 +1878,13 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 let type = availablePaneTypes.first { $0.id == typeID }!.name
                 let container = PaneContainer(content: leaves[pane.id]!, type: type, typeID: typeID,
                                               showWelcome: pane.type == .terminal && settings.welcome.snapshot.automaticDisplayEnabled)
-                container.onInsertWelcomeCommand = { [weak self, weak container, weak terminal = terminals[pane.id]] in
+                container.onInsertWelcomeCommand = { [weak self, weak container, weak terminal = terminals[pane.id]] command in
                     guard let self, let container, let terminal,
                           self.containers[pane.id] === container, self.terminals[pane.id] === terminal,
                           let window = container.view.window else { return }
                     self.focused(pane.id)
                     self.focusResponder(pane.id, in: window)
-                    do { try terminal.send(WelcomeContent.readCommand) }
+                    do { try terminal.send(command) }
                     catch { self.present(error) }
                 }
                 container.onClose = { [weak self] in self?.runUserCommand("pane.close", params: ["pane": .string(pane.id.description)]) }

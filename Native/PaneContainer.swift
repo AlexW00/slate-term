@@ -48,11 +48,11 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
     private var isActive = true
     var onClose: (() -> Void)?
     var onFocus: (() -> Void)?
-    var onInsertWelcomeCommand: (() -> Void)? {
+    var onInsertWelcomeCommand: ((String) -> Void)? {
         didSet {
-            welcomeView?.onInsertCommand = onInsertWelcomeCommand == nil ? nil : { [weak self] in
+            welcomeView?.onInsertCommand = onInsertWelcomeCommand == nil ? nil : { [weak self] command in
                 guard let self, self.welcomeVisible else { return }
-                self.onInsertWelcomeCommand?()
+                self.onInsertWelcomeCommand?(command)
             }
         }
     }
@@ -183,11 +183,11 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
         constrainContent()
     }
 
-    func clickWelcomeInsertForTesting() throws {
+    func clickWelcomeInsertForTesting(skillSetup: Bool = false) throws {
         guard welcomeVisible, let welcomeView else {
             throw RPCFailure(code: -32051, message: "Welcome message is not presented")
         }
-        welcomeView.clickInsertCommandForTesting()
+        welcomeView.clickInsertCommandForTesting(skillSetup ? WelcomeContent.skillCommand : WelcomeContent.readCommand)
     }
 
     func dismissWelcome() {

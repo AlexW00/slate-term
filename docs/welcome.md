@@ -4,7 +4,7 @@ New terminal sessions show a short native message above the live terminal until 
 
 The terminal view and session are retained when the message disappears. Welcome content never receives keyboard focus or terminal input. It wraps and scrolls locally when necessary, takes no more than half the available content height, and yields space to the terminal in very small panes. Hiding the pane header does not dismiss the welcome.
 
-The small play-shaped button beside `slate-term welcome --read` **inserts** that exact text into the terminal below and focuses it. It does not press Return, mark the message read, or clear an existing draft; input is inserted at the current cursor, like typing. Press Return yourself when ready. Its tooltip and accessibility label describe insertion rather than execution. This is a native convenience for the existing terminal-input capability (`terminal.send` for agents), not a second acknowledgement operation.
+Each small play-shaped button sits to the left of its command: `slate-term skill setup` opens an interactive skill installer, and `slate-term welcome --read` acknowledges the welcome. A button **inserts** its exact command text into the terminal below and focuses it. It does not press Return, mark the message read, or clear an existing draft; input is inserted at the current cursor, like typing. Press Return yourself when ready. Its tooltip and accessibility label describe insertion rather than execution. These are native conveniences for the existing terminal-input capability (`terminal.send` for agents), not separate installation or acknowledgement operations. The interactive installer uses `skills.list` and `skills.install`, just like Settings → AI Agents, and asks for destinations and confirmation before installing. It does not acknowledge the welcome. See [agent skill setup](control.md#agent-skill).
 
 ## Explicit operations
 
@@ -51,7 +51,7 @@ Acknowledgement is a private boolean in `state/welcome.json` under the applicati
 
 Malformed/unreadable saved state pauses automatic display rather than preventing terminal startup or repeatedly showing onboarding. `config.get` includes the welcome snapshot and its storage diagnostic. Only an explicit read/reset may repair malformed content; unsafe permissions and symlinks still fail closed.
 
-**Wording is intentionally provisional.** Edit only `Sources/SlateTermCore/Welcome.swift` (`WelcomeContent.current` and `readCommand`) to iterate. Both native presentation and CLI/API content use it. Text edits must not reset acknowledgement. Release announcements and onboarding steps are not part of this feature.
+**Wording is intentionally provisional.** Edit only `Sources/SlateTermCore/Welcome.swift` (`WelcomeContent.current`, `skillCommand` and `readCommand`) to iterate. Both native presentation and CLI/API content use it. Text edits must not reset acknowledgement. Release announcements are not part of this feature.
 
 ## Focused checks
 

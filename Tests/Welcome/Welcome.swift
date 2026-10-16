@@ -18,8 +18,8 @@ import SlateTermCore
         pane.setTitle("Terminal")
         pane.onFocus = { window.makeFirstResponder(terminal) }
         var inserted: [String] = []
-        pane.onInsertWelcomeCommand = {
-            inserted.append(WelcomeContent.readCommand)
+        pane.onInsertWelcomeCommand = { command in
+            inserted.append(command)
             window.makeFirstResponder(terminal)
         }
         window.contentViewController = pane
@@ -58,12 +58,24 @@ import SlateTermCore
         try require(inserted == [WelcomeContent.readCommand], "Button must insert the displayed command exactly once")
         try require(!inserted[0].contains("\n") && !inserted[0].contains("\r"), "Insert must not submit the command")
         try require(pane.welcomeVisible && window.firstResponder === terminal, "Insert must retain welcome and focus terminal")
+        let fullWelcome = pane.view.subviews.compactMap { $0 as? WelcomeView }.first!
+        fullWelcome.clickInsertCommandForTesting(WelcomeContent.skillCommand)
+        try require(inserted == [WelcomeContent.readCommand, WelcomeContent.skillCommand], "Skill button must insert its command without submitting")
+        try require(pane.welcomeVisible && window.firstResponder === terminal, "Skill insertion must retain welcome and terminal focus")
         size(320, 420)
         try require(pane.welcomeVisible && terminal.bounds.width == 320, "Narrow welcome pushed pane width")
         try require(terminal.bounds.height >= 196, "Narrow terminal height lost")
         let narrowWelcome = pane.view.subviews.compactMap { $0 as? WelcomeView }.first!
-        try require(narrowWelcome.documentView!.bounds.height <= narrowWelcome.contentSize.height + 0.5,
-                    "The command and insert button must fit the 320-point welcome without clipping")
+        let document = narrowWelcome.documentView!
+        let buttons = document.subviews.compactMap { $0 as? NSButton }
+        try require(buttons.count == 2, "Both welcome commands need insert buttons")
+        for button in buttons {
+            let command = document.subviews.compactMap { $0 as? NSTextField }.first {
+                $0.stringValue == (button === buttons[0] ? WelcomeContent.skillCommand : WelcomeContent.readCommand)
+            }!
+            try require(button.frame.maxX < command.frame.minX && command.frame.maxX <= document.bounds.width,
+                        "Each play button must be left of its command, within narrow content")
+        }
         try capture("narrow")
         // Scrolling is local to native welcome content, independent of terminal input.
         size(200, 260)
@@ -102,7 +114,7 @@ import SlateTermCore
         settle()
         try require(!pane.welcomeVisible && terminal.bounds.height > height, "Dismissal did not recover terminal space")
         insertButton.performClick(nil)
-        try require(!insertButton.isEnabled && inserted.count == 1, "Dismissed button must not insert again")
+        try require(!insertButton.isEnabled && inserted.count == 2, "Dismissed button must not insert again")
         try require(pane.content === controller && pane.content.view === terminal, "Terminal identity replaced")
         try require(window.firstResponder === terminal, "Dismissal stole keyboard focus")
         try require(terminal.bounds.height == pane.view.bounds.height, "Dismissed welcome left blank space")

@@ -31,6 +31,6 @@ import SlateTermCore
         #expect(!command.contract.requiresArguments)
         #expect(AutomationMethod.commandRun.resolving(["id": .string(id)], defaults: defaults) == ["id": .string(id)])
     }
-    #expect(WelcomeContent.current.text.contains("Settings → AI Agents"))
+    #expect(WelcomeContent.current.text.contains(WelcomeContent.skillCommand))
     #expect(WelcomeContent.current.text.contains(WelcomeContent.readCommand))
 }
