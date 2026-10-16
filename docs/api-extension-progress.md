@@ -40,13 +40,62 @@ unsupported optional month/week inputs, a test-helper expression syntax error,
 and restoring a private preference file without mode 0600); corrections were
 verified by the final successful gate. An earlier api-settings run completed its
 assertions but failed temporary WebKit profile deletion (`Failed to delete files
-on disk`); its failed receipt is retained, and a later gate passed. This is not a
-claim to have fixed that intermittent cleanup failure.
+on disk`); its failed receipt is retained, and a later gate passed. That parity
+checkpoint did not fix the cleanup failure; the subsequent investigation and fix
+are recorded below.
 
 No full-suite pass or `artifacts/verification.json` certification is claimed.
 Fullscreen failure/interruption, cross-display behavior, physical input/VoiceOver
 and exhaustive native-tab transition races remain unverified. The final documentation
 status update follows the cited stable-source receipts; it changes no implementation.
+
+### Follow-up: temporary WebKit profile cleanup race
+
+Investigation reproduced cleanup errors in **5/20 actual settings runs**, after
+settings assertions passed. All 30 instrumented comparison targets were absent
+before cleanup. Opening the named target solely to initialize WebKit created its
+directories while removal was requested; upstream WebKit initializes directories
+and removes profiles on separate queues. A matching named-store probe produced
+three deletion errors and one success-with-leftovers in ten settings runs, versus
+zero errors/leftovers with in-memory initialization. This strongly supports an
+initialization/removal race; the exact filesystem interleaving was not traced.
+The implicated cleanup, caller, fixture and settings-gate sources match main
+`1706a08`; a pristine-main executable was not separately tested.
+
+`BrowserData.removeTestProfile` now bootstraps WebKit with `nonPersistent()` rather
+than opening the target profile. Private metadata validation, integration-only
+entry conditions, store lifetime, identifier-based removal and error propagation
+are unchanged. No retries, error masking or direct filesystem deletion were added.
+This is internal fixture cleanup, not a new public API or normal browser-store change.
+
+Permanent native regressions cover missing metadata, ten never-created profiles,
+repeated removal, actual cookie-populated profile removal, absence after a bounded
+late-creation check, and rejection of non-private metadata. Independent source
+review found no actionable issues; it correctly noted that native tests preinitialize
+WebKit, so separate cold-process tests were also executed.
+
+Verification of the actual rebuilt implementation, with native execution only in VMPal:
+- App/native builds succeeded. **browser-data** (including new regressions) and
+  **api-settings** passed in `artifacts/vm/20261016T081603Z-17811670/receipt.json`.
+- **40 cold/repeated cleanup calls** across 20 fresh profiles passed, with no
+  remaining profile directories.
+- **20/20 actual settings runs** passed, including post-cleanup absence checks.
+  The copied app binary and changed source hashes were checked against the VM
+  receipt; these runs used the rebuilt app, not the investigation probe.
+- **browser-profiles** passed a bounded diagnostic rerun, including shared
+  persistence across restart, private isolation, native consent and CLI/page/service
+  clearing. The wrapper preserved gate deadlines and assertions and only added
+  sampling on a restart timeout; that failure path was not reached on the rerun.
+- Whitespace checks passed. Evidence/scripts: `artifacts/profile-cleanup-fix/`;
+  investigation evidence: `artifacts/profile-cleanup-investigation/REPORT.md`.
+
+The initial browser-profiles attempt timed out waiting for restart, before cleanup;
+its cleanup succeeded. The later pass does **not** establish the restart timeout's
+cause or fix it. One repetition-launch attempt acquired no lock and ran no tests;
+it was retried only after the VM lock was absent, without removing another owner's
+lock. Failed results are retained. No full-suite certification is claimed, and
+bounded repetitions cannot establish that all future WebKit cleanup errors are
+impossible. Only documentation changed after the cited implementation checks.
 
 Authorized scope: implement the reviewed API-extension plan iteratively with high-value tests, including post-operation lifecycle hooks (not veto hooks). Checkpoint before implementation: `2763ce9`; working tree was clean after that commit. Future capability-parity requirements live in `AGENTS.md`.
 

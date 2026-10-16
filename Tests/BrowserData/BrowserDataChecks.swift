@@ -12,11 +12,54 @@ struct BrowserDataChecks {
     static func cookie(_ domain: String) -> HTTPCookie {
         HTTPCookie(properties: [.domain: domain, .path: "/", .name: "fixture", .value: "saved", .expires: Date(timeIntervalSinceNow: 3600)])!
     }
+    static func identifier(in directory: URL) throws -> UUID {
+        try JSONDecoder().decode(UUID.self, from: Data(contentsOf: directory.appendingPathComponent("browser-profile.json")))
+    }
+    static func identifiers() async -> [UUID] {
+        await withCheckedContinuation { continuation in
+            WKWebsiteDataStore.fetchAllDataStoreIdentifiers { continuation.resume(returning: $0) }
+        }
+    }
+    static func requireRemoved(_ identifier: UUID) async throws {
+        try require(!(await identifiers()).contains(identifier), "Removed profile remains on disk")
+        // Detect late directory creation as well as an immediate removal error.
+        try await Task.sleep(nanoseconds: 100_000_000)
+        try require(!(await identifiers()).contains(identifier), "Cleanup recreated the removed profile")
+    }
+    static func unusedProfileCleanup(in directory: URL) async throws {
+        let bootstrap = WKWebsiteDataStore.nonPersistent()
+        defer { withExtendedLifetime(bootstrap) {} }
+        try await BrowserData.removeTestProfile(directory: directory.appendingPathComponent("missing"))
+        for index in 0..<10 {
+            let root = directory.appendingPathComponent("unused-\(index)")
+            // Metadata is created at startup even for terminal-only/private launches.
+            _ = try BrowserData(directory: root)
+            let id = try identifier(in: root)
+            try require(!(await identifiers()).contains(id), "Unused fixture unexpectedly created a profile")
+            try await BrowserData.removeTestProfile(directory: root)
+            try await requireRemoved(id)
+            try await BrowserData.removeTestProfile(directory: root)
+            try await requireRemoved(id)
+        }
+        let guarded = directory.appendingPathComponent("invalid-permissions")
+        _ = try BrowserData(directory: guarded)
+        let metadata = guarded.appendingPathComponent("browser-profile.json")
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: metadata.path)
+        do {
+            try await BrowserData.removeTestProfile(directory: guarded)
+            throw Failure(message: "Cleanup accepted non-private metadata")
+        } catch let error as Failure { throw error }
+        catch { /* PrivateJSONStore's failure must propagate, not become success. */ }
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: metadata.path)
+        try await BrowserData.removeTestProfile(directory: guarded)
+        try await requireRemoved(identifier(in: guarded))
+    }
     static func main() async {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let directory = URL(fileURLWithPath: CommandLine.arguments[1])
         var failure: Error?
         do {
+            try await unusedProfileCleanup(in: directory.appendingPathComponent("cleanup-regressions"))
             do {
                 let data = try BrowserData(directory: directory)
                 let same = try BrowserData(directory: directory)
@@ -25,6 +68,7 @@ struct BrowserDataChecks {
                 try require(a !== b && !a.isPersistent && data.persistent.isPersistent, "Incorrect browser store ownership")
                 await data.persistent.httpCookieStore.setCookie(cookie("example.com"))
                 await data.persistent.httpCookieStore.setCookie(cookie("other.org"))
+                try require((await identifiers()).contains(try identifier(in: directory)), "Populated profile is missing on disk")
                 await a.httpCookieStore.setCookie(cookie("example.com"))
                 try require(await b.httpCookieStore.allCookies().isEmpty, "Private panes shared cookies")
                 let site = try BrowserDataRequest(kind: .site, params: ["pane": .string("p1"), "url": .string("https://www.example.com/path")])
@@ -66,7 +110,16 @@ struct BrowserDataChecks {
             }
         } catch { failure = error }
         // Release all users before cleanup, on failure as well as success.
-        do { try await BrowserData.removeTestProfile(directory: directory) }
+        do {
+            try await BrowserData.removeTestProfile(directory: directory)
+            // This profile held real persistent cookies, unlike the unused fixtures.
+            if FileManager.default.fileExists(atPath: directory.appendingPathComponent("browser-profile.json").path) {
+                let id = try identifier(in: directory)
+                try await requireRemoved(id)
+                try await BrowserData.removeTestProfile(directory: directory)
+                try await requireRemoved(id)
+            }
+        }
         catch {
             fputs("FAIL browser profile cleanup (ownership metadata retained at \(directory.path)): \(error)\n", stderr)
             exit(1)
@@ -75,6 +128,6 @@ struct BrowserDataChecks {
             fputs("FAIL browser data: \(failure)\n", stderr)
             exit(1)
         }
-        print("PASS browser stores: shared profile identity, private isolation, PSL/IDN/IPv6 domain-group removal, private/all-data clearing, post-fetch liveness and profile cleanup")
+        print("PASS browser stores: shared profile identity, private isolation, PSL/IDN/IPv6 domain-group removal, private/all-data clearing, post-fetch liveness, unused/populated/repeated profile cleanup and metadata validation")
     }
 }

@@ -26,8 +26,9 @@ final class BrowserData {
     static func removeTestProfile(directory: URL) async throws {
         let file = try PrivateJSONStore(url: directory.appendingPathComponent("browser-profile.json"), maximumBytes: 128)
         guard let identifier = try file.load(UUID.self) else { return }
-        // Initialize WebKit's main run loop before its static asynchronous removal API.
-        let store = WKWebsiteDataStore(forIdentifier: identifier)
+        // Bootstrap WebKit without opening the profile being removed: a named store
+        // asynchronously creates its directories and can race the static deletion API.
+        let store = WKWebsiteDataStore.nonPersistent()
         defer { withExtendedLifetime(store) {} }
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             WKWebsiteDataStore.remove(forIdentifier: identifier) { error in
