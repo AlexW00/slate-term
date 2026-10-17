@@ -76,7 +76,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     var terminals: [PaneID: TerminalView] = [:]
     private lazy var terminalControl = TerminalControl { [weak self] pane in
         guard let self, let view = self.terminals[pane], let session = self.shellSessions[pane] else { return nil }
-        return TerminalControl.Target(paneID: pane, sessionID: session.instanceID, runKey: session.runKey, view: view, report: session.report)
+        return TerminalControl.Target(paneID: pane, sessionID: session.instanceID, runKey: session.runKey(for: session.report?.shellKind ?? .zsh), view: view, report: session.report)
     }
     var rendered: [TabID: Layout] = [:]
     var renderedZoom: [TabID: PaneID] = [:]
@@ -801,10 +801,12 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 throw RPCFailure(code: -32040, message: "Shell session is unavailable")
             }
             let report = try JSONDecoder().decode(ShellReport.self, from: JSONEncoder().encode(JSONValue.object(params)))
-            try session.accept(report, token: token)
+            let acceptance = try session.accept(report, token: token)
             shellSessions[pane] = session
-            if report.state == .running { notificationCommandText[pane] = report.command }
             terminalControl.observe(pane: pane, sessionID: session.instanceID, report: report)
+            // A late report never changes visible state; only run tracking needs it.
+            guard acceptance == .current else { return .object(["sequence": .integer(report.sequence)]) }
+            if report.state == .running { notificationCommandText[pane] = report.command }
             layoutStartup.observe(pane: pane, session: session.instanceID, report: report)
             processTitles.bind(pane: pane, pid: pid_t(report.pid))
             refreshTerminalTitles()
@@ -1598,10 +1600,11 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 }
             }
             if let command = pane.configuration["command"]?.string, !command.isEmpty {
+                // bash 3.2 passes this check; its first prompt report then refuses the run with a clear reason.
                 guard settings.current.terminal.shellIntegration == .auto,
-                      URL(fileURLWithPath: settings.current.terminal.shell).lastPathComponent == "zsh",
+                      ShellKind(executablePath: settings.current.terminal.shell) != nil,
                       !integration || ProcessInfo.processInfo.environment["SLATE_TERM_TEST_REAL_SHELL"] == "1" else {
-                    throw RPCFailure(code: -32602, message: "Startup commands require zsh with automatic shell integration")
+                    throw RPCFailure(code: -32602, message: "Startup commands require zsh, bash or fish with automatic shell integration")
                 }
             }
         }
@@ -1682,7 +1685,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                                 "workingDirectory": directory.map(JSONValue.string) ?? .null,
                                 "state": .string(report?.state.rawValue ?? "unknown"), "isAtPrompt": report.map { .bool($0.state == .prompt) } ?? .null,
                                 "command": report?.command.map(JSONValue.string) ?? .null, "exitCode": exitCode.map(JSONValue.integer) ?? .null,
-                                "sequence": .integer(report?.sequence ?? 0)])
+                                "sequence": .integer(report?.sequence ?? 0),
+                                "shell": report.map { .string($0.shellKind.rawValue) } ?? .null,
+                                "runAvailable": report.map { .bool($0.acceptsRunInput) } ?? .null])
         }
         return .object(["instanceId": .string(instanceID), "scope": .string(scope), "tabId": .string(tab.id.description),
                         "focusedPaneId": .string(tab.focusedPane.description), "activeTerminalPaneId": tab.activeTerminal.map { .string($0.description) } ?? .null,

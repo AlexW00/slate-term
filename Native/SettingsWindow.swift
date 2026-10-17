@@ -448,7 +448,7 @@ private struct SettingsView: View {
                     Text("Off").tag("off")
                 }
             } header: { Text("Shell") } footer: {
-                Text("Use an absolute executable path, such as /bin/zsh. Shell changes apply to new terminals.")
+                Text("Use an absolute executable path, such as /bin/zsh. zsh, bash and fish get automatic integration. Shell changes apply to new terminals.")
             }
         }
     }

@@ -349,6 +349,9 @@ extension WorkspaceHost {
         if let session = shellSessions[id] {
             result["sessionId"] = .string(session.instanceID)
             result["state"] = .string(session.report?.state.rawValue ?? "unknown")
+            // Known only after the shell's first authenticated report.
+            result["shell"] = session.report.map { .string($0.shellKind.rawValue) } ?? .null
+            result["runAvailable"] = session.report.map { .bool($0.acceptsRunInput) } ?? .null
             result["contentOperations"] = .array(["terminal.capture", "terminal.send", "terminal.key", "terminal.run", "terminal.wait"].map(JSONValue.string))
         } else if let plugin = leaves[id] as? PluginPane {
             result["pluginInstanceId"] = .string(plugin.instance.id)

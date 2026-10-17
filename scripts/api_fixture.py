@@ -26,8 +26,9 @@ def eventually(label, condition, timeout=15):
 
 
 class AppFixture:
-    def __init__(self, name, configuration='[terminal]\nshell = "/bin/zsh"\n', *, workspace_source=None):
+    def __init__(self, name, configuration='[terminal]\nshell = "/bin/zsh"\n', *, workspace_source=None, environment=None):
         self.name, self.configuration = name, configuration
+        self.extra_environment = environment or {}
         self.workspace_source = workspace_source
 
     def __enter__(self):
@@ -62,6 +63,7 @@ fi
         self.env.update(SLATE_TERM_INTEGRATION='1', SLATE_TERM_TEST_REAL_SHELL='1',
                         SLATE_TERM_STATE_DIR=str(self.root), SLATE_TERM_CONFIG_FILE=str(self.config),
                         SLATE_TERM_SOCKET_FILE=str(self.ready), ZDOTDIR=str(startup))
+        self.env.update(self.extra_environment)
         self.log = (ROOT / f'artifacts/{self.name}-process.log').open('w')
         self.process = subprocess.Popen([str(APP)], env=self.env, stdout=self.log, stderr=self.log, start_new_session=True)
         try:

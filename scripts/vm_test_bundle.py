@@ -1,5 +1,6 @@
 """Copy only runnable products/resources; no SDKs, compiler caches or guest builds."""
 import hashlib
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -66,6 +67,20 @@ def stage_products(root, bundle, selected, package_bin=None):
         if package_bin is None:
             raise RuntimeError('Package CLI directory is required by selected native gates')
         copy(package_bin / 'slate-term', '.build/vm-support/slate-term')
+    if any(gate.name in ('shell-hooks', 'shells') for gate in selected):
+        # Built on the host by scripts/build-test-shells.sh; the guest has only Apple's bash 3.2.
+        shells = root / '.build/test-shells'
+        for name, executable in [('bash-5.2', 'bash'), ('bash-5.3', 'bash'), ('fish-4', 'fish')]:
+            source = shells / name / executable
+            if not source.is_file():
+                if name == 'fish-4' and os.environ.get('SLATE_TEST_SHELLS_WITHOUT_FISH') == '1':
+                    # An explicit, visible opt-out; the guest gates report it instead of passing silently.
+                    marker = bundle / '.build/test-shells/WITHOUT_FISH'
+                    marker.parent.mkdir(parents=True, exist_ok=True)
+                    marker.write_text('fish was not built for this run\n')
+                    continue
+                raise RuntimeError('Missing test shell ' + str(source) + '; run scripts/build-test-shells.sh')
+            copy(source, str(source.relative_to(root)))
     if any(gate.name == 'web' for gate in selected):
         copy(root / '.build/vm-tests/check-screenshot', '.build/vm-tests/check-screenshot')
     return guest_hashes, host_hashes

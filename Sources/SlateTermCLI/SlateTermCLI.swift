@@ -140,6 +140,7 @@ struct TerminalCommand: ParsableCommand {
     @Option var sessionId: String?
     @Option var text: String?
     @Option var command: String?
+    @Option(help: "Language the run command is written in; refuse if the pane runs another shell.") var shell: ShellKind?
     @Option(help: "Logical key, e.g. ctrl+c, alt+left, shift+tab; text entry uses send.") var key: String?
     @Option(help: "Wait for this literal screen text instead of a shell prompt.") var contains: String?
     @Option(help: "Require a later authenticated prompt sequence.") var afterSequence: Int?
@@ -150,6 +151,10 @@ struct TerminalCommand: ParsableCommand {
         if let sessionId { params["sessionId"] = .string(sessionId); params.removeValue(forKey: "expectedAnchorSessionId") }
         if let text { params["text"] = .string(text) }
         if let command { params["command"] = .string(command) }
+        if let shell {
+            guard action == .run else { throw ValidationError("--shell applies only to terminal run") }
+            params["shell"] = .string(shell.rawValue)
+        }
         if let key { params["key"] = .string(key) }
         if let contains { params["contains"] = .string(contains) }
         if let afterSequence { params["afterSequence"] = .integer(afterSequence) }
@@ -340,14 +345,18 @@ struct ShellCommand: ParsableCommand {
     @Argument var action: Action
     @OptionGroup var connection: Connection
     @Option var state: State?
+    @Option(help: "Shell whose hooks send the report, or whose hooks to print.") var shell: ShellKind?
+    @Option(help: "Whether the shell can check its edit line before a run (false on bash 3.2).") var runInput: Bool?
     @Option var pid: Int?
+    @Flag(help: .hidden) var deliver = false
     @Option var sequence: Int?
     @Option var cwd: String?
     @Option var command: String?
     @Option var exitCode: Int?
     @Flag var emptyBuffer = false
     func run() throws {
-        if action == .integration { print(ShellIntegration.zshHooks); return }
+        if action == .integration { print(ShellIntegration.hooks(for: shell ?? .zsh)); return }
+        if deliver { return try ShellReportDelivery.deliver(connection: connection) }
         let environment = ProcessInfo.processInfo.environment
         if action == .runInput {
             guard let pane = environment["SLATE_TERM_PANE_ID"], let token = environment["SLATE_TERM_CONTEXT_TOKEN"], let pid else {
@@ -364,8 +373,16 @@ struct ShellCommand: ParsableCommand {
                                           "pid": .integer(pid), "sequence": .integer(sequence), "cwd": .string(cwd)]
         if let command { params["command"] = .string(command) }
         if let exitCode { params["exitCode"] = .integer(exitCode) }
-        // Telemetry must not strand an interactive prompt if its host is gone.
-        try connection.call("shell.update", params: params, timeoutSeconds: 1)
+        if let shell { params["shell"] = .string(shell.rawValue) }
+        if let runInput { params["runInput"] = .bool(runInput) }
+        // A command's start is reported before it runs, so the host never sends a run key into
+        // a program reading input. A busy host, as at launch, must not stall the prompt: prompts,
+        // and starts the host cannot take within a second, go to a detached copy instead.
+        if state == .running {
+            do { return try connection.call("shell.update", params: params, timeoutSeconds: 1) }
+            catch is SocketError {}
+        }
+        try ShellReportDelivery.spawn(params, connection: connection)
     }
 }
 
@@ -507,4 +524,64 @@ struct RPC: ParsableCommand {
 struct Version: ParsableCommand {
     @OptionGroup var connection: Connection
     func run() throws { try connection.call("version") }
+}
+
+extension ShellKind: ExpressibleByArgument {}
+
+/// Detached delivery for shell reports. posix_spawn, not fork: a forked Swift process must
+/// not run Foundation or Dispatch code. The copy starts its own session with no terminal, so
+/// the shell's job table, prompt and Ctrl-C never see it. It receives the report on stdin,
+/// which keeps command text out of its arguments, where other processes could read it.
+enum ShellReportDelivery {
+    static let timeoutSeconds: TimeInterval = 10
+    static let maximumBytes = 65_536
+
+    static func spawn(_ params: [String: JSONValue], connection: Connection) throws {
+        guard let executable = Bundle.main.executablePath else { throw ValidationError("Cannot locate the slate-term executable") }
+        let payload = try JSONEncoder().encode(JSONValue.object(params))
+        guard payload.count <= maximumBytes else { throw ValidationError("Shell report is too large") }
+        var pipe: [Int32] = [0, 0]
+        guard Darwin.pipe(&pipe) == 0 else { throw ValidationError("Could not start shell report delivery") }
+        var actions: posix_spawn_file_actions_t?
+        posix_spawn_file_actions_init(&actions)
+        defer { posix_spawn_file_actions_destroy(&actions) }
+        posix_spawn_file_actions_adddup2(&actions, pipe[0], 0)
+        for descriptor: Int32 in [1, 2] {
+            posix_spawn_file_actions_addopen(&actions, descriptor, "/dev/null", O_WRONLY, 0)
+        }
+        var attributes: posix_spawnattr_t?
+        posix_spawnattr_init(&attributes)
+        defer { posix_spawnattr_destroy(&attributes) }
+        // Close every other inherited descriptor, such as the terminal and the pipe's write end.
+        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT))
+        let arguments = [executable, "shell", "update", "--deliver"] + (connection.socket.map { ["--socket", $0] } ?? [])
+        let argv = arguments.map { strdup($0) } + [nil]
+        defer { argv.forEach { free($0) } }
+        var child = pid_t()
+        let status = posix_spawn(&child, executable, &actions, &attributes, argv, environ)
+        Darwin.close(pipe[0])
+        defer { Darwin.close(pipe[1]) }
+        guard status == 0 else { throw ValidationError("Could not start shell report delivery: \(String(cString: strerror(status)))") }
+        // Well below the pipe buffer, so this never waits for the copy. It is not waited for:
+        // the copy is reparented when this process exits a moment later.
+        _ = payload.withUnsafeBytes { Darwin.write(pipe[1], $0.baseAddress, $0.count) }
+    }
+
+    /// Runs in the detached copy. The host checks credentials when it accepts a connection, so
+    /// the copy stays connected for the reply. A full listen queue refuses at once; retry until
+    /// the deadline rather than lose a report while the host is busy.
+    static func deliver(connection: Connection) throws {
+        let input = FileHandle.standardInput.readData(ofLength: maximumBytes + 1)
+        guard input.count <= maximumBytes, case .object(let params) = try JSONDecoder().decode(JSONValue.self, from: input) else {
+            throw ValidationError("Invalid shell report")
+        }
+        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        while true {
+            let remaining = Int(deadline.timeIntervalSinceNow.rounded(.up))
+            do { return try connection.call("shell.update", params: params, timeoutSeconds: max(1, remaining)) }
+            catch SocketError.system("connect", let code) where [ECONNREFUSED, EAGAIN, ENOENT].contains(code) && Date() < deadline {
+                usleep(50_000)
+            }
+        }
+    }
 }

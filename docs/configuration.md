@@ -154,7 +154,16 @@ The app watches both the file and its parent directory, handling in-place writes
 - Padding is symmetric on each axis, in whole points from **0 to 64** (Slate Terminal's supported range). Padding changes apply to **new terminals**, following the pinned engine's behavior; existing panes are not recreated. Large padding leaves less room for terminal cells in small panes.
 - Shell, shell-integration, and padding changes apply to new terminals. `restartRequired` reports differences from launch settings; running shells are not killed or restarted automatically.
 - `shell` names a regular executable file by absolute path, not a command with arguments. It is started as a login shell (`-l`). Spaces and quotes are supported. The pinned engine's automatic integration parser cannot safely handle dollar signs, backticks, or backslashes in an executable path: use `shell_integration = "off"` for those paths.
-- Automatic integration depends on the engine's shell support. In particular, it intentionally does not inject integration into Apple's `/bin/bash`. Production-path zsh is covered by the runtime gate; other shells are not yet independently verified.
+- Automatic integration recognizes the shell by its executable name:
+
+  | Shell | State, cwd, exit status, command text | `terminal run`, startup commands | How Slate loads its hooks |
+  | --- | --- | --- | --- |
+  | zsh | yes | yes | Redirects the engine's zsh startup directory, then sources the user's `.zshenv` |
+  | bash 4.4+ (for example Homebrew bash) | yes | yes | Exports `PROMPT_COMMAND` with a one-line bootstrap that runs at the first prompt, after the user's startup files, then stops exporting it |
+  | bash 3.2–4.3, including Apple `/bin/bash` | yes | no: refuses with a reason | Same bootstrap; on Apple bash it also loads the engine's bash script, which the engine does not inject there |
+  | fish 3.1+ | yes | yes | Starts fish with `--init-command`, which runs after `config.fish` |
+
+  If a bash startup file replaces `PROMPT_COMMAND` instead of appending to it, the shell runs without Slate's integration. bash marks its prompts through `PS0`, `PS1` and `PS2` and re-adds those marks after other prompt hooks; a run is refused, never guessed, when they are missing or `promptvars` is off. Shells inside tmux or screen never report for the pane. fish integration is skipped for a state directory whose path contains quotes, `$`, backticks or backslashes. Hooks deliver reports from a detached helper, so a prompt never waits for a busy app.
 
 ## Shortcuts
 

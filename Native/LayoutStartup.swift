@@ -36,7 +36,7 @@ final class LayoutStartup {
     }
     func observe(pane: PaneID, session: String, report: ShellReport) {
         guard let item = pending[pane], item.session == session else { return }
-        if item.state == "starting", report.state == .running, report.command?.hasPrefix(": __SLATE_RUN_") == true {
+        if item.state == "starting", report.state == .running, report.command.map(ShellKind.isRunMarker) == true {
             pending[pane]?.state = "running"
         }
         guard item.state == "waitingForPrompt", report.state == .prompt else { return }
