@@ -215,6 +215,8 @@ For example, tmux users can implement discovery, control-mode clients, inner-pan
 
 Plugins and services can send attention/completion notifications with the shared `notifications.post/list/dismiss/status` API; registered pages have `workspace.notifications.*` helpers and executable tools use `slate-term notify`. Requests obey user focus/sound/permission policy and capture the original source lifetime. See [notifications](notifications.md) for bounds, coalescing, unread state and safe source navigation. Emitting a custom event does not implicitly create a desktop notification.
 
+Registered pages and services may inspect `presence.list` and explicitly navigate a live activity with `presence.focus {activityId}`; pages also have generated `workspace.presence.*` helpers. This uses the same session-guarded navigation as native agent pills and has no inherited pane target. It does not grant the ability to claim an actor or hold activity. See [agent presence](presence.md#clicking-and-focusing-the-agent).
+
 ## Scope and lifetime
 
 - `pane` (default): separate instance for each pane, stopped when its view is removed.

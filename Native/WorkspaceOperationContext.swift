@@ -22,7 +22,7 @@ struct WorkspaceOperationContext: Sendable {
     }
     let origin: Origin
     let lineage: OperationLineage
-    /// Self-declared agent identity for presence display. Never used for admission or routing.
+    /// Self-declared activity identity. Never changes admission or this operation's target.
     let actor: PresenceActor?
     let validateCaller: @MainActor @Sendable () throws -> Void
 

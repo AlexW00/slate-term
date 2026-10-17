@@ -46,6 +46,7 @@ public struct UnixClient: Sendable {
         private var nextID = 2
         private var supportsMetadata: Bool?
         private var supportsPresence = false
+        private var supportsPresenceOrigin = false
         fileprivate init(descriptor: Int32) { self.descriptor = descriptor }
         deinit { if let descriptor { Darwin.close(descriptor) } }
 
@@ -56,6 +57,7 @@ public struct UnixClient: Sendable {
                 if supportsMetadata == nil { _ = try? call("api.describe") }
                 // An actor is presentation-only, so an older host silently skips it.
                 if !(supportsMetadata == true && supportsPresence) { metadata = metadata?.withoutActor }
+                else if !supportsPresenceOrigin { metadata = metadata?.withoutActorOrigin }
             }
             if metadata != nil {
                 if supportsMetadata == nil {
@@ -76,6 +78,7 @@ public struct UnixClient: Sendable {
                 if method == "api.describe" {
                     supportsMetadata = result.object?["causation"]?.object?["version"] == .integer(1)
                     supportsPresence = result.object?["presence"]?.object?["version"] == .integer(1)
+                    supportsPresenceOrigin = result.object?["presence"]?.object?["originVersion"] == .integer(1)
                 }
                 return result
             }

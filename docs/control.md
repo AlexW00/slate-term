@@ -25,7 +25,7 @@ The CLI's `--cause` negotiates support and dispatches on the same handshaken con
 
 ## Agent presence metadata
 
-When `api.describe.presence.version` is `1`, administrative requests may also carry `"actor":{"name":"claude","note":"…","home":"p1"}` in the same `metadata` object. The CLI fills it from `SLATE_TERM_ACTOR`/`--actor`, `--note` and the launching pane, and drops it for hosts without presence support. A malformed actor rejects the request like other malformed metadata. The actor is display only: it never changes admission, routing or authorization, and it is ignored for plugin pages, services and requests with a `cause`. See [agent presence](presence.md).
+When `api.describe.presence.version` is `1`, administrative requests may also carry `"actor":{"name":"claude","note":"…","home":"p1","origin":{"instanceId":"APP-EPOCH","sessionId":"TERMINAL-SESSION"}}` in the same `metadata` object. The CLI fills it from `SLATE_TERM_ACTOR`/`--actor`, `--note` and the launching pane, and drops it for hosts without presence support. A malformed actor rejects the request like other malformed metadata. The actor never changes admission, operation-target routing or authorization, and it is ignored for plugin pages, services and requests with a `cause`. Optional `origin` requires `presence.originVersion == 1`; it binds `home` to the app epoch/current terminal session for explicit pill clicks or shared `presence.focus {activityId}` navigation. Missing/stale origins are navigation no-ops, not current-pane fallbacks. The CLI strips only this optional origin on hosts without origin support. See [agent presence](presence.md).
 
 ## Discovery and methods
 

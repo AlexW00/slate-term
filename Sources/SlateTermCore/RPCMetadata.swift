@@ -4,7 +4,7 @@ import Foundation
 /// A cause is an opaque delivery reference, not caller-selected provenance.
 public struct RPCMetadata: Codable, Equatable, Sendable {
     public let cause: String?
-    /// Presentation-only agent identity. Hosts advertise support with `api.describe.presence`.
+    /// Self-declared activity identity and optional navigation origin; never authorization.
     public let actor: PresenceActor?
 
     public init(cause: String? = nil, actor: PresenceActor? = nil) throws {
@@ -31,6 +31,12 @@ public struct RPCMetadata: Codable, Equatable, Sendable {
         if let cause { fields["cause"] = .string(cause) }
         if let actor { fields["actor"] = actor.json }
         try JSONValue.object(fields).encode(to: encoder)
+    }
+
+    /// Preserve display metadata on hosts without session-bound presence navigation.
+    public var withoutActorOrigin: RPCMetadata {
+        guard let actor, actor.origin != nil else { return self }
+        return try! RPCMetadata(cause: cause, actor: PresenceActor(name: actor.name, note: actor.note, home: actor.home))
     }
 
     /// The same metadata without the actor, for hosts that do not show presence.

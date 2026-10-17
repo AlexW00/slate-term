@@ -12,32 +12,36 @@ struct PresenceOverlayItem: Equatable {
     let element: NSRect?
     let pulse: Int
     let order: Int
+    let originPane: String?
 }
 
-/// Paints agent frames and tags above pane content. Like the inactive shade, it never
-/// takes clicks or focus. Everything below this view is a plain CALayer, so updates never
-/// mark view layout dirty, which web automation readiness checks would reject.
+/// Paints target rings and native glass agent pills above pane content.
+/// Only the pills take clicks; empty overlay space passes through to pane content.
+/// Tags use explicit frames without constraints to keep pane and web layout independent.
 @MainActor
 final class PresenceOverlayView: NSView {
     static let fade: TimeInterval = 0.45
     private static let move: TimeInterval = 0.3
     static let tagHeight: CGFloat = 21
 
-    /// Distance from the top edge to the bottom of the pane header.
-    var headerInset: CGFloat = 28 { didSet { if headerInset != oldValue { layoutItems(animated: false) } } }
-    /// Where pane tags hang from when pane chrome continues below the header, such as a browser toolbar.
-    var contentTop: CGFloat? { didSet { if contentTop != oldValue { layoutItems(animated: false) } } }
-    private var tagTop: CGFloat { max(headerInset, contentTop ?? 0) }
+    var onActivate: ((String) -> Void)?
+    /// Keep pills over content, clear of a browser's native status strip.
+    var contentBottomInset: CGFloat = 0 {
+        didSet { if contentBottomInset != oldValue { layoutItems(animated: false) } }
+    }
 
     private var items: [PresenceOverlayItem] = []
-    private var tags: [String: PresenceTagLayer] = [:]
+    private var tags: [String: PresenceTagView] = [:]
     private var pulses: [String: Int] = [:]
     private let paneRing = PresenceRingLayer()
     private var elementRings: [String: PresenceRingLayer] = [:]
-    private let overflow = PresenceTagLayer()
+    private let overflow = PresenceTagView()
 
     override var isFlipped: Bool { true }
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let hit = super.hitTest(point)
+        return hit === self ? nil : hit
+    }
     override var acceptsFirstResponder: Bool { false }
 
     override init(frame: NSRect) {
@@ -46,13 +50,15 @@ final class PresenceOverlayView: NSView {
         // Glows stay inside the pane instead of spilling over neighbouring panes.
         layer?.masksToBounds = true
         layer?.addSublayer(paneRing)
-        overflow.opacity = 0
-        layer?.addSublayer(overflow)
+        overflow.alphaValue = 0
+        addSubview(overflow)
         setAccessibilityElement(false)
     }
     required init?(coder: NSCoder) { nil }
 
-    override func accessibilityChildren() -> [Any]? { [] }
+    override func accessibilityChildren() -> [Any]? {
+        items.compactMap { tags[$0.id] }.filter { $0.alphaValue > 0 && !$0.isLeaving }
+    }
 
     override func layout() {
         super.layout()
@@ -73,6 +79,7 @@ final class PresenceOverlayView: NSView {
         let scale = window?.backingScaleFactor ?? 2
         effectiveAppearance.performAsCurrentDrawingAppearance {
             for tag in tags.values { tag.restyle(scale: scale, dark: effectiveAppearance.isDark) }
+            overflow.restyle(scale: scale, dark: effectiveAppearance.isDark)
         }
     }
 
@@ -85,9 +92,10 @@ final class PresenceOverlayView: NSView {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             for item in items {
                 let tag = tags[item.id] ?? {
-                    let created = PresenceTagLayer()
-                    created.opacity = 0
-                    layer?.addSublayer(created)
+                    let created = PresenceTagView()
+                    created.alphaValue = 0
+                    created.onActivate = { [weak self] in self?.onActivate?(item.id) }
+                    addSubview(created)
                     tags[item.id] = created
                     return created
                 }()
@@ -103,7 +111,7 @@ final class PresenceOverlayView: NSView {
             fade(tag, to: 0) { [weak self, weak tag] in
                 // A newer appearance or exit owns the tag now; leave it alone.
                 guard let self, let tag, tag.generation == generation else { return }
-                tag.removeFromSuperlayer()
+                tag.removeFromSuperview()
                 if self.tags[id] === tag { self.tags[id] = nil }
             }
         }
@@ -116,87 +124,29 @@ final class PresenceOverlayView: NSView {
 
     private func layoutItems(animated: Bool) {
         let paneItems = items.filter { $0.element == nil }
-        var pending: [(PresenceTagLayer, CGRect?)] = []
         withoutActions {
             paneRing.frame = bounds
             paneRing.update(path: CGPath(roundedRect: bounds.insetBy(dx: 1.5, dy: 1.5), cornerWidth: 7, cornerHeight: 7, transform: nil),
                             colors: paneItems.map { NSColor(rgb: $0.rgb) })
         }
         paneRing.setVisible(!paneItems.isEmpty, animated: animated)
-
-        // Pane tags hang from the header's bottom edge at the top right. The first
-        // arrival sits in the corner and later ones line up to its left.
-        let available = max(0, bounds.width - 24)
-        let newest = paneItems.max { $0.order < $1.order }?.id
-        var compact = Set(paneItems.count >= 3 || bounds.width < 200 ? paneItems.map(\.id).filter { $0 != newest } : [])
-        if bounds.width < 200, let newest { compact.insert(newest) }
-        func widths() -> [String: CGFloat] {
-            Dictionary(uniqueKeysWithValues: paneItems.compactMap { item in
-                tags[item.id].map { (item.id, $0.width(compact: compact.contains(item.id), maximum: available)) }
-            })
-        }
-        var sizes = widths()
-        func total(_ shown: [PresenceOverlayItem]) -> CGFloat {
-            shown.reduce(0) { $0 + (sizes[$1.id] ?? 0) } + CGFloat(max(0, shown.count - 1)) * 4
-        }
-        if total(paneItems) > available {
-            compact.formUnion(paneItems.map(\.id).filter { $0 != newest })
-            sizes = widths()
-        }
-        // Keep the corner tags and the newest; fold the rest into a "+N" chip.
-        var shown = paneItems
-        var hidden: [PresenceOverlayItem] = []
-        let chipWidth: CGFloat = 34
-        while shown.count > 1, total(shown) + chipWidth + 4 > available || (total(shown) > available) {
-            guard let drop = shown.dropLast().last(where: { $0.id != newest }) ?? shown.first(where: { $0.id != newest }) else { break }
-            shown.removeAll { $0.id == drop.id }
-            hidden.append(drop)
-        }
-        var right = bounds.maxX - 12
-        var paneFrames: [CGRect] = []
-        for item in shown {
-            guard let tag = tags[item.id] else { continue }
-            let width = sizes[item.id] ?? 0
-            let frame = CGRect(x: max(8, right - width), y: tagTop, width: width, height: Self.tagHeight)
-            tag.setShape(.hanging, compact: compact.contains(item.id))
-            right = frame.minX - 4
-            paneFrames.append(frame)
-            pending.append((tag, frame))
-        }
-        for item in hidden { if let tag = tags[item.id] { pending.append((tag, nil)) } }
-        if hidden.isEmpty {
-            fade(overflow, to: 0)
-        } else {
-            let frame = CGRect(x: max(8, right - chipWidth), y: tagTop, width: chipWidth, height: Self.tagHeight)
-            effectiveAppearance.performAsCurrentDrawingAppearance {
-                overflow.configureOverflow(count: hidden.count, scale: window?.backingScaleFactor ?? 2, dark: effectiveAppearance.isDark)
-            }
-            paneFrames.append(frame)
-            move(overflow, to: frame, animated: animated)
-            fade(overflow, to: 1)
-        }
-
-        // Element tags sit above the element's own frame, clear of pane tags and each other.
+        // Only the highlight follows an element. Its pill stays in the pane corner.
         let elementItems = items.filter { $0.element != nil }
         for (id, ring) in elementRings where !elementItems.contains(where: { $0.id == id }) {
             elementRings[id] = nil
             ring.dismiss(animated: animated)
         }
-        var occupied = paneFrames
-        let usable = bounds.insetBy(dx: 1, dy: 1)
         for item in elementItems {
-            guard let element = item.element, let tag = tags[item.id] else { continue }
-            let target = element.insetBy(dx: -4, dy: -4).intersection(usable)
+            guard let element = item.element else { continue }
+            let target = element.insetBy(dx: -4, dy: -4).intersection(bounds.insetBy(dx: 1, dy: 1))
             guard !target.isNull, target.width > 2, target.height > 2 else {
-                // The element moved out of view; drop its frame rather than draw a stale one.
                 elementRings[item.id]?.dismiss(animated: animated)
                 elementRings[item.id] = nil
-                pending.append((tag, nil))
                 continue
             }
             let ring = elementRings[item.id] ?? {
                 let created = PresenceRingLayer()
-                layer?.insertSublayer(created, below: overflow)
+                layer?.insertSublayer(created, above: paneRing)
                 elementRings[item.id] = created
                 return created
             }()
@@ -205,57 +155,77 @@ final class PresenceOverlayView: NSView {
                 ring.update(path: CGPath(roundedRect: target, cornerWidth: 6, cornerHeight: 6, transform: nil), colors: [NSColor(rgb: item.rgb)])
             }
             ring.setVisible(true, animated: animated)
-            tag.setShape(.pill, compact: false)
-            let width = tag.width(compact: false, maximum: max(60, bounds.width - 16))
-            var frame = CGRect(x: min(max(4, target.minX), bounds.maxX - width - 4), y: target.minY - Self.tagHeight - 4,
-                               width: width, height: Self.tagHeight)
-            if frame.minY < tagTop + 2 { frame.origin.y = target.maxY + 4 }
-            var attempts = 0
-            while occupied.contains(where: { $0.intersects(frame) }), attempts < 8 {
-                frame.origin.y += Self.tagHeight + 3
-                attempts += 1
-            }
-            frame.origin.y = min(frame.minY, bounds.maxY - Self.tagHeight - 2)
-            occupied.append(frame)
-            pending.append((tag, frame))
         }
-
-        for (tag, frame) in pending {
-            guard let frame else {
-                if !tag.isLeaving { fade(tag, to: 0) }
-                continue
-            }
-            let appearing = tag.opacity == 0 && tag.animation(forKey: "fade") == nil
-            move(tag, to: frame, animated: animated && !appearing)
+        let available = max(0, bounds.width - 28)
+        let newest = items.max { $0.order < $1.order }?.id
+        var compact = Set(items.count >= 3 || bounds.width < 200 ? items.map(\.id).filter { $0 != newest } : [])
+        if bounds.width < 200, let newest { compact.insert(newest) }
+        func widths() -> [String: CGFloat] {
+            Dictionary(uniqueKeysWithValues: items.compactMap { item in
+                tags[item.id].map { (item.id, $0.width(compact: compact.contains(item.id), maximum: available)) }
+            })
+        }
+        var sizes = widths()
+        func total(_ shown: [PresenceOverlayItem]) -> CGFloat {
+            shown.reduce(0) { $0 + (sizes[$1.id] ?? 0) } + CGFloat(max(0, shown.count - 1)) * 4
+        }
+        if total(items) > available {
+            compact.formUnion(items.map(\.id).filter { $0 != newest })
+            sizes = widths()
+        }
+        var shown = items
+        var hidden: [PresenceOverlayItem] = []
+        let chipWidth: CGFloat = min(34, available)
+        while shown.count > 1, total(shown) + (hidden.isEmpty ? 0 : chipWidth + 4) > available {
+            guard let drop = shown.dropLast().last(where: { $0.id != newest }) ?? shown.first(where: { $0.id != newest }) else { break }
+            shown.removeAll { $0.id == drop.id }
+            hidden.append(drop)
+        }
+        if !hidden.isEmpty, let only = shown.first, shown.count == 1 {
+            sizes[only.id] = max(0, min(sizes[only.id] ?? 0, available - chipWidth - 4))
+        }
+        var right = bounds.maxX - 14
+        let y = max(bounds.minY, bounds.maxY - contentBottomInset - Self.tagHeight - 14)
+        for item in shown {
+            guard let tag = tags[item.id] else { continue }
+            let width = sizes[item.id] ?? 0
+            let frame = CGRect(x: max(bounds.minX, right - width), y: y, width: width, height: Self.tagHeight)
+            tag.setCompact(compact.contains(item.id))
+            right = frame.minX - 4
+            move(tag, to: frame, animated: animated && tag.alphaValue > 0)
             if !tag.isLeaving { fade(tag, to: 1) }
         }
-    }
-
-    private func move(_ layer: CALayer, to frame: CGRect, animated: Bool) {
-        guard layer.frame != frame else { return }
-        CATransaction.begin()
-        CATransaction.setDisableActions(!animated || Self.reduceMotion)
-        CATransaction.setAnimationDuration(Self.move)
-        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
-        layer.frame = frame
-        CATransaction.commit()
-    }
-
-    private func fade(_ layer: CALayer, to target: Float, completion: (@MainActor () -> Void)? = nil) {
-        guard layer.opacity != target else { completion?(); return }
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        CATransaction.setCompletionBlock { MainActor.assumeIsolated { completion?() } }
-        if !Self.reduceMotion {
-            let animation = CABasicAnimation(keyPath: "opacity")
-            animation.fromValue = layer.presentation()?.opacity ?? layer.opacity
-            animation.toValue = target
-            animation.duration = Self.fade
-            animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            layer.add(animation, forKey: "fade")
+        for item in hidden { if let tag = tags[item.id] { fade(tag, to: 0) } }
+        if hidden.isEmpty { fade(overflow, to: 0) }
+        else {
+            effectiveAppearance.performAsCurrentDrawingAppearance {
+                overflow.configureOverflow(count: hidden.count, scale: window?.backingScaleFactor ?? 2, dark: effectiveAppearance.isDark)
+            }
+            overflow.toolTip = hidden.map(\.label).joined(separator: ", ")
+            let frame = CGRect(x: max(bounds.minX, right - chipWidth), y: y, width: chipWidth, height: Self.tagHeight)
+            move(overflow, to: frame, animated: animated)
+            fade(overflow, to: 1)
         }
-        layer.opacity = target
-        CATransaction.commit()
+    }
+
+    private func move(_ tag: PresenceTagView, to frame: CGRect, animated: Bool) {
+        guard tag.frame != frame else { return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = animated && !Self.reduceMotion ? Self.move : 0
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            tag.animator().frame = frame
+        }
+    }
+
+    private func fade(_ tag: PresenceTagView, to target: CGFloat, completion: (@MainActor () -> Void)? = nil) {
+        guard tag.alphaValue != target else { completion?(); return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Self.reduceMotion ? 0 : Self.fade
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            tag.animator().alphaValue = target
+        } completionHandler: {
+            MainActor.assumeIsolated { completion?() }
+        }
     }
 
     private func withoutActions(_ changes: () -> Void) {
@@ -266,6 +236,13 @@ final class PresenceOverlayView: NSView {
     }
 
     static var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+
+    /// Exercise the real native control action without manufacturing a focus target.
+    func clickForTesting(_ id: String) -> Bool {
+        guard let tag = tags[id], tag.alphaValue > 0, !tag.isLeaving else { return false }
+        tag.performClick(nil)
+        return true
+    }
 
     /// Integration probe: what a user would currently see in this pane.
     var testingState: JSONValue {
@@ -285,7 +262,15 @@ final class PresenceOverlayView: NSView {
             }
             if let tag = tags[item.id] {
                 fields["compact"] = .bool(tag.isCompact)
-                fields["shown"] = .bool(tag.opacity > 0)
+                fields["shown"] = .bool(tag.alphaValue > 0)
+                fields["glass"] = .bool(tag.usesGlass)
+                fields["clickable"] = .bool(tag.isEnabled)
+                fields["hitTarget"] = .bool(hitTest(convert(NSPoint(x: tag.frame.midX, y: tag.frame.midY), to: superview)) === tag)
+                fields["outsidePassesThrough"] = .bool(hitTest(convert(NSPoint(x: 1, y: 1), to: superview)) == nil)
+                fields["cornerRadius"] = .number(Self.tagHeight / 2)
+                fields["frame"] = .object(["x": .number(tag.frame.minX), "y": .number(tag.frame.minY),
+                                           "width": .number(tag.frame.width), "height": .number(tag.frame.height),
+                                           "bottomInset": .number(bounds.maxY - tag.frame.maxY)])
             }
             return .object(fields)
         })
@@ -383,16 +368,36 @@ private final class PresenceRingLayer: CALayer {
 /// The name tag: status icon or spinner, agent name, optional note and elapsed time or result.
 /// Text is drawn with CATextLayers and measured directly, without Auto Layout.
 @MainActor
-private final class PresenceTagLayer: CALayer {
-    enum Shape { case hanging, pill }
+private final class PresenceTagView: NSButton {
     var generation = 0
     var isLeaving = false
     private(set) var isCompact = false
-    private var shape = Shape.pill
+    var onActivate: (() -> Void)?
     private var item: PresenceOverlayItem?
     private var overflowCount: Int?
     private var scale: CGFloat = 2
     private var dark = true
+
+    private let glass = NSGlassEffectView()
+    private let textContent = PresenceTagContentView()
+
+    var usesGlass: Bool { glass.superview === self && glass.contentView === textContent }
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard !isHidden, alphaValue > 0.01, !isLeaving, frame.contains(point) else { return nil }
+        return self
+    }
+    override var acceptsFirstResponder: Bool { isEnabled && !isLeaving }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override var focusRingMaskBounds: NSRect { bounds }
+    override func drawFocusRingMask() {
+        NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).fill()
+    }
+
+    @objc private func activatePresence(_ sender: Any?) {
+        guard isEnabled, !isLeaving else { return }
+        onActivate?()
+    }
 
     private let icon = CATextLayer()
     private let spinner = CAShapeLayer()
@@ -405,19 +410,31 @@ private final class PresenceTagLayer: CALayer {
     private static let detailFont = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)
     private static let iconFont = NSFont.systemFont(ofSize: 9, weight: .bold)
 
-    override init() {
-        super.init()
-        borderWidth = 1
-        cornerRadius = 8
-        shadowOpacity = 0.25
-        shadowRadius = 5
-        shadowOffset = CGSize(width: 0, height: 2)
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.masksToBounds = true
+        // Keep the outer silhouette rounded even while the native glass resizes.
+        layer?.cornerRadius = PresenceOverlayView.tagHeight / 2
+        glass.autoresizingMask = [.width, .height]
+        glass.style = .regular
+        glass.cornerRadius = PresenceOverlayView.tagHeight / 2
+        title = ""
+        isBordered = false
+        isEnabled = false
+        target = self
+        action = #selector(activatePresence(_:))
+        focusRingType = .exterior
+        textContent.wantsLayer = true
+        glass.contentView = textContent
+        addSubview(glass)
+        setAccessibilityElement(false)
         for (text, font) in [(icon, Self.iconFont), (nameText, Self.nameFont), (note, Self.noteFont), (detail, Self.detailFont)] {
             text.font = font
             text.fontSize = font.pointSize
             text.truncationMode = .end
             text.alignmentMode = .left
-            addSublayer(text)
+            textContent.layer?.addSublayer(text)
         }
         spinner.fillColor = nil
         spinner.lineWidth = 1.5
@@ -425,15 +442,18 @@ private final class PresenceTagLayer: CALayer {
         spinner.path = CGPath(ellipseIn: CGRect(x: 0, y: 0, width: 9, height: 9), transform: nil)
         spinner.strokeEnd = 0.75
         spinner.isHidden = true
-        addSublayer(spinner)
+        textContent.layer?.addSublayer(spinner)
     }
-    override init(layer: Any) { super.init(layer: layer) }
     required init?(coder: NSCoder) { nil }
 
     /// Call inside the overlay's effective appearance.
     func configure(_ next: PresenceOverlayItem, scale: CGFloat, dark: Bool) {
         let swapped = item != nil && item?.note != next.note
         item = next
+        isEnabled = next.originPane != nil
+        setAccessibilityElement(true)
+        setAccessibilityLabel("\(next.label)\(next.note.map { ": \($0)" } ?? "")")
+        toolTip = next.originPane.map { "Focus \(next.label) in \($0)" } ?? "No live Slate terminal origin"
         overflowCount = nil
         restyle(scale: scale, dark: dark)
         if swapped, !PresenceOverlayView.reduceMotion {
@@ -448,13 +468,12 @@ private final class PresenceTagLayer: CALayer {
     func configureOverflow(count: Int, scale: CGFloat, dark: Bool) {
         item = nil
         overflowCount = count
-        shape = .hanging
+        isEnabled = false
         restyle(scale: scale, dark: dark)
     }
 
-    func setShape(_ next: Shape, compact: Bool) {
-        guard next != shape || compact != isCompact else { return }
-        shape = next
+    func setCompact(_ compact: Bool) {
+        guard compact != isCompact else { return }
         isCompact = compact
         relayoutContents()
     }
@@ -464,13 +483,13 @@ private final class PresenceTagLayer: CALayer {
         self.scale = scale
         self.dark = dark
         let agent = item.map { NSColor(rgb: $0.rgb) } ?? .secondaryLabelColor
-        let base = NSColor.windowBackgroundColor
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        contentsScale = scale
-        backgroundColor = (base.blended(withFraction: 0.22, of: agent) ?? base).cgColor
-        borderColor = agent.withAlphaComponent(0.5).cgColor
-        shadowColor = NSColor.black.cgColor
+        // Text layers keep their status hues, so anchor the glass tint to the app's
+        // appearance rather than letting bright page content wash out the foreground.
+        let base = NSColor.windowBackgroundColor
+        let tint = item == nil ? base : base.blended(withFraction: 0.22, of: agent) ?? base
+        glass.tintColor = tint.withAlphaComponent(0.8)
         for text in [icon, nameText, note, detail] { text.contentsScale = scale }
         nameText.foregroundColor = (dark ? agent : agent.blended(withFraction: 0.35, of: .black) ?? agent).cgColor
         note.foregroundColor = NSColor.labelColor.cgColor
@@ -491,7 +510,9 @@ private final class PresenceTagLayer: CALayer {
             case .live(let elapsed): spinning = true; text = elapsed
             case .held: symbol = "◆"; text = "held"
             case .ok(let value): symbol = "✓"; text = value ?? ""; statusColor = .systemGreen
-            case .failed(let value): symbol = "✕"; text = value ?? ""; statusColor = .systemRed
+            case .failed(let value):
+                symbol = "✕"; text = value ?? ""
+                statusColor = NSColor.systemRed.blended(withFraction: dark ? 0.35 : 0.15, of: dark ? .white : .black) ?? .systemRed
             }
         }
         icon.string = symbol
@@ -529,19 +550,16 @@ private final class PresenceTagLayer: CALayer {
         return parts
     }
 
-    override func layoutSublayers() {
-        super.layoutSublayers()
+    override func layout() {
+        super.layout()
         relayoutContents()
     }
 
     private func relayoutContents() {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        // A hanging tag joins the header edge, so only its lower corners are round.
-        // The overlay is flipped, so this layer's maximum Y is its visual bottom.
-        maskedCorners = shape == .hanging
-            ? [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
-            : [.layerMinXMinYCorner, .layerMaxXMinYCorner, .layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+        glass.frame = bounds
+        textContent.frame = glass.bounds
         let parts = segments(compact: isCompact)
         let shownLayers = Set(parts.map { ObjectIdentifier($0.layer) })
         for text in [icon, nameText, note, detail] where !shownLayers.contains(ObjectIdentifier(text)) { text.frame = .zero }
@@ -563,6 +581,11 @@ private final class PresenceTagLayer: CALayer {
     private static func measure(_ text: String, _ font: NSFont) -> CGFloat {
         ceil((text as NSString).size(withAttributes: [.font: font]).width)
     }
+}
+
+/// Match the overlay's top-left coordinates when hosting the text layers inside glass.
+private final class PresenceTagContentView: NSView {
+    override var isFlipped: Bool { true }
 }
 
 private extension NSAppearance {

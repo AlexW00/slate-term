@@ -1,5 +1,11 @@
 # API extension implementation progress
 
+## Agent pill navigation — focused verification passed
+
+Working tree `fix/agent-indicator-glass`: approved detached bottom-right native Liquid Glass pills for pane and element actions; optional app/session-bound actor origins; shared `presence.focus` navigation with no current-pane fallback. CLI, registered-page and service access use the public catalog and authoritative pane/window focus commands. Self-declared actor names remain supported without authenticating agents. Missing/stale origins are disabled/no-op; replacement sessions do not merge with old activity. No parameterless Cmd-K action is added for the required activity ID.
+
+Focused core/CLI/IPC regressions and VM presence cases cover origin negotiation, native/CLI/page/service navigation, foreign/missing/stale origins, moved/minimized/zoomed origins, terminal replacement, and picker dismissal. **370 package tests**, the host app/CLI/helper build, whitespace, and sequential VM **presence, web, command-picker** checks passed together on stable sources. Receipt: `artifacts/vm/20261017T054137Z-9d46b4a6/receipt.json` (completed, exit 0; all selected host/guest statuses 0). Fresh independent rendered review of eight representative states found no visual issues after browser-footer clearance and failure contrast/capsule fixes. Native NSButton actions and hit-testing were exercised; physical hardware clicks were not independently tested. This is focused verification, not full-suite certification. Only this documentation status update follows that run. No website changes, push, publication or host GUI testing.
+
 ## Managed ZIP plugin packages
 
 Implemented in the working tree: ZIP-only import/validation, private managed archive/extraction generations, package-relative runtime resolution, readable `plugins/registry.json` with explicit enabled choice, and native/CLI/page/service parity. No dependency bundling, legacy manifest registration, catalog migration, or real-user-data changes. Settings installation uses the shared preparation/publication implementation; argument-requiring install/validation deliberately have no new parameterless picker action. Contributed commands/shortcuts keep their existing native surfaces.

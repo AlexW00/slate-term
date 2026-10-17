@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Agent presence: CLI actor metadata, pane and element frames, holds, events and the display setting.
 Run only through verify-vm.py."""
+import json
 import subprocess
+import sys
 import time
+from plugin_package_fixture import package_fixture
 from api_fixture import AppFixture, ROOT, eventually
 
 assert subprocess.check_output(['/usr/sbin/sysctl', '-n', 'hw.model'], text=True).strip().startswith('VirtualMac'), 'Run this UI gate through scripts/verify-vm.py'
@@ -12,6 +15,7 @@ HTML = '''<!doctype html><title>Presence fixture</title><style>body{padding:40px
 
 with AppFixture('presence') as app:
     assert app.rpc('api.describe')['presence']['version'] == 1
+    app.cli('appearance', 'dark')
 
     def activities():
         return app.rpc('presence.list')['activities']
@@ -19,9 +23,11 @@ with AppFixture('presence') as app:
     def shown(pane):
         return app.rpc('debug.presence').get(pane, [])
 
-    def snapshot(name):
-        # Visual evidence for review; fade-ins take 0.45 s.
-        time.sleep(0.6)
+    def snapshot(name, *, settle=0.6, activate=True):
+        # Capture the on-screen glass composite, not an offscreen view rendering.
+        if activate:
+            app.rpc('debug.activate')
+        time.sleep(settle)
         subprocess.run(['/usr/sbin/screencapture', '-x', str(ROOT / f'artifacts/presence-{name}.png')], check=False)
 
     def presence_events(cursor):
@@ -45,6 +51,7 @@ with AppFixture('presence') as app:
     assert activity['note'] == 'reading failing test output' and activity['actionKind'] == 'read', activity
     [tag] = shown(target)
     assert tag['label'] == 'claude' and tag['target'] == 'pane' and tag['note'] == 'reading failing test output', tag
+    assert tag['glass'] and tag['outsidePassesThrough'], tag
     snapshot('pane')
 
     # The agent's own pane never shows presence.
@@ -81,8 +88,11 @@ with AppFixture('presence') as app:
     assert activities() == [], 'Caused calls never show presence'
     app.rpc('terminal.capture', pane=target, request_metadata={'version': 1, 'actor': {'name': 'bad name'}}, error=-32600)
 
-    # A long run stays live, then shows its result.
+    # A long run stays live, then shows its result. Its entrance has already settled;
+    # capture immediately, before the short result hold starts fading out.
+    app.rpc('debug.activate')
     app.cli('terminal', 'run', '--pane', target, '--command', 'sleep 1; false', env=agent)
+    snapshot('failed', settle=0, activate=False)
     [run] = activities()
     assert run['actionKind'] == 'run' and run['result'] == 'failed', run
     assert shown(target)[0]['status'] == 'failed'
@@ -99,6 +109,13 @@ with AppFixture('presence') as app:
     assert shown(target)[0]['status'] == 'held'
     time.sleep(2.0)
     assert activities(), 'A hold outlives the minimum hold'
+    snapshot('held-dark')
+    [pill] = shown(target)
+    assert pill['hitTarget'] and not pill['clickable'], pill
+    assert pill['frame']['bottomInset'] == 14 and pill['cornerRadius'] == pill['frame']['height'] / 2, pill
+    app.cli('appearance', 'light')
+    snapshot('held-light')
+    app.cli('appearance', 'dark')
     assert app.cli('presence', 'release', '--pane', target, env=agent)['released'] is True
     eventually('released presence ends', lambda: activities() == [], timeout=6)
 
@@ -131,7 +148,9 @@ with AppFixture('presence') as app:
     assert clicked['rect']['width'] > 0 and clicked['viewport']['width'] > 0, clicked
     [frame] = shown(target)
     assert frame['target'] == 'element' and frame['element']['width'] > 0 and frame['element']['y'] > 28, frame
+    assert frame['glass'] and frame['outsidePassesThrough'], frame
     snapshot('element')
+    assert shown(target)[0]['frame']['bottomInset'] > shown(target)[0]['frame']['height'], shown(target)
     app.cli('web', 'snapshot', '--pane', target, env=agent)
     assert shown(target)[0]['target'] == 'pane', 'A new pane-level call returns the frame to the pane'
     eventually('presence ends', lambda: activities() == [], timeout=6)
@@ -142,9 +161,165 @@ with AppFixture('presence') as app:
     tags = shown(target)
     assert [t['label'] for t in tags] == ['gemini', 'codex', 'claude'], tags
     assert [t['compact'] for t in tags] == [True, True, False], tags
+    assert all(t['glass'] and t['outsidePassesThrough'] for t in tags), tags
     snapshot('crowded')
+
+    # Overflow retains the newest tag and hides older tags behind a +N glass chip.
+    for index in range(8):
+        app.cli('presence', 'hold', '--pane', target, env=dict(app.env, SLATE_TERM_ACTOR=f'extra{index}', SLATE_TERM_PANE_ID='p1'))
+    eventually('overflow hides older tags', lambda: any(not t['shown'] for t in shown(target)))
+    assert shown(target)[-1]['shown'], shown(target)
+    snapshot('overflow')
 
     # Closing the pane drops its presence.
     app.rpc('command.run', id='pane.close', pane=target, force=True)
     eventually('closed pane presence ends', lambda: activities() == [], timeout=3)
-print('presence ok')
+print('presence presentation ok')
+
+with AppFixture('presence-focus') as app:
+    def command(id, **params):
+        return app.rpc('command.run', id=id, **params)
+
+    def inspect(pane):
+        return app.rpc('pane.inspect', pane=pane)
+
+    def listed(id):
+        return next(a for a in app.rpc('presence.list')['activities'] if a['activityId'] == id)
+
+    def shown(pane):
+        return app.rpc('debug.presence').get(pane, [])
+
+    def focus_is(pane):
+        info = inspect(pane)
+        window = app.rpc('window.get', windowId=info['windowId'])
+        tab = next(t for t in app.rpc('tabs.list') if t['id'] == info['tabId'])
+        native = next(p for p in app.rpc('debug.inspect')['panes'] if p['paneId'] == pane)
+        return window['key'] and tab['focusedPane'] == pane and native.get('firstResponder') is True
+
+    instance = app.rpc('workspace.snapshot')['appInstanceId']
+    origin = 'p1'
+    session = inspect(origin)['sessionId']
+    origin_window = inspect(origin)['windowId']
+    command('window.new')
+    target = app.rpc('tabs.list')[-1]['focusedPane']
+    eventually('focus target prompt', lambda: inspect(target).get('state') == 'prompt')
+    env = dict(app.env, SLATE_TERM_ACTOR='claude', SLATE_TERM_PANE_ID=origin,
+               SLATE_TERM_INSTANCE_ID=instance, SLATE_TERM_SESSION_ID=session)
+    held = app.cli('presence', 'hold', '--pane', target, '--ttl', '300', '--note', 'checking output', env=env)
+    activity = held['activityId']
+    assert listed(activity)['canFocus'] is True
+    describe = app.rpc('api.describe')
+    assert describe['presence']['originVersion'] == 1 and 'presence.focus' in describe['methods']
+    app.rpc('presence.focus', error=-32602)
+    app.rpc('presence.focus', activityId=activity, pane=target, error=-32602)
+    app.rpc('presence.focus', activityId=activity, expectedAnchorSessionId=session, error=-32602)
+    app.rpc('presence.focus', activityId=activity, expectedInstanceId='stale-app', error=-32050)
+
+    # Real native NSButton action, shared with the public operation; pill hit-testing is isolated.
+    eventually('native pill shown', lambda: any(t['id'] == activity and t['shown'] and t['hitTarget'] for t in shown(target)))
+    pill = next(t for t in shown(target) if t['id'] == activity)
+    assert pill['clickable'] and pill['outsidePassesThrough'] and pill['glass'], pill
+    assert pill['frame']['bottomInset'] == 14 and pill['cornerRadius'] == pill['frame']['height'] / 2
+    app.rpc('command.run', id='window.focus', windowId=inspect(target)['windowId'], activate=True)
+    time.sleep(0.6)
+    subprocess.run(['/usr/sbin/screencapture', '-x', str(ROOT / 'artifacts/presence-clickable.png')], check=True)
+    assert app.rpc('debug.presenceClick', pane=target, activityId=activity)['clicked']
+    eventually('native origin focus', lambda: focus_is(origin))
+    command('pane.focus', pane=target)
+    assert app.cli('presence', 'focus', '--activity-id', activity, env=app.env)['paneId'] == origin
+    eventually('CLI origin focus', lambda: focus_is(origin))
+    command('pane.focus', pane=target)
+    command('window.minimize', windowId=origin_window)
+    eventually('origin minimized', lambda: app.rpc('window.get', windowId=origin_window)['minimized'])
+    assert app.rpc('presence.focus', activityId=activity)['focused']
+    eventually('origin restored and focused', lambda: not app.rpc('window.get', windowId=origin_window)['minimized'] and focus_is(origin))
+
+    # Registered pages and services discover/use the same operation, without becoming actors.
+    panel = app.root / 'panel'; panel.mkdir()
+    (panel / 'index.html').write_text('<!doctype html><title>Presence controller</title><p>Presence controller</p>')
+    app.rpc('plugins.register', packagePath=package_fixture(dict(id='presence.controller', title='Presence controller',
+        source=dict(kind='directory', path=str(panel))), app.root))
+    controller = command('split.right', pane=target)['paneId']
+    command('pane.type', pane=controller, type='presence.controller', force=True)
+    eventually('presence page bridge', lambda: app.rpc('debug.pluginEval', pane=controller, script='typeof workspace') == 'object')
+    script = 'await workspace.presence.focus({activityId:' + json.dumps(activity) + '})'
+    assert app.rpc('debug.pluginEval', pane=controller, script=script)['paneId'] == origin
+    eventually('page origin focus', lambda: focus_is(origin))
+    worker = app.root / 'service.py'
+    context_path = app.root / 'service-context.json'
+    worker.write_text('''import json,os,pathlib,subprocess,time
+keys=['SLATE_TERM_SOCKET','SLATE_TERM_INSTANCE_ID','SLATE_TERM_SERVICE_PLUGIN_ID','SLATE_TERM_SERVICE_ID','SLATE_TERM_SERVICE_GENERATION']
+pathlib.Path(os.environ['CONTEXT_PATH']).write_text(json.dumps({k:os.environ[k] for k in keys}))
+subprocess.run([os.environ['SLATE_TERM_CLI'],'rpc','service.ready','--params','{"version":1}'],check=True)
+while True: time.sleep(1)
+''')
+    app.rpc('plugins.register', packagePath=package_fixture(dict(id='presence.service', title='Presence service', service=dict(
+        executable=sys.executable, arguments=[str(worker)], environment=dict(CONTEXT_PATH=str(context_path)), readyTimeoutSeconds=10)), app.root))
+    app.rpc('plugins.service.start', id='presence.service')
+    eventually('presence service ready', lambda: app.rpc('plugins.service.status', id='presence.service')['state'] == 'ready')
+    service_env = dict(app.env, **json.loads(context_path.read_text()))
+    command('pane.focus', pane=target)
+    assert app.cli('presence', 'focus', '--activity-id', activity, env=service_env)['paneId'] == origin
+    eventually('service origin focus', lambda: focus_is(origin))
+
+    # Self-declared actors remain supported. A home alone is never sufficient for navigation.
+    claimed_origin = dict(instanceId=instance, sessionId=session)
+    invalid_actors = [
+        dict(name='external'),
+        dict(name='legacy', home=origin),
+        dict(name='missing', home='p999', origin=claimed_origin),
+        dict(name='old-session', home=origin, origin=dict(instanceId=instance, sessionId='stale-session')),
+        dict(name='foreign-app', home=origin, origin=dict(instanceId='foreign-app', sessionId=session)),
+        dict(name='not-terminal', home=controller, origin=claimed_origin),
+    ]
+    command('pane.focus', pane=target)
+    for actor in invalid_actors:
+        item = app.rpc('presence.hold', pane=target, ttlSeconds=300, request_metadata=dict(version=1, actor=actor))
+        assert listed(item['activityId'])['canFocus'] is False
+        before = app.rpc('workspace.get')
+        assert app.rpc('presence.focus', activityId=item['activityId']) == dict(focused=False)
+        assert app.rpc('workspace.get') == before
+        eventually('disabled pill visible', lambda: any(t['id'] == item['activityId'] and t['shown'] for t in shown(target)))
+        assert app.rpc('debug.presenceClick', pane=target, activityId=item['activityId'])['clicked']
+        assert app.rpc('workspace.get') == before
+        assert focus_is(target), actor
+    assert app.rpc('presence.focus', activityId='missing-activity') == dict(focused=False)
+
+    # Current membership, not the origin's captured tab/window, determines navigation.
+    move_snapshot = app.rpc('workspace.snapshot')
+    move_origin = inspect(origin)
+    command('pane.move', pane=origin, tab=move_origin['tabId'], target=target, direction='left',
+            expectedLayoutRevision=move_origin['layoutRevision'], expectedWorkspaceRevision=move_snapshot['workspaceRevision'])
+    assert inspect(origin)['windowId'] != origin_window and inspect(origin)['sessionId'] == session
+    command('pane.zoom', pane=target)
+    assert app.rpc('presence.focus', activityId=activity)['windowId'] == inspect(target)['windowId']
+    eventually('moved/zoomed origin focused', lambda: focus_is(origin) and inspect(origin)['visible'])
+    command('pane.focus', pane=target)
+    assert app.rpc('debug.commandPicker', show=True)['visible']
+    assert app.rpc('presence.focus', activityId=activity)['focused']
+    assert not app.rpc('debug.commandPicker')['visible']
+    eventually('origin focused after picker dismissal', lambda: focus_is(origin))
+
+    # Replacing a terminal invalidates old activity permanently, including later same-slot shells.
+    command('pane.type', pane=origin, type='private-browser', force=True)
+    command('pane.type', pane=origin, type='terminal', force=True)
+    replacement = inspect(origin)['sessionId']
+    assert replacement != session
+    command('pane.focus', pane=target)
+    before = app.rpc('workspace.get')
+    assert app.rpc('presence.focus', activityId=activity) == dict(focused=False)
+    assert app.rpc('workspace.get') == before
+    assert not listed(activity)['canFocus']
+    # A fresh call from the old environment must not rebind an old origin to the replacement.
+    assert app.cli('presence', 'hold', '--pane', target, env=env)['activityId'] == activity
+    assert app.rpc('presence.focus', activityId=activity) == dict(focused=False)
+    new_env = dict(env, SLATE_TERM_SESSION_ID=replacement)
+    fresh = app.cli('presence', 'hold', '--pane', target, '--ttl', '300', env=new_env)['activityId']
+    assert fresh != activity and listed(fresh)['canFocus']
+    assert app.rpc('presence.focus', activityId=fresh)['paneId'] == origin
+    command('pane.close', pane=origin, force=True)
+    before = app.rpc('workspace.get')
+    assert app.rpc('presence.focus', activityId=fresh) == dict(focused=False)
+    assert app.rpc('workspace.get') == before
+    app.rpc('plugins.service.stop', id='presence.service')
+print('presence focus routing, native/CLI/page/service parity and stale-origin checks ok')

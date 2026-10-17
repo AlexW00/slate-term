@@ -1,6 +1,6 @@
 # Agent presence
 
-When a coding agent acts on a pane through the CLI, Slate frames the smallest target it knows and shows a tag with the agent's name and an optional short note. Presence is display only. It never affects admission, authorization, routing or focus.
+When a coding agent acts on a pane through the CLI, Slate frames the smallest target it knows and shows a detached Liquid Glass pill with the agent's name and an optional short note. Every pill sits at the pane's bottom right, fully rounded and inset from the edges. Presence never affects request admission, authorization or the target of the agent's command. Clicking a navigable pill explicitly focuses its originating Slate terminal.
 
 ## Identifying an agent
 
@@ -14,8 +14,8 @@ slate-term --help                        # --actor overrides the variable for on
 - `SLATE_TERM_ACTOR` or `--actor` names the agent: 1–32 ASCII letters, digits, `.`, `_`, `-` or `:`, starting with a letter or digit. `claude:reviewer` style labels are allowed; colors follow the part before `:`.
 - `--note` is optional per call: one line, at most 80 characters (320 UTF-8 bytes), without control characters. `--note` without a valid actor is an error.
 - An invalid inherited `SLATE_TERM_ACTOR` is ignored with a warning, so a bad export never breaks other calls. An invalid `--actor` is an error. Shell-integration hooks and `api describe` never send an actor.
-- The CLI sends both in request metadata, next to `cause`: `"metadata":{"version":1,"actor":{"name":"claude","note":"…","home":"p1"}}`. `home` is the launching pane from `SLATE_TERM_PANE_ID`, used only to tell two sessions of the same agent apart.
-- Only hosts advertising `api.describe.presence.version == 1` receive an actor. An older host silently gets the call without it.
+- The CLI sends actor information in request metadata, next to `cause`: `"metadata":{"version":1,"actor":{"name":"claude","note":"…","home":"p1","origin":{"instanceId":"APP-EPOCH","sessionId":"TERMINAL-SESSION"}}}`. `home` is the launching pane from `SLATE_TERM_PANE_ID`; it disambiguates labels but is not sufficient for navigation. Optional `origin` binds it to `SLATE_TERM_INSTANCE_ID` and `SLATE_TERM_SESSION_ID`. Explicit action targets such as `--pane p2` never replace the launching identity. A different socket or explicit app instance does not inherit it.
+- Only hosts advertising `api.describe.presence.version == 1` receive an actor. An older host silently gets the call without it. `presence.originVersion == 1` separately advertises session-bound navigation; hosts without it still receive the actor label/home, without `origin`.
 - Background services never send an actor; `--actor`/`--note` fail in a service session.
 
 Presence is strictly for agents that identify themselves. Only administrative clients (the CLI, or a raw same-user socket client) can supply an actor; `api.describe.presence.actorOrigins` says so. A call shows nothing when:
@@ -39,7 +39,7 @@ An agent that runs a plugin command through `command run` shows on that command'
 | `web click/fill/select/check/set-value/focus/key`, `web scroll` with a target, matched `web wait`, `browser click/fill/select/scroll/wait` | The element, using the action's returned `rect` |
 | `command run` for a pane-scoped command | The pane |
 
-Pane tags hang from the bottom edge of the pane header at the top right. Element tags sit above the element's frame. Overlays are drawn above pane content, take no clicks or focus and never change a terminal's size.
+All pills stay in a single bottom-right group, even for element actions. Only the highlight moves to the specific element. Pills are fully rounded native Liquid Glass containers, detached 14 pt from the content area's bottom and right edges (above a browser's native status strip). They overlay content without resizing the terminal. Empty overlay space remains click-through. A pill with no live origin is disabled and does not redirect focus. The `+N` overflow chip is only a summary, not a guessed navigation target.
 
 - **Timing.** Every call shows for at least 1.6 s, then fades. A call that is still running keeps its tag. `terminal run`, waits and navigation that take longer than 0.5 s show a spinner and elapsed time, then ✓ or ✕ (`exit N` for a failing run) for 1.3 s.
 - **Merging.** Calls from the same agent session to the same pane merge into one activity. The hold extends, the note updates when a call supplies one, and the frame pulses once.
@@ -57,7 +57,22 @@ slate-term presence list
 
 `presence.hold` keeps a tag up across many short calls. Any call by that agent session to that pane refreshes it; the note stays the hold's note. The TTL defaults to 60 s, accepts 1–600 s and clears a hold an agent forgot to release. Holding your own pane is rejected. `presence.hold` and `presence.release` require an actor; without one they fail with `-32602`. `release` returns `released: false` when there was no hold.
 
-`presence.list` returns `{visible, activities}`. Each activity has `activityId`, `actor`, `label`, `pane`, `actionKind` (`read`, `write`, `run`, `wait`, `navigate`, `eval`, `command`, `hold`), `count`, `live`, `leased`, `element`, and optional `tab`, `note`, `home`, `result` and `leaseExpiresInMilliseconds`. At most 256 activities exist at once; a hold beyond that fails with `-32051`, and further calls simply show no presence.
+`presence.list` returns `{visible, activities}`. Each activity has `activityId`, `actor`, `label`, `pane`, `canFocus` (whether its claimed app/session origin is live), `actionKind` (`read`, `write`, `run`, `wait`, `navigate`, `eval`, `command`, `hold`), `count`, `live`, `leased`, `element`, and optional `tab`, `note`, `home`, `result` and `leaseExpiresInMilliseconds`. At most 256 activities exist at once; a hold beyond that fails with `-32051`, and further calls simply show no presence.
+
+## Clicking and focusing the agent
+
+A pill is navigable only when its actor supplies a complete origin matching this app epoch and the current terminal session in its claimed home pane. At activation, Slate revalidates the activity, pane type and session, then resolves the pane's **current** tab/window. It reuses guarded `pane.focus` and `window.focus` operations, restores a minimized window, and activates Slate. Existing pane-zoom behavior is preserved. A command picker or tab-rename editor is dismissed/cancelled before navigation; a target window with a sheet is not navigated.
+
+Missing/expired activities, absent origins, unknown/nonterminal homes, foreign app epochs, replaced sessions and closed origins produce no navigation. There is no fallback to current focus or contextual terminal history. A new terminal in the same pane slot cannot revive an old activity; calls from a new session form a separate activity.
+
+```sh
+slate-term presence list
+slate-term presence focus --activity-id a42
+```
+
+The shared `presence.focus {activityId}` operation is a mutation available to CLI/socket, registered pages (`workspace.presence.focus({activityId}, options)` or `workspace.call`) and services. It returns `{focused:false}` for an unavailable origin/activity, or `{focused:true,paneId,tabId,windowId}` after accepting navigation. `activityId` is required, at most 64 ASCII letters/digits/hyphens/underscores; malformed/unknown payload fields fail with `-32602`. Optional `expectedInstanceId` and `expectedWorkspaceRevision` guards use the standard conflict behavior; other safety guards are rejected. Pin `expectedInstanceId` when retaining activity IDs across connections/app launches. No current-pane defaults are inherited. This argument-requiring action has no new parameterless shortcut or Cmd-K entry.
+
+**External/self-declared agents:** any same-user CLI/socket client can claim an actor name. This is not authentication, and pretending to be an agent is not prohibited. Without a pane ID and matching app/session origin, it can still show activity on an explicitly targeted pane, but its pill cannot navigate. Public origin IDs are lifetime guards, not credentials; a trusted caller that deliberately supplies another live origin can claim it. An explicit `--pane` is the operation's target, not proof of where the agent runs. Plugin pages/services may navigate listed activities but still cannot claim actors or hold activity as an agent.
 
 ## Event
 

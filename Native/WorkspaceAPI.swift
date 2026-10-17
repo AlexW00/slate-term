@@ -76,6 +76,12 @@ extension WorkspaceHost {
                 throw RPCFailure(code: -32602, message: "\(unsupported) is not supported by \(id)")
             }
         }
+        if method == "presence.focus" {
+            let supported: Set<String> = ["expectedInstanceId", "expectedWorkspaceRevision"]
+            if let unsupported = Set(params.keys).intersection(Self.apiGuardKeys).subtracting(supported).sorted().first {
+                throw RPCFailure(code: -32602, message: "\(unsupported) is not supported by presence.focus")
+            }
+        }
         if let expected = try string("expectedInstanceId"), expected != instanceID {
             throw RPCFailure(code: APIError.conflict, message: "App instance changed; rediscover context")
         }

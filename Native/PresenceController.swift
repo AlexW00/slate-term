@@ -15,7 +15,11 @@ final class PresenceController {
 
     static let descriptor: JSONValue = .object([
         "version": .integer(1),
-        "metadata": .string("metadata: {version: 1, actor?: {name, note?, home?}}"),
+        "metadata": .string("metadata: {version: 1, actor?: {name, note?, home?, origin?: {instanceId, sessionId}}}"),
+        "originVersion": .integer(1),
+        "focus": .object(["method": .string("presence.focus"), "input": .string("{activityId: string}"),
+                          "result": .string("{focused: boolean, paneId?: string, tabId?: string, windowId?: string}"),
+                          "invalidOrigin": .string("no-op"), "invalidParameters": .integer(-32602)]),
         // Presence is for agents: plugin pages and services cannot claim an actor or hold.
         "actorOrigins": .array([.string("administrative")]),
         "ignoredWhenCaused": .bool(true),
@@ -27,9 +31,11 @@ final class PresenceController {
         "defaultLeaseSeconds": .integer(Int(PresenceTracker.defaultLeaseSeconds)),
         "maximumLeaseSeconds": .integer(Int(PresenceTracker.maximumLeaseSeconds)),
         "topic": .string("host.presence.changed"),
-        "methods": .array(["presence.list", "presence.hold", "presence.release"].map(JSONValue.string)),
+        "methods": .array(["presence.list", "presence.hold", "presence.release", "presence.focus"].map(JSONValue.string)),
         "setting": .string("agents.show_activity"),
-        "displayOnly": .bool(true),
+        "displayOnly": .bool(false),
+        "actorAuthorization": .string("selfDeclaredNoAuthorization"),
+        "explicitFocusOnly": .bool(true),
     ])
 
     private weak var host: WorkspaceHost?
@@ -94,6 +100,7 @@ final class PresenceController {
             var fields: [String: JSONValue] = [
                 "activityId": .string(record.id), "actor": .string(record.actor), "label": .string(item.label),
                 "pane": .string(record.pane), "actionKind": .string(record.action.rawValue), "count": .integer(record.count),
+                "canFocus": .bool(originPane(record) != nil),
                 "live": .bool(record.isLive), "leased": .bool(record.isLeased), "element": .bool(record.element != nil),
             ]
             if let note = record.note { fields["note"] = .string(note) }
@@ -138,6 +145,25 @@ final class PresenceController {
         return .object(["released": .bool(released), "pane": .string(pane.description)])
     }
 
+    /// Never resolve a missing/stale home through terminal history or current focus.
+    private func originPane(_ record: PresenceRecord) -> PaneID? {
+        guard let host, let origin = record.origin, origin.instanceID == host.instanceID,
+              let home = record.home, let pane = try? PaneID(parsing: home),
+              host.workspace.panes.contains(where: { $0.id == pane && $0.type == .terminal }),
+              host.terminals[pane] != nil, host.shellSessions[pane]?.instanceID == origin.sessionID else { return nil }
+        return pane
+    }
+
+    func focus(activityID: String, operation: WorkspaceOperationContext) throws -> JSONValue {
+        try operation.validateCaller()
+        sweep()
+        guard let host, let record = tracker.records.first(where: { $0.id == activityID }),
+              let pane = originPane(record), let origin = record.origin else {
+            return .object(["focused": .bool(false)])
+        }
+        return try host.focusPresencePane(pane, origin: origin, operation: operation)
+    }
+
     private func requireActor(_ actor: PresenceActor?, method: String) throws -> PresenceActor {
         guard let actor else {
             throw RPCFailure(code: -32602, message: "\(method) requires an agent identity, which only administrative clients such as the CLI can supply: set SLATE_TERM_ACTOR or pass --actor, without --cause")
@@ -164,23 +190,25 @@ final class PresenceController {
         if shown {
             for item in tracker.display(now: current) {
                 guard let pane = try? PaneID(parsing: item.record.pane) else { continue }
-                byPane[pane, default: []].append(Self.overlayItem(item))
+                byPane[pane, default: []].append(Self.overlayItem(item, originPane: originPane(item.record)))
             }
         }
         for (pane, container) in host.containers {
             let items = byPane[pane] ?? []
-            // Browser tags hang below the address bar so they never cover navigation controls.
-            var contentTop: CGFloat?
-            if !items.isEmpty, let web = (host.leaves[pane] as? BrowserPane)?.web, web.superview != nil {
-                let frame = web.convert(web.bounds, to: container.view)
-                contentTop = container.view.isFlipped ? frame.minY : container.view.bounds.height - frame.maxY
+            container.onActivatePresence = { [weak self] id in
+                _ = try? self?.focus(activityID: id, operation: WorkspaceOperationContext(origin: .native))
             }
-            container.setPresence(items, contentTop: contentTop)
+            var bottomInset: CGFloat = 0
+            if let web = (host.leaves[pane] as? BrowserPane)?.web, web.superview != nil {
+                let frame = web.convert(web.bounds, to: container.view)
+                bottomInset = max(0, container.view.isFlipped ? container.view.bounds.maxY - frame.maxY : frame.minY)
+            }
+            container.setPresence(items, contentBottomInset: bottomInset)
         }
         schedule()
     }
 
-    private static func overlayItem(_ item: PresenceDisplay) -> PresenceOverlayItem {
+    private static func overlayItem(_ item: PresenceDisplay, originPane: PaneID?) -> PresenceOverlayItem {
         let record = item.record
         let status: PresenceOverlayItem.Status
         if record.isLeased { status = .held }
@@ -195,7 +223,7 @@ final class PresenceController {
         // Activity IDs are "a<sequence>", so they also give a stable arrival order.
         let order = Int(record.id.dropFirst()) ?? 0
         return PresenceOverlayItem(id: record.id, label: item.label, note: record.note, rgb: PresenceColor.rgb(for: record.actorKey),
-                                   status: status, element: element, pulse: record.pulse, order: order)
+                                   status: status, element: element, pulse: record.pulse, order: order, originPane: originPane?.description)
     }
 
     /// Ticks at 5 Hz only while an elapsed time is shown; otherwise wakes once at the next expiry.

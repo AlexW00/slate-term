@@ -397,6 +397,7 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
             onChange:(handler,options={})=>workspace.subscribe(handler,{...options,topics:['host.appearance.changed']})
           }),
           notifications:methodsFor('notifications.'),
+          presence:methodsFor('presence.'),
           pluginSettings:Object.freeze({get:()=>call('plugins.settings.get'),patch:(operations,expectedWriteRevision,options={})=>call('plugins.settings.patch',{operations,expectedWriteRevision},options)}),
           windows:Object.freeze({
             ...methodsFor('window.'),

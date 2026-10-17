@@ -45,7 +45,7 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
     private let renameField = LiteralTextField(string: "")
     private var editingOriginal: String?
     private let inactiveShade = PaneInactiveShade()
-    /// Created with the view so later presence updates never add views or constraints.
+    /// A separate overlay keeps agent glass and ring updates out of pane content layout.
     private let presenceOverlay = PresenceOverlayView()
     private var isActive = true
     var onClose: (() -> Void)?
@@ -218,7 +218,6 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
         headerVisible = visible
         header.isHidden = !visible
         headerHeight.constant = visible ? 28 : 0
-        presenceOverlay.headerInset = visible ? 28 : 0
         view.needsLayout = true
         view.layoutSubtreeIfNeeded()
     }
@@ -235,14 +234,19 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
         dragHandle.setAccessibilityLabel("Move \(typeName) Pane: \(latestTitle)")
     }
 
-    /// Shows agent frames and tags above everything else in the pane.
-    func setPresence(_ items: [PresenceOverlayItem], contentTop: CGFloat? = nil) {
+    var onActivatePresence: ((String) -> Void)? {
+        didSet { presenceOverlay.onActivate = onActivatePresence }
+    }
+
+    /// Shows target frames and detached bottom-right agent pills without resizing content.
+    func setPresence(_ items: [PresenceOverlayItem], contentBottomInset: CGFloat = 0) {
         _ = view
-        presenceOverlay.contentTop = contentTop
+        presenceOverlay.contentBottomInset = contentBottomInset
         presenceOverlay.update(items)
     }
 
     var presenceTestingState: JSONValue { presenceOverlay.testingState }
+    func clickPresenceForTesting(_ id: String) -> Bool { presenceOverlay.clickForTesting(id) }
 
     func setUnreadNotification(_ unread: Bool) {
         guard hasUnreadNotification != unread else { return }

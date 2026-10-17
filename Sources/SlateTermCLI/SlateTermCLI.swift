@@ -104,10 +104,15 @@ extension Connection {
             if note != nil { throw ValidationError("--note requires a valid agent name; set SLATE_TERM_ACTOR or pass --actor") }
             return nil
         }
-        // The launching pane only disambiguates labels, so use it only for its own socket.
-        let inherited = socket == nil || socket == environment["SLATE_TERM_SOCKET"]
+        // Origin stays tied to the launching app/session, never the explicit action target.
+        let inherited = (socket == nil || socket == environment["SLATE_TERM_SOCKET"])
+            && (expectedInstanceId == nil || expectedInstanceId == environment["SLATE_TERM_INSTANCE_ID"])
         let home = inherited ? environment["SLATE_TERM_PANE_ID"].flatMap { PresenceActor.isValidHome($0) ? $0 : nil } : nil
-        do { return try PresenceActor(name: name, note: note, home: home) }
+        let origin: PresenceOrigin?
+        if home != nil, let instance = environment["SLATE_TERM_INSTANCE_ID"], let session = environment["SLATE_TERM_SESSION_ID"] {
+            origin = try? PresenceOrigin(instanceID: instance, sessionID: session)
+        } else { origin = nil }
+        do { return try PresenceActor(name: name, note: note, home: home, origin: origin) }
         catch { throw ValidationError("Invalid agent identity: \(error)") }
     }
 }

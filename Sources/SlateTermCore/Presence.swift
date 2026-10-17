@@ -1,7 +1,7 @@
 import Foundation
 
 /// A self-declared agent identity carried in request metadata. It is shown to the
-/// user and never used for admission, authorization or routing.
+/// user, never used for admission or authorization. Its optional origin enables explicit navigation.
 public struct PresenceActor: Equatable, Hashable, Sendable {
     public static let maximumNameLength = 32
     public static let maximumNoteCharacters = 80
@@ -9,10 +9,11 @@ public struct PresenceActor: Equatable, Hashable, Sendable {
 
     public let name: String
     public let note: String?
-    /// Pane ID of the terminal the agent runs in. It only disambiguates labels.
+    /// Claimed launching pane, also used to disambiguate labels. Not a navigation identity by itself.
     public let home: String?
+    public let origin: PresenceOrigin?
 
-    public init(name: String, note: String? = nil, home: String? = nil) throws {
+    public init(name: String, note: String? = nil, home: String? = nil, origin: PresenceOrigin? = nil) throws {
         guard Self.isValidName(name) else { throw PresenceError.invalidActor("actor name must be 1–32 ASCII letters, digits, '.', '_', '-' or ':' and start with a letter or digit") }
         let trimmed = note?.trimmingCharacters(in: .whitespaces)
         if let trimmed {
@@ -24,7 +25,9 @@ public struct PresenceActor: Equatable, Hashable, Sendable {
         if let home { guard Self.isValidHome(home) else { throw PresenceError.invalidActor("home must be a pane ID") } }
         self.name = name
         self.note = trimmed
+        guard origin == nil || home != nil else { throw PresenceError.invalidActor("origin requires home") }
         self.home = home
+        self.origin = origin
     }
 
     public static func isValidName(_ value: String) -> Bool {
@@ -44,20 +47,59 @@ public struct PresenceActor: Equatable, Hashable, Sendable {
     public var key: String { name.lowercased() }
 
     init(json: JSONValue) throws {
-        guard let fields = json.object, Set(fields.keys).isSubset(of: ["name", "note", "home"]),
+        guard let fields = json.object, Set(fields.keys).isSubset(of: ["name", "note", "home", "origin"]),
               let name = fields["name"]?.string,
               fields["note"] == nil || fields["note"]?.string != nil,
               fields["home"] == nil || fields["home"]?.string != nil else {
             throw PresenceError.invalidActor("actor must be an object with name and optional note and home strings")
         }
-        try self.init(name: name, note: fields["note"]?.string, home: fields["home"]?.string)
+        try self.init(name: name, note: fields["note"]?.string, home: fields["home"]?.string,
+                      origin: fields["origin"].map(PresenceOrigin.init(json:)))
     }
 
     var json: JSONValue {
         var fields: [String: JSONValue] = ["name": .string(name)]
         if let note { fields["note"] = .string(note) }
         if let home { fields["home"] = .string(home) }
+        if let origin { fields["origin"] = origin.json }
         return .object(fields)
+    }
+}
+
+/// Optional app epoch and terminal session for the actor's claimed home pane.
+/// These are public identity guards, not credentials or actor authentication.
+public struct PresenceOrigin: Equatable, Hashable, Sendable {
+    public let instanceID: String
+    public let sessionID: String
+
+    public init(instanceID: String, sessionID: String) throws {
+        guard isValidCausationToken(instanceID), isValidCausationToken(sessionID) else {
+            throw PresenceError.invalidActor("origin identities must be 1–64 ASCII letters, digits, hyphens or underscores")
+        }
+        self.instanceID = instanceID
+        self.sessionID = sessionID
+    }
+
+    init(json: JSONValue) throws {
+        guard let fields = json.object, Set(fields.keys) == ["instanceId", "sessionId"],
+              let instance = fields["instanceId"]?.string, let session = fields["sessionId"]?.string else {
+            throw PresenceError.invalidActor("origin must contain instanceId and sessionId strings")
+        }
+        try self.init(instanceID: instance, sessionID: session)
+    }
+
+    var json: JSONValue {
+        .object(["instanceId": .string(instanceID), "sessionId": .string(sessionID)])
+    }
+}
+
+public struct PresenceFocusRequest: Sendable {
+    public let activityID: String
+    public init(_ params: [String: JSONValue]) throws {
+        guard Set(params.keys) == ["activityId"], let id = params["activityId"]?.string, isValidCausationToken(id) else {
+            throw RPCFailure(code: -32602, message: "presence.focus requires only activityId (1–64 ASCII letters, digits, hyphens or underscores)")
+        }
+        activityID = id
     }
 }
 
@@ -118,6 +160,7 @@ public struct PresenceRecord: Equatable, Sendable {
     public let id: String
     public let actor: String
     public let actorKey: String
+    public let origin: PresenceOrigin?
     public let home: String?
     public let pane: String
     public internal(set) var note: String?
@@ -221,7 +264,7 @@ public struct PresenceTracker: Sendable {
         }
         guard records.count < Self.maximumRecords else { return (nil, []) }
         nextID += 1
-        let record = PresenceRecord(id: "a\(nextID)", actor: actor.name, actorKey: actor.key, home: actor.home, pane: pane,
+        let record = PresenceRecord(id: "a\(nextID)", actor: actor.name, actorKey: actor.key, origin: actor.origin, home: actor.home, pane: pane,
                                     note: actor.note, action: action, count: 1, startedAt: now, liveCalls: [nextCall: live],
                                     holdUntil: now + Self.minimumHold, leaseUntil: nil, leaseSeconds: nil, result: nil, element: nil, pulse: 1)
         records.append(record)
@@ -258,7 +301,7 @@ public struct PresenceTracker: Sendable {
         }
         guard records.count < Self.maximumRecords else { return (nil, []) }
         nextID += 1
-        let record = PresenceRecord(id: "a\(nextID)", actor: actor.name, actorKey: actor.key, home: actor.home, pane: pane,
+        let record = PresenceRecord(id: "a\(nextID)", actor: actor.name, actorKey: actor.key, origin: actor.origin, home: actor.home, pane: pane,
                                     note: actor.note, action: .hold, count: 0, startedAt: now, liveCalls: [:],
                                     holdUntil: now + Self.minimumHold, leaseUntil: now + ttl, leaseSeconds: ttl, result: nil, element: nil, pulse: 1)
         records.append(record)
@@ -322,7 +365,7 @@ public struct PresenceTracker: Sendable {
     }
 
     private func index(actor: PresenceActor, pane: String) -> Int? {
-        records.firstIndex { $0.actorKey == actor.key && $0.home == actor.home && $0.pane == pane }
+        records.firstIndex { $0.actorKey == actor.key && $0.home == actor.home && $0.origin == actor.origin && $0.pane == pane }
     }
 }
 

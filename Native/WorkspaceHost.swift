@@ -712,6 +712,26 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }
     }
 
+    /// Presence clicks and trusted clients share the existing guarded pane/window operations.
+    func focusPresencePane(_ pane: PaneID, origin: PresenceOrigin, operation: WorkspaceOperationContext) throws -> JSONValue {
+        guard origin.instanceID == instanceID, shellSessions[pane]?.instanceID == origin.sessionID,
+              workspace.panes.contains(where: { $0.id == pane && $0.type == .terminal }),
+              let tab = workspace.tabs.first(where: { $0.layout.paneIDs.contains(pane) }),
+              let window = windows[tab.id], window.attachedSheet == nil else { return .object(["focused": .bool(false)]) }
+        try operation.validateCaller()
+        commandPicker?.dismiss(restoreFocus: false)
+        tabRename?.cancelForLifecycle()
+        _ = try call("command.run", params: ["id": .string("pane.focus"), "pane": .string(pane.description),
+                     "expectedInstanceId": .string(origin.instanceID), "expectedAnchorSessionId": .string(origin.sessionID)], operation: operation)
+        guard shellSessions[pane]?.instanceID == origin.sessionID, windows[tab.id] === window else {
+            return .object(["focused": .bool(false)])
+        }
+        _ = try call("command.run", params: ["id": .string("window.focus"), "windowId": .string(window.identity),
+                     "activate": .bool(true), "expectedInstanceId": .string(origin.instanceID)], operation: operation)
+        return .object(["focused": .bool(true), "paneId": .string(pane.description),
+                        "tabId": .string(tab.id.description), "windowId": .string(window.identity)])
+    }
+
     private func call(_ method: String, params: [String: JSONValue], operation suppliedOperation: WorkspaceOperationContext? = nil) throws -> JSONValue {
         guard !reconciling, !settlingNativeLayouts else { throw RPCFailure(code: APIError.conflict, message: "Workspace presentation is being reconciled") }
         try synchronizeNativeGroups()
@@ -741,6 +761,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         case .presenceList:
             guard withoutAPIGuards(params).isEmpty else { throw RPCFailure(code: -32602, message: "presence.list takes no payload parameters") }
             return presence.list()
+        case .presenceFocus:
+            let request = try PresenceFocusRequest(withoutAPIGuards(params))
+            return try presence.focus(activityID: request.activityID, operation: operation)
         case .presenceHold, .presenceRelease:
             let payload = withoutAPIGuards(params)
             let allowed: Set<String> = contract == .presenceHold ? ["pane", "ttlSeconds"] : ["pane"]
@@ -971,6 +994,11 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         switch method {
         case "debug.inspect" where integration: return inspect()
         case "debug.presence" where integration: return presence.testingState()
+        case "debug.presenceClick" where integration:
+            guard let id = params["activityId"]?.string, let container = containers[try targetPaneID(params)] else {
+                throw RPCFailure(code: -32602, message: "pane and activityId are required")
+            }
+            return .object(["clicked": .bool(container.clickPresenceForTesting(id))])
         case "debug.welcomeInsert" where integration:
             guard let container = containers[try targetPaneID(params)] else {
                 throw RPCFailure(code: -32051, message: "Pane container is unavailable")
