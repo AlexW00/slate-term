@@ -1,149 +1,25 @@
+> **Actively in development and nearing its first release.**
+
 # Slate Terminal
 
 **Software you can shape.**
 
-Slate is a native macOS terminal and a canvas for your ideas. Its powerful plugin system and CLI give you and your AI agents the tools to build panels, interfaces, and app-like workflows—and refine them as you go.
+[Website](https://alexw00.github.io/slate-term/)
 
-A solid terminal first. A workspace you can keep shaping. Built around an open-source philosophy.
+Slate is a native macOS terminal powered by libghostty. Bring terminals, browser panes, and your own tools into one workspace. Its plugin system and CLI let you and your AI agents build panels, automate tasks, and refine your workflow as you go.
 
-Read the [core philosophy](docs/core-philosophy.md), including publication prerequisites, or open the [website content wireframe](docs/mockups/website.html) in a browser for the draft page structure and demo placeholders.
+- Native tabs, split panes, and saved layouts.
+- Plugins for custom panels, commands, and background services.
+- A shared automation API for the CLI, plugins, and agents.
 
-## Development status
+Requires **Apple Silicon and macOS 27 or later**.
 
-Implemented in verification-gated increments from the v0.2 specification.
+## Documentation
 
-**Status: v0.2 implementation and the full automated suite verified on Apple Silicon/macOS 27. Manual release QA remains; not release-certified.**
+- [Build from source](docs/development.md)
+- [Configuration](docs/configuration.md) · [Saved layouts](docs/saved-layouts.md)
+- [Plugins](docs/plugins.md) · [CLI and automation](docs/automation.md) · [Agent skill](skills/slate-terminal/SKILL.md)
+- [Testing](docs/vm-testing.md) · [Verification status](docs/verification.md) · [Releases](docs/releasing.md)
+- [Product philosophy](docs/core-philosophy.md)
 
-Implemented:
-
-- Real, pinned libghostty terminal surfaces in AppKit windows.
-- Native tabs and nested `NSSplitViewController` panes, directional focus, zoom, and equalization.
-- Shared pane headers with type, a live title centered on the full panel width, optional command-backed plugin buttons, and a close control using the existing confirmation policy. Titles stay centered and truncate before overlapping the controls in narrow panes. Click the title or choose **Rename Pane…** to open an anchored popover; Return/Rename saves, and Escape/Cancel or clicking outside discards the draft. Manual names persist and override plugin/browser/terminal updates. Clear the name to restore automatic titles. **Copy Pane ID** is available in the command picker/Workspace menu and can be assigned a shortcut.
-- A six-dot grip to the left of each pane type: drag to another pane’s left/right/top/bottom edge to move the existing pane within its tab. The highlight previews its new position; Escape or an invalid drop cancels. Click the grip for an accessible destination menu. Live terminal sessions and web content are retained. Unzoom before moving; cross-tab/window moves are not supported.
-- Inactive panes are subtly dimmed; the selected pane stays undimmed even while a picker or popover is open. Window titles omit internal tab IDs.
-- A dropdown beside each pane type for type changes without replacing pane identity or layout. Switching warns that the current state is discarded; “Don’t show again” remembers your choice separately from close warnings.
-- Real WebKit **Browser** panes share one persistent website profile across panes/restarts; **Private Browser** panes each use isolated temporary storage. Native/API commands clear all persistent website data or one browser's site group. Both modes have HTTP(S) and local-file navigation (HTML, images and supported video via `file:` URLs, absolute paths or `~/…`) and trusted-client evaluation; shared guarded `web` snapshots, click/fill/select/scroll, waits and screenshots for browser/plugin panes. Plugin views retain separate origin, store and bridge privileges.
-- Pure Swift workspace model: monotonic IDs, split/close/focus, terminal focus history, fractions, tab groups, validated JSON roundtrips.
-- Shared command registry for menus, default shortcuts, and CLI actions; a keyboard-first **⌘K command picker** with native Liquid Glass, fuzzy search, context-aware availability, and built-in/plugin commands.
-- Private per-instance Unix control socket with same-user `LOCAL_PEERCRED`, JSON-RPC handshake, bounded framing/output, and nonblocking server I/O.
-- Bundled Swift Argument Parser CLI, terminal self-identification, literal input, protocol-aware key taps, bounded screen capture and authenticated shell run/condition waits.
-- Typed TOML settings with live font/theme/shortcut reload, last-valid retention, offline validation, and restart diagnostics.
-- Private, atomic workspace restoration with single-writer ownership, native tab order, and corruption-preserving recovery (never placeholder views).
-- Native terminal input/composition, mouse input, clipboard confirmation, and token-bound zsh context reporting.
-- Trusted plugins can contribute on-demand executable commands, panels, and independently controlled [manual background services](docs/background-services.md). CLI, registered-plugin bridge and services share one automation API; service generations use public routing identity, not bearer tokens. App-local shortcuts, namespaced settings, pane/tab/global panel instances, private persisted storage, bounded process logs, supervision and owned-group cleanup after GUI crashes.
-- Bounded resumable event polling/streaming, native source attribution, scoped plugin subscriptions, directed delivery and cancellation.
-- Unit, socket, native lifecycle, CLI-driven restart/configuration, production-zsh, and regression-mutation checks.
-
-The sequential whole-application suite records source/binary hashes in `artifacts/verification.json` only after every gate passes without source changes. Consult the verification ledger and current run artifacts rather than treating historical results as certification of a later working tree. Manual IME/accessibility, long-use soak and wider platform coverage remain unverified. Capture is current-screen text, not an isolated last-command stdout stream. See [automation contracts and limits](docs/automation.md) and the [verification ledger](docs/verification.md).
-
-Core remains terminal-agnostic: no tmux adapter, session discovery, command parsing, or tmux runtime dependency. Extensions implement tool-specific integration using the generic bridge, managed backend, CLI/IPC, input/capture, and events. Isolated tmux fixtures verify compatibility only.
-
-See [saved layouts](docs/saved-layouts.md) for file-backed recipes, the native editor and Spotlight shortcuts, [agent identity, inspection and shared commands](docs/agent-api.md), [guarded layout/tab/window APIs](docs/layout-api.md), [trusted plugins](docs/plugins.md) for commands, panels, settings and supervision, the [command picker](docs/command-picker.md), and [workspace events](docs/events.md). Historical capability audits document [native UI/CLI layout parity](docs/layout-cli-audit.md) and [plugin integration/hooks](docs/plugin-integration-audit.md); see [implementation progress](docs/api-extension-progress.md) for delivered slices and remaining work.
-
-Coding agents can load the [Slate Terminal skill](skills/slate-terminal/SKILL.md). It covers runtime API discovery, [plugin building](skills/slate-terminal/references/building-plugins.md) and the [plugin UI kit](skills/slate-terminal/references/ui/INDEX.md); maintainer tooling for the UI kit stays in [design-system/](design-system/README.md).
-
-Pane titles follow terminal process/context information, browser document titles, and plugin document titles or `workspace.setTitle(title)`. Passing `null` restores a plugin's document title. macOS can redact process environments; authenticated zsh reports supply ownership for foreground-process sampling, while unavailable process metadata falls back to the configured shell and engine title.
-
-## Build and run
-
-Requires Apple Silicon, Xcode with the Metal toolchain, and Swift 6.2 or newer. The existing Xcode app deployment target is macOS 27; older OS versions and Intel have not been validated.
-
-```sh
-bash scripts/build-ghostty.sh   # pinned source + checksum-verified local Zig download
-bash scripts/build-app.sh      # CLI, native app, resources, development-only ad hoc signature
-open ".derived/Build/Products/Debug/Slate Terminal.app"
-```
-
-In Xcode select **SlateTermApp**, not `slate-term` (the package CLI can create a same-named autogenerated scheme). The app target builds and embeds both the CLI and layout launcher helpers, including in Debug builds. If an existing DerivedData directory reports missing core types after a package linkage change, use **Product → Clean Build Folder** and rebuild: stale standalone Swift modules can shadow the current package-framework modules. No toolchain or CLI is installed globally, and nothing is published or notarized.
-
-The Ghostty pin is `554ea65867ffe34bb3e51e09bd016e154a1f9d7a`, built with Zig `0.16.0`. Sources are fetched into `.build/bootstrap/ghostty`; binaries are not checked in. See `scripts/build-ghostty.sh` for the pin and toolchain checksum.
-
-## Release builds and licensing
-
-Original Slate code is licensed under [GPL-3.0-or-later](COPYING.md). Third-party licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). See [release builds and credentials](docs/releasing.md) for CI checks, signed/notarized draft releases, corresponding source, and shared credential injection across worktrees. In-app updates are not implemented by this pipeline.
-
-## CLI
-
-Inside a terminal pane, `slate-term` is on PATH and automatically targets that pane/tab:
-
-```sh
-slate-term panes split --right
-slate-term panes split --down --pane p2
-slate-term panes list --json
-slate-term layout get --tab t1
-slate-term panes focus --pane p1
-slate-term panes send --pane p1 --text $'printf "hello\\n"\r'
-slate-term panes capture --pane p1
-slate-term terminal key --pane p1 --key ctrl+c
-slate-term terminal run --pane p1 --command 'printf "hello\\n"'
-slate-term terminal wait --pane p1 --contains READY --timeout-milliseconds 5000
-slate-term panes type --pane p2 --type browser --force
-slate-term context get
-slate-term plugins register --package /absolute/path/plugin.zip
-slate-term plugins list
-slate-term plugins service list
-slate-term plugins service start controller
-slate-term plugins service stop controller
-slate-term events watch --topic 'host.context.*'
-slate-term events emit --topic build.finished --payload '{"exitCode":0}'
-slate-term tabs new
-slate-term command list
-slate-term command run split.right
-slate-term config get
-slate-term config reload
-slate-term config validate --file ~/.config/slate-term/config.toml
-```
-
-External shells must pass `--socket <path>` or set `SLATE_TERM_SOCKET`. Socket files live under `~/Library/Application Support/SlateTerm/control/`; the host accepts only the same user. This is intentionally a powerful local interface, like a tmux socket.
-
-`--pane`/`--tab` override the corresponding `SLATE_TERM_PANE_ID`/`SLATE_TERM_TAB_ID` defaults. An explicit tab suppresses an inherited pane target; an explicit pane suppresses an inherited tab target. Closing a potentially busy terminal requires `--force` or confirmation in the native UI. All current CLI responses are JSON.
-
-## Notifications
-
-Slate supports shared API/CLI/plugin/service notifications, OSC 9/777, and automatic shell-command completion after 30 seconds. Native delivery is subject to macOS permission and focus policy; sound and command details are off by default. Unread pane/tab indicators and **Jump to Next Notification** work without a persistent inbox. See [notification controls and API](docs/notifications.md).
-
-## Configuration
-
-Edit `~/.config/slate-term/config.toml`; valid changes reload automatically. Workspace structure is saved under `~/Library/Application Support/SlateTerm/state/`. Restored terminals are new processes, not resumed PTYs. See [configuration and recovery](docs/configuration.md) for fields, shortcut overrides, diagnostics, and limitations.
-
-## Verify
-
-```sh
-bash scripts/verify-all.sh               # expanded sequential suite with source/binary manifest
-
-# Or run individual gates:
-bash scripts/verify-model.sh             # pure model/protocol + actual Unix socket tests
-python3 scripts/verify-model-mutations.py
-bash scripts/verify-terminal.sh          # own shell/windows: reparent, resize, tabs, output, child cleanup
-bash scripts/build-app.sh
-python3 scripts/verify-app.py            # own app/storage: drive and inspect it using the bundled CLI
-python3 scripts/verify-config-cli.py     # offline validation, no running app required
-python3 scripts/verify-settings.py       # live reload, native key routing, reorder, restart/recovery
-python3 scripts/verify-notifications.py   # owned notifications policy/API/engine/lifecycle fixture
-python3 scripts/verify-shell.py          # production zsh path, isolated dotfiles, OSC 133, UTF-8 input
-bash scripts/verify-browser-data.sh
-python3 scripts/verify-browser-profiles.py
-python3 scripts/verify-browser.py
-python3 scripts/verify-context.py        # shell context and pane headers
-bash scripts/verify-pane-titles-native.sh # isolated production header layout/editing and native renders
-python3 scripts/verify-pane-titles.py    # full-app title centering, focus dimming and anchored rename
-bash scripts/verify-pane-movement-native.sh # drop geometry and native preview helpers
-python3 scripts/verify-pane-movement.py  # native drop callbacks, retained content, menu, previews and persistence
-python3 scripts/verify-plugins.py        # actual modules/bridge/storage/restoration/header controls
-python3 scripts/verify-plugin-services.py
-python3 scripts/verify-plugin-commands.py
-python3 scripts/verify-command-picker.py
-bash scripts/verify-plugin-process.sh
-python3 scripts/verify-plugin-worker.py
-bash scripts/verify-plugin-listener.sh
-bash scripts/verify-process-titles.sh
-bash scripts/verify-event-hub.sh
-bash scripts/verify-terminal-keys.sh
-bash scripts/verify-terminal-runs.sh
-python3 scripts/verify-events.py
-python3 scripts/verify-extension-interop.py # external adapter; owns an isolated tmux server
-```
-
-Native gates require a logged-in macOS GUI session, tmux on PATH, and permission to capture their own windows. They use deadlines, fail on unavailable capture, ignore physical keyboard input in their test windows, and never automate unrelated applications. Generated logs/screenshots stay in ignored `artifacts/`. Integration-only `debug.*` methods are enabled only with `SLATE_TERM_INTEGRATION=1`.
-
-See [implementation gates](docs/implementation.md) and the [verification ledger](docs/verification.md) for evidence, failed checks, and remaining work. [Pane movement](docs/pane-movement.md) documents the new interaction, callback-level coverage, and remaining manual drag checks.
+Licensed under [GPL-3.0-or-later](COPYING.md). See [third-party notices](THIRD_PARTY_NOTICES.md).

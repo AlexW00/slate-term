@@ -1,0 +1,83 @@
+name: Website
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/mockups/website-designs/f-apple-v2.html
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Prepare landing page
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Stage and check the standalone page
+        run: |
+          mkdir -p "$RUNNER_TEMP/slate-pages"
+          cp docs/mockups/website-designs/f-apple-v2.html "$RUNNER_TEMP/slate-pages/index.html"
+          python3 - <<'PY'
+          from html.parser import HTMLParser
+          import os
+          from pathlib import Path
+          import subprocess
+
+          class Scripts(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.scripts = []
+                  self.in_script = False
+              def handle_starttag(self, tag, attrs):
+                  if tag == "script":
+                      assert "src" not in dict(attrs), "The page must contain its scripts."
+                      self.in_script = True
+                      self.scripts.append("")
+              def handle_endtag(self, tag):
+                  if tag == "script":
+                      self.in_script = False
+              def handle_data(self, data):
+                  if self.in_script:
+                      self.scripts[-1] += data
+
+          page = Path(os.environ["RUNNER_TEMP"]) / "slate-pages" / "index.html"
+          parser = Scripts()
+          parser.feed(page.read_text())
+          assert parser.scripts, "Expected the landing page's interactive scripts."
+          for script in parser.scripts:
+              subprocess.run(["node", "--check"], input=script, text=True, check=True)
+          print(f"Checked {len(parser.scripts)} inline script(s).")
+          PY
+      - name: Upload landing page
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: ${{ runner.temp }}/slate-pages
+
+  deploy:
+    name: Deploy landing page
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

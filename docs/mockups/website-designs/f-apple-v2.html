@@ -3,8 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Slate Terminal</title>
-<meta name="description" content="Design mockup F, version 2 (Apple product page): a features bento and a gallery of proposed examples for Slate Terminal.">
+<title>Slate Terminal — Software you can shape</title>
+<meta name="description" content="A native macOS terminal you and your agents can build on. Bring terminals, browser panes, and your own tools into one workspace.">
+<link rel="canonical" href="https://alexw00.github.io/slate-term/">
+<meta property="og:title" content="Slate Terminal — Software you can shape">
+<meta property="og:description" content="A native macOS terminal you and your agents can build on. Actively in development and nearing release.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://alexw00.github.io/slate-term/">
 <meta name="color-scheme" content="light dark">
 <style>
 /* ================================================================
@@ -90,6 +95,7 @@ h1,h2,h3,p{margin:0}
 /* ---------- Buttons ---------- */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:44px;padding:0 22px;border-radius:980px;background:var(--blue);color:#fff;font:400 17px/1 var(--font);letter-spacing:-.022em;white-space:nowrap;transition:background-color .2s}
 .btn:hover{background:var(--blue-h);text-decoration:none}
+.soon,.soon:hover{background:var(--ctl);color:var(--text-2)}
 .btn .apple{width:15px;height:18px;margin-top:-3px;flex:none}
 .tlink{font-size:17px;letter-spacing:-.022em;white-space:nowrap}
 .ctas{display:flex;justify-content:center;align-items:center;gap:30px;flex-wrap:wrap}
@@ -241,6 +247,30 @@ h1{font-family:var(--font-display);font-weight:600;font-size:clamp(48px,8.4vw,96
 .cur{display:inline-block;width:7px;height:14px;vertical-align:-3px;background:var(--text-k);animation:blink 1.1s steps(1) infinite}
 .cur.off{display:none}
 @keyframes blink{50%{opacity:0}}
+
+/* Agent presence, after Native/PresenceOverlay.swift: a 1.5pt ring with a soft inner glow,
+   and a tag hanging from the pane header's bottom edge at the top right. */
+.prs{position:absolute;inset:0;pointer-events:none;z-index:3}
+.prs .ring{position:absolute;inset:1.5px;border-radius:8px;border:1.5px solid var(--ag);box-shadow:inset 0 0 9px color-mix(in srgb,var(--ag) 55%,transparent);opacity:0;transition:opacity .45s ease-out}
+.prs .ring.multi{border-color:transparent}
+.prs .ring.multi::before{content:"";position:absolute;inset:-1.5px;border-radius:inherit;padding:1.5px;background:linear-gradient(90deg,var(--ag1),var(--ag2));-webkit-mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0);mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0)}
+.prs.on .ring{opacity:1}
+.prs .ring.pulse{animation:prsPulse 1.1s ease-out}
+@keyframes prsPulse{from{box-shadow:inset 0 0 18px var(--ag)}}
+.prs .tags{position:absolute;top:28px;right:12px;display:flex;flex-direction:row-reverse;gap:4px}
+.ptag{--bgw:var(--st-bg);display:flex;align-items:center;gap:5px;height:21px;padding:0 7px;border:1px solid color-mix(in srgb,var(--ag) 50%,transparent);border-top:0;border-radius:0 0 8px 8px;
+  background:color-mix(in srgb,var(--bgw) 78%,var(--ag));box-shadow:0 2px 5px rgba(0,0,0,.25);font:600 10.5px/1 var(--mono);letter-spacing:0;white-space:nowrap;opacity:0;transition:opacity .45s ease-out}
+.ptag.on{opacity:1}
+.ptag .st{display:flex}
+.ptag .nm{color:var(--ag)}
+.lt .ptag .nm{color:color-mix(in srgb,var(--ag) 65%,#000)}
+.ptag .no{font-weight:400;color:var(--text-k)}
+.ptag .dt{font:500 10px/1 var(--mono);font-variant-numeric:tabular-nums;color:var(--text-k3)}
+.ptag .ic{font:700 9px/1 var(--font);color:var(--ag)}
+.ptag .ic.ok{color:#34c759}
+.ptag .psp{width:9px;height:9px;border-radius:50%;border:1.5px solid var(--ag);border-right-color:transparent;animation:prsSpin .8s linear infinite;flex:none}
+@keyframes prsSpin{to{transform:rotate(-360deg)}}
+@media (prefers-reduced-motion:reduce){.ptag .psp{animation-duration:2.4s}.prs .ring.pulse{animation:none}}
 
 /* Kit: toolbar, controls, rows (after slate.css + recipes) */
 .k{position:absolute;inset:0;display:flex;flex-direction:column;font-size:12px;color:var(--text-k)}
@@ -452,7 +482,6 @@ h2 .g{color:var(--text-3)}
 .t-plug .pstage{flex:1}
 .t-plug .pchips{margin-top:16px}
 .t-plug .pchips li{height:24px;font-size:12px;padding:0 10px}
-.t-k .vis{justify-content:center}
 
 /* Agents section: an agent session in a terminal window. */
 .agterm{max-width:860px;margin:56px auto 0}
@@ -507,7 +536,7 @@ h2 .g{color:var(--text-3)}
 .mt-tabs .mt-keys span{gap:6px;height:24px;padding:0 10px;background:rgba(255,255,255,.07);color:#d4d4d4;font-size:11px}
 .mt-keys kbd{font:inherit;color:#86868b}
 @media (max-width:734px){.mt{right:-24px;font-size:11px}.mt-keys{display:none!important}.mt-h b{padding-right:0}
-  .tile .vis.v-spot,.tile .vis.v-th,.tile .vis.v-k,.tile .vis.v-br,.tile .vis.v-toml{min-height:0}}
+  .tile .vis.v-spot,.tile .vis.v-th,.tile .vis.v-br,.tile .vis.v-toml{min-height:0}}
 
 /* Move and retype tile */
 .v-mv .solo{display:flex;flex-direction:column}
@@ -526,16 +555,23 @@ h2 .g{color:var(--text-3)}
 .v-mv .menu hr{border:0;height:.5px;background:var(--sep);margin:4px 6px}
 .v-mv .ghost{position:absolute;inset:30px 0 0;padding:10px 12px;font:11px/1.7 var(--mono);color:var(--text-k3);white-space:pre}
 
-/* ⌘K tile */
-.v-k{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding-bottom:36px}
-.keys{display:flex;gap:10px}
-.key{width:64px;height:64px;border-radius:15px;display:grid;place-items:center;font:500 29px/1 var(--font);color:var(--text);background:var(--tile);box-shadow:0 0 0 1px var(--hair),0 3px 0 var(--hair),0 6px 14px rgba(0,0,0,.05)}
-.klist{width:100%;max-width:250px;list-style:none;margin:0;padding:6px;border-radius:14px;background:var(--bg-alt);font-size:13px}
-.klist li{display:flex;justify-content:space-between;gap:8px;height:28px;align-items:center;padding:0 10px;border-radius:8px;color:var(--text-2);white-space:nowrap}
-.klist li.q{color:var(--text);font-size:14px;justify-content:flex-start;border-bottom:1px solid var(--hair-2);border-radius:0;margin-bottom:4px;padding-bottom:2px}
-.klist li.q svg{width:13px;height:13px;opacity:.5}
-.klist li.sel{background:var(--blue);color:#fff}
-.klist kbd,.klist small{font:inherit;opacity:.7}
+/* Agent presence tile: a pane tag on a terminal and an element tag in a browser. */
+.v-prs .solo{display:flex;flex-direction:column}
+.v-prs .mp{position:relative;flex:1;display:flex;flex-direction:column;min-height:0}
+.v-prs .mp+.mp{border-top:.5px solid var(--sep)}
+.v-prs .phd{grid-template-columns:auto 1fr auto;color:var(--text-k2)}
+.v-prs .ptitle{justify-self:start}
+.v-prs pre{margin:0;padding:30px 12px 10px;flex:1;font:11px/1.7 var(--mono);color:var(--text-k)}
+.v-prs pre .g{color:var(--ok)}.v-prs pre .d{color:var(--text-k3)}
+.v-prs .mp:first-child{flex:none}
+.v-prs .pg{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:12px 16px 16px;font-size:12px;color:var(--text-k)}
+.v-prs .pg b{font-size:14px}
+.v-prs .fld{width:180px;height:24px;display:flex;align-items:center;padding:0 8px;border-radius:6px;box-shadow:0 0 0 .5px var(--border-k);color:var(--text-k3);font-size:11.5px}
+.v-prs .pbtn{height:24px;display:flex;align-items:center;padding:0 12px;border-radius:6px;background:var(--acc);color:var(--on-acc);font-weight:500;font-size:11.5px}
+/* Element frame: the button's rect plus 4px. Its tag is a pill above it. */
+.v-prs .btnw{position:relative;margin-top:30px}
+.v-prs .el{position:absolute;inset:-4px;border-radius:8px;border:1.5px solid var(--ag);box-shadow:0 0 9px color-mix(in srgb,var(--ag) 45%,transparent)}
+.ptag.pel{position:absolute;left:-4px;bottom:calc(100% + 8px);border-top:1px solid color-mix(in srgb,var(--ag) 50%,transparent);border-radius:8px}
 .klist small{font-size:11px}
 
 /* Browser tile */
@@ -723,7 +759,7 @@ footer a:hover{color:var(--text)}
       <a href="#features">Features</a>
       <a href="#agents">Agents</a>
       <a href="#examples">Plugin ideas</a>
-      <a class="pill" href="#">Download</a>
+      <span class="pill soon">Coming soon</span>
     </div>
   </div>
 </nav>
@@ -736,16 +772,16 @@ footer a:hover{color:var(--text)}
       <h1 id="hero-title">Software you can shape.</h1>
       <p class="lede">A native macOS terminal you and your agents can build on.</p>
       <div class="ctas">
-        <a class="btn" href="#"><svg class="apple" aria-hidden="true"><use href="#apple"/></svg>Download for Mac</a>
-        <a class="tlink" href="#">View source<svg class="chev" aria-hidden="true"><use href="#chev"/></svg></a>
+        <span class="btn soon"><svg class="apple" aria-hidden="true"><use href="#apple"/></svg>Coming soon for Mac</span>
+        <a class="tlink" href="https://github.com/AlexW00/slate-term">View source<svg class="chev" aria-hidden="true"><use href="#chev"/></svg></a>
       </div>
-      <p class="req">macOS 27 · Apple silicon</p>
+      <p class="req">In development · Nearing release · macOS 27+ · Apple silicon</p>
     </div>
 
     <div class="demo" id="demo">
       <div class="wrap-wide">
         <h2 class="sr-only" id="demo-title">Demo: ask your agent for a tool, then use it</h2>
-        <p class="sr-only" id="demo-desc">Animated placeholder. In a Slate terminal, the user starts Claude Code and asks for a panel that tails deploys. In time-lapse, the agent writes a plugin and opens it as a panel, then adds a latency chart and an agent task board when asked. At real speed, the user approves a task and inspects the chart, saves the layout from the command picker, and reopens it from a Spotlight launcher. Three proposed examples follow: an agent-workflow panel, an interface for a script, and an experiment workbench.</p>
+        <p class="sr-only" id="demo-desc">Illustrated example workflow. In a Slate terminal, the user starts Claude Code and asks for a panel that tails deploys. In time-lapse, the agent writes a plugin, opens it as a panel and checks it, with a tag on the pane showing what the agent is doing. It then adds a latency chart and an agent task board when asked. At real speed, the user approves a task while tags show Codex and Claude working in the Deploys panel, inspects the chart, saves the layout from the command picker, and reopens it from a Spotlight launcher. Three proposed examples follow: an agent-workflow panel, an interface for a script, and an experiment workbench.</p>
         <div class="screen" id="screen" role="img" aria-labelledby="demo-title" aria-describedby="demo-desc">
           <div class="stage" id="stage" aria-hidden="true"></div>
         </div>
@@ -760,7 +796,7 @@ footer a:hover{color:var(--text)}
           </button>
           <ol class="chaps" id="chaps" aria-label="Demo chapters"></ol>
         </div>
-        <p class="note">Placeholder animation — replace with recorded footage.</p>
+        <p class="note">An illustrated workflow. The tools shown are examples you could build.</p>
       </div>
     </div>
   </section>
@@ -774,7 +810,7 @@ footer a:hover{color:var(--text)}
       <div class="bento">
         <article class="tile s4 t-term reveal" aria-labelledby="tb1">
           <h3 id="tb1">A native terminal, powered by libghostty.</h3>
-          <p>Tabs and nested splits in AppKit windows. Zoom one pane, or even them out.</p>
+          <p>Tabs and nested splits in a native Mac workspace. Zoom one pane, or even them out.</p>
           <div class="vis" aria-hidden="true">
             <div class="mt">
               <div class="mt-tabs"><span class="l"><i></i><i></i><i></i></span><span class="on">launchpad</span><span>api</span><span>notes</span><div class="mt-keys"><span><kbd>⇧⌘↩</kbd>Maximize</span><span><kbd>⇧⌘E</kbd>Equalize</span></div></div>
@@ -817,24 +853,31 @@ footer a:hover{color:var(--text)}
           </div>
         </article>
 
-        <article class="tile s2 t-k reveal" aria-labelledby="tb3">
-          <h3 id="tb3">Every command, one shortcut.</h3>
-          <p>Fuzzy search across built-in and plugin commands.</p>
-          <div class="vis v-k" aria-hidden="true">
-            <div class="keys"><span class="key">⌘</span><span class="key">K</span></div>
-            <ul class="klist">
-              <li class="q"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>sp</li>
-              <li class="sel"><span>Split Right</span><kbd>⌘D</kbd></li>
-              <li><span>Split Down</span><kbd>⇧⌘D</kbd></li>
-              <li><span>Snapshot Deploys</span><small>Deploys</small></li>
-            </ul>
+        <article class="tile s2 t-prs reveal" aria-labelledby="tb3">
+          <h3 id="tb3">See what your agents are doing.</h3>
+          <p>When an agent works in a pane, a tag shows who it is and why.</p>
+          <div class="vis v-prs" aria-hidden="true">
+            <div class="solo kt" data-pal>
+              <div class="mp">
+                <div class="phd"><span class="ty"><span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span><b>Terminal</b></span><span class="ptitle">pnpm test</span><span></span></div>
+                <pre><span class="g">❯</span> pnpm test checkout
+<span class="g">✓</span> cart totals <span class="d">(4)</span>
+<span class="g">✓</span> promo codes <span class="d">(6)</span>
+<span class="d">running payment.spec…</span></pre>
+                <div class="prs on"><div class="ring" style="--ag:#ff9466"></div><div class="tags"><span class="ptag on" style="--ag:#ff9466"><span class="st"><span class="psp"></span></span><span class="nm">claude</span><span class="no">running the tests</span><span class="dt">4.2s</span></span></div></div>
+              </div>
+              <div class="mp">
+                <div class="phd"><span class="ty"><span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span><b>Browser</b></span><span class="ptitle">localhost:5173</span><span></span></div>
+                <div class="pg"><b>Checkout</b><span class="fld">you@example.com</span><span class="btnw" style="--ag:#b79cff"><span class="pbtn">Place order</span><span class="el"></span><span class="ptag pel on"><span class="st"><span class="ic">●</span></span><span class="nm">codex</span><span class="no">submitting the form</span></span></span></div>
+              </div>
+            </div>
           </div>
         </article>
 
         <article class="tile s4 t-plug reveal" aria-labelledby="tb7">
           <div class="lead">
             <h3 id="tb7">Plugins add what’s missing.</h3>
-            <p>A manifest and a folder of HTML. Your agent writes them, Slate runs them.</p>
+            <p>Build panels with HTML, CSS and JavaScript. Add commands and services as you need them.</p>
             <ul class="pchips"><li>Panels</li><li>Commands</li><li>Header buttons</li><li>Background services</li><li>Workspace events</li></ul>
           </div>
           <div class="pstage" aria-hidden="true">
@@ -906,7 +949,7 @@ footer a:hover{color:var(--text)}
       <div class="agnames reveal">
         <p>Bring the agents you already use.</p>
         <div class="names">Claude Code <span>·</span> Codex <span>·</span> Gemini CLI <span>·</span> Aider <span>·</span> OpenCode <span>·</span> <i class="you">your own script</i></div>
-        <p class="fine">Slate includes no model. Names are examples, not a tested-compatibility list.</p>
+        <p class="fine">Slate provides the workspace. You choose the agent and model.</p>
       </div>
     </div>
   </section>
@@ -917,7 +960,7 @@ footer a:hover{color:var(--text)}
       <div class="sec-head reveal">
         <p class="kick">Plugin ideas</p>
         <h2 id="gal-title">Make room for a bigger idea.</h2>
-        <p class="sub">Each of these is a plugin your agent could write. It runs as a panel in Slate.</p>
+        <p class="sub">A few ideas for panels you can build with Slate’s plugin system.</p>
         <p class="pnote"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><circle cx="6" cy="6" r="5"/><path d="M6 5.4V8.6" stroke-linecap="round"/><circle cx="6" cy="3.6" r=".4" fill="currentColor"/></svg>Ideas to build. They don’t ship with Slate.</p>
       </div>
     </div>
@@ -964,21 +1007,21 @@ footer a:hover{color:var(--text)}
       <svg class="appicon" width="72" height="72" aria-hidden="true"><use href="#app"/></svg>
       <h2 id="close-title"><span>A solid terminal.</span><span>Yours to shape.</span><span class="c3">Open source.</span></h2>
       <div class="ctas">
-        <a class="btn" href="#"><svg class="apple" aria-hidden="true"><use href="#apple"/></svg>Download for Mac</a>
-        <a class="tlink" href="#">View source<svg class="chev" aria-hidden="true"><use href="#chev"/></svg></a>
+        <span class="btn soon"><svg class="apple" aria-hidden="true"><use href="#apple"/></svg>Coming soon for Mac</span>
+        <a class="tlink" href="https://github.com/AlexW00/slate-term">View source<svg class="chev" aria-hidden="true"><use href="#chev"/></svg></a>
       </div>
-      <p class="req">macOS 27 · Apple silicon</p>
+      <p class="req">In development · Nearing release · macOS 27+ · Apple silicon</p>
     </div>
   </section>
 </main>
 
 <footer>
   <div class="wrap">
-    <p class="fnote">Proposed examples are illustrations to build and record. They don’t ship with Slate. Download and source links are placeholders.</p>
+    <p class="fnote">Slate is actively in development. The demos illustrate possible workflows; example plugins are not bundled with the app.</p>
     <div class="crumbs"><svg aria-hidden="true"><use href="#app"/></svg><span>Slate Terminal</span></div>
     <div class="legal">
-      <span>Slate Terminal · Design mockup F, v2</span>
-      <nav aria-label="Footer"><a href="#">Source</a><a href="#">License</a><a href="#">Changelog</a><a href="#">Contact</a></nav>
+      <span>Slate Terminal · GPL-3.0-or-later</span>
+      <nav aria-label="Footer"><a href="https://github.com/AlexW00/slate-term">Source</a><a href="https://github.com/AlexW00/slate-term/blob/main/COPYING.md">License</a><a href="https://github.com/AlexW00/slate-term/releases">Releases</a><a href="https://github.com/AlexW00/slate-term/issues">Feedback</a></nav>
     </div>
   </div>
 </footer>
@@ -1266,7 +1309,7 @@ const cutUpd = { agents: CUTS.agents(sc.agents), script: CUTS.script(sc.script),
 const P = {
   term: pane("Terminal", "zsh — launchpad", `<div class="term" id="tMain"></div>`),
   deploy: pane("Deploys", "Deploys", `<div class="k">
-    <div class="k-tb"><span class="k-dot acc"></span><b class="mono" style="font-size:11.5px;font-weight:500">web@4f2a91c</b><span class="k-badge acc">rollout 50%</span><span class="sp"></span><span class="k-badge dng hid" id="dFail">1 failed hook</span></div>
+    <div class="k-tb"><span class="k-dot acc"></span><b class="mono" style="font-size:11.5px;font-weight:500">web@4f2a91c</b><span class="k-badge acc">rollout 50%</span><span class="k-badge dng hid" id="dFail">1 failed hook</span><span class="sp"></span></div>
     <div class="k-main"><div class="k-log" id="dLog"></div></div>
     <div class="k-st"><span id="dCount">0 events</span><span class="sp"></span><span>Following</span></div></div>`),
   metrics: pane("Latency", "p95 latency", `<div class="k">
@@ -1316,23 +1359,71 @@ const TR = [
   [9.3, `<div class="tool"><b>Write</b>(plugins/deploy-tail/index.html) <span class="ok">+142</span></div>`],
   [10.7, `<div class="tool"><b>Bash</b>(slate-term plugins register --manifest …)</div><div class="so">⎿ registered deploy-tail</div>`],
   [12.2, `<div class="tool"><b>Bash</b>(slate-term panes split --right --type deploy-tail)</div>`],
-  [14.6, `<div class="gap"></div><span class="ok">✓</span> Deploys is open on the right.`],
+  [13.6, `<div class="tool"><b>Bash</b>(slate-term web snapshot --pane p2 --note "checking the new panel")</div>`],
+  [15.4, `<div class="gap"></div><span class="ok">✓</span> Deploys is open on the right.`],
   [18.2, `<div class="gap"></div><span class="d">&gt;</span> ${typ("Flag failed hooks. Add a p95 latency chart.", 18.5, 20.4)}${cur(18.2, 20.9)}`],
   [21.2, `<div class="tool"><b>Edit</b>(plugins/deploy-tail/index.html) <span class="ok">+38</span> <span class="e">−4</span></div>`],
   [21.8, `<div class="tool"><b>Bash</b>(slate-term panes split --down --type latency)</div>`],
+  [22.9, `<div class="tool"><b>Bash</b>(slate-term web snapshot --pane p3 --note "checking the chart")</div>`],
   [24.2, `<div class="gap"></div><span class="d">&gt;</span> ${typ("And a board for my agent tasks.", 24.5, 26.0)}${cur(24.2, 26.4)}`],
   [26.6, `<div class="tool"><b>Write</b>(plugins/agent-board/index.html) <span class="ok">+210</span></div>`],
   [27.1, `<div class="tool"><b>Bash</b>(slate-term panes split --left --type agent-board)</div>`],
   [28.8, `<div class="gap"></div><span class="ok">✓</span> Three panels. Tell me what to change.`],
   [29.4, `<span class="d">&gt;</span> ${cur(29.4, 999)}`],
 ];
-const WORKING = [[5.6, 14.6], [21.0, 22.8], [26.5, 28.8]];
+const WORKING = [[5.6, 15.4], [21.0, 23.8], [26.5, 28.8]];
 const tMain = $("#tMain");
 tMain.innerHTML = TR.map(([t0, html]) => `<div class="ln" data-t="${t0}">${html}</div>`).join("") + `<div class="ln a" id="tWork">✻ Working… <span class="d">(esc to interrupt)</span></div>`;
 const trLines = [...tMain.querySelectorAll(".ln[data-t]")].map(el => [parseFloat(el.dataset.t), el]);
 const typEls = [...tMain.querySelectorAll("[data-typ]")].map(el => [el, el.dataset.typ, parseFloat(el.dataset.a), parseFloat(el.dataset.b)]);
 const curEls = [...tMain.querySelectorAll("[data-c]")].map(el => [el, ...el.dataset.c.split(",").map(Number)]);
 const tWork = $("#tWork");
+
+// Agent presence on panes, as the app draws it. Colors are the app's per-agent colors.
+// live: spinner with elapsed time after 0.5 s. ok: time the ✓ result replaces it.
+const AG = { claude: "#ff9466", codex: "#b79cff" };
+const PRES = [
+  { pane: "deploy", ag: "claude", a: 13.6, b: 16.4, note: "checking the new panel", ok: 15.3 },
+  { pane: "metrics", ag: "claude", a: 22.9, b: 25.4, note: "checking the chart", ok: 24.3 },
+  { pane: "deploy", ag: "codex", a: 30.6, b: 35.8, note: "waiting for the canary", live: true, ok: 34.9 },
+  { pane: "deploy", ag: "claude", a: 32.8, b: 35.8, note: "retrying the deploy hook" },
+];
+for (const k in P) $(".pbox", P[k]).append(h(`<div class="prs"><div class="ring"></div><div class="tags"></div></div>`));
+PRES.forEach(it => {
+  it.el = h(`<span class="ptag" style="--ag:${AG[it.ag]}"><span class="st"></span><span class="nm">${it.ag}</span><span class="no">${esc(it.note)}</span><span class="dt"></span></span>`);
+  $(".tags", P[it.pane]).append(it.el);
+});
+function renderPresence(t) {
+  for (const k in P) {
+    const prs = $(".prs", P[k]), ring = $(".ring", prs);
+    const items = PRES.filter(it => it.pane === k);
+    const live = items.filter(it => t >= it.a && t < it.b);
+    prs.classList.toggle("on", live.length > 0);
+    if (live.length) {
+      const last = live[live.length - 1];
+      ring.style.setProperty("--ag", AG[last.ag]);
+      ring.classList.toggle("multi", live.length > 1);
+      if (live.length > 1) { ring.style.setProperty("--ag1", AG[live[0].ag]); ring.style.setProperty("--ag2", AG[last.ag]); }
+      ring.classList.toggle("pulse", live.some(it => t - it.a < 1.1));
+    }
+    items.forEach(it => {
+      const on = t >= it.a && t < it.b;
+      // A faded tag leaves the row so the next one takes the corner.
+      it.el.style.display = t >= it.a && t < it.b + .5 ? "" : "none";
+      it.el.classList.toggle("on", on);
+      // Older tags shrink to the name once a newer one needs the room.
+      const compact = live.length > 1 && it !== live[live.length - 1] && on;
+      const done = it.ok !== undefined && t >= it.ok;
+      const running = it.live && !done && t - it.a >= .5;
+      setHTML($(".st", it.el), "st" + PRES.indexOf(it), done ? '<span class="ic ok">✓</span>' : running ? '<span class="psp"></span>' : '<span class="ic">●</span>');
+      $(".no", it.el).style.display = compact ? "none" : "";
+      const dt = running && !compact ? (t - it.a).toFixed(1) + "s" : "";
+      const dtEl = $(".dt", it.el);
+      if (dtEl.textContent !== dt) dtEl.textContent = dt;
+      dtEl.style.display = dt ? "" : "none";
+    });
+  }
+}
 
 // Chapters, captions and the quiet status tag.
 const CH = [
@@ -1352,6 +1443,7 @@ const CAPS = [
   [18, "Ask for a change."],
   [24, "Add the next tool."],
   [30, "Use it."],
+  [32.8, "See what your agents are doing."],
   [36, "Save the layout."],
   [41, "Open it from Spotlight."],
   [48, "A panel beside your agents."],
@@ -1452,6 +1544,7 @@ function renderBuild(t) {
   setHTML($(".ptitle", P.term), "tt", t >= 1.5 ? "claude — launchpad" : "zsh — launchpad");
   const focus = t >= 31.2 && t < 33.2 ? "board" : t >= 33.2 && t < 36 ? "metrics" : "term";
   for (const k in P) P[k].classList.toggle("focus", k === focus && !!lay[k]);
+  renderPresence(t);
 
   // Transcript.
   trLines.forEach(([t0, el]) => on(el, t >= t0));
