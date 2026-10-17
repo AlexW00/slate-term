@@ -2,7 +2,13 @@
 
 Worktree: `~/.worktrees/local/slate-term-a42fd7a1/plugin-persistence`  
 Branch: `feature/plugin-persistence`, based on `d6240e5`.  
-Implementation is uncommitted; no merge/push/deploy or legacy-data migration. Original-checkout changes were not edited. See [contract](plugin-persistence.md), [plan](plugin-persistence-plan.md) and [independent plan review](plugin-persistence-plan-review.md).
+Feature checkpoint: `00d8a6e`; integration with main's agent presence (`23e7b62`): `f1ae9a7`. Local-main integration is authorized; no push/deploy or legacy-data migration. Unrelated original-checkout changes are preserved. See [contract](plugin-persistence.md), [plan](plugin-persistence-plan.md) and [independent plan review](plugin-persistence-plan-review.md).
+
+## Combined-main verification — current status
+
+The combined committed sources passed host **342 package tests** (215 core, 87 settings, 22 IPC, 18 CLI), **35 runner tests**, app/CLI/helper build and whitespace, plus all five selected VM gates: **plugin-persistence, plugin-services, cross-window-pane-movement, presence and api-settings**. Receipt: `artifacts/vm/20261017T001655Z-be82c71a/receipt.json` in the feature worktree (completed, exit 0). This includes the readiness fix, six failed-backend movement cycles and a panel-reset/agent-presence integration assertion. A read-only integration review found no actionable defects; it did not execute tests.
+
+The earlier VM-owner block is resolved for these checks. The API-parity gate was not rerun in this integration batch; its older failures are retained below, and no full-suite certification is claimed. Only documentation status updates follow the receipt. Historical blocked/pending statements below describe earlier checkpoints, not the current five-gate result.
 
 ## Independent source review
 

@@ -1,6 +1,24 @@
 # API extension implementation progress
 
-## Plugin persistence — implemented; final native verification blocked
+## Plugin persistence — integrated with main; focused combined checks passed
+
+Feature commit `00d8a6e` and merge `f1ae9a7` combine plugin persistence with main's
+agent presence (`23e7b62`). Both dispatch paths/guards and native settings are retained;
+the verification inventory now has 82 invocations. Independent integration review found
+no actionable defects. Combined committed sources passed **342 package tests** (215 core,
+87 settings, 22 IPC, 18 CLI), **35 runner tests**, app/CLI/helper build and whitespace,
+plus VM **plugin-persistence, plugin-services, cross-window-pane-movement, presence,
+and api-settings**. Receipt in the feature worktree:
+`artifacts/vm/20261017T001655Z-be82c71a/receipt.json` (completed, exit 0).
+
+This verifies the readiness-session fix and panel-reset/presence integration. The earlier
+VM-owner block is resolved for these checks. API-parity was not rerun in this batch;
+its older failures remain recorded, not silently relabeled as passing. No full-suite
+certificate, push or deploy. Main's unrelated local files/edits are preserved. Only
+this documentation status update follows verification. The notes below are earlier
+feature checkpoints and are superseded by this combined-source result.
+
+### Prior feature checkpoints
 
 Implemented in `~/.worktrees/local/slate-term-a42fd7a1/plugin-persistence`,
 branch `feature/plugin-persistence`, based on `d6240e5`. Original checkout
