@@ -45,19 +45,22 @@ public struct Pane: Equatable, Codable, Sendable, Identifiable {
     public internal(set) var manualTitle: String? = nil
     /// Native pane chrome belongs to the slot, not its terminal or web document.
     public internal(set) var headerVisible: Bool = true
+    public internal(set) var pluginPanel: PluginPanelRecord?
 
     init(id: PaneID, type: PaneType) {
         self.id = id
         self.type = type
+        if case .registered = type { pluginPanel = PluginPanelRecord() }
     }
 
-    private enum CodingKeys: String, CodingKey { case id, type, manualTitle, headerVisible }
+    private enum CodingKeys: String, CodingKey { case id, type, manualTitle, headerVisible, pluginPanel }
     public init(from decoder: any Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         id = try values.decode(PaneID.self, forKey: .id)
         type = try values.decode(PaneType.self, forKey: .type)
         manualTitle = try values.decodeIfPresent(String.self, forKey: .manualTitle)
         headerVisible = values.contains(.headerVisible) ? try values.decode(Bool.self, forKey: .headerVisible) : true
+        pluginPanel = try values.decodeIfPresent(PluginPanelRecord.self, forKey: .pluginPanel)
     }
 }
 
@@ -204,6 +207,8 @@ public struct Workspace: Equatable, Sendable {
         guard let index = panes.firstIndex(where: { $0.id == pane }) else { throw WorkspaceError.paneNotFound(pane) }
         guard panes[index].type != type else { return }
         panes[index].type = type
+        if case .registered = type { panes[index].pluginPanel = PluginPanelRecord() }
+        else { panes[index].pluginPanel = nil }
         tabs[tab].terminalHistory.removeAll { $0 == pane }
         if type == .terminal {
             if tabs[tab].focusedPane == pane { tabs[tab].terminalHistory.insert(pane, at: 0) }
@@ -408,16 +413,68 @@ public struct Workspace: Equatable, Sendable {
         guard next > 0, next < Int.max else { throw WorkspaceError.exhaustedIdentities }
     }
 
+    public mutating func setPluginConfiguration(_ configuration: [String: JSONValue], for pane: PaneID) throws {
+        guard let index = panes.firstIndex(where: { $0.id == pane }), var record = panes[index].pluginPanel else {
+            throw RPCFailure(code: APIError.unavailable, message: "A registered-plugin pane is required")
+        }
+        try record.configure(configuration)
+        var next = self
+        next.panes[index].pluginPanel = record
+        try next.validatePluginPanels()
+        self = next
+    }
+
+    public mutating func patchPluginState(_ pane: PaneID, expectedPanelId: String, expectedRevision: String, operations: JSONValue?) throws {
+        guard let index = panes.firstIndex(where: { $0.id == pane }), var record = panes[index].pluginPanel else {
+            throw RPCFailure(code: APIError.unavailable, message: "A registered-plugin pane is required")
+        }
+        try record.patch(expectedPanelId: expectedPanelId, expectedRevision: expectedRevision, operations: operations)
+        var next = self
+        next.panes[index].pluginPanel = record
+        try next.validatePluginPanels()
+        self = next
+    }
+
+    public func validatePluginPanels() throws {
+        var ids = Set<String>()
+        var bytes = 0
+        for pane in panes {
+            if case .registered(let id) = pane.type {
+                try PluginPersistence.validateID(id)
+                guard let record = pane.pluginPanel, ids.insert(record.panelId).inserted else {
+                    throw WorkspaceError.invalidSnapshot("Missing or duplicate plugin panel identity")
+                }
+                try record.validated()
+                bytes += try JSONEncoder().encode(record).count
+            } else if pane.pluginPanel != nil { throw WorkspaceError.invalidSnapshot("Non-plugin pane has plugin state") }
+        }
+        guard bytes <= PluginPersistence.workspaceBytes else { throw WorkspaceError.invalidSnapshot("Plugin panel records exceed 2 MiB per workspace") }
+    }
+
+    /// Disk encoding is not a public bulk-data API. Explicit plugin APIs read payloads.
+    public func publicJSON() throws -> JSONValue {
+        var fields = try JSONDecoder().decode(JSONValue.self, from: encoded()).object!
+        if case .array(let panes) = fields["panes"] {
+            fields["panes"] = .array(panes.map { pane in
+                var object = pane.object!
+                object.removeValue(forKey: "pluginPanel")
+                return .object(object)
+            })
+        }
+        return .object(fields)
+    }
+
     public func encoded() throws -> Data {
+        try validatePluginPanels()
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return try encoder.encode(Snapshot(schemaVersion: 1, panes: panes, tabs: tabs, groups: groups,
+        return try encoder.encode(Snapshot(schemaVersion: 2, panes: panes, tabs: tabs, groups: groups,
                                           keyTabID: keyTabID, nextPane: nextPane, nextTab: nextTab, nextGroup: nextGroup))
     }
 
     public static func restore(_ data: Data) throws -> Workspace {
         let snapshot = try JSONDecoder().decode(Snapshot.self, from: data)
-        guard snapshot.schemaVersion == 1 else { throw WorkspaceError.invalidSnapshot("Unsupported schema version") }
+        guard snapshot.schemaVersion == 2 else { throw WorkspaceError.invalidSnapshot("Unsupported schema version") }
         let paneIDs = Set(snapshot.panes.map(\.id))
         let tabIDs = Set(snapshot.tabs.map(\.id))
         let groupIDs = Set(snapshot.groups.map(\.id))
@@ -458,6 +515,7 @@ public struct Workspace: Equatable, Sendable {
         result.nextPane = snapshot.nextPane
         result.nextTab = snapshot.nextTab
         result.nextGroup = snapshot.nextGroup
+        try result.validatePluginPanels()
         return result
     }
 

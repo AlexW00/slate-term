@@ -433,7 +433,16 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
             run:(command,params={},options={})=>call('terminal.run',{...params,command},options),
             wait:(params={},options={})=>call('terminal.wait',params,options)
           }),
-          storage:Object.freeze({get:key=>call('storage.get',key===undefined?{}:{key}),set:(key,value,options={})=>call('storage.set',{key,value},options),delete:(key,options={})=>call('storage.delete',{key},options)}),
+          pluginData:Object.freeze({
+            get:(options={})=>call('plugins.data.get',{},options),
+            patch:(operations,expectedDataRevision,options={})=>call('plugins.data.patch',{operations,expectedDataRevision},options),
+            reset:(params,options={})=>call('plugins.data.reset',params,options)
+          }),
+          panelState:Object.freeze({
+            get:(options={})=>call('plugins.panelState.get',{},options),
+            patch:(operations,guards,options={})=>call('plugins.panelState.patch',{...guards,operations},options),
+            reset:(guards,options={})=>call('plugins.panelState.reset',guards,options)
+          }),
           emit:(topic,payload,options={})=>{const {cause,signal,...routing}=options;return call('events.emit',{...routing,topic,payload},{cause,signal});},
           subscribe:async (handler,options={})=>{
             let active=true,cursor=options.after;

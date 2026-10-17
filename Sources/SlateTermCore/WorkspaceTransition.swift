@@ -25,6 +25,7 @@ public struct WorkspaceTransition: Sendable {
         case startup = "native.startup", windowFocus = "window.focus", pluginRemoval = "plugins.unregister"
         case pluginEnable = "plugins.enable", pluginDisable = "plugins.disable"
         case savedLayoutOpen = "layouts.open"
+        case pluginPanelPatch = "plugins.panelState.patch", pluginPanelReset = "plugins.panelState.reset"
     }
 
     public init(observing next: Workspace, from previous: Workspace, revisions: WorkspaceRevisions,
@@ -36,10 +37,12 @@ public struct WorkspaceTransition: Sendable {
     /// Execute the authoritative model adapter once. Only explicitly selected validated fields
     /// become facts; arbitrary input dictionaries (including titles) are never retained or copied.
     public static func command(_ id: String, parameters: [String: JSONValue], workspace: Workspace,
-                               revisions: WorkspaceRevisions) throws -> Self {
+                               revisions: WorkspaceRevisions, preparing: (inout Workspace) throws -> Void = { _ in }) throws -> Self {
         guard revisions.represents(workspace) else { throw staleRevisionLedger() }
         var next = workspace
         let result = try CommandRegistry.execute(id, params: parameters, workspace: &next)
+        try preparing(&next)
+        try next.validatePluginPanels()
         func anchor() throws -> PaneID {
             let pane = try parameters["pane"].flatMap(\.string).map(PaneID.init(parsing:))
             let tab = try parameters["tab"].flatMap(\.string).map(TabID.init(parsing:))
@@ -130,6 +133,18 @@ public struct WorkspaceTransition: Sendable {
                 }
                 append(fact.topic, tab: fact.tab, pane: fact.pane, extra: extra)
             }
+        }
+        for pane in next.panes {
+            guard let after = pane.pluginPanel,
+                  let before = previous.panes.first(where: { $0.id == pane.id })?.pluginPanel,
+                  before.panelId == after.panelId, before.stateRevision != after.stateRevision else { continue }
+            var extra = PluginPersistence.summary(before: before.state, after: after.state)
+            extra["pluginId"] = .string(pane.type.identifier)
+            extra["panelId"] = .string(after.panelId)
+            extra["beforeRevision"] = .string(before.stateRevision)
+            extra["revision"] = .string(after.stateRevision)
+            extra["reset"] = .bool(action == Observation.pluginPanelReset.rawValue)
+            append("host.plugin.panel-state.changed", tab: next.tabs.first { $0.layout.paneIDs.contains(pane.id) }?.id, pane: pane.id, extra: extra)
         }
         // A path is a resize only while the same two pane partitions still identify its split.
         // Creation, collapse and relocation must not masquerade as a divider resize.

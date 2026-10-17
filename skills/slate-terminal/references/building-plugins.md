@@ -27,7 +27,7 @@ Minimal static panel:
 
 - Paths are absolute. Plugin IDs are lowercase; command IDs become `plugin.<plugin-id>.<command-id>`.
 - `source.kind` is `directory` (served under `plugin://<id>/`) or `url`. A `url` source with a `process` is a managed local HTTP server on `127.0.0.1`; use port `0` and the `{port}` argument.
-- `scope` is `pane` (default), `tab` or `global`. Instances of one scope share storage and subscriptions. Every visible pane still gets its own web view.
+- `scope` is `pane` (default), `tab` or `global`. It controls runtime/backend, ephemeral WebKit-store lifetime and default event context—not durable data or panel state. Every panel gets its own web view, panel identity and restoration state; durable plugin data is always shared by plugin ID.
 - Validate offline, then register:
 
 ```sh
@@ -62,7 +62,7 @@ await workspace.command("split.right");     // any command.run id
 await workspace.setTitle("README.md");      // pane header title; null restores document.title
 ```
 
-Convenience namespaces include `terminal`, `panes`, `layout`, `tabs`, `web`, `browser`, `services`, `layouts`, `storage` and `pluginSettings`. Inspect `Object.keys(workspace)` and `workspace.methods` rather than assuming a helper exists. Every helper takes a final `{signal, cause}` options object; use `AbortController` for long waits.
+Convenience namespaces include `terminal`, `panes`, `layout`, `tabs`, `web`, `browser`, `services`, `layouts`, `pluginData`, `panelState` and `pluginSettings`. Inspect `Object.keys(workspace)` and `workspace.methods` rather than assuming a helper exists. Every helper takes a final `{signal, cause}` options object; use `AbortController` for long waits.
 
 ## Events: cursor, snapshot, then subscribe
 
@@ -88,11 +88,45 @@ await workspace.emit("notes.updated", { key: "draft" });
 - Mutations are rate limited per plugin. Do not turn every event into another mutation.
 - Re-subscribe in a `pageshow` handler after cached-history restoration.
 
-## Storage and settings
+## Data, panel state, settings and starting inputs
 
-- `workspace.storage.get/set/delete(key)`: private JSON per logical instance, about 1 MiB. Changes emit `host.plugin.storage.changed`.
-- `workspace.settings()` reads the user's `[plugins.<id>]` TOML table. Plugins own defaults and validation.
-- To write settings, call `workspace.pluginSettings.get()`, then `patch(operations, writeRevision)`. On a conflict, refetch and rebase. Re-read after `host.plugin.settings.changed`.
+Discover `api.describe.pluginPersistence` before using these APIs. The old `workspace.storage` / `storage.*` API was removed; do not build against it.
+
+| What you are saving | Use |
+| --- | --- |
+| User-created notes/tasks or small shared datasets | `workspace.pluginData`: durable per plugin ID, even with no panel |
+| This panel's selected document, filters or view mode | `workspace.panelState`: independent of runtime scope |
+| User preferences | `workspace.settings()` / `workspace.pluginSettings`: TOML |
+| Template starting folder/project/document | Manifest `layoutFields` / `workspace.layoutConfiguration()` |
+| Hover/menu/animation | Page memory |
+| Large files/databases/remote synchronization | Plugin-owned backend/files/server |
+
+```js
+const data = await workspace.pluginData.get(); // {id,values,revision}
+await workspace.pluginData.patch([
+  {op: "set", key: "note:123", value: {version: 1, text: "Hello"}}
+], data.revision);
+
+const panel = await workspace.panelState.get(); // {pluginId,paneId,panelId,values,revision}
+await workspace.panelState.patch([
+  {op: "set", key: "selectedNoteId", value: "123"}
+], {expectedPanelId: panel.panelId, expectedStateRevision: panel.revision});
+```
+
+- Patches use 1–32 distinct literal top-level keys. `set` replaces a value; `delete` has no value. JSON null is valid, not deletion. Whole-document revision checks are required; a conflict means reread and deliberately resolve the user's edit, never auto-retry a stale autosave.
+- Shared values: 256 KiB/1,024 keys; panel values: 32 KiB/128 keys; each value ≤16 KiB, keys 1–256 UTF-8 bytes, patch arrays ≤48 KiB. Transport bounds also apply. Use files/databases for large data. These stores are not encrypted secret vaults.
+- Save valuable content during editing, **not only on unload/quit**. Surface read/write errors. A panel result's `workspacePersistence` distinguishes saved from failed/disabled/suspended; an accepted live mutation is not always durable. Shared-data failure preserves old values. After timeout/disconnect inspect before writing again.
+- Initialize by obtaining an event cursor, reading data/state/configuration, rendering, then subscribing from the cursor. Filter `host.plugin.data.changed` by `pluginId` (broadcast across scopes) and `host.plugin.panel-state.changed` by `panelId`. Coalesce reads and reject stale responses; never write defaults on every refresh.
+- Empty panel state must **never clear shared data**. Keep a plugin-owned format version and handle incompatible data explicitly. Put document IDs in shared data/configuration; `paneId`, logical `instanceId`, `viewId` and `panelId` are not user-document identities.
+- Panel state/configuration survive reload, moves and normal workspace restoration. Explicit close, type replacement and forced removal discard the panel record; shared data survives. Tab-scoped moves still recreate the document in the destination runtime. Restore-off/suspended still permits live view-state use but does not save it across launch.
+- Saved layouts and Spotlight launchers create fresh panel state, not resumable apps. Configure a stable document/project reference to reconnect to shared data. Capture copies starting configuration only. Plain opening with required fields lacking defaults fails; use a configured layout, or make fields optional for an in-panel setup flow.
+- WebKit plugin stores are ephemeral. Do not assume `localStorage`, cookies, a changed URL, DOM or JS memory survives restart. Persist route/document IDs explicitly; don't put secrets in URLs.
+- Reset is a generation barrier, even when empty. It emits an invalidation and rejects old queued writes. Cancel obsolete debounce timers; do not rebase pre-reset writes onto the fresh revision. A replayed old reset must not overwrite a newer intentional edit. The nonvisual [notes example](plugin-persistence.mjs) demonstrates these rules; copy it into the plugin and supply `render`/`onError` callbacks. Call `stop()` on retirement, and recreate on cached `pageshow`.
+- `workspace.pluginData.reset({expectedDataRevision,force:true})` deletes shared host-managed data; `workspace.panelState.reset({expectedPanelId,expectedStateRevision})` resets only this view. Neither clears TOML, starting configuration or external files. Native controls confirm; API calls are explicit and noninteractive.
+- Commands/services use `plugins data get|patch|reset PLUGIN-ID` or the shared RPCs without opening a panel. Panel-state methods require an explicit or bound pane, never focus fallback. Generic `workspace.call` can explicitly target another plugin/panel; these are trusted controllers, not a permission sandbox.
+- `workspace.settings()` reads `[plugins.<id>]`. To edit preferences use `workspace.pluginSettings.get()`, then `patch(operations, writeRevision)`; on conflict refetch/rebase. Re-read after `host.plugin.settings.changed`.
+
+Before shipping a plugin, test: reload; app restart; two panels sharing data with different selections; panel close/type change; a second template/launcher invocation; reset with a pending save; save failure; and a stale revision. Do not claim persistence solely because one open view still displays its in-memory content.
 
 ## Theming
 

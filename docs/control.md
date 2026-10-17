@@ -49,6 +49,10 @@ Browser and Private Browser pages and subframes have no bridge. Both modes and t
 
 [Inline welcome](welcome.md) uses `welcome.get` and global `command.run` IDs `welcome.read`, `welcome.unread` and its alias `welcome.reset`. Unread/reset re-enables future terminal sessions for testing; unrelated commands never acknowledge it. The CLI (`welcome --read/--unread/--reset`), registered-page `workspace.welcome` helpers, native Cmd-K actions and services share those operations. Discovery is under `api.describe.welcome`.
 
+## Plugin persistence
+
+The shared `plugins.data.*` and `plugins.panelState.*` methods separate durable per-plugin data from panel restoration state; see [plugin persistence](plugin-persistence.md) for typed parameters/results, required revision guards, CLI/page helpers and failure semantics. `command.run` with `plugins.panelState.reset` requires the same panel ID/state revision guards as the direct method; native commands capture those before confirmation. Unsupported guard kinds fail closed. The old instance-scoped `storage.*` methods are removed.
+
 ## Manual background services
 
 `plugins.service.start/stop/list/status/logs` are shared API operations, with `slate-term plugins service …` conveniences. Registration does not activate a service. Each launch has a private same-user endpoint bound to its public generation identity, not a bearer token or separate capability list. Ordinary hello replies include that identity; inherited service clients validate it on the same peer before dispatch and never silently discard their owner. Invalid repeated hello invalidates negotiation on both endpoint kinds. See [manual services](background-services.md) for schemas, readiness, bootstrap and teardown. Automatic startup/restart and enable/disable controls remain deferred.

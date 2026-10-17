@@ -59,6 +59,7 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
     var onRename: ((String) -> Void)?
     var typeChoices: (() -> [(name: String, id: String)])?
     var onChangeType: ((String) -> Void)?
+    var onResetPluginView: (() -> Void)?
 
     init(content: NSViewController, type: String, typeID: String, showWelcome: Bool = false) {
         welcomeEnabled = showWelcome && typeID == "terminal"
@@ -326,6 +327,11 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
             item.state = choice.id == typeID ? .on : .off
             item.isEnabled = choice.id != typeID
         }
+        if onResetPluginView != nil {
+            menu.addItem(.separator())
+            let reset = menu.addItem(withTitle: "Reset Plugin Panel View…", action: #selector(resetPluginView), keyEquivalent: "")
+            reset.target = self
+        }
         return menu
     }
 
@@ -348,6 +354,7 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
         guard let type = sender.representedObject as? String else { return }
         onChangeType?(type)
     }
+    @objc private func resetPluginView() { onResetPluginView?() }
     @objc private func closePane() { onClose?() }
     func performClose() { closeButton.performClick(nil) }
 

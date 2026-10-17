@@ -5,7 +5,7 @@ import Testing
 @Test func automationCatalogHasOnePublicInventory() {
     let names = AutomationMethod.publicMethods.map(\.rawValue)
     #expect(Set(names).count == names.count)
-    for name in ["config.patch", "appearance.get", "skills.list", "skills.install", "browser.eval", "web.screenshot", "plugins.service.start", "storage.get", "pane.title", "service.ready"] {
+    for name in ["config.patch", "appearance.get", "skills.list", "skills.install", "browser.eval", "web.screenshot", "plugins.service.start", "plugins.data.get", "plugins.panelState.patch", "pane.title", "service.ready"] {
         #expect(names.contains(name))
     }
     #expect(!names.contains("shell.update"))
@@ -70,8 +70,10 @@ import Testing
     #expect(AutomationMethod.configGet.resolving([:], defaults: defaults).isEmpty)
     #expect(AutomationMethod.pluginSettingsGet.resolving([:], defaults: defaults)["id"] == .string("notes"))
     #expect(AutomationMethod.pluginSettingsGet.resolving(["id": .string("other")], defaults: defaults)["id"] == .string("other"))
-    #expect(AutomationMethod.storageGet.resolving([:], defaults: defaults)["instanceId"] == .string("notes-instance"))
-    #expect(AutomationMethod.storageGet.resolving(["pane": .string("p9")], defaults: defaults)["instanceId"] == nil)
+    #expect(AutomationMethod.pluginDataGet.resolving([:], defaults: defaults) == ["id": .string("notes")])
+    #expect(AutomationMethod.panelStateGet.resolving([:], defaults: defaults)["pane"] == .string("p2"))
+    #expect(AutomationMethod.panelStateGet.resolving(["pane": .string("p9")], defaults: defaults)["tab"] == nil)
+    #expect(AutomationMethod(rawValue: "storage.get") == nil)
 }
 
 @Test func automationCommandDefaultsDoNotAttachTargetsToGlobalActions() {
@@ -80,5 +82,6 @@ import Testing
     #expect(AutomationMethod.commandRun.resolving(["id": .string("pane.zoom")], defaults: defaults)["pane"] == .string("p2"))
     #expect(AutomationMethod.commandRun.resolving(["id": .string("plugin.tools.build")], defaults: defaults)["scope"] == .string("tab"))
     #expect(AutomationMethod.workspaceSnapshot.resolving(["scope": .string("global")], defaults: defaults)["pane"] == nil)
-    #expect(AutomationMethod.storageGet.resolving([:], defaults: .init()).isEmpty)
+    #expect(AutomationMethod.panelStateGet.resolving([:], defaults: .init()).isEmpty)
+    #expect(AutomationMethod.commandRun.resolving(["id": .string("plugins.panelState.reset")], defaults: defaults)["pane"] == .string("p2"))
 }

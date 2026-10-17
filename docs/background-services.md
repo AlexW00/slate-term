@@ -46,7 +46,7 @@ Invalid repeated hello invalidates negotiation on both endpoint kinds, including
 Common resolution is explicit target → validated caller defaults → documented active-context fallback or missing-resource error. Page clients can default to their bound pane, namespace and instance; a service has no fabricated page identity. Examples:
 
 - `plugins.settings.get/patch` accept an explicit `id`; service/page callers default to their own plugin ID. `settings.get` is the applied-value alias.
-- `storage.get/set/delete` require a live plugin `instanceId` or plugin `pane` unless the page supplies its instance default. Storage remains logical-instance-scoped, not new service storage.
+- `plugins.data.get/patch/reset` access durable data shared by plugin ID without any live panel; service callers default to their own plugin ID. `plugins.panelState.get/patch/reset` require an explicit plugin pane for unanchored services and reject focus fallback. Data invalidations broadcast across runtime scopes, including during startup; read data in the cursor-before-snapshot bootstrap. See [plugin persistence](plugin-persistence.md).
 - Automatic `pane.title` targeting another view requires `pane`, `title` and paired `expectedViewId`/`expectedDocumentId` from `web.get`. Stale documents are rejected. Self-page `workspace.setTitle` remains compatible.
 - Configuration, window controls, built-in commands, terminal/web automation, browser evaluation, screenshots and event emission use the same handlers for all clients. Ordinary websites and subframes still receive **no bridge**; arbitrary evaluation remains browser-only, not a plugin-document capability.
 

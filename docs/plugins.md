@@ -17,7 +17,7 @@ slate-term plugins enable notes
 slate-term plugins unregister notes --force
 ```
 
-The pane-header type dropdown includes only plugins with a panel source. **Workspace → Plugin Commands**, the **⌘K command picker**, and **Settings → Keyboard Shortcuts** include contributed commands. Switching type destroys the live view; saved plugin data follows its declared scope. Registration replacement (`--replace`) requires that type's visible panes to be closed first. Disable and unregister refuse active views unless `--force` is supplied. Both retain saved data.
+The pane-header type dropdown includes only plugins with a panel source. **Workspace → Plugin Commands**, the **⌘K command picker**, and **Settings → Keyboard Shortcuts** include contributed commands. Switching type destroys the live view and its panel-state record; shared plugin data is retained independently of runtime scope. Registration replacement (`--replace`) requires that type's visible panes to be closed first. Disable and unregister refuse active views unless `--force` is supplied. Both retain saved data.
 
 **Settings → Plugins** has a leading enable checkbox and a trash icon button to remove each plugin. Changes apply immediately, independently of the config editor’s Apply/Revert buttons. Disabling keeps the registration but removes its pane types, contributed commands, header buttons and shortcuts from active use; running commands, panel instances and background services are stopped. Open plugin panes are closed only after native confirmation (or explicit API/CLI `force`). Enabling restores contributions but does not reopen panes or start processes. The choice persists across app launches and registration replacement; removal clears it. Saved plugin data, settings, and shortcut bindings are retained.
 
@@ -207,9 +207,9 @@ Plugins and services can send attention/completion notifications with the shared
 - `tab`: views within one tab share an instance, which lasts until that tab closes.
 - `global`: one instance per registered type, created on first use and retained until app shutdown or unregister.
 
-Cross-tab/window pane movement retains pane/global-scoped views, documents and instances. A pane-scoped instance's live owning tab changes, but its running backend's environment remains its launch context; pane-anchored CLI calls resolve current membership. Explicit stale pane/tab pairs fail. **Tab-scoped moves recreate the moved page against the destination tab's instance/store/backend** (reuse that instance if present); unsaved DOM state may reset and source storage is not copied. The source instance lives until its source tab closes. A self-moving tab-plugin may lose its reply when its old document retires; inspect placement rather than retry. New default calls and inherited event subscriptions follow retained panes; explicit event filters stay fixed.
+Cross-tab/window pane movement retains pane/global-scoped views, documents and instances. A pane-scoped instance's live owning tab changes, but its running backend's environment remains its launch context; pane-anchored CLI calls resolve current membership. Explicit stale pane/tab pairs fail. **Tab-scoped moves recreate the moved page against the destination tab's instance/ephemeral WebKit store/backend** (reuse that instance if present); unsaved DOM state may reset. The panel's saved state/configuration and shared plugin data remain intact. The source instance lives until its source tab closes. A self-moving tab-plugin may lose its reply when its old document retires; inspect placement rather than retry. New default calls and inherited event subscriptions follow retained panes; explicit event filters stay fixed.
 
-Every newly created pane has a fresh web view. Logical instances share their own ephemeral WebKit data store and private key/value store. Data files persist across app launches; browser/DOM history is not restored. Pane and tab IDs determine persisted storage scope.
+Every newly created pane has a fresh web view. Logical instances share only their ephemeral WebKit store/runtime. Durable `workspace.pluginData` belongs to the plugin ID, even without open panels; `workspace.panelState` belongs independently to each plugin panel. Both require explicit serialization/restoration by the author. Browser/DOM history is not restored. See [plugin persistence](plugin-persistence.md) for APIs, guards, limits, native reset controls and close/quit/template behavior.
 
 ## Page API
 
@@ -225,9 +225,13 @@ await workspace.terminal.key("ctrl+c");
 const result = await workspace.terminal.run("printf 'hello\\n'");
 await workspace.terminal.wait({ contains: "READY", timeoutMilliseconds: 5000 });
 await workspace.command("split.right");
-await workspace.storage.set("draft", { text: "メモ" });
-const draft = await workspace.storage.get("draft");
-await workspace.storage.delete("draft");
+const saved = await workspace.pluginData.get();
+await workspace.pluginData.patch([{op:"set", key:"draft", value:{text:"メモ"}}], saved.revision);
+const draft = (await workspace.pluginData.get()).values.draft;
+const panel = await workspace.panelState.get();
+await workspace.panelState.patch([{op:"set", key:"selected", value:"draft"}], {
+  expectedPanelId: panel.panelId, expectedStateRevision: panel.revision
+});
 ```
 
 Terminal operations use the active terminal in the plugin's context; an explicit terminal `pane` overrides that history. A nonterminal focus does not erase it. Run/wait accept `{signal}` as a final options argument. Run requires authenticated zsh prompt/empty-buffer checks; it is not a generic TUI command runner. See [automation](automation.md) for limits, deadlines and the distinction between current-screen text and command stdout. `workspace.plugin` contains the type ID, logical `instanceId`, `viewId`, `paneId`, and scope.
@@ -307,4 +311,4 @@ Backend stdout/stderr are bounded, with a retained 64 KiB log tail. Crashes use 
 
 The reported PID is the bundled supervisor/group leader. Actual service exit codes are recorded in logs; the supervisor deliberately kills its own group to remove remaining descendants. It watches GUI death, including SIGKILL. Processes that deliberately daemonize into another group/session escape this containment; plugins must not do so.
 
-The bridge bounds requests and responses; storage is limited to 1 MiB and 1,024 keys. Files are private and atomically replaced under the app's state directory. Atomic replacement is not a power-loss durability guarantee.
+The bridge bounds requests and responses. Shared plugin values are limited to 256 KiB/1,024 keys, panel state to 32 KiB/128 keys; additional per-value/patch/configuration/aggregate bounds are advertised by `api.describe.pluginPersistence`. Files are private and atomically replaced under the app's state directory. Atomic replacement is not a power-loss durability guarantee. The old instance-scoped storage API/files are not migrated; see [development format changes](plugin-persistence.md#breaking-development-formats).

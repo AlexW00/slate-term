@@ -198,8 +198,8 @@ http.server.ThreadingHTTPServer(('127.0.0.1',port),Handler).serve_forever()
                 assert len({item["url"] for item in instances}) == 2 and len({item["instanceId"] for item in instances}) == 2
                 for pane in [private1, private2]:
                     eventually("Private bridge", lambda: evaluate(pane, "window.fixtureReady===true"))
-                evaluate(private1, "workspace.storage.set('secret','one')")
-                assert evaluate(private2, "workspace.storage.get('secret')") is None
+                evaluate(private1, "workspace.panelState.get().then(s=>workspace.panelState.patch([{op:'set',key:'secret',value:'one'}],{expectedPanelId:s.panelId,expectedStateRevision:s.revision}))")
+                assert evaluate(private2, "workspace.panelState.get().then(s=>s.values.secret??null)") is None
                 for pane in [private1, private2]:
                     evaluate(pane, "(async()=>{window.privateEvents=[];window.stopPrivate=await workspace.subscribe(event=>window.privateEvents.push(event),{topics:['test.private'],waitMilliseconds:25000});return true})()")
                 eventually("per-pane subscriptions", lambda: rpc("events.head")["pendingPolls"] == 2)

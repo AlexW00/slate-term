@@ -1,6 +1,6 @@
 # Plugin integration and hooks audit
 
-Audit baseline: checkpoint `1f80bde`. This documents the supported API and missing integration points. It does **not** introduce a hook SDK, synchronous interception, or always-running headless plugins.
+Historical audit baseline: checkpoint `1f80bde`. This records the API and missing integration points at that checkpoint, not the current contract. Subsequent shared API/service/settings work supersedes the narrower boundaries below; [plugin persistence](plugin-persistence.md) replaces instance-scoped storage with shared data and panel restoration. It does **not** introduce a hook SDK, synchronous interception, or always-running headless plugins.
 
 **Subsequent extension:** [manifest `headerButtons`](plugins.md#native-frame-buttons) now contributes command-backed buttons beside Close for all pane types, built-ins, or exact plugin widget IDs. This does not add arbitrary native view injection or a live JavaScript callback API.
 

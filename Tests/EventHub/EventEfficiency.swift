@@ -18,36 +18,41 @@ struct EventEfficiencyChecks {
     }
 
     static func checkStorage(_ root: URL) throws {
-        let registration = try PluginRegistration.parse(Data(#"{"id":"notes","title":"Notes","source":{"kind":"directory","path":"/tmp","entry":"index.html"}}"#.utf8))
-        let instance = try PluginInstance(registration: registration, scopeKey: "p1", tab: TabID(1), directory: root,
-                                          connection: .init(socketPath: "/unused", appInstanceID: "test", cliPath: "/unused"))
-        defer { instance.close() }
+        let store = try PluginDataStore(directory: root.appendingPathComponent("data"), id: "notes")
         var events = 0
-        instance.onEvent = { name, _, _ in if name == "storageChanged" { events += 1 } }
-        let file = root.appendingPathComponent("notes/p1.json")
-        try instance.storageSet("missing", value: nil)
+        func set(_ key: String, _ value: JSONValue?) throws {
+            var op: [String: JSONValue] = ["op": .string(value == nil ? "delete" : "set"), "key": .string(key)]
+            op["value"] = value
+            let candidate = try store.document.changing(operations: .array([.object(op)]), expectedRevision: store.document.revision)
+            guard candidate != store.document else { return }
+            try store.persist(candidate)
+            store.accept(candidate)
+            events += 1
+        }
+        let file = store.url
+        try set("missing", nil)
         try require(!FileManager.default.fileExists(atPath: file.path) && events == 0, "Absent deletion created storage or notified")
         let value = JSONValue.object(["draft": .string("keep"), "nullable": .null])
-        try instance.storageSet("value", value: value)
+        try set("value", value)
         let inode = try FileManager.default.attributesOfItem(atPath: file.path)[.systemFileNumber] as? NSNumber
-        try instance.storageSet("value", value: value)
-        try require(events == 1 && instance.storageGet("value") == value, "Equal write notified or changed values")
+        try set("value", value)
+        try require(events == 1 && store.document.values["value"] == value, "Equal write notified or changed values")
         try require(try FileManager.default.attributesOfItem(atPath: file.path)[.systemFileNumber] as? NSNumber == inode, "Equal write replaced the file")
-        try instance.storageSet("null", value: .null)
-        try instance.storageSet("null", value: .null)
+        try set("null", .null)
+        try set("null", .null)
         try require(events == 2, "Null storage was confused with deletion")
-        try instance.storageSet("value", value: nil)
-        try instance.storageSet("value", value: nil)
-        try require(events == 3 && instance.storageGet(nil).object?["value"] == nil, "Delete notification was duplicated")
+        try set("value", nil)
+        try set("value", nil)
+        try require(events == 3 && store.document.values["value"] == nil, "Delete notification was duplicated")
         // A failed persistence must retain both authoritative state and event count.
         try FileManager.default.removeItem(at: file)
         try FileManager.default.createDirectory(at: file, withIntermediateDirectories: false)
         do {
-            try instance.storageSet("null", value: .string("must fail"))
+            try set("null", .string("must fail"))
             throw Failure("Storage write unexpectedly succeeded over a directory")
         } catch is Failure { throw Failure("Failed-persistence fixture did not fail") }
         catch { }
-        try require(events == 3 && instance.storageGet("null") == .null, "Failed persistence mutated or notified")
+        try require(events == 3 && store.document.values["null"] == .null, "Failed persistence mutated or notified")
         print("PASS storage: equal writes/absent deletes do no I/O or notification; null, changed writes and failed persistence preserved")
     }
 

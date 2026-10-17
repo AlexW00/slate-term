@@ -5,7 +5,7 @@ import SlateTermCore
 import SlateTermSettings
 
 /// A logical pane/tab/app-scoped plugin instance. Each visible pane owns a new
-/// web view; only explicitly scoped service/storage state is shared.
+/// web view; scope shares only runtime/backend and ephemeral WebKit state.
 @MainActor
 final class PluginInstance {
     let id = UUID().uuidString
@@ -15,13 +15,10 @@ final class PluginInstance {
     let scopeKey: String
     private(set) var tab: TabID?
     let dataStore = WKWebsiteDataStore.nonPersistent()
-    private let storage: PrivateJSONStore
     private let connection: PluginControlConnection
-    private var values: [String: JSONValue]
     private var process: PluginProcess?
     private var task: Task<Void, Never>?
     private var restartTask: Task<Void, Never>?
-    private var session: URLSession?
     private var generation = UUID()
     private var restartCount = 0
     private var closed = false
@@ -33,13 +30,11 @@ final class PluginInstance {
     private var observers: [UUID: () -> Void] = [:]
     var onEvent: ((String, JSONValue, OperationLineage?) -> Void)?
 
-    init(registration: PluginRegistration, scopeKey: String, tab: TabID?, directory: URL, connection: PluginControlConnection) throws {
+    init(registration: PluginRegistration, scopeKey: String, tab: TabID?, connection: PluginControlConnection) throws {
         self.registration = registration; self.scopeKey = scopeKey; self.tab = tab
         self.connection = connection
         guard let entryURL = registration.entryURL else { throw RPCFailure(code: -32602, message: "Plugin does not provide a panel") }
         self.entryURL = entryURL
-        storage = try PrivateJSONStore(url: directory.appendingPathComponent(registration.id).appendingPathComponent(scopeKey + ".json"), maximumBytes: 1_048_576)
-        values = try storage.load([String: JSONValue].self) ?? [:]
     }
 
     isolated deinit { close() }
@@ -64,18 +59,6 @@ final class PluginInstance {
     }
     var logs: String { String(decoding: logTail, as: UTF8.self) }
 
-    func storageGet(_ key: String?) -> JSONValue { key.map { values[$0] ?? .null } ?? .object(values) }
-    func storageSet(_ key: String, value: JSONValue?, lineage: OperationLineage? = nil) throws {
-        guard !key.isEmpty, key.utf8.count <= 256 else { throw RPCFailure(code: -32602, message: "Storage key must contain 1–256 UTF-8 bytes") }
-        var next = values
-        next[key] = value
-        guard next.count <= 1024 else { throw RPCFailure(code: -32602, message: "Plugin storage exceeds 1024 keys") }
-        guard next != values else { return }
-        try storage.save(next)
-        values = next
-        onEvent?("storageChanged", .object(["key": .string(key)]), lineage)
-    }
-
     func restart() async {
         guard !closed else { return }
         if let restartTask { await restartTask.value; return }
@@ -92,7 +75,7 @@ final class PluginInstance {
         guard !closed else { return }
         generation = UUID()
         let expected = generation
-        task?.cancel(); session?.invalidateAndCancel(); session = nil
+        task?.cancel()
         update("stopping")
         let previous = process
         await previous?.stop()
@@ -108,7 +91,6 @@ final class PluginInstance {
         generation = UUID()
         task?.cancel(); task = nil
         restartTask?.cancel(); restartTask = nil
-        session?.invalidateAndCancel(); session = nil
         process?.close(); process = nil
         state = "closed"
         observers.removeAll()
@@ -117,7 +99,7 @@ final class PluginInstance {
 
     private func start() {
         guard !closed else { return }
-        task?.cancel(); session?.invalidateAndCancel()
+        task?.cancel()
         generation = UUID()
         let expected = generation
         guard let spec = registration.process else { update("ready"); return }
@@ -160,7 +142,7 @@ final class PluginInstance {
             }
             child.onExit = { [weak self] status in
                 guard let self, !self.closed, self.generation == expected else { return }
-                self.task?.cancel(); self.session?.invalidateAndCancel(); self.session = nil
+                self.task?.cancel()
                 self.process = nil
                 self.update("failed", error: "Process exited: \(status)")
                 guard self.restartCount < spec.restartLimit else { return }
@@ -177,8 +159,12 @@ final class PluginInstance {
             configuration.timeoutIntervalForResource = min(1, spec.readyTimeoutSeconds)
             configuration.timeoutIntervalForRequest = min(1, spec.readyTimeoutSeconds)
             let session = URLSession(configuration: configuration, delegate: PluginReadinessDelegate(origin: origin), delegateQueue: nil)
-            self.session = session
             task = Task { [weak self] in
+                // data(for:) may suspend before creating its URLSessionTask. Only this
+                // poller may invalidate the session, after that await has settled;
+                // closing/restarting the instance cancels the poller instead. External
+                // invalidation can otherwise raise an uncaught NSGenericException.
+                defer { session.invalidateAndCancel() }
                 guard let self else { return }
                 let deadline = ContinuousClock.now.advanced(by: .milliseconds(Int64(spec.readyTimeoutSeconds * 1000)))
                 while !Task.isCancelled, !self.closed, self.generation == expected, ContinuousClock.now < deadline {
@@ -190,8 +176,6 @@ final class PluginInstance {
                            response.url.map({ self.origin.matches($0) }) == true,
                            self.generation == expected, !Task.isCancelled, self.ownsListener {
                             self.update("ready")
-                            session.finishTasksAndInvalidate()
-                            self.session = nil
                             return
                         }
                     } catch {}
@@ -199,7 +183,6 @@ final class PluginInstance {
                 }
                 guard !Task.isCancelled, !self.closed, self.generation == expected else { return }
                 self.process?.close(); self.process = nil
-                session.invalidateAndCancel(); self.session = nil
                 self.update("failed", error: "Readiness timed out after \(spec.readyTimeoutSeconds) seconds")
             }
         } catch { update("failed", error: String(describing: error)) }
@@ -226,10 +209,8 @@ private final class PluginReadinessDelegate: NSObject, URLSessionTaskDelegate, @
 @MainActor
 final class PluginInstances {
     private var instances: [String: PluginInstance] = [:]
-    private let directory: URL
     private var connection: PluginControlConnection?
     var onEvent: ((PluginInstance, String, JSONValue, OperationLineage?) -> Void)?
-    init(directory: URL) { self.directory = directory }
 
     func connect(socketPath: String, appInstanceID: String) {
         connection = PluginControlConnection(socketPath: socketPath, appInstanceID: appInstanceID,
@@ -249,7 +230,7 @@ final class PluginInstances {
         if let existing = instances[key] { instance = existing }
         else {
             instance = try PluginInstance(registration: registration, scopeKey: scopeKey,
-                                          tab: registration.scope == .global ? nil : tab, directory: directory, connection: connection)
+                                          tab: registration.scope == .global ? nil : tab, connection: connection)
             instance.onEvent = { [weak self, weak instance] name, payload, lineage in
                 guard let instance else { return }
                 self?.onEvent?(instance, name, payload, lineage)

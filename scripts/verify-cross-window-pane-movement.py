@@ -196,8 +196,8 @@ while True: time.sleep(1)
             eventually('plugin ready', lambda pane=pane: js(pane, 'typeof workspace') == 'object')
         old, destination = inspect(source), inspect(target)
         js(source, 'window.moveSentinel="retained"')
-        js(source, 'await workspace.storage.set("owner","source")')
-        js(target, 'await workspace.storage.set("owner","destination")')
+        js(source, 'await workspace.panelState.get().then(s=>workspace.panelState.patch([{op:"set",key:"owner",value:"source"}],{expectedPanelId:s.panelId,expectedStateRevision:s.revision}))')
+        js(target, 'await workspace.panelState.get().then(s=>workspace.panelState.patch([{op:"set",key:"owner",value:"destination"}],{expectedPanelId:s.panelId,expectedStateRevision:s.revision}))')
         if scope == 'tab':
             native(source, target)
             app.rpc('debug.screenshot', path=str(ROOT / 'artifacts/cross-window-tab-plugin-preview.png'))
@@ -234,13 +234,13 @@ while True: time.sleep(1)
         if scope == 'tab':
             assert current['viewId'] != old['viewId'] and current['pluginInstanceId'] == destination['pluginInstanceId']
             assert js(source, 'window.moveSentinel === undefined') is True
-            assert js(source, 'await workspace.storage.get("owner")') == 'destination'
+            assert js(source, 'await workspace.panelState.get().then(s=>s.values.owner)') == 'source'
             assert not [p for p in app.rpc('plugins.status', id='move.tab') if p['instanceId'] == old['pluginInstanceId']]
         else:
             assert current['viewId'] == old['viewId'] and current['pluginInstanceId'] == old['pluginInstanceId']
             assert js(source, 'window.moveSentinel') == 'retained'
             assert js(source, 'await workspace.context().then(x=>x.tabId)') == current['tabId']
-            assert app.rpc('storage.get', pane=source, tab=current['tabId'], key='owner') in ['source', 'destination']
+            assert app.rpc('plugins.panelState.get', pane=source, tab=current['tabId'])['values']['owner'] == 'source'
         close_tab(target)
 
     # A new destination tab instance is provisional until commit, not just reused instances.
@@ -260,13 +260,19 @@ while True: time.sleep(1)
     app.rpc('plugins.register', manifest=dict(id='move.failed', title='Failed backend', scope='tab',
         source=dict(kind='url', url='http://127.0.0.1:0/'),
         process=dict(executable='/usr/bin/false', restartLimit=0, readyTimeoutSeconds=1)))
-    source, target = window(), window()
-    command('pane.type', pane=source, type='move.failed', force=True)
-    result = move(source, target)
-    assert result['contentRecreated'] and inspect(source)['tabId'] == inspect(target)['tabId']
-    eventually('destination backend failed', lambda: inspect(source)['state'] == 'failed')
-    assert len(app.rpc('plugins.status', id='move.failed')) == 1
-    close_tab(target)
+    # Repeated immediate exits/moves/close must not invalidate an HTTP session while
+    # its async readiness task is still being created (previously an Obj-C crash).
+    for _ in range(6):
+        source, target = window(), window()
+        command('pane.type', pane=source, type='move.failed', force=True)
+        panel = app.rpc('plugins.panelState.get', pane=source)
+        result = move(source, target)
+        assert result['contentRecreated'] and inspect(source)['tabId'] == inspect(target)['tabId']
+        assert app.rpc('plugins.panelState.get', pane=source) == panel
+        eventually('destination backend failed', lambda: inspect(source)['state'] == 'failed')
+        assert len(app.rpc('plugins.status', id='move.failed')) == 1
+        close_tab(target)
+    assert not app.rpc('plugins.status', id='move.failed')
 
     # A frozen terminal wait follows its live session, never the new tab's other terminal.
     source, target = window(), window()

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Existing directed storage notifications must preserve admitted causal depth."""
+"""Shared data invalidations preserve admitted causal depth across runtime scopes."""
 import json
 from api_fixture import AppFixture, eventually
 
@@ -16,16 +16,17 @@ with AppFixture('storage-causation') as app:
 
     eventually('owned bridge', lambda: js('typeof workspace') == 'object')
     cursor = app.rpc('events.head')['cursor']
-    js('workspace.storage.set("counter",0)')
+    js('workspace.pluginData.get().then(s=>workspace.pluginData.patch([{op:"set",key:"counter",value:0}],s.revision))')
     for value in range(1, 10):
-        query = json.dumps(dict(after=cursor, topics=['host.plugin.storage.changed'], waitMilliseconds=0))
+        query = json.dumps(dict(after=cursor, topics=['host.plugin.data.changed'], waitMilliseconds=0))
         batch = js('workspace.call("events.poll",' + query + ')')
         event = batch['events'][-1]
-        assert event['targetInstanceId'] == js('workspace.plugin.instanceId')
+        assert event['payload']['pluginId'] == 'storage.fixture'
+        assert event.get('targetInstanceId') is None
         cause = json.dumps(event['deliveryContext'])
-        result = js('workspace.storage.set("counter",' + str(value) + ',{cause:' + cause + '}).then(()=>0,e=>e.code)')
+        result = js('workspace.pluginData.get().then(s=>workspace.pluginData.patch([{op:"set",key:"counter",value:' + str(value) + '}],s.revision,{cause:' + cause + '})).then(()=>0,e=>e.code)')
         assert result == (0 if value <= 8 else -32056), dict(value=value, result=result)
         cursor = batch['cursor']
-    assert js('workspace.storage.get("counter")') == 8
+    assert js('workspace.pluginData.get().then(s=>s.values.counter)') == 8
 
-print('PASS directed storage notifications preserve causal depth and reject the next write without changing storage')
+print('PASS broadcast plugin data invalidations preserve causal depth and reject the next write without changing storage')

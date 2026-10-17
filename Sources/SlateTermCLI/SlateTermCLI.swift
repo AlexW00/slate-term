@@ -131,18 +131,28 @@ struct TerminalCommand: ParsableCommand {
 
 struct Plugins: ParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Register trusted web panels. Registered pages can control your terminals.")
-    enum Action: String, CaseIterable, ExpressibleByArgument { case list, register, validate, unregister, enable, disable, status, restart, logs, settings, service }
+    enum Action: String, CaseIterable, ExpressibleByArgument { case list, register, validate, unregister, enable, disable, status, restart, logs, settings, service, data; case panelState = "panel-state" }
     @Argument var action: Action
     @Argument var id: String?
     @Argument(help: "Plugin namespace for settings get/patch or service controls.") var namespace: String?
-    @Option(help: "JSON set/delete operation array for settings patch.") var operations: String?
+    @Option(help: "JSON set/delete operation array for settings or persistence patch.") var operations: String?
     @Option var expectedWriteRevision: String?
+    @Option var expectedDataRevision: String?
+    @Option var expectedPanelId: String?
+    @Option var expectedStateRevision: String?
+    @Option var pane: String?
+    @Option var tab: String?
+    @Option var expectedWorkspaceRevision: String?
     @Option var manifest: String?
     @Option var instanceId: String?
     @Flag var replace = false
     @Flag var force = false
     @OptionGroup var connection: Connection
     func run() throws {
+        if action == .data || action == .panelState { try runPersistence(); return }
+        guard expectedDataRevision == nil, expectedPanelId == nil, expectedStateRevision == nil, pane == nil, tab == nil, expectedWorkspaceRevision == nil else {
+            throw ValidationError("Persistence options require plugins data or panel-state")
+        }
         if action == .service {
             guard let id, let method = AutomationMethod(rawValue: "plugins.service.\(id)"), method.family == .services,
                   (id == "list" ? namespace == nil : namespace != nil),

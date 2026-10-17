@@ -34,6 +34,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
     private let browserData: BrowserData
     private let pluginInstances: PluginInstances
+    var pluginDataStores: [String: PluginDataStore] = [:]
+    func hasPluginRegistration(_ id: String) -> Bool { pluginCatalog.registrations.contains { $0.id == id } }
+    func pluginPanelRegistration(_ id: String) -> PluginRegistration? { pluginCatalog.activeRegistrations.first { $0.id == id && $0.hasPanel } }
     private let pluginCommands = PluginCommands()
     var serviceSettingsRecipients: [(plugin: String, target: ServiceEventRecipient)] { backgroundServices.recipients }
     private lazy var backgroundServices = BackgroundServices(appID: instanceID,
@@ -145,10 +148,12 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     private var statusMenuItem: NSMenuItem?
     private var workspaceShortcuts: NSMenu?
     private var testConfirmationHandler: ((NSAlert) -> Void)?
+    private var testPresentationError: ((any Error) -> Void)?
     private struct ConfigurationApplyFault { let replacement: String? }
     private var configurationApplyFault: ConfigurationApplyFault?
     private var rejectNextTerminalPreparation = false
     var rejectNextWorkspacePublication = false
+    var rejectNextPluginDataPublication = false
     private var terminalPreparationCount = 0
     private var tabGroupObservations: [ObjectIdentifier: (group: NSWindowTabGroup, token: NSKeyValueObservation)] = [:]
     private var tabGroupSyncScheduled = false
@@ -174,7 +179,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         savedLayouts = SavedLayouts(directory: settings.configURL.deletingLastPathComponent().appendingPathComponent("layouts"))
         let catalog = try PluginCatalog(directory: settings.base.appendingPathComponent("state"))
         pluginCatalog = catalog
-        pluginInstances = PluginInstances(directory: settings.base.appendingPathComponent("state/plugin-data"))
+        pluginInstances = PluginInstances()
         self.workspace = settings.restore(or: workspace, registeredTypes: Set(catalog.activeRegistrations.filter(\.hasPanel).map(\.id)))
         // An app launched from another Slate pane must not pass that app's routing,
         // command settings or shell credentials to its new surfaces. Ghostty inherits
@@ -229,10 +234,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         pluginInstances.onEvent = { [weak self] instance, name, value, lineage in
             guard let self else { return }
             var payload: [String: JSONValue] = ["instanceId": .string(instance.id), "type": .string(instance.registration.id)]
-            if name == "storageChanged" {
-                payload["key"] = value.object?["key"]
-                self.events.publishHost("host.plugin.storage.changed", payload: .object(payload), targetInstanceId: instance.id, lineage: lineage)
-            } else if name == "stateChanged" {
+            if name == "stateChanged" {
                 self.refreshPluginSettingsStatus()
                 payload["state"] = value.object?["state"]
                 self.events.publishHost("host.plugin.state.changed", payload: .object(payload), tab: instance.tab)
@@ -391,7 +393,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     @discardableResult
-    private func persistWorkspace() -> WorkspacePersistence {
+    func persistWorkspace() -> WorkspacePersistence {
         // Persistence observes an already committed model; it must never discover/attribute
         // earlier native mutations to whichever request happens to save next.
         let persistence = settings.save(workspace)
@@ -534,6 +536,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         try validateAPIGuards(params, method: method)
         let client = caller ?? AutomationCaller(origin: .administrative, audience: operations.administrativeAudience)
         let operation = try suppliedOperation ?? client.admit(method, metadata: metadata, through: operations)
+        if let contract, contract.family == .pluginPersistence {
+            return try callPluginPersistence(contract, params: params, operation: operation)
+        }
         if let contract, contract.family == .notifications {
             return try await callNotifications(contract, params: params, operation: operation)
         }
@@ -708,7 +713,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             let target = try targetNativeWindow(params)
             return nativeWindowInfo(target.window, tab: target.tab)
         case .tabsList: return try .encoding(workspace.tabs)
-        case .panesList: return try .encoding(workspace.panes)
+        case .panesList: return try workspace.publicJSON().object!["panes"]!
         case .pluginsList:
             return .array(try pluginCatalog.registrations.map { registration in
                 var info = try JSONValue.encoding(registration).object ?? [:]
@@ -764,7 +769,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             refreshTerminalTitles()
             publishTerminalContext(pane, reason: "shell")
             return .object(["sequence": .integer(report.sequence)])
-        case .workspaceGet: return try JSONDecoder().decode(JSONValue.self, from: workspace.encoded())
+        case .workspaceGet: return try workspace.publicJSON()
         case .layoutGet: return try .encoding(targetTab(params).layout)
         case .commandList: return try .encoding(availableCommands)
         case .configGet:
@@ -833,6 +838,11 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 container.showRenamePopover()
                 return .object(["paneId": .string(pane.description)])
             }
+            if id == "plugins.panelState.reset" {
+                var input = params
+                input.removeValue(forKey: "id")
+                return try callPluginPersistence(.panelStateReset, params: input, operation: operation)
+            }
             if id == "pane.copyID" {
                 let pane = try targetPaneID(params)
                 let board = commandPasteboard
@@ -866,7 +876,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 throw RPCFailure(code: -32602, message: "Unknown pane type")
             }
             try validateMutationAdmission(id, params: params)
-            let transition = try WorkspaceTransition.command(id, parameters: params, workspace: workspace, revisions: revisions)
+            let transition = try WorkspaceTransition.command(id, parameters: params, workspace: workspace, revisions: revisions) { next in
+                try preparePluginConfigurations(&next)
+            }
             let next = transition.workspace
             var result = transition.result
             if id == "pane.move", var value = result.object {
@@ -902,7 +914,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             return .object([:])
         case .panesCapture: return try .encoding(TerminalOutput(targetTerminal(params).capture()))
         case .notificationsPost, .notificationsList, .notificationsDismiss, .notificationsStatus,
-             .layoutConfiguration, .contextInspect, .settingsGet, .storageGet, .storageSet, .storageDelete, .paneTitle,
+             .layoutConfiguration, .contextInspect, .settingsGet, .pluginDataGet, .pluginDataPatch, .pluginDataReset,
+             .panelStateGet, .panelStatePatch, .panelStateReset, .paneTitle,
              .terminalSend, .terminalKey, .terminalCapture, .terminalRun, .terminalWait,
              .eventsHead, .eventsPoll, .eventsEmit, .pluginsRestart,
              .webGet, .webSnapshot, .webClick, .webFill, .webSelect, .webScroll, .webWait, .webFocus, .webKey, .webCheck, .webSetValue, .webScreenshot,
@@ -933,6 +946,41 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 "appActive": .bool(NSApp.isActive),
                 "keyTab": windows.first(where: { $0.value === NSApp.keyWindow }).map { .string($0.key.description) } ?? .null,
                 "tabTitles": .object(Dictionary(uniqueKeysWithValues: windows.map { ($0.key.description, .string($0.value.tab.title)) }))])
+        case "debug.pluginPersistence" where integration:
+            if params["rejectPublication"] == .bool(true) {
+                rejectNextPluginDataPublication = true
+                return .object(["armed": .bool(true)])
+            }
+            var prompts: [JSONValue] = []
+            var failures: [JSONValue] = []
+            testPresentationError = { error in failures.append(.integer((error as? RPCFailure)?.code ?? -32000)) }
+            testConfirmationHandler = { alert in
+                prompts.append(.string(alert.messageText))
+                if let path = params["screenshot"]?.string { try? Self.captureWindow(alert.window.windowNumber, path: path) }
+                if params["changeWhileConfirming"] == .bool(true) {
+                    if let id = params["pluginId"] {
+                        if let state = try? self.callPluginPersistence(.pluginDataGet, params: ["id": id], operation: .init(origin: .native)) {
+                            _ = try? self.callPluginPersistence(.pluginDataPatch, params: ["id": id, "expectedDataRevision": state.object!["revision"]!,
+                                "operations": .array([.object(["op": .string("set"), "key": .string("during-confirmation"), "value": .bool(true)])])], operation: .init(origin: .native))
+                        }
+                    } else if let pane = params["pane"],
+                              let state = try? self.callPluginPersistence(.panelStateGet, params: ["pane": pane], operation: .init(origin: .native)) {
+                        _ = try? self.callPluginPersistence(.panelStatePatch, params: ["pane": pane, "expectedPanelId": state.object!["panelId"]!,
+                            "expectedStateRevision": state.object!["revision"]!,
+                            "operations": .array([.object(["op": .string("set"), "key": .string("during-confirmation"), "value": .bool(true)])])], operation: .init(origin: .native))
+                    }
+                }
+                if let focus = params["focusPane"] { _ = try? self.call("command.run", params: ["id": .string("pane.focus"), "pane": focus]) }
+                alert.buttons[params["confirm"] == .bool(true) ? 1 : 0].performClick(nil)
+            }
+            defer { testConfirmationHandler = nil; testPresentationError = nil }
+            if let id = params["pluginId"]?.string {
+                showSettings(section: .plugins)
+                settingsModel?.deletePluginData?(id)
+            } else if let pane = params["pane"] {
+                runUserCommand("plugins.panelState.reset", params: ["pane": pane])
+            } else { throw RPCFailure(code: -32602, message: "pane or pluginId required") }
+            return .object(["prompts": .array(prompts), "failures": .array(failures), "settingsError": settingsModel?.error.map(JSONValue.string) ?? .null])
         case "debug.rejectNextWorkspacePublication" where integration:
             guard params.isEmpty else { throw RPCFailure(code: -32602, message: "This fixture takes no parameters") }
             rejectNextWorkspacePublication = true
@@ -1398,7 +1446,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             try keys(["pane", "tab"])
             guard payload["pane"] != nil else { throw RPCFailure(code: -32602, message: "layout.configuration requires a pane") }
             let pane = try targetPaneID(payload)
-            return .object(layoutRecipes[pane]?.configuration ?? [:])
+            return .object(workspace.panes.first { $0.id == pane }?.pluginPanel?.configuration ?? layoutRecipes[pane]?.configuration ?? [:])
         case .contextInspect:
             let pane = caller?.defaults.pane
             let view = pane.flatMap { leaves[$0] as? PluginPane }
@@ -1409,36 +1457,6 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 throw RPCFailure(code: -32602, message: "id must identify a registered plugin")
             }
             return .object(settings.current.plugins[id] ?? [:])
-        case .storageGet, .storageSet, .storageDelete:
-            try keys(["instanceId", "pane", "tab", "key", "value"])
-            let instance: PluginInstance
-            if payload["pane"] != nil {
-                guard let view = leaves[try targetPaneID(payload)] as? PluginPane else {
-                    throw RPCFailure(code: APIError.unavailable, message: "Storage requires a registered-plugin pane")
-                }
-                instance = view.instance
-                if let expected = payload["instanceId"], expected != .string(instance.id) {
-                    throw RPCFailure(code: APIError.conflict, message: "Plugin instance changed")
-                }
-            } else {
-                guard let id = payload["instanceId"]?.string, let found = pluginInstances.all.first(where: { $0.id == id }) else {
-                    throw RPCFailure(code: -32602, message: "instanceId or a registered-plugin pane is required")
-                }
-                instance = found
-            }
-            if let tab = payload["tab"], let owner = instance.tab, tab != .string(owner.description) {
-                throw RPCFailure(code: -32602, message: "Plugin instance does not belong to the requested tab")
-            }
-            try operation.validateCaller()
-            if method == .storageGet {
-                if let key = payload["key"], key.string == nil { throw RPCFailure(code: -32602, message: "Storage key must be a string") }
-                return instance.storageGet(payload["key"]?.string)
-            }
-            guard let key = payload["key"]?.string, method == .storageDelete || payload["value"] != nil else {
-                throw RPCFailure(code: -32602, message: "Storage key and value are required")
-            }
-            try instance.storageSet(key, value: method == .storageDelete ? nil : payload["value"], lineage: operation.lineage)
-            return .null
         case .paneTitle:
             try keys(["pane", "tab", "title"])
             let pane = try targetPaneID(params)
@@ -1511,7 +1529,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             let panes = tab.layout.paneIDs.map { id -> SavedLayoutPane in
                 let pane = workspace.panes.first { $0.id == id }!
                 let type = paneTypeName(pane.type)
-                var configuration = layoutRecipes[id]?.configuration ?? [:]
+                var configuration = pane.pluginPanel?.configuration ?? layoutRecipes[id]?.configuration ?? [:]
                 if pane.type == .terminal {
                     configuration["directory"] = directories ? (shellSessions[id]?.report?.workingDirectory ?? terminals[id]?.context.workingDirectory).map(JSONValue.string) : nil
                     if !commands { configuration.removeValue(forKey: "command") }
@@ -1553,14 +1571,16 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             }
             openingRecipes[id] = pane
         }
-        let transition = try WorkspaceTransition(observing: opening.workspace, from: workspace, revisions: revisions, action: .savedLayoutOpen)
+        var openingWorkspace = opening.workspace
+        try preparePluginConfigurations(&openingWorkspace, recipes: openingRecipes)
+        let transition = try WorkspaceTransition(observing: openingWorkspace, from: workspace, revisions: revisions, action: .savedLayoutOpen)
         let startupPanes = Set(openingRecipes.compactMap { id, pane in
             pane.type == "terminal" && !(pane.configuration["command"]?.string ?? "").isEmpty ? id : nil
         })
         // Reserve before any old sessions are torn down; ordinary runs cannot steal these slots.
         try terminalControl.reserveStartup(startupPanes)
         let persistence: WorkspacePersistence
-        do { persistence = try reconcile(opening.workspace, recipes: openingRecipes, transition: transition, operation: operation) }
+        do { persistence = try reconcile(openingWorkspace, recipes: openingRecipes, transition: transition, operation: operation) }
         catch { startupPanes.forEach { terminalControl.releaseStartup($0) }; throw error }
         for (id, pane) in openingRecipes where pane.type == "terminal" {
             if let command = pane.configuration["command"]?.string, !command.isEmpty, let session = shellSessions[id] {
@@ -1805,7 +1825,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         layoutRecipes = layoutRecipes.filter { id, recipe in
             next.panes.contains { $0.id == id && paneTypeName($0.type) == recipe.type }
         }
-        layoutRecipes.merge(recipes) { _, new in new }
+        layoutRecipes.merge(recipes.filter { PaneType(identifier: $0.value.type).isBrowser || $0.value.type == "terminal" }) { _, new in new }
         for (id, terminal) in created {
             terminal.onFocus = { [weak self] in self?.focused(id) }
             terminal.onCloseRequest = { [weak self, weak terminal] processAlive in
@@ -1931,6 +1951,12 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 }
                 container.typeChoices = { [weak self] in self?.availablePaneTypes ?? [] }
                 container.onChangeType = { [weak self] type in self?.changePaneType(pane.id, to: type) }
+                if let panel = pane.pluginPanel {
+                    container.onResetPluginView = { [weak self] in
+                        guard let self, self.workspace.panes.first(where: { $0.id == pane.id })?.pluginPanel?.panelId == panel.panelId else { return }
+                        self.runUserCommand("plugins.panelState.reset", params: ["pane": .string(pane.id.description)])
+                    }
+                }
                 container.onFocus = { [weak self] in
                     guard let self, let window = self.containers[pane.id]?.view.window else { return }
                     self.focused(pane.id)
@@ -2456,7 +2482,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         workspaceMenu.addItem(.separator())
         addCommands(["window.new"], to: workspaceMenu)
         workspaceMenu.addItem(.separator())
-        addCommands(["layouts.edit", "layouts.openWindow", "layouts.captureWindow", "plugins.reload"], to: workspaceMenu)
+        addCommands(["layouts.edit", "layouts.openWindow", "layouts.captureWindow", "plugins.reload", "plugins.panelState.reset"], to: workspaceMenu)
         workspaceMenu.addItem(.separator())
         for (title, commands) in [
             ("Tabs", ["tab.new", "tab.rename", "tab.title.clear", "tab.close", "tab.previous", "tab.next"]),
@@ -2632,7 +2658,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             registration.commands.map { ($0.namespacedID(plugin: registration.id), (title: $0.title, plugin: registration.title)) }
         })
         let excluded: Set<String> = ["command.picker", "layouts.openWindow", "layouts.launcher", "layouts.folder", "welcome.reset"]
-        let commands = availableCommands.filter { !excluded.contains($0.id) && !$0.contract.requiresArguments }.map { command in
+        let commands = availableCommands.filter { !excluded.contains($0.id) && (!$0.contract.requiresArguments || $0.id == "plugins.panelState.reset") }.map { command in
             var title = command.title
             var detail = "Workspace"
             var symbol = "square.grid.2x2"
@@ -2656,6 +2682,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 case "notifications.settings": detail = "Notifications"; symbol = "bell"; keywords = "alerts sound permission"
                 case "config.reload": detail = "Application"; symbol = "arrow.clockwise"; keywords = "settings refresh"
                 case "plugins.reload": detail = "Plugin"; symbol = "arrow.clockwise"; keywords = "refresh widget panel"
+                case "plugins.panelState.reset": detail = "Plugin"; symbol = "arrow.counterclockwise"; keywords = "reset panel view state selection"
                 case "welcome.read", "welcome.unread":
                     detail = "Welcome Message"; symbol = "text.alignleft"; keywords = "onboarding welcome message read unread dismiss reset"
                     if command.id == "welcome.read", settings.welcome.acknowledged == true { unavailable = "Welcome message is already marked as read" }
@@ -2691,6 +2718,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 if !command.contract.workspaceIndependent {
                     if missingTarget { unavailable = "The original workspace target was closed" }
                     else if tab == nil && command.id != "tab.new" { unavailable = "Open a workspace to use this command" }
+                    else if command.id == "plugins.panelState.reset", pane?.pluginPanel == nil { unavailable = "Focus a plugin panel to reset its view" }
                     else if command.id == "plugins.reload", pane.flatMap({ leaves[$0.id] as? PluginPane }) == nil { unavailable = "Focus a plugin pane to reload it" }
                     else if command.id.hasPrefix("browser."), pane?.type.isBrowser != true { unavailable = "Focus a browser pane to use this command" }
                     else if command.id == "browser.clearSiteData", let pane,
@@ -2818,6 +2846,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 self?.changePluginFromSettings(id, method: enabled ? .pluginsEnable : .pluginsDisable)
             }
             model.removePlugin = { [weak self] id in self?.changePluginFromSettings(id, method: .pluginsUnregister) }
+            model.deletePluginData = { [weak self] id in self?.deletePluginDataFromSettings(id) }
             model.changeAgentSkill = { [weak self] id, install in
                 guard let self else { return }
                 do { _ = try self.changeAgentSkills(["agents": .array([.string(id)])], install: install) }
@@ -3008,6 +3037,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             return TabRenameController.unavailableReason(window: editor.owner, editor: editor) == nil
         }
         guard NSApp.keyWindow is WorkspaceWindow else { return false }
+        if id == "plugins.panelState.reset" { return (try? targetPaneID([:])).flatMap { id in workspace.panes.first { $0.id == id }?.pluginPanel } != nil }
         if id == "plugins.reload" { return (try? targetPaneID([:])).flatMap { leaves[$0] as? PluginPane } != nil }
         if id == "browser.clearSiteData" { return focusedBrowser?.currentURL.flatMap { try? BrowserDataRequest.siteHost($0) } != nil }
         if id?.hasPrefix("browser.") == true { return focusedBrowser != nil }
@@ -3039,6 +3069,22 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             try synchronizeNativeGroups()
             drainNativeLayouts()
             try finishNativeDivider(cancelled: false)
+            if id == "plugins.panelState.reset" {
+                let pane = try targetPaneID(params)
+                guard let panel = workspace.panes.first(where: { $0.id == pane })?.pluginPanel else {
+                    throw RPCFailure(code: APIError.unavailable, message: "Focus a plugin panel first")
+                }
+                params["pane"] = .string(pane.description)
+                params["expectedPanelId"] = .string(panel.panelId)
+                params["expectedStateRevision"] = .string(panel.stateRevision)
+                let alert = NSAlert()
+                alert.messageText = "Reset Plugin Panel View?"
+                alert.informativeText = "Clear this panel’s saved selection and view preferences. Shared plugin data and starting configuration are kept. The plugin will be notified; its backend is not restarted."
+                alert.addButton(withTitle: "Cancel"); alert.addButton(withTitle: "Reset View")
+                guard runConfirmationAlert(alert) == .alertSecondButtonReturn else { return }
+                _ = try call("command.run", params: params)
+                return
+            }
             if ["browser.clearData", "browser.clearSiteData"].contains(id) {
                 if id == "browser.clearSiteData" {
                     let pane = try targetPaneID(params)
@@ -3103,6 +3149,20 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         } catch { present(error) }
     }
 
+    private func deletePluginDataFromSettings(_ id: String) {
+        do {
+            let operation = WorkspaceOperationContext(origin: .native)
+            let snapshot = try callPluginPersistence(.pluginDataGet, params: ["id": .string(id)], operation: operation)
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Delete Slate-managed Plugin Data?"
+            alert.informativeText = "Delete saved data shared by all panels of \(id). This cannot be undone. Preferences, panel selections, starting configuration, and external files or databases are not deleted. Open plugins may save new data afterward."
+            alert.addButton(withTitle: "Cancel"); alert.addButton(withTitle: "Delete Data")
+            guard runConfirmationAlert(alert) == .alertSecondButtonReturn else { return }
+            _ = try callPluginPersistence(.pluginDataReset, params: ["id": .string(id), "expectedDataRevision": snapshot.object!["revision"]!, "force": .bool(true)], operation: operation)
+        } catch { settingsModel?.error = (error as? RPCFailure)?.message ?? "Could not delete plugin data" }
+    }
+
     private func confirm(_ message: String) -> Bool {
         guard !settings.suppressCloseWarning else { return true }
         let alert = NSAlert()
@@ -3143,6 +3203,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     private func present(_ error: any Error) {
+        if integration, let handler = testPresentationError { handler(error); return }
         guard !reconciling, !settlingNativeLayouts else {
             NSLog("Native presentation error: %@", String(describing: error))
             return

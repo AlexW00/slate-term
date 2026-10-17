@@ -203,14 +203,14 @@ try:
                 assert len(cli("tabs", "list")) == 1, "An iframe forged a privileged bridge request"
                 # Shell telemetry is a non-public method; it stays reachable but requires the pane's shell token.
                 assert evaluate("workspace.call('shell.update',{}).then(()=> 'unexpected',error=>error.code)") == -32040
-                evaluate("workspace.storage.set('note','保存したメモ')")
-                assert evaluate("workspace.storage.get('note')") == "保存したメモ"
+                evaluate("workspace.pluginData.get().then(s=>workspace.pluginData.patch([{op:'set',key:'note',value:'保存したメモ'}],s.revision))")
+                assert evaluate("workspace.pluginData.get().then(s=>s.values.note??null)") == "保存したメモ"
                 sibling = cli("panes", "split", "--down", "--pane", "p2")["paneId"]
                 cli("panes", "type", "--pane", sibling, "--type", "notes", "--force")
                 eventually("second scoped view", lambda: evaluate("window.fixtureReady===true", pane=sibling))
                 assert info()["instanceId"] == info(sibling)["instanceId"], "Tab-scoped views did not share a logical instance"
                 assert info()["viewId"] != info(sibling)["viewId"]
-                assert evaluate("workspace.storage.get('note')", sibling) == "保存したメモ"
+                assert evaluate("workspace.pluginData.get().then(s=>s.values.note??null)", sibling) == "保存したメモ"
                 # A different tab has a different logical instance. Directed delivery
                 # crosses the tab filter but defaults to the selected recipient. Explicit
                 # observation of another tab/recipient is available to every trusted client.
@@ -273,7 +273,7 @@ try:
                 cli("panes", "type", "--pane", "p2", "--type", "notes", "--force")
                 eventually("fresh plugin view", lambda: evaluate("window.fixtureReady===true"))
                 assert info()["viewId"] != old_view and evaluate("typeof window.transient") == "undefined"
-                assert evaluate("workspace.storage.get('note')") == "保存したメモ"
+                assert evaluate("workspace.pluginData.get().then(s=>s.values.note??null)") == "保存したメモ"
                 assert evaluate("document.querySelector('#send').getBoundingClientRect().bottom<=innerHeight"), "Plugin fixture action is clipped"
                 rpc("debug.paneHeader", pane="p2", rename="My notes — 手動")
                 if not args.functional_only:
@@ -310,12 +310,12 @@ try:
                 assert rpc("debug.paneHeader", pane="p2")["title"] == "My notes — 手動"
                 rpc("debug.paneHeader", pane="p2", rename="")
                 assert rpc("debug.paneHeader", pane="p2")["title"] == "After restart"
-                assert evaluate("workspace.storage.get('note')") == "保存したメモ"
+                assert evaluate("workspace.pluginData.get().then(s=>s.values.note??null)") == "保存したメモ"
                 failed_unregister_preserves_views()
-                assert evaluate("workspace.storage.get('note')") == "保存したメモ"
+                assert evaluate("workspace.pluginData.get().then(s=>s.values.note??null)") == "保存したメモ"
                 rpc("debug.paneHeader", pane=sibling, close=True)
                 assert sibling not in [pane["id"] for pane in cli("panes", "list")]
-                assert evaluate("workspace.storage.get('note')") == "保存したメモ"
+                assert evaluate("workspace.pluginData.get().then(s=>s.values.note??null)") == "保存したメモ"
                 cli("plugins", "unregister", "notes", "--force")
                 assert cli("plugins", "list") == [] and cli("plugins", "status") == []
                 assert [pane["id"] for pane in cli("panes", "list")] == ["p1"]

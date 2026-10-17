@@ -99,6 +99,7 @@ public enum CommandRegistry {
         .init(id: "browser.forward", title: "Go Forward", key: "]", shift: false),
         .init(id: "browser.focusAddress", title: "Focus Address Bar", key: "l", shift: false),
         .init(id: "plugins.reload", title: "Reload Plugin", key: "", shift: false),
+        .init(id: "plugins.panelState.reset", title: "Reset Plugin Panel View…", key: "", shift: false),
         .init(id: "browser.reload", title: "Reload Page", key: "r", shift: false),
         .init(id: "browser.clearData", title: "Clear Browser Data…", key: "", shift: false),
         .init(id: "browser.clearSiteData", title: "Clear This Site’s Data…", key: "", shift: false),

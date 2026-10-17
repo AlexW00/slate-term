@@ -81,6 +81,7 @@ final class SettingsModel: ObservableObject {
     var registerPlugin: (() -> Void)?
     var setPluginEnabled: ((String, Bool) -> Void)?
     var removePlugin: ((String) -> Void)?
+    var deletePluginData: ((String) -> Void)?
     var changeAgentSkill: ((String, Bool) -> Void)?
     var revealAgentSkill: (() -> Void)?
     var refreshAgentSkills: (() -> Void)?
@@ -343,6 +344,7 @@ private struct SettingsView: View {
     private var general: some View {
         Section {
             Toggle("Restore workspace on launch", isOn: $model.restore)
+                .help("Restore open panels and their saved view state. Closing a panel removes it; shared plugin data is retained separately.")
         } footer: {
             Text("Restore tabs and split panes with new shell sessions.")
         }
@@ -551,10 +553,19 @@ private struct SettingsView: View {
                             .foregroundStyle(plugin.indicator.color)
                             .help(plugin.status)
                             .accessibilityLabel("\(plugin.title): \(plugin.status)")
+                        Menu {
+                            Button("Delete Slate-managed Plugin Data…", role: .destructive) { model.deletePluginData?(plugin.id) }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                        }
+                        .menuStyle(.borderlessButton)
+                        .fixedSize()
+                        .help("Data actions for \(plugin.title)")
+                        .accessibilityLabel("Data actions for \(plugin.title)")
                         Button { model.removePlugin?(plugin.id) } label: {
                             Image(systemName: "trash")
                         }
-                        .help("Remove \(plugin.title)")
+                        .help("Remove \(plugin.title). Saved plugin data and preferences are retained.")
                         .accessibilityLabel("Remove \(plugin.title)")
                     }
                 }

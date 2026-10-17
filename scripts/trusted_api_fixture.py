@@ -65,8 +65,12 @@ def verify_trusted_api(app, service_call):
         patched = call('plugins.settings.patch', dict(id='other', expectedWriteRevision=namespace['writeRevision'],
             operations=[dict(op='set', path=['parity'], value=name)]))
         assert patched['values']['parity'] == name
-        call('storage.set', dict(instanceId=instance, key='parity', value=name))
-        assert cli('storage.get', dict(pane=sibling, key='parity')) == name
+        stored = call('plugins.data.get', {'id': 'parity.fixture'})
+        call('plugins.data.patch', dict(id='parity.fixture', expectedDataRevision=stored['revision'], operations=[dict(op='set', key='parity', value=name)]))
+        assert cli('plugins.data.get', {'id': 'parity.fixture'})['values']['parity'] == name
+        state = call('plugins.panelState.get', {'pane': panel})
+        call('plugins.panelState.patch', dict(pane=panel, expectedPanelId=state['panelId'], expectedStateRevision=state['revision'], operations=[dict(op='set', key='selection', value=name)]))
+        assert cli('plugins.panelState.get', {'pane': sibling})['values'] == {}
         call('pane.title', dict(pane=sibling, title=name, **guards))
         assert app.rpc('pane.inspect', pane=sibling)['title'] == name
         assert app.rpc('pane.inspect', pane=panel)['title'] == source_title

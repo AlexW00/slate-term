@@ -89,14 +89,14 @@ with AppFixture('api-settings', source) as app:
     assert stale == -32050, stale
     mismatch = evaluate('await workspace.panes.inspect({pane:"p1",tab:"t999"}).then(()=>null,e=>e.code)')
     assert mismatch == -32602, mismatch
-    for method, params in [('pane.title', {'title': 'Must Not Apply'}), ('storage.set', {'key': 'guarded', 'value': 'Must Not Apply'}), ('context.get', {})]:
+    for method, params in [('pane.title', {'title': 'Must Not Apply'}), ('plugins.panelState.patch', {'operations': [{'op': 'set', 'key': 'guarded', 'value': 'Must Not Apply'}]}), ('context.get', {})]:
         for guard, code in [('expectedWorkspaceRevision', -32050), ('expectedSourceRevision', -32602)]:
             result = evaluate('await workspace.call(' + json.dumps(method) + ',' + json.dumps(params | {guard: 'stale'}) + ').then(()=>null,e=>e.code)')
             assert result == code, (method, guard, result)
-    assert evaluate('await workspace.storage.get("guarded")') is None
+    assert evaluate('await workspace.panelState.get().then(s=>s.values.guarded??null)') is None
     assert app.rpc('pane.inspect', pane='p1')['title'] == 'Fixture'
     for value in [None, False, {'ok': False, 'value': 7, 'error': {'code': 123}}]:
-        assert evaluate('(async()=>{await workspace.storage.set("envelope",' + json.dumps(value) + ');return await workspace.storage.get("envelope");})()') == value
+        assert evaluate('(async()=>{const s=await workspace.pluginData.get();await workspace.pluginData.patch([{op:"set",key:"envelope",value:' + json.dumps(value) + '}],s.revision);return (await workspace.pluginData.get()).values.envelope;})()') == value
     # Existing reload convenience remains compatible with the shared API.
     assert isinstance(evaluate('await workspace.command("config.reload")'), dict)
     discovery = evaluate('await workspace.api()')

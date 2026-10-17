@@ -27,7 +27,7 @@ with tempfile.TemporaryDirectory(prefix='slate-window-recovery-', dir='/tmp') as
     state = directory / 'state'
     state.mkdir(mode=0o700)
     (state / 'workspace.json').write_text(json.dumps({
-        'schemaVersion': 1, 'panes': [], 'tabs': [], 'groups': [],
+        'schemaVersion': 2, 'panes': [], 'tabs': [], 'groups': [],
         'nextPane': 17, 'nextTab': 8, 'nextGroup': 6,
     }))
     ready = directory / 'socket'

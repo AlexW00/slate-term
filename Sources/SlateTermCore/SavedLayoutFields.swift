@@ -74,9 +74,17 @@ public struct SavedLayoutPaneType: Codable, Sendable, Identifiable {
 extension SavedLayoutDefinition {
     public func problems(types: [SavedLayoutPaneType]) -> [String] {
         var result: [String] = []
+        var pluginBytes = 0
         for pane in tabs.flatMap(\.panes) {
             guard let type = types.first(where: { $0.id == pane.type }) else {
                 result.append("Missing plugin: \(pane.type)"); continue
+            }
+            if case .registered = PaneType(identifier: pane.type) {
+                do {
+                    var record = PluginPanelRecord()
+                    try record.configure(type.defaults.merging(pane.configuration) { _, explicit in explicit })
+                    pluginBytes += try JSONEncoder().encode(record).count
+                } catch { result.append("Plugin starting configuration exceeds its supported bounds") }
             }
             for field in type.fields {
                 if let problem = field.problem(pane.configuration[field.id]) {
@@ -85,6 +93,7 @@ extension SavedLayoutDefinition {
                 }
             }
         }
+        if pluginBytes > PluginPersistence.workspaceBytes { result.append("Plugin panel records exceed 2 MiB per workspace") }
         return result
     }
 

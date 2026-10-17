@@ -14,7 +14,7 @@ public enum APIGuards {
     /// Reserved routing preconditions. Contributed commands may still define other
     /// argument names beginning with "expected"; those are not host safety guards.
     public static let legacyNames: Set<String> = ["expectedInstanceId", "expectedAnchorSessionId", "expectedWorkspaceRevision", "expectedLayoutRevision", "expectedSourceRevision"]
-    public static let names = legacyNames.union(["expectedWriteRevision", "expectedViewId", "expectedDocumentId", "expectedSavedLayoutRevision"])
+    public static let names = legacyNames.union(["expectedWriteRevision", "expectedViewId", "expectedDocumentId", "expectedSavedLayoutRevision", "expectedDataRevision", "expectedPanelId", "expectedStateRevision"])
 
     public static func supported(by capabilities: JSONValue) throws -> Set<String> {
         guard let object = capabilities.object, object["identityGuards"] == .bool(true) else {

@@ -160,6 +160,7 @@ public struct SavedLayoutPane: Equatable, Codable, Sendable {
                 throw invalidSavedLayout("Invalid plugin pane type: \(type)")
             }
             try checkSavedJSON(.object(configuration))
+            try PluginPersistence.validateConfiguration(configuration)
         }
     }
 
@@ -203,6 +204,7 @@ private func buildSavedTree(_ layout: Layout, seed: PaneID, tab: TabID, path: [B
         let recipe = recipes[template]!
         let type = PaneType(identifier: recipe.type)
         try workspace.setType(seed, to: type)
+        if case .registered = type { try workspace.setPluginConfiguration(recipe.configuration, for: seed) }
         try workspace.setManualTitle(recipe.title, for: seed)
         try workspace.setHeaderVisible(recipe.headerVisible, for: seed)
         mapping[seed] = recipe

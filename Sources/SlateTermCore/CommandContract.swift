@@ -11,7 +11,7 @@ public struct CommandContract: Codable, Sendable {
 
     public static func forCommand(_ id: String) -> Self {
         let global = id.hasPrefix("appearance.") || id.hasPrefix("terminal.font.") || id.hasPrefix("terminal.palette.")
-            || id.hasPrefix("warnings.") || id.hasPrefix("skills.") || id.hasPrefix("welcome.") || (id.hasPrefix("plugins.") && id != "plugins.reload") || id.hasPrefix("window.frame.")
+            || id.hasPrefix("warnings.") || id.hasPrefix("skills.") || id.hasPrefix("welcome.") || (id.hasPrefix("plugins.") && !["plugins.reload", "plugins.panelState.reset"].contains(id)) || id.hasPrefix("window.frame.")
             || ["window.focus", "window.minimize", "window.restore", "window.fullscreen.set", "tab.detachCurrent"].contains(id)
         let independent = id.hasPrefix("notifications.") || id.hasPrefix("layouts.") || (global && id != "tab.detachCurrent") || ["window.new", "settings.open", "config.reload", "command.picker", "browser.clearData"].contains(id)
         let parameters: [String: String]
@@ -33,6 +33,7 @@ public struct CommandContract: Codable, Sendable {
         case "tab.reorder": parameters = ["index": "integer>=0", "focus": "target|preserve", "expectedWorkspaceRevision": "string"]; required = ["index", "expectedWorkspaceRevision"]
         case "tab.move": parameters = ["group": "group-id", "index": "integer>=0", "focus": "target|preserve", "expectedWorkspaceRevision": "string"]; required = ["group", "expectedWorkspaceRevision"]
         case "tab.detach": parameters = ["focus": "target|preserve", "expectedWorkspaceRevision": "string"]; required = ["expectedWorkspaceRevision"]
+        case "plugins.panelState.reset": parameters = ["expectedPanelId": "string", "expectedStateRevision": "string"]; required = ["expectedPanelId", "expectedStateRevision"]
         case "pane.type": parameters = ["type": "pane-type"]; required = ["type"]
         case "pane.focus": parameters = ["pane": "pane-id"]; required = ["pane"]
         case "tab.focus": parameters = ["tab": "tab-id"]; required = ["tab"]

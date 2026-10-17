@@ -71,6 +71,10 @@ Application configuration writes, appearance, palette import and font-default co
 
 `notifications.post/list/dismiss/status` are shared trusted-client operations, also exposed as `workspace.notifications.*` and `slate-term notify` / `slate-term notifications …`. Posts capture the original content lifetime and never request OS permission. Replies distinguish native submission from policy/authorization suppression; neither proves display. Records and unread state are bounded/in-memory. `notifications.next` and `notifications.open` commands navigate without retargeting stale sessions. See [notification contracts, defaults and bounds](notifications.md).
 
+## Plugin data and panel restoration
+
+Discover `api.describe.pluginPersistence`. `plugins.data.get/patch/reset` (CLI `plugins data`) address shared durable values by plugin ID without an open panel. `plugins.panelState.get/patch/reset` (CLI `plugins panel-state`) address one panel’s restoration context; page defaults are native-bound, unanchored clients must supply a pane. Writes require data or panel/content revision guards. Native reset controls use the same operations; no legacy `storage.*` aliases remain. Bulk topology reads omit payloads; `pane.inspect` exposes `pluginPanelId`/`pluginStateRevision`. See [the complete schemas, lifetime and failure contract](plugin-persistence.md).
+
 ## Own-plugin settings
 
 ```js

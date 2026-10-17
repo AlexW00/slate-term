@@ -28,7 +28,8 @@ with AppFixture('plugin-lifecycle') as app:
     app.rpc('command.run', id='pane.type', pane=pane, type='lifecycle', force=True)
     eventually('plugin document', lambda: app.rpc('web.get', pane=pane).get('documentId'))
     instance = app.rpc('pane.inspect', pane=pane)['pluginInstanceId']
-    app.rpc('storage.set', instanceId=instance, key='draft', value='keep me')
+    data = app.rpc('plugins.data.get', id='lifecycle')
+    app.rpc('plugins.data.patch', id='lifecycle', expectedDataRevision=data['revision'], operations=[dict(op='set', key='draft', value='keep me')])
     before = app.rpc('workspace.get')
     app.rpc('plugins.disable', id='lifecycle', error=-32010)
     app.rpc('plugins.unregister', id='lifecycle', error=-32010)
@@ -105,7 +106,7 @@ with AppFixture('plugin-lifecycle') as app:
     app.rpc('command.run', id='pane.type', pane=pane, type='lifecycle', force=True)
     eventually('enabled panel', lambda: app.rpc('web.get', pane=pane).get('documentId'))
     # Scoped data files remain on disk even though the original pane was explicitly closed.
-    assert any('keep me' in p.read_text() for p in (app.root / 'state/plugin-data').rglob('*.json'))
+    assert any('keep me' in p.read_text() for p in (app.root / 'state/plugin-data-v2').rglob('*.json'))
     controller = dict(id='controller', title='Controller', source=dict(kind='directory', path=str(assets)))
     app.rpc('plugins.register', manifest=controller)
     control_pane = app.rpc('command.run', id='split.down', pane='p1')['paneId']

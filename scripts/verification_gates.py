@@ -59,7 +59,7 @@ ORDER = (
     'divider-ordinary', 'causation', 'storage-causation', 'command-lifecycle',
     'settings-lifecycle', 'workspace-persistence', 'pane-titles', 'tab-titles',
     'pane-headers', 'cross-window-pane-movement', 'pane-movement', 'plugins',
-    'plugin-lifecycle', 'plugin-services', 'plugin-commands', 'plugin-header-buttons',
+    'plugin-lifecycle', 'plugin-persistence', 'plugin-services', 'plugin-commands', 'plugin-header-buttons',
     'events', 'extension-interop', 'whitespace',
 )
 ALIASES = {'app': 'app-1'}

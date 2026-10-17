@@ -217,6 +217,8 @@ Restoration preserves pane/tab/group IDs, counters, tab order, split trees/fract
 
 Closing the last window leaves the app running. **New Window** (⌘N) and **New Tab** (⌘T) remain available without a terminal window, including from Settings. Clicking the Dock icon reopens a workspace window. If the saved workspace is empty at launch, the app opens one fresh terminal while preserving the saved identity counters.
 
+Plugin panel identity, saved view state and starting configuration also live in the workspace snapshot (schema 2). Shared plugin data is stored separately and survives panel closure, unregister and restoration being disabled. Old development workspace schemas are rejected/preserved; to start fresh, move `state/workspace.json` aside while Slate is stopped. Old instance-scoped data files remain untouched/unused. See [plugin persistence](plugin-persistence.md).
+
 With `restore_workspace = false`, the app neither loads nor overwrites the existing snapshot. Re-enabling it begins saving the current workspace; it does not replace the live workspace with the old file.
 
 A corrupt or incompatible startup snapshot is preserved unchanged. The app opens a recovery workspace with autosave suspended and reports the error. Repair or move the old file and restart to resume normal restoration. Do not edit a healthy snapshot while the app is running.

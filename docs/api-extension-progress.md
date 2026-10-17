@@ -1,5 +1,44 @@
 # API extension implementation progress
 
+## Plugin persistence — implemented; final native verification blocked
+
+Implemented in `~/.worktrees/local/slate-term-a42fd7a1/plugin-persistence`,
+branch `feature/plugin-persistence`, based on `d6240e5`. Original checkout
+changes are untouched. See the [reviewed plan](plugin-persistence-plan.md),
+[plan review](plugin-persistence-plan-review.md) and [current contract](plugin-persistence.md).
+
+The authoritative workspace now owns panel identity/state/configuration (schema 2);
+shared plugin data uses private per-plugin documents, independent of runtime scope.
+The shared catalog/guards, CLI, bound page helpers, trusted services, events, native
+confirmed resets, configuration/template semantics, regressions and shipped authoring
+guidance are implemented. No implicit legacy migration or resumable launcher identity.
+Panel reset is available in native menus, Cmd-K and configurable shortcuts; shared-data
+deletion is a confirmed Settings action and explicit guarded API/CLI operation, not a
+parameterless global picker action because it requires a chosen namespace.
+
+Host checkpoint: **323 package tests** passed (199 core, 84 settings, 22 IPC, 18 CLI),
+plus 35 VM-runner tests, app/CLI/helper build, mutation checks and whitespace. Fifteen
+selected VM gates have passing results across recorded checkpoints, including the new
+persistence gate, packaged skill and CLI/page/service parity paths. This is not an
+uninterrupted passing batch or a full-suite certification.
+
+Independent implementation review found an authoring-example read invalidation race;
+corrected and regression-tested, with no actionable follow-up findings. Independent
+rendered review found no issues in five native captures. Broader VM runs retained
+readiness/startup/menu failures; an unchanged diagnostic run passed four of the six
+failed gates but exposed an actual readiness-session crash during movement. Corrected
+that HTTP session lifetime race and strengthened its fixture; focused independent
+source review found no actionable findings. **The correction is not yet VM-tested**:
+another active run owns the VM lock. API-parity restart readiness also remains unresolved.
+No lock was broken, timeout/assertion weakened, or host GUI fallback used.
+
+See [implementation review and exact receipts](plugin-persistence-implementation-review.md)
+for passing checks, failed runs, rendered evidence and remaining verification. Final
+host-only revalidation passed: **323 package tests**, app/CLI/helper build and whitespace,
+receipt `artifacts/vm/20261016T162327Z-35f4db04/receipt.json`. Only this final documentation
+status update follows that receipt; no implementation changes followed it.
+
+
 ## First-pass API parity (feature/api-parity-first-pass)
 
 Implemented in `~/.worktrees/local/slate-term-a42fd7a1/api-parity-first-pass`, initially

@@ -29,6 +29,26 @@ extension WorkspaceHost {
             guard let text = value.string, !text.isEmpty else { throw RPCFailure(code: -32602, message: "\(key) must be a nonempty string") }
             return text
         }
+        let persistenceMethod = method == "command.run" && params["id"] == .string("plugins.panelState.reset") ? "plugins.panelState.reset" : method
+        let data = persistenceMethod.hasPrefix("plugins.data.")
+        let panel = persistenceMethod.hasPrefix("plugins.panelState.")
+        if data || panel {
+            var supported: Set<String> = ["expectedInstanceId"]
+            if panel { supported.insert("expectedWorkspaceRevision") }
+            if persistenceMethod != "plugins.data.get" && data { supported.insert("expectedDataRevision") }
+            if persistenceMethod != "plugins.panelState.get" && panel { supported.formUnion(["expectedPanelId", "expectedStateRevision"]) }
+            if let unsupported = Set(params.keys).intersection(Self.apiGuardKeys).subtracting(supported).sorted().first {
+                throw RPCFailure(code: -32602, message: "\(unsupported) is not supported by \(persistenceMethod)")
+            }
+        }
+        for key in ["expectedDataRevision", "expectedPanelId", "expectedStateRevision"] {
+            if try string(key) != nil {
+                let allowed = key == "expectedDataRevision"
+                    ? ["plugins.data.patch", "plugins.data.reset"]
+                    : ["plugins.panelState.patch", "plugins.panelState.reset"]
+                guard allowed.contains(persistenceMethod) else { throw RPCFailure(code: -32602, message: "\(key) is not supported by this operation") }
+            }
+        }
         if method.hasPrefix("layouts.") {
             var supported: Set<String> = ["expectedInstanceId"]
             if ["layouts.windows", "layouts.capture", "layouts.open"].contains(method) { supported.insert("expectedWorkspaceRevision") }
@@ -100,6 +120,7 @@ extension WorkspaceHost {
         return .object([
             "apiVersion": .integer(1), "appInstanceId": .string(instanceID), "identityGuards": .bool(true),
             "workspaceRevisions": .bool(true), "surface": .string("trusted"),
+            "pluginPersistence": Self.pluginPersistenceDescriptor,
             "webAutomation": .object([
                 "version": .integer(1), "paneKinds": .array([.string("browser"), .string("private-browser"), .string("registeredPlugin")]),
                 "identity": .array([.string("viewId"), .string("documentId")]),
@@ -319,6 +340,10 @@ extension WorkspaceHost {
                 (direction.rawValue, tab.layout.neighbor(of: id, direction: direction).map { .string($0.description) } ?? .null)
             }))
         ]
+        if let record = pane.pluginPanel {
+            result["pluginPanelId"] = .string(record.panelId)
+            result["pluginStateRevision"] = .string(record.stateRevision)
+        }
         if let session = shellSessions[id] {
             result["sessionId"] = .string(session.instanceID)
             result["state"] = .string(session.report?.state.rawValue ?? "unknown")
