@@ -289,7 +289,8 @@ class VMRunnerTests(unittest.TestCase):
                 cli = root / '.build/fake/slate-term'
                 cli.write_text('#!/bin/sh\nprintf launched >> ' + str(marker) + '\n')
                 cli.chmod(0o755)
-                for name, message in [('git', 'fixture-commit'), ('xcrun', 'fixture Swift version')]:
+                for name, message in [('git', 'fixture-commit'), ('xcrun', 'fixture Swift version'),
+                                      ('sw_vers', 'fixture macOS version')]:
                     tool = fake_bin / name
                     tool.write_text('#!/bin/sh\necho ' + message + '\n')
                     tool.chmod(0o755)
