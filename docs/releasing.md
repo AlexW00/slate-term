@@ -6,7 +6,7 @@ Slate's release workflow builds Apple Silicon apps for macOS 27 or later. A succ
 
 Pull requests and pushes to `main` run the complete fetched-history secret scan, release-tooling tests, verification-inventory tests, workflow validation, Swift unit tests, and an unsigned Release build/package smoke test. Actions are pinned by commit; Dependabot proposes updates. Fork builds receive no signing credentials. Native application behavior still requires the [VM gates](vm-testing.md); CI packaging does not certify GUI behavior.
 
-The macOS jobs use the Apple Silicon `xcode-27` runner because the app requires SDK 27. The bootstrap pins Ghostty, Zig, downloaded archive hashes, and the local Ghostty patch. It disables Sentry and gettext, and rejects their symbols in the resulting library. The license collector checks pinned dependency notices and installs them into the app.
+The macOS jobs use the Apple Silicon `xcode-27` runner because the app requires SDK 27. Each job installs Apple's optional Metal Toolchain if the shader compiler is unavailable. The bootstrap pins Ghostty, Zig, downloaded archive hashes, and the local Ghostty patch. It disables Sentry and gettext, and rejects their symbols in the resulting library. The license collector checks pinned dependency notices and installs them into the app.
 
 Run the inexpensive checks locally:
 

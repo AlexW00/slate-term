@@ -60,6 +60,12 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.12'
+      - name: Ensure Metal compiler is available
+        run: |
+          if ! xcrun --sdk macosx metal --version; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+          xcrun --sdk macosx metal --version
       - name: Test packages
         run: swift test --jobs 4 --only-use-versions-from-resolved-file
       - name: Build pinned engine
