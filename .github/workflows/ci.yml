@@ -34,6 +34,7 @@ jobs:
         run: python3 -m unittest discover -s Tests/VMRunner -v
       - name: Check shell syntax
         run: |
+          bash -n scripts/setup-metal-ci.sh
           bash -n scripts/build-ghostty.sh
           bash -n scripts/release-build.sh
           bash -n scripts/release-package.sh
@@ -53,11 +54,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Ensure Metal compiler is available
-        run: |
-          if ! xcrun --sdk macosx metal --version; then
-            xcodebuild -downloadComponent MetalToolchain
-          fi
-          xcrun --sdk macosx metal --version
+        run: bash scripts/setup-metal-ci.sh
       - name: Toolchain
         id: toolchain
         run: |
