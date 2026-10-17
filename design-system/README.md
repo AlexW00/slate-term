@@ -6,15 +6,17 @@ The design system's agent-facing files live in the Slate Terminal skill at [`ski
 
 Open `gallery.html` in a browser. It is self-contained. Pick any bundled terminal palette, then switch the pane width between narrow, medium and full, or drag a preview's right edge. Each entry shows its guidance, a live preview inside a mock pane header, and the copyable code.
 
-To view it inside Slate Terminal, register this folder as a panel plugin:
+To view it inside Slate Terminal, package the self-contained gallery as a panel plugin (from this directory):
 
 ```sh
-cat > /tmp/slate-ui-gallery.json <<EOF
-{"id": "slate-ui-gallery", "title": "UI Gallery", "scope": "global",
- "source": {"kind": "directory", "path": "$PWD", "entry": "gallery.html"}}
-EOF
-slate-term plugins register --manifest /tmp/slate-ui-gallery.json
+stage=$(mktemp -d)
+cp gallery.html "$stage/"
+printf '%s\n' '{"id":"slate-ui-gallery","title":"UI Gallery","scope":"global","source":{"kind":"directory","path":".","entry":"gallery.html"}}' > "$stage/plugin.json"
+(cd "$stage" && zip /tmp/slate-ui-gallery.zip plugin.json gallery.html)
+slate-term plugins register --package /tmp/slate-ui-gallery.zip
 ```
+
+Slate keeps its own ZIP/extracted copy. Rebuild the ZIP and install with `--replace` after gallery changes.
 
 When the host implements `appearance.get`, the palette menu gains a **Terminal (live)** option that follows the real palette.
 

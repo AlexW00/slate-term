@@ -9,6 +9,7 @@ import subprocess
 import sys
 from api_fixture import AppFixture, CLI, eventually
 from trusted_api_fixture import verify_trusted_api
+from plugin_package_fixture import package_fixture
 
 
 def service_rpc(env, method, params=None, error=None):
@@ -66,7 +67,7 @@ while True: time.sleep(1)
     def register(name):
         manifest = dict(id=name, title=name, service=dict(executable=sys.executable,
             arguments=[str(worker)], environment={'TEST_ROOT': str(app.root)}, readyTimeoutSeconds=10))
-        app.rpc('plugins.register', manifest=manifest)
+        app.rpc('plugins.register', packagePath=package_fixture(manifest, app.root))
         return manifest
 
     def read(name, suffix):
@@ -106,9 +107,9 @@ while True: time.sleep(1)
     assert read('controller', '.bootstrap')['starting']['source']['kind'] == 'service'
     assert 'SLATE_TERM_SERVICE_TOKEN' not in context
     verify_trusted_api(app, lambda method, params=None, error=None: service_rpc(context, method, params, error))
-    app.rpc('plugins.register', manifest=dict(id='tools', title='Tools', commands=[
+    app.rpc('plugins.register', packagePath=package_fixture(dict(id='tools', title='Tools', commands=[
         dict(id='parent', title='Parent', executable=str(CLI), arguments=['rpc','command.run','--params','{"id":"plugin.tools.child"}']),
-        dict(id='child', title='Child', executable='/bin/sleep', arguments=['30'])]))
+        dict(id='child', title='Child', executable='/bin/sleep', arguments=['30'])]), app.root))
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         pending = pool.submit(service_rpc, context, 'command.run', {'id': 'plugin.tools.parent'})
         eventually('nested service commands', lambda: len([s for s in app.rpc('plugins.status', id='tools') if s['state'] == 'running']) == 2)
@@ -139,7 +140,7 @@ while True: time.sleep(1)
     assert app.cli('rpc', 'api.describe', env=stale, error=True)['code'] == -32059
     eventually('service stdout', lambda: 'READY' in app.cli('plugins', 'service', 'logs', 'controller')['stdout'])
     controller_pid = read('controller', '.bootstrap')['pid']
-    app.rpc('plugins.register', manifest=first_manifest, replace=True)
+    app.rpc('plugins.register', packagePath=package_fixture(first_manifest, app.root), replace=True)
     eventually('replacement retired old process', lambda: not alive(controller_pid))
     assert status('controller')['state'] == 'stopped'
     app.rpc('plugins.unregister', id='controller')

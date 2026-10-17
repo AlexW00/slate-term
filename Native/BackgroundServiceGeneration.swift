@@ -20,6 +20,7 @@ final class BackgroundServiceGeneration {
     private(set) var stderr = Data()
     private let cliPath: String
     private let spec: PluginProcessSpec
+    private let packageRoot: String?
     private let directory = URL(fileURLWithPath: "/tmp/slate-svc-\(UUID().uuidString)")
     private let isCurrent: () -> Bool
     private let request: Request
@@ -36,7 +37,7 @@ final class BackgroundServiceGeneration {
     private var ownsDirectory = false
     private var polling = false
 
-    init(identity: ServiceIdentity, cliPath: String, spec: PluginProcessSpec,
+    init(identity: ServiceIdentity, cliPath: String, spec: PluginProcessSpec, packageRoot: String? = nil,
          isCurrent: @escaping () -> Bool, operations: OperationControl, request: @escaping Request,
          ready: @escaping (WorkspaceOperationContext) throws -> Void,
          retireOwned: @escaping (ServiceIdentity) -> Task<Bool, Never>, failed: @escaping (Failure) -> Void) throws {
@@ -44,6 +45,7 @@ final class BackgroundServiceGeneration {
         audience = .service(epoch: operations.epoch, registrationID: identity.pluginID,
                             recipient: try ServiceEventRecipient(serviceID: identity.serviceID, generation: identity.generation))
         self.cliPath = cliPath; self.spec = spec; self.isCurrent = isCurrent
+        self.packageRoot = packageRoot
         self.request = request; self.ready = ready
         self.retireOwned = retireOwned; self.failed = failed
     }
@@ -80,6 +82,7 @@ final class BackgroundServiceGeneration {
             var environment = ProcessInfo.processInfo.environment.merging(spec.environment) { _, value in value }
             for key in environment.keys where key.hasPrefix("SLATE_TERM_") { environment.removeValue(forKey: key) }
             environment.merge(try connection.commandEnvironment(owner: identity)) { _, value in value }
+            environment["SLATE_TERM_PLUGIN_ROOT"] = packageRoot
             environment["SLATE_TERM_PLUGIN_SETTINGS"] = String(decoding: try JSONEncoder().encode(settings), as: UTF8.self)
             environment["PATH"] = URL(fileURLWithPath: cliPath).deletingLastPathComponent().path + ":" + (environment["PATH"] ?? "/usr/bin:/bin")
             try validateLive()

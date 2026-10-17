@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 from api_fixture import AppFixture, APP, ROOT, eventually
+from plugin_package_fixture import package_fixture
 
 configuration = '[appearance]\ntheme = "light"\n[keybind]\n"cmd+ctrl+r" = "tab.rename"\n"cmd+ctrl+shift+r" = "tab.title.clear"\n'
 with AppFixture('tab-titles', configuration=configuration) as app:
@@ -174,7 +175,7 @@ with AppFixture('tab-titles', configuration=configuration) as app:
     assets = app.root / 'panel'
     assets.mkdir()
     (assets / 'index.html').write_text('<!doctype html><title>Tab names fixture</title>')
-    app.rpc('plugins.register', manifest=dict(id='tabnames', title='Tab Names', source=dict(kind='directory', path=str(assets))))
+    app.rpc('plugins.register', packagePath=package_fixture(dict(id='tabnames', title='Tab Names', source=dict(kind='directory', path=str(assets))), app.root))
     panel = next(t['focusedPane'] for t in app.rpc('tabs.list') if t['id'] == second)
     app.cli('panes', 'type', '--pane', panel, '--type', 'tabnames', '--force')
     eventually('page bridge ready', lambda: js('typeof workspace') == 'object')
@@ -193,7 +194,7 @@ keys=['SLATE_TERM_SOCKET','SLATE_TERM_INSTANCE_ID','SLATE_TERM_SERVICE_PLUGIN_ID
 p=pathlib.Path(os.environ['TAB_CONTEXT']); t=p.with_suffix('.tmp'); t.write_text(json.dumps({k:os.environ[k] for k in keys})); t.replace(p)
 while True: time.sleep(1)
 ''')
-    app.rpc('plugins.register', manifest=dict(id='tabworker', title='Tab Worker', service=dict(executable=sys.executable, arguments=[str(worker)], environment={'TAB_CONTEXT': str(context)})))
+    app.rpc('plugins.register', packagePath=package_fixture(dict(id='tabworker', title='Tab Worker', service=dict(executable=sys.executable, arguments=[str(worker)], environment={'TAB_CONTEXT': str(context)})), app.root))
     app.rpc('plugins.service.start', id='tabworker')
     eventually('service ready', context.exists)
     service_env = dict(app.env, **json.loads(context.read_text()))

@@ -161,7 +161,7 @@ struct TerminalCommand: ParsableCommand {
 }
 
 struct Plugins: ParsableCommand {
-    static let configuration = CommandConfiguration(abstract: "Register trusted web panels. Registered pages can control your terminals.")
+    static let configuration = CommandConfiguration(abstract: "Install trusted plugin ZIPs. Plugins can control your terminals and files.")
     enum Action: String, CaseIterable, ExpressibleByArgument { case list, register, validate, unregister, enable, disable, status, restart, logs, settings, service, data; case panelState = "panel-state" }
     @Argument var action: Action
     @Argument var id: String?
@@ -174,7 +174,7 @@ struct Plugins: ParsableCommand {
     @Option var pane: String?
     @Option var tab: String?
     @Option var expectedWorkspaceRevision: String?
-    @Option var manifest: String?
+    @Option(help: "Plugin ZIP to install or validate.") var package: String?
     @Option var instanceId: String?
     @Flag var replace = false
     @Flag var force = false
@@ -187,14 +187,14 @@ struct Plugins: ParsableCommand {
         if action == .service {
             guard let id, let method = AutomationMethod(rawValue: "plugins.service.\(id)"), method.family == .services,
                   (id == "list" ? namespace == nil : namespace != nil),
-                  manifest == nil, instanceId == nil, !replace, !force, operations == nil, expectedWriteRevision == nil else {
+                  package == nil, instanceId == nil, !replace, !force, operations == nil, expectedWriteRevision == nil else {
                 throw ValidationError("Use plugins service list or plugins service start|stop|status|logs PLUGIN-ID; no registration/settings options")
             }
             try connection.call(method.rawValue, params: namespace.map { ["id": .string($0)] } ?? [:])
             return
         }
         if action == .settings {
-            guard let id, ["get", "patch"].contains(id), let namespace, manifest == nil, instanceId == nil, !replace, !force else {
+            guard let id, ["get", "patch"].contains(id), let namespace, package == nil, instanceId == nil, !replace, !force else {
                 throw ValidationError("Use plugins settings get|patch PLUGIN-ID; registration/process options do not apply")
             }
             var params: [String: JSONValue] = ["id": .string(namespace)]
@@ -215,16 +215,18 @@ struct Plugins: ParsableCommand {
         if force { params["force"] = .bool(true) }
         if replace { params["replace"] = .bool(true) }
         if action == .register || action == .validate {
-            guard let manifest else { throw ValidationError("register and validate require --manifest") }
-            let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: manifest))
-            defer { try? handle.close() }
-            let registration = try PluginRegistration.parse(handle.read(upToCount: 262_145) ?? Data())
+            guard let package, id == nil, instanceId == nil, !force, action != .validate || !replace else {
+                throw ValidationError("register and validate require --package ZIP; only register accepts --replace")
+            }
+            let url = URL(fileURLWithPath: package).standardizedFileURL
             if action == .validate {
                 guard connection.socket == nil else { throw ValidationError("validate is offline; do not pass --socket") }
-                try printJSON(.object(["valid": .bool(true), "registration": try .encoding(registration)]))
+                try printJSON(PluginPackageStore.validate(url))
                 return
             }
-            params["manifest"] = try .encoding(registration)
+            params["packagePath"] = .string(url.path)
+        } else if package != nil || replace {
+            throw ValidationError("--package and --replace require plugins register (or --package for validate)")
         }
         try connection.call("plugins.\(action.rawValue)", params: params)
     }

@@ -510,10 +510,10 @@ private struct SettingsView: View {
                         .font(.system(size: 44)).foregroundStyle(.secondary)
                     VStack(spacing: 8) {
                         Text("No Plugins").font(.title2.weight(.semibold))
-                        Text("Register a plugin to add commands or panel types to Slate Terminal.")
+                        Text("Install a plugin ZIP to add commands or panel types to Slate Terminal.")
                             .foregroundStyle(.secondary)
                     }
-                    Button("Register Plugin…") { model.registerPlugin?() }
+                    Button("Install Plugin…") { model.registerPlugin?() }
                     pluginRegistrationHint
                 }
                 .multilineTextAlignment(.center)
@@ -526,8 +526,8 @@ private struct SettingsView: View {
 
     private var pluginRegistrationHint: some View {
         VStack(spacing: 6) {
-            Text("You or an agent can also register plugins from the command line:")
-            Text("slate-term plugins register --manifest /path/to/plugin.json")
+            Text("You or an agent can also install plugin ZIPs from the command line:")
+            Text("slate-term plugins register --package /path/to/plugin.zip")
                 .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
         }
         .font(.callout).foregroundStyle(.secondary)
@@ -576,7 +576,7 @@ private struct SettingsView: View {
             Section {
                 HStack {
                     Spacer()
-                    Button("Register Plugin…") { model.registerPlugin?() }
+                    Button("Install Plugin…") { model.registerPlugin?() }
                     Spacer()
                 }
             } footer: {

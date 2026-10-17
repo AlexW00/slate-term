@@ -8,6 +8,7 @@ import os
 import subprocess
 import threading
 from api_fixture import AppFixture, ROOT, eventually
+from plugin_package_fixture import package_fixture
 
 HTML = '''<!doctype html><title>Shared web fixture</title>
 <input id="name" value="before"><input id="password" type="password" value="PASSWORD_SENTINEL">
@@ -54,7 +55,7 @@ with AppFixture('web-conformance') as app:
         app.rpc('command.run', id='pane.type', pane='p1', type='browser', force=True)
         app.rpc('browser.navigate', pane='p1', url=base + '/index.html')
         p2 = app.rpc('command.run', id='split.right', pane='p1')['paneId']
-        app.rpc('plugins.register', manifest=dict(id='web.fixture', title='Web fixture', source=dict(kind='directory', path=str(assets))))
+        app.rpc('plugins.register', packagePath=package_fixture(dict(id='web.fixture', title='Web fixture', source=dict(kind='directory', path=str(assets))), app.root))
         app.rpc('command.run', id='pane.type', pane=p2, type='web.fixture', force=True)
         eventually('public identity without a bridge call', lambda: app.rpc('pane.inspect', pane=p2).get('documentId') is not None)
         plugin = next(p['plugin'] for p in app.rpc('debug.inspect')['panes'] if p['paneId'] == p2)

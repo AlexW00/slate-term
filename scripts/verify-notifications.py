@@ -10,6 +10,7 @@ import sys
 import struct
 import time
 from api_fixture import AppFixture, ROOT, eventually
+from plugin_package_fixture import package_fixture
 
 configuration = '''[terminal]
 shell = "/bin/zsh"
@@ -138,8 +139,8 @@ with AppFixture('notifications', configuration) as app:
     assets = app.root / 'panel'
     assets.mkdir()
     (assets / 'index.html').write_text('<!doctype html><title>Notification fixture</title><p>Notification API fixture</p>')
-    app.rpc('plugins.register', manifest=dict(id='notification.fixture', title='Notification fixture', scope='global',
-        source=dict(kind='directory', path=str(assets))))
+    app.rpc('plugins.register', packagePath=package_fixture(dict(id='notification.fixture', title='Notification fixture', scope='global',
+        source=dict(kind='directory', path=str(assets))), app.root))
     app.rpc('command.run', id='pane.type', pane=active, type='notification.fixture', force=True)
     def js(script):
         return app.rpc('debug.pluginEval', pane=active, script=script)
@@ -158,8 +159,8 @@ path=root/'service-context.json'; path.write_text(json.dumps(context)); path.chm
 subprocess.run([os.environ['SLATE_TERM_CLI'],'rpc','service.ready','--params','{"version":1}','--json'],check=True)
 while True:time.sleep(1)
 ''')
-    app.rpc('plugins.register', manifest=dict(id='notification.service', title='Notification service',
-        service=dict(executable=sys.executable, arguments=[str(worker)], environment={'TEST_ROOT': str(app.root)})))
+    app.rpc('plugins.register', packagePath=package_fixture(dict(id='notification.service', title='Notification service',
+        service=dict(executable=sys.executable, arguments=[str(worker)], environment={'TEST_ROOT': str(app.root)})), app.root))
     app.rpc('plugins.service.start', id='notification.service')
     eventually('notification service ready', lambda: app.rpc('plugins.service.status', id='notification.service')['state'] == 'ready')
     service_env = dict(app.env, **json.loads((app.root / 'service-context.json').read_text()))

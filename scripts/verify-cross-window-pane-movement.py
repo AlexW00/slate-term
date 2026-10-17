@@ -8,6 +8,7 @@ import socket
 import sys
 import time
 from api_fixture import AppFixture, ROOT, eventually
+from plugin_package_fixture import package_fixture
 
 
 def service_call(context, method, params, error=None):
@@ -61,8 +62,8 @@ with AppFixture('cross-window-pane-movement') as app:
     assets.mkdir()
     (assets / 'index.html').write_text('<!doctype html><title>Move fixture</title><h1>Live plugin</h1><input value="unchanged">')
     for scope in ['pane', 'tab', 'global']:
-        app.rpc('plugins.register', manifest=dict(id='move.' + scope, title='Move ' + scope, scope=scope,
-                    source=dict(kind='directory', path=str(assets))))
+        app.rpc('plugins.register', packagePath=package_fixture(dict(id='move.' + scope, title='Move ' + scope, scope=scope,
+                    source=dict(kind='directory', path=str(assets))), app.root))
     controller = command('split.right', pane='p1')['paneId']
     command('pane.type', pane=controller, type='move.global', force=True)
 
@@ -81,8 +82,8 @@ pathlib.Path(os.environ['CONTEXT_PATH']).write_text(json.dumps({k:os.environ[k] 
 subprocess.run([os.environ['SLATE_TERM_CLI'],'rpc','service.ready','--params','{"version":1}'],check=True)
 while True: time.sleep(1)
 ''')
-    app.rpc('plugins.register', manifest=dict(id='move.service', title='Move service', service=dict(executable=sys.executable,
-        arguments=[str(worker)], environment=dict(CONTEXT_PATH=str(context_path)), readyTimeoutSeconds=10)))
+    app.rpc('plugins.register', packagePath=package_fixture(dict(id='move.service', title='Move service', service=dict(executable=sys.executable,
+        arguments=[str(worker)], environment=dict(CONTEXT_PATH=str(context_path)), readyTimeoutSeconds=10)), app.root))
     app.rpc('plugins.service.start', id='move.service')
     eventually('service ready', lambda: app.rpc('plugins.service.status', id='move.service')['state'] == 'ready')
     context = json.loads(context_path.read_text())
@@ -257,9 +258,9 @@ while True: time.sleep(1)
     close_tab(target)
 
     # A destination backend failure is readiness failure after an accepted placement, never rollback.
-    app.rpc('plugins.register', manifest=dict(id='move.failed', title='Failed backend', scope='tab',
+    app.rpc('plugins.register', packagePath=package_fixture(dict(id='move.failed', title='Failed backend', scope='tab',
         source=dict(kind='url', url='http://127.0.0.1:0/'),
-        process=dict(executable='/usr/bin/false', restartLimit=0, readyTimeoutSeconds=1)))
+        process=dict(executable='/usr/bin/false', restartLimit=0, readyTimeoutSeconds=1)), app.root))
     # Repeated immediate exits/moves/close must not invalidate an HTTP session while
     # its async readiness task is still being created (previously an Obj-C crash).
     for _ in range(6):

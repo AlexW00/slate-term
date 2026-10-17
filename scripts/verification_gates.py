@@ -58,7 +58,7 @@ ORDER = (
     'divider-native-commands', 'divider-presentation', 'divider-reentrancy',
     'divider-ordinary', 'causation', 'storage-causation', 'command-lifecycle',
     'settings-lifecycle', 'workspace-persistence', 'pane-titles', 'tab-titles',
-    'pane-headers', 'cross-window-pane-movement', 'pane-movement', 'plugins',
+    'pane-headers', 'cross-window-pane-movement', 'pane-movement', 'plugins', 'plugin-packages',
     'plugin-lifecycle', 'plugin-persistence', 'plugin-services', 'plugin-commands', 'plugin-header-buttons',
     'events', 'extension-interop', 'whitespace',
 )

@@ -1,0 +1,5 @@
+module SlateArchive {
+    header "SlateArchive.h"
+    export *
+    link "archive"
+}

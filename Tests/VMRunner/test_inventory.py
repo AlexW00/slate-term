@@ -1,5 +1,7 @@
 """Inventory completeness and relocatable runtime-only bundle regressions."""
 from pathlib import Path
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -15,7 +17,8 @@ class InventoryTests(unittest.TestCase):
     def test_full_inventory_includes_every_script_and_three_app_iterations(self):
         inventory.validate(REPO)
         selected = inventory.select([], complete=True)
-        self.assertEqual(len(selected), 82)
+        self.assertEqual(len(selected), 83)
+        self.assertIn('plugin-packages', [gate.name for gate in selected])
         self.assertEqual([gate.name for gate in selected], list(inventory.ORDER))
         self.assertEqual([gate.name for gate in selected if gate.command[-1] == 'scripts/verify-app.py'],
                          ['app-1', 'app-2', 'app-3'])
@@ -78,6 +81,26 @@ class InventoryTests(unittest.TestCase):
             self.assertEqual(set(host), expected)
             self.assertEqual(hashes, host)
             self.assertFalse((staged / gate.native_directory / 'module-cache').exists())
+
+    def test_native_compiler_supplies_transitive_archive_module_and_object(self):
+        # Stub only the compiler: this host check must never execute a native fixture.
+        with tempfile.TemporaryDirectory(prefix='native flags ') as temporary:
+            directory = Path(temporary)
+            compiler = directory / 'swiftc'
+            compiler.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')
+            compiler.chmod(0o700)
+            environment = dict(os.environ, PATH=str(directory) + ':' + os.environ['PATH'])
+            cases = [([], False, False), (['-lSlateTermSettings'], True, False),
+                     ([str(directory / 'SlateTermSettings.o')], True, True)]
+            for arguments, needs_module, needs_object in cases:
+                result = subprocess.run(['/bin/bash', '-c',
+                    'set -eu; source scripts/native-gate.sh; slate_native_swiftc "$@"',
+                    'native-flags', *arguments, '-o', str(directory / 'fixture')],
+                    cwd=REPO, env=environment, text=True, capture_output=True, check=True)
+                flags = result.stdout.splitlines()
+                self.assertEqual('-larchive' in flags, needs_module)
+                self.assertEqual(str(REPO / 'Sources/SlateArchive/include') in flags, needs_module)
+                self.assertEqual(str(directory / 'SlateArchive.o') in flags, needs_object)
 
     def test_native_dependency_validation_requires_gate_local_dylibs(self):
         with tempfile.TemporaryDirectory() as temporary:

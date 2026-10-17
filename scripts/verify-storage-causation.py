@@ -2,13 +2,14 @@
 """Shared data invalidations preserve admitted causal depth across runtime scopes."""
 import json
 from api_fixture import AppFixture, eventually
+from plugin_package_fixture import package_fixture
 
 with AppFixture('storage-causation') as app:
     panel = app.root / 'panel'
     panel.mkdir()
     (panel / 'index.html').write_text('<!doctype html><title>Storage causation</title>')
-    app.rpc('plugins.register', manifest={'id': 'storage.fixture', 'title': 'Storage fixture',
-                                         'source': {'kind': 'directory', 'path': str(panel)}})
+    app.rpc('plugins.register', packagePath=package_fixture({'id': 'storage.fixture', 'title': 'Storage fixture',
+                                         'source': {'kind': 'directory', 'path': str(panel)}}, app.root))
     app.rpc('command.run', id='pane.type', pane='p1', type='storage.fixture', force=True)
 
     def js(script):

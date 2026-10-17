@@ -124,6 +124,7 @@ final class PluginInstance {
             if registration.scope == .pane { environment["SLATE_TERM_PANE_ID"] = scopeKey }
             let helperDirectory = URL(fileURLWithPath: connection.cliPath).deletingLastPathComponent().path
             environment["PATH"] = helperDirectory + ":" + (environment["PATH"] ?? "/usr/bin:/bin")
+            environment["SLATE_TERM_PLUGIN_ROOT"] = registration.packageRoot
             environment["SLATE_TERM_PLUGIN_ID"] = registration.id
             environment["SLATE_TERM_PLUGIN_INSTANCE"] = id
             environment["SLATE_TERM_PLUGIN_HOST"] = "127.0.0.1"

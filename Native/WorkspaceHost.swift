@@ -29,6 +29,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         return try reconcile(next, transition: transition, operation: operation)
     }
     private var pluginCatalog: PluginCatalog
+    private var packageOperationBusy = false
     var pluginSettingsRecipients: [(id: String, plugin: String)] {
         pluginInstances.all.map { (id: $0.id, plugin: $0.registration.id) }
     }
@@ -178,7 +179,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         self.settings = settings
         browserData = try BrowserData(directory: settings.base.appendingPathComponent("state"))
         savedLayouts = SavedLayouts(directory: settings.configURL.deletingLastPathComponent().appendingPathComponent("layouts"))
-        let catalog = try PluginCatalog(directory: settings.base.appendingPathComponent("state"))
+        let catalog = try PluginCatalog(directory: settings.base.appendingPathComponent("plugins"))
+        let maintenance = try catalog.packages.cleanAbandonedStaging().merging(catalog.packages.orphanRoots(referenced: catalog.records)) { first, _ in first }
+        for (root, reason) in maintenance { PackageFiles.retain(root: root, reason: reason) }
         pluginCatalog = catalog
         pluginInstances = PluginInstances()
         self.workspace = settings.restore(or: workspace, registeredTypes: Set(catalog.activeRegistrations.filter(\.hasPanel).map(\.id)))
@@ -565,6 +568,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     private func routeAdmitted(_ method: String, contract: AutomationMethod?, params input: [String: JSONValue],
                                operation: WorkspaceOperationContext, caller: AutomationCaller?) async throws -> JSONValue {
         var params = input
+        if contract == .pluginsRegister || contract == .pluginsValidate {
+            return try await installPlugin(params: params, validateOnly: contract == .pluginsValidate, operation: operation)
+        }
         if let contract, contract.family == .pluginPersistence {
             return try callPluginPersistence(contract, params: params, operation: operation)
         }
@@ -756,34 +762,26 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         case .tabsList: return try .encoding(workspace.tabs)
         case .panesList: return try workspace.publicJSON().object!["panes"]!
         case .pluginsList:
-            return .array(try pluginCatalog.registrations.map { registration in
-                var info = try JSONValue.encoding(registration).object ?? [:]
-                info["enabled"] = .bool(!pluginCatalog.disabledPlugins.contains(registration.id))
-                return .object(info)
-            })
+            var list = pluginCatalog.list().array ?? []
+            for index in list.indices {
+                if var info = list[index].object {
+                    info["cleanupPending"] = .bool(PackageFiles.diagnostics.keys.contains { URL(fileURLWithPath: $0).deletingLastPathComponent().deletingLastPathComponent().lastPathComponent == info["id"]?.string })
+                    list[index] = .object(info)
+                }
+            }
+            return .array(list)
         case .pluginsStatus:
-            return .array((pluginInstances.all.map(\.info) + pluginCommands.all).filter { params["id"]?.string == nil || $0.object?["type"] == params["id"] })
+            let cleanup = PackageFiles.diagnostics.map { root, message in
+                JSONValue.object(["type": .string(URL(fileURLWithPath: root).deletingLastPathComponent().deletingLastPathComponent().lastPathComponent),
+                    "kind": .string("packageCleanup"), "packageRoot": .string(root), "cleanupPending": .bool(true), "diagnostic": .string(message)])
+            }
+            return .array((pluginInstances.all.map(\.info) + pluginCommands.all + cleanup).filter { params["id"]?.string == nil || $0.object?["type"] == params["id"] })
         case .pluginsLogs:
             if let id = params["instanceId"]?.string, let logs = pluginCommands.logs(instanceID: id) { return .object(["text": .string(logs)]) }
             guard let instance = pluginInstances.all.first(where: { $0.id == params["instanceId"]?.string }) else { throw RPCFailure(code: -32602, message: "An active instanceId is required") }
             return .object(["text": .string(instance.logs)])
-        case .pluginsRegister:
-            guard let manifest = params["manifest"] else { throw RPCFailure(code: -32602, message: "manifest is required") }
-            let registration = try PluginRegistration.parse(JSONEncoder().encode(manifest))
-            guard !workspace.panes.contains(where: { $0.type == .registered(registration.id) }) else { throw RPCFailure(code: -32010, message: "Close or change this type's panes before replacing its registration") }
-            if case .directory(let path, _) = registration.source {
-                let encodedPath = URLComponents(url: registration.entryURL!, resolvingAgainstBaseURL: false)!.percentEncodedPath
-                _ = try PluginAssets(root: URL(fileURLWithPath: path)).file(forPercentEncodedPath: encodedPath)
-            }
-            try pluginCatalog.register(registration, replace: params["replace"] == .bool(true))
-            backgroundServices.remove(registration.id, operation: operation)
-            headerActionRevisions[registration.id] = UUID()
-            pluginInstances.remove(type: registration.id)
-            pluginCommands.remove(plugin: registration.id)
-            buildMenus()
-            refreshSettings()
-            events.publishHost("host.plugins.changed", payload: .object(["type": .string(registration.id), "registered": .bool(true), "enabled": .bool(!pluginCatalog.disabledPlugins.contains(registration.id))]), lineage: operation.lineage)
-            return try .encoding(registration)
+        case .pluginsRegister, .pluginsValidate:
+            throw RPCFailure(code: -32603, message: "Package preparation requires asynchronous dispatch")
         case .pluginsEnable, .pluginsDisable, .pluginsUnregister:
             return try changePluginRegistration(contract, params: params, operation: operation)
         case .contextGet: return try context(params)
@@ -1369,9 +1367,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                         _ = try? self.call("command.run", params: ["id": .string("tab.new"), "title": .string(stale)])
                     }
                     if params["replaceWhileConfirming"] == .bool(true),
-                       let registration = self.pluginCatalog.registrations.first(where: { $0.id == plugin }),
-                       let manifest = try? JSONValue.encoding(registration) {
-                        _ = try? self.call("plugins.register", params: ["manifest": manifest, "replace": .bool(true)])
+                       let record = self.pluginCatalog.records.first(where: { $0.id == plugin }),
+                       let prepared = try? self.pluginCatalog.packages.prepare(self.pluginCatalog.packages.root(record).deletingLastPathComponent().appendingPathComponent("package.zip")) {
+                        _ = try? self.commitPackage(prepared, replace: true, revision: self.pluginCatalog.revision, operation: .init(origin: .native))
                     }
                     alert.buttons[params["confirmPluginChange"] == .bool(true) ? 1 : 0].performClick(nil)
                 }
@@ -2806,12 +2804,16 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         let payload = withoutAPIGuards(params)
         guard Set(payload.keys).isSubset(of: ["id", "force"]),
               payload["force"] == nil || payload["force"] == .bool(true) || payload["force"] == .bool(false),
-              let id = payload["id"]?.string, pluginCatalog.registrations.contains(where: { $0.id == id }) else {
-            throw RPCFailure(code: -32602, message: "A registered plugin id and optional boolean force are required")
+              let id = payload["id"]?.string, pluginCatalog.records.contains(where: { $0.id == id }) else {
+            throw RPCFailure(code: -32602, message: "An installed plugin id and optional boolean force are required")
         }
+        let removedPackage = pluginCatalog.records.first { $0.id == id }
         let removing = method == .pluginsUnregister
         let enabling = method == .pluginsEnable
         let action: WorkspaceTransition.Observation = removing ? .pluginRemoval : (enabling ? .pluginEnable : .pluginDisable)
+        if enabling, pluginCatalog.diagnostics[id] != nil {
+            throw RPCFailure(code: -32602, message: "Repair the unavailable plugin before enabling it")
+        }
         let changed = removing || pluginCatalog.disabledPlugins.contains(id) == enabling
         let using = enabling ? [] : workspace.panes.filter { $0.type == .registered(id) }.map(\.id)
         guard using.isEmpty || payload["force"] == .bool(true) else {
@@ -2847,28 +2849,30 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             pluginInstances.remove(type: id)
             pluginCommands.remove(plugin: id)
         }
+        if removing, let removedPackage { retirePackage(removedPackage) }
         buildMenus()
         refreshSettings()
         return operationResult(result, transition: transition, operation: operation, workspacePersistence: persistence, committedExternalEffect: true)
     }
 
     private func changePluginFromSettings(_ id: String, method: AutomationMethod) {
-        guard let registration = pluginCatalog.registrations.first(where: { $0.id == id }) else { return }
+        guard let record = pluginCatalog.records.first(where: { $0.id == id }) else { return }
+        let title = pluginCatalog.registrations.first(where: { $0.id == id })?.title ?? id
         let revision = revisions.revision
         let registrationRevision = headerActionRevisions[id]
         let hasPanes = workspace.panes.contains { $0.type == .registered(id) }
         if method == .pluginsUnregister || method == .pluginsDisable && hasPanes {
             let alert = NSAlert()
             let verb = method == .pluginsUnregister ? "Remove" : "Disable"
-            alert.messageText = "\(verb) \(registration.title)?"
+            alert.messageText = "\(verb) \(title)?"
             alert.informativeText = (hasPanes ? "Its open panes will close and running work will stop. " : "Running work will stop. ")
-                + (method == .pluginsUnregister ? "Saved plugin data is kept. You can register it again later." : "Saved plugin data is kept. You can enable it again later.")
+                + (method == .pluginsUnregister ? "Installed code will be removed. Saved plugin data is kept. You can install it again later." : "Saved plugin data is kept. You can enable it again later.")
             alert.addButton(withTitle: "Cancel")
             alert.addButton(withTitle: verb)
             guard runConfirmationAlert(alert) == .alertSecondButtonReturn else { return }
         }
         do {
-            guard pluginCatalog.registrations.first(where: { $0.id == id }) == registration,
+            guard pluginCatalog.records.first(where: { $0.id == id }) == record,
                   headerActionRevisions[id] == registrationRevision else {
                 throw RPCFailure(code: APIError.conflict, message: "Plugin registration changed; review it again")
             }
@@ -2952,7 +2956,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
 
     private func refreshPluginSettingsStatus() {
         guard let model = settingsModel else { return }
-        let plugins = pluginCatalog.registrations.map { registration in
+        var plugins = pluginCatalog.registrations.map { registration in
             let instances = pluginInstances.all.filter { $0.registration.id == registration.id }
             let runs = pluginCommands.all.filter { $0.object?["type"]?.string == registration.id }
             let enabled = !pluginCatalog.disabledPlugins.contains(registration.id)
@@ -2969,6 +2973,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             return SettingsModel.Plugin(id: registration.id, title: registration.title, enabled: enabled,
                 indicator: !enabled ? .disabled : busy ? .busy : failed ? .failed : ready ? .ready : .idle,
                 status: !enabled ? "Disabled" : details.isEmpty ? (registration.commands.isEmpty ? "Not running" : "\(registration.commands.count) commands available") : details.joined(separator: ", "))
+        }
+        plugins += pluginCatalog.records.compactMap { record in
+            guard let diagnostic = pluginCatalog.diagnostics[record.id] else { return nil }
+            return SettingsModel.Plugin(id: record.id, title: record.id, enabled: record.enabled, indicator: .failed, status: diagnostic)
         }
         if plugins != model.plugins { model.plugins = plugins }
     }
@@ -3007,25 +3015,92 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }
     }
 
+    private func preparePackage(_ url: URL) async throws -> PreparedPluginPackage {
+        let store = pluginCatalog.packages
+        let task = Task.detached(priority: .userInitiated) {
+            do { return try store.prepare(url) }
+            catch is CancellationError { throw CancellationError() }
+            catch let failure as RPCFailure { throw failure }
+            catch { throw RPCFailure(code: -32602, message: "Could not prepare plugin ZIP: \(error)") }
+        }
+        return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+    }
+
+    private func installPlugin(params: [String: JSONValue], validateOnly: Bool, operation: WorkspaceOperationContext) async throws -> JSONValue {
+        let payload = withoutAPIGuards(params)
+        let allowed: Set<String> = validateOnly ? ["packagePath"] : ["packagePath", "replace"]
+        guard Set(payload.keys).isSubset(of: allowed), let path = payload["packagePath"]?.string, path.hasPrefix("/"), !path.utf8.contains(0),
+              payload["replace"] == nil || payload["replace"] == .bool(true) || payload["replace"] == .bool(false) else {
+            throw RPCFailure(code: -32602, message: "An absolute ZIP packagePath and optional boolean replace are required")
+        }
+        guard !packageOperationBusy else { throw RPCFailure(code: APIError.conflict, message: "Another package operation is pending") }
+        packageOperationBusy = true
+        defer { packageOperationBusy = false }
+        let revision = pluginCatalog.revision
+        let prepared = try await preparePackage(URL(fileURLWithPath: path))
+        try Task.checkCancellation()
+        try operation.validateCaller()
+        try validateAPIGuards(params, method: validateOnly ? "plugins.validate" : "plugins.register")
+        if validateOnly { return prepared.validation }
+        return try commitPackage(prepared, replace: payload["replace"] == .bool(true), revision: revision, operation: operation)
+    }
+
+    private func commitPackage(_ prepared: PreparedPluginPackage, replace: Bool, revision: UUID,
+                               operation: WorkspaceOperationContext) throws -> JSONValue {
+        try Task.checkCancellation()
+        try operation.validateCaller()
+        guard !reconciling, !settlingNativeLayouts, pluginCatalog.revision == revision else {
+            throw RPCFailure(code: APIError.conflict, message: "Plugin registry changed during preparation; review it again")
+        }
+        let id = prepared.manifest.id
+        guard PackageFiles.diagnostics.count < 64 else { throw RPCFailure(code: APIError.unavailable, message: "Too many retained package generations; inspect plugins.status before installing more") }
+        guard !workspace.panes.contains(where: { $0.type == .registered(id) }) else {
+            throw RPCFailure(code: -32010, message: "Close this plugin's panes before replacing it")
+        }
+        let previous = pluginCatalog.records.first { $0.id == id }
+        let fact = operation.publication(topic: "host.plugins.changed", payload: ["type": .string(id), "registered": .bool(true),
+            "enabled": .bool(previous?.enabled ?? true), "installationID": .string(prepared.installationID.uuidString.lowercased())])
+        try events.commitWorkspace([fact], beforeCommit: {
+            _ = try self.pluginCatalog.register(prepared, replace: replace)
+        }, updatingModel: {})
+        backgroundServices.remove(id, operation: operation)
+        headerActionRevisions[id] = UUID()
+        pluginInstances.remove(type: id)
+        pluginCommands.remove(plugin: id)
+        if let previous { retirePackage(previous) }
+        buildMenus(); refreshSettings()
+        return pluginCatalog.list().array?.first { $0.object?["id"] == .string(id) } ?? .null
+    }
+
+    private func retirePackage(_ record: InstalledPlugin) {
+        let store = pluginCatalog.packages
+        PackageFiles.retire(root: store.root(record).path) { try store.remove(record) }
+    }
+
     @objc private func registerPlugin() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.json]
+        panel.allowedContentTypes = [.zip]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.begin { [weak self] response in
             guard response == .OK, let self, let url = panel.url else { return }
-            do {
-                let handle = try FileHandle(forReadingFrom: url)
-                defer { try? handle.close() }
-                let registration = try PluginRegistration.parse(handle.read(upToCount: 262_145) ?? Data())
-                let alert = NSAlert()
-                alert.messageText = "Allow \(registration.title) to control Slate Terminal?"
-                alert.informativeText = "Register only code you trust. This plugin can read terminal content, run commands, and change panes.\n\n\(registration.entryURL?.absoluteString ?? "On-demand executable commands")"
-                alert.addButton(withTitle: "Cancel")
-                alert.addButton(withTitle: "Register")
-                guard alert.runModal() == .alertSecondButtonReturn else { return }
-                _ = try self.call("plugins.register", params: ["manifest": try .encoding(registration)])
-            } catch { self.present(error) }
+            Task {
+                guard !self.packageOperationBusy else { self.present(RPCFailure(code: APIError.conflict, message: "Another package operation is pending")); return }
+                self.packageOperationBusy = true
+                defer { self.packageOperationBusy = false }
+                do {
+                    let revision = self.pluginCatalog.revision
+                    let prepared = try await self.preparePackage(url)
+                    let replacing = self.pluginCatalog.records.contains { $0.id == prepared.manifest.id }
+                    let alert = NSAlert()
+                    alert.messageText = "Allow \(prepared.manifest.title) to control Slate Terminal?"
+                    alert.informativeText = "Install only code you trust. This plugin can read terminal content, run commands, and change panes. Slate will keep its own copy.\n\nPlugin: \(prepared.manifest.id)" + (replacing ? "\nThis replaces the installed package." : "")
+                    alert.addButton(withTitle: "Cancel")
+                    alert.addButton(withTitle: replacing ? "Replace" : "Install")
+                    guard self.runConfirmationAlert(alert) == .alertSecondButtonReturn else { return }
+                    _ = try self.commitPackage(prepared, replace: replacing, revision: revision, operation: .init(origin: .native))
+                } catch { self.present(error) }
+            }
         }
     }
 

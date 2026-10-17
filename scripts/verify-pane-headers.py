@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 from api_fixture import APP, AppFixture, ROOT, eventually
+from plugin_package_fixture import package_fixture
 
 ARTIFACTS = ROOT / 'artifacts'
 ARTIFACTS.mkdir(exist_ok=True)
@@ -40,7 +41,7 @@ with AppFixture('pane-headers', configuration) as app:
     assets = app.root / 'panel'
     assets.mkdir()
     (assets / 'index.html').write_text('<!doctype html><title>Preview</title><style>body{font:16px system-ui;padding:24px}</style><h1>Preview</h1><p>Retained pane content</p><input value="Draft stays here">')
-    app.rpc('plugins.register', manifest=dict(id='headers.fixture', title='Header Fixture', source=dict(kind='directory', path=str(assets))))
+    app.rpc('plugins.register', packagePath=package_fixture(dict(id='headers.fixture', title='Header Fixture', source=dict(kind='directory', path=str(assets))), app.root))
     command('pane.type', pane=panel, type='headers.fixture', force=True)
 
     def js(script):
@@ -121,7 +122,7 @@ keys=['SLATE_TERM_SOCKET','SLATE_TERM_INSTANCE_ID','SLATE_TERM_SERVICE_PLUGIN_ID
 p=pathlib.Path(os.environ['HEADER_CONTEXT']); t=p.with_suffix('.tmp'); t.write_text(json.dumps({k:os.environ[k] for k in keys})); t.replace(p)
 while True: time.sleep(1)
 ''')
-    app.rpc('plugins.register', manifest=dict(id='headerworker', title='Header Worker', service=dict(executable=sys.executable, arguments=[str(worker)], environment={'HEADER_CONTEXT': str(context_file)})))
+    app.rpc('plugins.register', packagePath=package_fixture(dict(id='headerworker', title='Header Worker', service=dict(executable=sys.executable, arguments=[str(worker)], environment={'HEADER_CONTEXT': str(context_file)})), app.root))
     app.rpc('plugins.service.start', id='headerworker')
     eventually('service ready', context_file.exists)
     service_env = dict(app.env, **json.loads(context_file.read_text()))

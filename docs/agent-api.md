@@ -89,6 +89,12 @@ Agents that name themselves get a frame and tag on the panes and elements they t
 
 Discover `api.describe.pluginPersistence`. `plugins.data.get/patch/reset` (CLI `plugins data`) address shared durable values by plugin ID without an open panel. `plugins.panelState.get/patch/reset` (CLI `plugins panel-state`) address one panel’s restoration context; page defaults are native-bound, unanchored clients must supply a pane. Writes require data or panel/content revision guards. Native reset controls use the same operations; no legacy `storage.*` aliases remain. Bulk topology reads omit payloads; `pane.inspect` exposes `pluginPanelId`/`pluginStateRevision`. See [the complete schemas, lifetime and failure contract](plugin-persistence.md).
 
+## Managed plugin packages
+
+`plugins.register {packagePath, replace?:boolean}` installs a local ZIP containing root `plugin.json` and its resources into application support. `plugins.validate {packagePath}` inspects it without installation or execution. CLI: `plugins register --package ZIP [--replace]`; offline inspection: `plugins validate --package ZIP`. Paths sent over RPC must be absolute and readable by the host; CLI normalizes local relative input. Loose manifests and legacy catalogs are not accepted or migrated.
+
+`api.describe.pluginManagement` version 2 advertises inputs, ZIP limits, readable `plugins/registry.json`, lifecycle and error codes. `plugins.list` reports installation ID, enabled choice, availability/diagnostic, managed root, and available contributions. Registered pages and services use the same methods as CLI/socket clients. No new parameterless picker action is needed for argument-requiring install/validation; Settings provides the ZIP picker and trust confirmation. Installing/enabling never starts a service or opens a pane. See [package layout, paths, failures and retention](plugins.md#managed-zip-packages).
+
 ## Own-plugin settings
 
 ```js

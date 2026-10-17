@@ -6,6 +6,7 @@ import pathlib
 import subprocess
 import tempfile
 import time
+from plugin_package_fixture import package_fixture
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP = ROOT / '.derived/Build/Products/Debug/Slate Terminal.app/Contents/MacOS/Slate Terminal'
@@ -73,7 +74,8 @@ with tempfile.TemporaryDirectory(prefix='slate-picker-', dir='/tmp') as temporar
             manifest.write_text(json.dumps(dict(id='project-tools', title='Project Tools', commands=[
                 dict(id='inspect', title='Inspect Workspace', executable='/bin/sh',
                      arguments=['-c', '"$SLATE_TERM_CLI" context get > "$MARKER"'], environment={'MARKER': str(marker)})])))
-            cli('plugins', 'register', '--manifest', str(manifest))
+            package = package_fixture(manifest, directory)
+            cli('plugins', 'register', '--package', package)
             cli('panes', 'send', '--pane', 'p1', '--text', "printf '\\033[36mSlate Terminal\\033[0m  /  workspace\\n\\n  Ready for your next command.\\n'\r")
             activate_workspace()
             rpc('debug.key', chord='cmd+k')
@@ -201,7 +203,7 @@ with tempfile.TemporaryDirectory(prefix='slate-picker-', dir='/tmp') as temporar
             picker(query='project')
             cli('plugins', 'unregister', 'project-tools')
             assert picker()['results'] == []
-            cli('plugins', 'register', '--manifest', str(manifest))
+            cli('plugins', 'register', '--package', package)
             assert picker()['selected'] == 'plugin.project-tools.inspect'
             picker(dismiss=True)
 
@@ -224,8 +226,8 @@ with tempfile.TemporaryDirectory(prefix='slate-picker-', dir='/tmp') as temporar
             assert state['visible'] and not any(r['id'].startswith('split.') for r in state['results']), state
             key('escape')
             # Running plugin commands update availability without reopening the picker.
-            rpc('plugins.register', manifest=dict(id='busy', title='Busy Fixture', commands=[
-                dict(id='wait', title='Wait Briefly', executable='/bin/sleep', arguments=['2'])]))
+            rpc('plugins.register', packagePath=package_fixture(dict(id='busy', title='Busy Fixture', commands=[
+                dict(id='wait', title='Wait Briefly', executable='/bin/sleep', arguments=['2'])]), directory))
             job = subprocess.Popen([str(CLI), 'command', 'run', 'plugin.busy.wait'], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             try:
                 eventually('Busy command running', lambda: any(r['state'] == 'running' for r in cli('plugins', 'status', 'busy')))
@@ -269,10 +271,10 @@ with tempfile.TemporaryDirectory(prefix='slate-picker-', dir='/tmp') as temporar
             rpc('debug.key', chord='cmd+alt+s', menu=True)
             # Capture of no workspace must remain empty if a background client creates one.
             context_marker = directory / 'empty-context'
-            rpc('plugins.register', manifest=dict(id='context-fixture', title='Context Fixture', commands=[
+            rpc('plugins.register', packagePath=package_fixture(dict(id='context-fixture', title='Context Fixture', commands=[
                 dict(id='capture', title='Capture Target', executable='/bin/sh',
                      arguments=['-c', 'printf "%s/%s" "${SLATE_TERM_TAB_ID-unset}" "${SLATE_TERM_PANE_ID-unset}" > "$MARKER"'],
-                     environment={'MARKER': str(context_marker)})]))
+                     environment={'MARKER': str(context_marker)})]), directory))
             cli('command', 'run', 'command.picker')
             picker(query='capture target')
             background_tab = cli('command', 'run', 'window.new')['tabId']

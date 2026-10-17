@@ -6,6 +6,7 @@ public enum JSONValue: Equatable, Sendable, Codable {
 
     public var string: String? { if case .string(let value) = self { value } else { nil } }
     public var object: [String: JSONValue]? { if case .object(let value) = self { value } else { nil } }
+    public var array: [JSONValue]? { if case .array(let value) = self { value } else { nil } }
 
     public init(from decoder: any Decoder) throws {
         let container = try decoder.singleValueContainer()

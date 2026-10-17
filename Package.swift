@@ -19,8 +19,9 @@ let package = Package(
         .target(name: "SlateTermCore"),
         .executableTarget(name: "SlateLayoutLauncher"),
         .target(name: "SlateTermIPC", dependencies: ["SlateTermCore"]),
+        .target(name: "SlateArchive", linkerSettings: [.linkedLibrary("archive")]),
         .target(name: "SlateTermSettings", dependencies: [
-            "SlateTermCore", .product(name: "TOMLDecoder", package: "TOMLDecoder"),
+            "SlateTermCore", "SlateArchive", .product(name: "TOMLDecoder", package: "TOMLDecoder"),
         ]),
         .executableTarget(name: "SlateTermCLI", dependencies: [
             "SlateTermCore", "SlateTermIPC", "SlateTermSettings", .product(name: "ArgumentParser", package: "swift-argument-parser"),

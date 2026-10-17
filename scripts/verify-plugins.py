@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from plugin_package_fixture import package_fixture
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--functional-only', action='store_true', help='Omit foreground screenshot checks; does not certify visual verification.')
@@ -60,7 +61,6 @@ try:
         catch(error){window.bridgeError=String(error);document.querySelector('#status').textContent=String(error);}
         ''')
         (assets / "child.html").write_text('''<!doctype html><script>let documentId;parent.document.addEventListener('slate-document-identity',event=>documentId=event.detail,{once:true});parent.document.dispatchEvent(new parent.Event('slate-document-query'));parent.postMessage({channel:'slate-request',documentId,id:999,method:'command.run',params:{id:'window.new'}},'*');</script>''')
-        (assets / "escape").symlink_to("/etc", target_is_directory=True)
         manifest = directory / "notes.json"
         manifest.write_text(json.dumps({"id": "notes", "title": "Notes", "scope": "tab", "source": {"kind": "directory", "path": str(assets), "entry": "index.html"}}))
         ready = directory / "ready"
@@ -110,7 +110,7 @@ try:
 
                 def failed_unregister_preserves_views():
                     before = cli("panes", "list")
-                    catalog_path = directory / "state/plugins.json"
+                    catalog_path = directory / "plugins/registry.json"
                     catalog_path.chmod(0o400)
                     try:
                         cli("plugins", "unregister", "notes", "--force", success=False)
@@ -120,10 +120,12 @@ try:
                         catalog_path.chmod(0o600)
 
                 eventually("fixture shell is ready for input", lambda: cli("panes", "capture", "--pane", "p1")["text"].rstrip().endswith("$"))
-                assert cli("plugins", "validate", "--manifest", str(manifest))["valid"]
-                assert cli("plugins", "register", "--manifest", str(manifest))["id"] == "notes"
+                package = package_fixture(manifest, directory)
+                assert cli("plugins", "validate", "--package", package)["valid"]
+                installed = cli("plugins", "register", "--package", package)
+                assert installed["id"] == "notes"
                 assert cli("plugins", "list")[0]["id"] == "notes"
-                cli("plugins", "register", "--manifest", str(manifest), success=False)
+                cli("plugins", "register", "--package", package, success=False)
                 assert any(item["type"] == "notes" for item in rpc("debug.paneTypeMenu", pane="p1"))
                 assert cli("panes", "split", "--right", "--pane", "p1")["paneId"] == "p2"
                 rpc("debug.paneTypeMenu", select="notes", answer="switch")
@@ -264,7 +266,13 @@ try:
                 eventually("external plugin navigation is blocked", lambda: info()["blockedNavigations"] > blocked)
                 assert foreign_requests == []
                 assert info()["url"].startswith("plugin://notes/")
+                # Valid ZIPs cannot contain links. Inject one only into this
+                # installed runtime to exercise the static handler's own guard.
+                runtime_assets = pathlib.Path(installed["source"]["path"])
+                assert runtime_assets.is_relative_to(pathlib.Path(installed["packageRoot"]))
+                (runtime_assets / "escape").symlink_to("/etc", target_is_directory=True)
                 assert evaluate("fetch('./escape/passwd').then(r=>r.text()).then(()=>false,()=>true)"), "Static handler followed an escaping symlink"
+                (runtime_assets / "escape").unlink()
                 local_storage = evaluate("(()=>{try{localStorage.setItem('probe','ok');return {supported:localStorage.getItem('probe')==='ok'}}catch(error){return {supported:false,error:String(error)}}})()")
                 print("Observed custom-scheme localStorage:", json.dumps(local_storage), flush=True)
                 old_view = info()["viewId"]
@@ -297,7 +305,7 @@ try:
                     except AssertionError as error:
                         raise AssertionError(f"{error}; pixels={previous_dimensions}; native={rpc('debug.inspect')}") from error
                 cli("plugins", "unregister", "notes", success=False)
-                cli("plugins", "register", "--manifest", str(manifest), "--replace", success=False)
+                cli("plugins", "register", "--package", package, "--replace", success=False)
                 rpc("debug.paneHeader", pane="p2", beginRename=True)
                 assert rpc("debug.paneHeader", pane="p2")["editing"] is True
                 if not args.functional_only:

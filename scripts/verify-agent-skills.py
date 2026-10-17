@@ -4,6 +4,7 @@ import json
 import os
 import time
 from api_fixture import ROOT, AppFixture, eventually
+from plugin_package_fixture import package_fixture
 
 with AppFixture('agent-skills') as app:
     home = app.root / 'agent-home'
@@ -42,7 +43,7 @@ with AppFixture('agent-skills') as app:
     panel = app.root / 'panel'
     panel.mkdir()
     (panel / 'index.html').write_text('<!doctype html><title>Skill Fixture</title>')
-    app.rpc('plugins.register', manifest={'id': 'skill-fixture', 'title': 'Skill Fixture', 'source': {'kind': 'directory', 'path': str(panel)}})
+    app.rpc('plugins.register', packagePath=package_fixture({'id': 'skill-fixture', 'title': 'Skill Fixture', 'source': {'kind': 'directory', 'path': str(panel)}}, app.root))
     app.rpc('command.run', id='pane.type', pane='p1', type='skill-fixture', force=True)
 
     def evaluate(script):

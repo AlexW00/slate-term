@@ -2,6 +2,7 @@
 """Shared appearance writer, conflict protection, pending-editor preservation and bridge parity."""
 import json
 from api_fixture import AppFixture, eventually
+from plugin_package_fixture import package_fixture
 
 source = '# preserved comment\n[appearance]\ntheme = "auto" # follow OS\n[terminal]\nshell = "/bin/zsh"\n[plugins.\"acme.tools\".custom]\ncount = 7\n'
 with AppFixture('api-settings', source) as app:
@@ -89,7 +90,7 @@ with AppFixture('api-settings', source) as app:
     panel = app.root / 'panel'
     panel.mkdir()
     (panel / 'index.html').write_text('<!doctype html><title>Fixture</title><button>Fixture</button>')
-    app.rpc('plugins.register', manifest={'id': 'fixture', 'title': 'Fixture', 'source': {'kind': 'directory', 'path': str(panel)}})
+    app.rpc('plugins.register', packagePath=package_fixture({'id': 'fixture', 'title': 'Fixture', 'source': {'kind': 'directory', 'path': str(panel)}}, app.root))
     app.rpc('command.run', id='pane.type', pane='p1', type='fixture', force=True)
 
     def evaluate(script):

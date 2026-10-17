@@ -1,6 +1,6 @@
 # Building Slate Terminal plugins
 
-A plugin is a JSON manifest registered with the running app. It can contribute any combination of:
+A plugin is a ZIP installed into Slate’s managed application-support directory, containing a root `plugin.json` manifest and its resources. It can contribute any combination of:
 
 | Part | Manifest key | What it is | Lifetime |
 | --- | --- | --- | --- |
@@ -21,18 +21,19 @@ Minimal static panel:
   "id": "notes",
   "title": "Notes",
   "scope": "tab",
-  "source": { "kind": "directory", "path": "/absolute/path/to/notes", "entry": "index.html" }
+  "source": { "kind": "directory", "path": "web", "entry": "index.html" }
 }
 ```
 
-- Paths are absolute. Plugin IDs are lowercase; command IDs become `plugin.<plugin-id>.<command-id>`.
+- Resource/working-directory paths are package-relative; omitted working directories default to package root. Executables are explicit external absolute paths or `./bin/tool`. Use `{pluginRoot}/scripts/tool.py` for resource arguments, or `SLATE_TERM_PLUGIN_ROOT` in scripts. No dependency installation or shell expansion is performed. Plugin IDs are lowercase; command IDs become `plugin.<plugin-id>.<command-id>`.
 - `source.kind` is `directory` (served under `plugin://<id>/`) or `url`. A `url` source with a `process` is a managed local HTTP server on `127.0.0.1`; use port `0` and the `{port}` argument.
 - `scope` is `pane` (default), `tab` or `global`. It controls runtime/backend, ephemeral WebKit-store lifetime and default event context—not durable data or panel state. Every panel gets its own web view, panel identity and restoration state; durable plugin data is always shared by plugin ID.
 - Validate offline, then register:
 
 ```sh
-slate-term plugins validate --manifest /abs/plugin.json
-slate-term plugins register --manifest /abs/plugin.json      # add --replace to update
+zip -r /tmp/notes.zip plugin.json web                    # from package root
+slate-term plugins validate --package /tmp/notes.zip
+slate-term plugins register --package /tmp/notes.zip         # add --replace to update
 slate-term panes type --pane p2 --type notes --force         # show the panel in a pane
 slate-term plugins status notes
 slate-term plugins logs --instance-id INSTANCE_ID
@@ -136,8 +137,8 @@ The host injects the `--st-*` palette variables, `data-appearance` and `color-sc
 
 ## Development loop
 
-1. Write the manifest and files, then run `plugins validate`.
-2. `plugins register --replace`. Replacement needs the plugin's visible panes closed first; `panes type` the pane to something else, or close it.
+1. Write the portable manifest and files, create a ZIP with `plugin.json` at its root, then run `plugins validate --package ZIP`.
+2. `plugins register --package ZIP --replace`. Replacement needs the plugin's visible panes closed first; `panes type` the pane to something else, or close it.
 3. Open it with `panes type --pane P --type ID --force`, or `command run plugin.ID.CMD`.
 4. Inspect with `web snapshot --pane P`, `web screenshot --pane P --path /abs/out.png`, `plugins status ID` and `plugins logs`.
 5. To load edited files, use `slate-term command run plugins.reload --pane P` (or Reload Plugin in ⌘K with that plugin focused). This reloads the selected document, or retries its backend if unready; check `web get` for readiness. `plugins restart ID` restarts all active managed panel instances of that type.

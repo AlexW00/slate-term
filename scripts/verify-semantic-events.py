@@ -3,6 +3,7 @@
 import json
 import subprocess
 from api_fixture import AppFixture, eventually
+from plugin_package_fixture import package_fixture
 
 TOPICS = ['host.pane.*', 'host.tab.*', 'host.tabs.*', 'host.layout.*', 'host.focus.*', 'host.workspace.*']
 
@@ -37,7 +38,7 @@ with AppFixture('semantic-events') as app:
     directory = app.root / 'panel'
     directory.mkdir()
     (directory / 'index.html').write_text('<!doctype html><title>Semantic fixture</title>')
-    app.rpc('plugins.register', manifest={'id': 'fixture', 'title': 'Fixture', 'source': {'kind': 'directory', 'path': str(directory)}})
+    app.rpc('plugins.register', packagePath=package_fixture({'id': 'fixture', 'title': 'Fixture', 'source': {'kind': 'directory', 'path': str(directory)}}, app.root))
     app.rpc('command.run', id='pane.type', pane=panel, type='fixture', force=True)
     def evaluate(script):
         return app.rpc('debug.pluginEval', pane=panel, script=script)
@@ -108,8 +109,8 @@ with AppFixture('semantic-events') as app:
     assert not app.rpc('events.poll', after=start, topics=TOPICS + ['host.plugins.changed'], waitMilliseconds=0)['events']
     # An actual filesystem write failure has the same atomic boundary as preflight
     # rejection. Only this fixture's private catalog directory is made unwritable.
-    state_directory = app.root / 'state'
-    catalog_file = state_directory / 'plugins.json'
+    state_directory = app.root / 'plugins'
+    catalog_file = state_directory / 'registry.json'
     source = catalog_file.read_bytes()
     workspace_revision = app.rpc('workspace.snapshot')['workspaceRevision']
     state_directory.chmod(0o500)
@@ -130,7 +131,7 @@ with AppFixture('semantic-events') as app:
     assert len([e for e in correlated if e['topic'] == 'host.plugins.changed']) == 1
     assert all(e['payload']['workspaceRevision'] == removed['workspaceRevision'] for e in correlated)
 
-    app.rpc('plugins.register', manifest={'id': 'unused', 'title': 'Unused', 'source': {'kind': 'directory', 'path': str(directory)}})
+    app.rpc('plugins.register', packagePath=package_fixture({'id': 'unused', 'title': 'Unused', 'source': {'kind': 'directory', 'path': str(directory)}}, app.root))
     start = head()
     workspace_revision = app.rpc('workspace.snapshot')['workspaceRevision']
     removed = app.rpc('plugins.unregister', id='unused')

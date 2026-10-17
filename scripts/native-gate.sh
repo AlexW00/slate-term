@@ -30,17 +30,25 @@ slate_native_swiftc() {
     echo 'FAIL: native gate attempted guest compilation' >&2; return 125;
   }
   local output='' library=0 previous='' argument
+  local archive_flags=()
   for argument in "$@"; do
     [[ "$previous" != -o ]] || output="$argument"
     [[ "$argument" != -emit-library ]] || library=1
+    # Standalone consumers do not inherit SwiftPM's transitive C-module/link flags.
+    if [[ "$argument" == -lSlateTermSettings || "$argument" == */SlateTermSettings.o ]]; then
+      archive_flags=(-I "$PWD/Sources/SlateArchive/include" -larchive)
+      if [[ "$argument" == */SlateTermSettings.o ]]; then
+        archive_flags+=("${argument%/*}/SlateArchive.o")
+      fi
+    fi
     previous="$argument"
   done
   [[ -n "$output" ]] || { echo 'Native compiler output (-o) is required' >&2; return 1; }
   if [[ "$library" == 1 ]]; then
-    command swiftc "$@" -Xlinker -install_name -Xlinker "@rpath/$(basename "$output")" \
+    command swiftc "$@" ${archive_flags[@]+"${archive_flags[@]}"} -Xlinker -install_name -Xlinker "@rpath/$(basename "$output")" \
       -Xlinker -rpath -Xlinker '@loader_path'
   else
-    command swiftc "$@" -Xlinker -rpath -Xlinker '@loader_path'
+    command swiftc "$@" ${archive_flags[@]+"${archive_flags[@]}"} -Xlinker -rpath -Xlinker '@loader_path'
   fi
 }
 

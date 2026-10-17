@@ -8,6 +8,7 @@ import shlex
 import sys
 import time
 from api_fixture import APP, CLI, ROOT, AppFixture, eventually
+from plugin_package_fixture import package_fixture
 
 with AppFixture('welcome', '[terminal]\nshell="/bin/zsh"\nshell_integration="off"\n[keybind]\n"cmd+shift+r"="welcome.reset"\n') as app:
     def command(id, **params):
@@ -156,7 +157,7 @@ with AppFixture('welcome', '[terminal]\nshell="/bin/zsh"\nshell_integration="off
     assets = app.root / 'welcome-panel'
     assets.mkdir()
     (assets / 'index.html').write_text('<!doctype html><title>Welcome fixture</title>')
-    app.rpc('plugins.register', manifest=dict(id='welcome.fixture', title='Welcome fixture', source=dict(kind='directory', path=str(assets))))
+    app.rpc('plugins.register', packagePath=package_fixture(dict(id='welcome.fixture', title='Welcome fixture', source=dict(kind='directory', path=str(assets))), app.root))
     command('pane.type', pane=sibling, type='welcome.fixture', force=True)
     def js(source):
         return app.rpc('debug.pluginEval', pane=sibling, script=source)
@@ -178,8 +179,8 @@ pathlib.Path(os.environ['CONTEXT_PATH']).write_text(json.dumps({k:os.environ[k] 
 subprocess.run([os.environ['SLATE_TERM_CLI'],'rpc','service.ready','--params','{"version":1}'],check=True)
 while True: time.sleep(1)
 ''')
-    app.rpc('plugins.register', manifest=dict(id='welcome.service', title='Welcome service', service=dict(executable=sys.executable,
-        arguments=[str(worker)], environment=dict(CONTEXT_PATH=str(context_path)), readyTimeoutSeconds=10)))
+    app.rpc('plugins.register', packagePath=package_fixture(dict(id='welcome.service', title='Welcome service', service=dict(executable=sys.executable,
+        arguments=[str(worker)], environment=dict(CONTEXT_PATH=str(context_path)), readyTimeoutSeconds=10)), app.root))
     app.rpc('plugins.service.start', id='welcome.service')
     eventually('welcome service', lambda: app.rpc('plugins.service.status', id='welcome.service')['state'] == 'ready')
     service_env = dict(app.env, **json.loads(context_path.read_text()))

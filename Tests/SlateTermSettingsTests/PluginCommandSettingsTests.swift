@@ -48,8 +48,9 @@ import SlateTermCore
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
     var catalog = try PluginCatalog(directory: directory)
-    let plugin = try PluginRegistration.parse(Data(#"{"id":"tools","title":"Tools","commands":[{"id":"go","title":"Go","executable":"/bin/sh"}]}"#.utf8))
-    try catalog.register(plugin, replace: false)
+    let source = try packageFixture()
+    defer { try? FileManager.default.removeItem(at: source.deletingLastPathComponent()) }
+    let plugin = try catalog.register(catalog.packages.prepare(source), replace: false)
     #expect(try PluginCatalog(directory: directory).registrations == [plugin])
     try catalog.remove(plugin.id)
     #expect(try PluginCatalog(directory: directory).registrations.isEmpty)

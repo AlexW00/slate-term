@@ -4,8 +4,10 @@ A trusted registration may declare one app-level `service`, independently of its
 
 ```json
 {"id":"controller","title":"Controller",
- "service":{"executable":"/absolute/path/controller","arguments":[],"readyTimeoutSeconds":10}}
+ "service":{"executable":"./bin/controller","arguments":[],"readyTimeoutSeconds":10}}
 ```
+
+The manifest and `bin/controller` belong inside the installed ZIP. Service paths use the same [managed package contract](plugins.md#managed-zip-packages) as commands/panels: package-relative working directory (package root by default), `{pluginRoot}/…` resource arguments, and authoritative `SLATE_TERM_PLUGIN_ROOT`. External runtimes remain the author/user’s responsibility.
 
 ## Shared API and manual controls
 

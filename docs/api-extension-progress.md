@@ -1,5 +1,16 @@
 # API extension implementation progress
 
+## Managed ZIP plugin packages
+
+Implemented in the working tree: ZIP-only import/validation, private managed archive/extraction generations, package-relative runtime resolution, readable `plugins/registry.json` with explicit enabled choice, and native/CLI/page/service parity. No dependency bundling, legacy manifest registration, catalog migration, or real-user-data changes. Settings installation uses the shared preparation/publication implementation; argument-requiring install/validation deliberately have no new parameterless picker action. Contributed commands/shortcuts keep their existing native surfaces.
+
+Package readers/process cleanup receipts retain old generations until release is confirmed. Previous-session or unconfirmed generations are reported and conservatively retained, not guessed safe to delete. Invalid individual package/staging entries produce diagnostics without blocking healthy installed plugins. The managed top-level security boundary and corrupt registry still fail closed/preserve bytes.
+
+Host checkpoint: **354 package tests** passed (222 core, 88 settings, 24 IPC, 20 CLI), including original-download deletion, readable registry/enabled state, atomic failure, unsafe ZIP names/types/collisions, CRC/size limits, executable permissions, corrupt-package diagnostics, and old-input rejection. Final app/CLI/helper build, **35 VM-runner unit tests**, Python syntax/inventory validation and whitespace checks passed. Offline CLI validation passed for real static, command, managed-HTTP, and manual-service fixture ZIPs. Independent bounded source review found two corruption-handling defects; both were fixed and regression-tested. No additional confirmed extraction/lifetime issue was reported by that review.
+
+Integration fixtures now explicitly author ZIPs, and `plugin-packages` is registered as a new VM gate covering source ZIP/authoring-tree deletion, restart, panel modules, packaged HTTP backends, commands/services, replacement, disable/re-enable, cleanup, and retained data. **VM/native and rendered checks are not verified:** selected production gates could not acquire the existing `/tmp/slate-ui-tests.lock`; receipt `artifacts/vm/20261017T010343Z-65f8ad89/receipt.json`. An ownership-inspection attempt also hit VMPal’s two-active-command limit. No lock was broken and no host GUI fallback used. No full-suite certificate, commit, push, or deploy.
+
+
 ## Plugin persistence — integrated with main; focused combined checks passed
 
 Feature commit `00d8a6e` and merge `f1ae9a7` combine plugin persistence with main's

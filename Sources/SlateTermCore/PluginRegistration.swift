@@ -82,6 +82,8 @@ public struct PluginRegistration: Equatable, Codable, Sendable {
     public let commands: [PluginCommand]
     public let headerButtons: [PluginHeaderButton]
     public let layoutFields: [SavedLayoutField]
+    /// Host-derived installation context; never accepted from manifest JSON.
+    public var packageRoot: String? = nil
 
     public var hasPanel: Bool { source != nil }
     public var entryURL: URL? {
@@ -101,10 +103,10 @@ public struct PluginRegistration: Equatable, Codable, Sendable {
         return try JSONDecoder().decode(Self.self, from: data)
     }
 
-    private enum Keys: String, CodingKey { case id, title, source, scope, process, service, commands, headerButtons, layoutFields }
+    private enum CodingKeys: String, CodingKey { case id, title, source, scope, process, service, commands, headerButtons, layoutFields }
     public init(from decoder: any Decoder) throws {
         try requirePluginKeys(decoder, allowed: ["id", "title", "source", "scope", "process", "service", "commands", "headerButtons", "layoutFields"])
-        let values = try decoder.container(keyedBy: Keys.self)
+        let values = try decoder.container(keyedBy: CodingKeys.self)
         id = try values.decode(String.self, forKey: .id)
         title = try values.decode(String.self, forKey: .title)
         source = try values.decodeIfPresent(PluginSource.self, forKey: .source)

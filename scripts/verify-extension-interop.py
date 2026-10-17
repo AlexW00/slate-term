@@ -9,6 +9,7 @@ import signal
 import subprocess
 import tempfile
 import time
+from plugin_package_fixture import package_fixture
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP = ROOT / '.derived/Build/Products/Debug/Slate Terminal.app/Contents/MacOS/Slate Terminal'
@@ -131,7 +132,7 @@ with tempfile.TemporaryDirectory(prefix='slate-extension-', dir='/tmp') as tempo
                 return rpc('debug.pluginEval', pane='p2', script=source)
 
             eventually('isolated shell prompt', lambda: cli('panes','capture','--pane','p1')['text'].rstrip().endswith('$'))
-            cli('plugins','register','--manifest',str(manifest))
+            cli('plugins','register','--package',package_fixture(manifest, directory))
             cli('panes','split','--right','--pane','p1')
             cli('panes','type','--pane','p2','--type','interop','--force')
             eventually('extension page', lambda: evaluate('window.ready===true'))

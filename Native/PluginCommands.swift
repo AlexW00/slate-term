@@ -92,6 +92,7 @@ final class PluginCommands {
         var environment = ProcessInfo.processInfo.environment.merging(command.environment) { _, value in value }
         for key in environment.keys where key.hasPrefix("SLATE_TERM_") { environment.removeValue(forKey: key) }
         environment.merge(controlEnvironment) { _, value in value }
+        environment["SLATE_TERM_PLUGIN_ROOT"] = plugin.packageRoot
         environment["SLATE_TERM_PLUGIN_ID"] = plugin.id
         environment["SLATE_TERM_PLUGIN_INSTANCE"] = run.id // Compatibility alias; not a panel-service identity.
         environment["SLATE_TERM_INVOCATION_ID"] = run.id

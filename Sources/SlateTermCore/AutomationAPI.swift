@@ -18,7 +18,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
     case skillsList = "skills.list", skillsInstall = "skills.install", skillsUninstall = "skills.uninstall"
     case welcomeGet = "welcome.get"
     case presenceList = "presence.list", presenceHold = "presence.hold", presenceRelease = "presence.release"
-    case pluginsList = "plugins.list", pluginsRegister = "plugins.register", pluginsUnregister = "plugins.unregister"
+    case pluginsList = "plugins.list", pluginsRegister = "plugins.register", pluginsValidate = "plugins.validate", pluginsUnregister = "plugins.unregister"
     case pluginsEnable = "plugins.enable", pluginsDisable = "plugins.disable"
     case pluginsStatus = "plugins.status", pluginsRestart = "plugins.restart", pluginsLogs = "plugins.logs"
     case pluginSettingsGet = "plugins.settings.get", pluginSettingsPatch = "plugins.settings.patch", settingsGet = "settings.get"
@@ -47,7 +47,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
         case .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsCreate, .layoutsUpdate, .layoutsWindows, .layoutsCapture, .layoutsOpen, .layoutsLauncher, .layoutsStartupStatus,
              .describe, .version, .contextGet, .workspaceGet, .workspaceSnapshot, .layoutGet, .tabsList, .panesList, .paneInspect,
              .commandList, .commandRun, .windowList, .windowGet, .configGet, .configReload, .configValidate, .configPatch,
-             .paletteList, .paletteImport, .appearanceGet, .welcomeGet, .skillsList, .skillsInstall, .skillsUninstall, .pluginsList, .pluginsRegister, .pluginsUnregister, .pluginsEnable, .pluginsDisable, .pluginsStatus, .pluginsLogs,
+             .paletteList, .paletteImport, .appearanceGet, .welcomeGet, .skillsList, .skillsInstall, .skillsUninstall, .pluginsList, .pluginsRegister, .pluginsValidate, .pluginsUnregister, .pluginsEnable, .pluginsDisable, .pluginsStatus, .pluginsLogs,
              .pluginSettingsGet, .pluginSettingsPatch, .panesSend, .panesCapture, .presenceList, .presenceHold, .presenceRelease: .synchronous
         case .notificationsPost, .notificationsList, .notificationsDismiss, .notificationsStatus: .notifications
         case .layoutConfiguration, .contextInspect, .settingsGet, .paneTitle: .contextual
@@ -72,7 +72,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
         case .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsWindows, .layoutsStartupStatus, .layoutConfiguration,
              .describe, .version, .contextGet, .contextInspect, .workspaceGet, .workspaceSnapshot, .layoutGet,
              .tabsList, .panesList, .paneInspect, .commandList, .windowList, .windowGet, .configGet, .configValidate,
-             .paletteList, .appearanceGet, .welcomeGet, .skillsList, .pluginsList, .pluginsStatus, .pluginsLogs, .pluginSettingsGet, .settingsGet, .pluginDataGet, .panelStateGet,
+             .paletteList, .appearanceGet, .welcomeGet, .skillsList, .pluginsList, .pluginsValidate, .pluginsStatus, .pluginsLogs, .pluginSettingsGet, .settingsGet, .pluginDataGet, .panelStateGet,
              .terminalCapture, .terminalWait, .panesCapture, .eventsHead, .eventsPoll, .webGet, .webSnapshot, .webWait,
              .browserGet, .browserSnapshot, .browserWait, .serviceList, .serviceStatus, .serviceLogs,
              .notificationsList, .notificationsStatus, .presenceList, .presenceHold, .presenceRelease: .read
@@ -121,7 +121,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
         case .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsCreate, .layoutsUpdate, .layoutsWindows, .layoutsCapture, .layoutsOpen, .layoutsLauncher, .layoutsStartupStatus,
              .describe, .version, .workspaceGet, .tabsList, .panesList, .commandList, .windowList, .windowGet,
              .configGet, .configReload, .configValidate, .configPatch, .paletteList, .paletteImport, .appearanceGet, .welcomeGet,
-             .skillsList, .skillsInstall, .skillsUninstall, .pluginsList, .pluginsRegister, .pluginsUnregister, .pluginsEnable, .pluginsDisable, .pluginsStatus, .pluginsRestart, .pluginsLogs,
+             .skillsList, .skillsInstall, .skillsUninstall, .pluginsList, .pluginsRegister, .pluginsValidate, .pluginsUnregister, .pluginsEnable, .pluginsDisable, .pluginsStatus, .pluginsRestart, .pluginsLogs,
              .eventsHead, .eventsPoll, .eventsEmit, .serviceStart, .serviceStop, .serviceList, .serviceStatus,
              .serviceLogs, .serviceReady, .shellUpdate, .shellRunInput, .browserClearData,
              .notificationsList, .notificationsDismiss, .notificationsStatus, .presenceList, .presenceHold, .presenceRelease: break

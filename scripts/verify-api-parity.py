@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 from api_fixture import AppFixture, APP, ROOT, eventually
+from plugin_package_fixture import package_fixture
 
 assert subprocess.check_output(['/usr/sbin/sysctl', '-n', 'hw.model'], text=True).strip().startswith('VirtualMac'), 'Run this UI gate through scripts/verify-vm.py'
 
@@ -136,7 +137,7 @@ with AppFixture('api-parity') as app:
     app.rpc('command.run', id='pane.type', pane='p1', type='private-browser', force=True)
     app.rpc('browser.navigate', pane='p1', url=str(assets / 'index.html'))
     plugin = app.rpc('command.run', id='split.right', pane='p1')['paneId']
-    app.rpc('plugins.register', manifest=dict(id='parity.fixture', title='Parity fixture', source=dict(kind='directory', path=str(assets))))
+    app.rpc('plugins.register', packagePath=package_fixture(dict(id='parity.fixture', title='Parity fixture', source=dict(kind='directory', path=str(assets))), app.root))
     app.rpc('command.run', id='pane.type', pane=plugin, type='parity.fixture', force=True)
     for pane in ['p1', plugin]:
         eventually('renderable', lambda: app.rpc('web.get', pane=pane).get('renderable') is True)
@@ -227,8 +228,8 @@ results=[call(method,params) for method,params in json.loads((root/'service-plan
 temporary=root/'service-results.tmp';temporary.write_text(json.dumps(results));temporary.replace(root/'service-results.json')
 while True: time.sleep(1)
 ''')
-    app.rpc('plugins.register', manifest=dict(id='parity.service', title='Parity service', service=dict(
-        executable=sys.executable, arguments=[str(worker), str(app.root)], readyTimeoutSeconds=15)))
+    app.rpc('plugins.register', packagePath=package_fixture(dict(id='parity.service', title='Parity service', service=dict(
+        executable=sys.executable, arguments=[str(worker), str(app.root)], readyTimeoutSeconds=15)), app.root))
     app.rpc('plugins.service.start', id='parity.service')
     try:
         eventually('service parity results', lambda: (app.root / 'service-results.json').exists(), timeout=30)

@@ -6,6 +6,7 @@ import pathlib
 import subprocess
 import tempfile
 import time
+from plugin_package_fixture import package_fixture
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP = ROOT / '.derived/Build/Products/Debug/Slate Terminal.app/Contents/MacOS/Slate Terminal'
@@ -110,7 +111,7 @@ with tempfile.TemporaryDirectory(prefix='slate-header-buttons-', dir='/tmp') as 
                 dict(id='capture', title='Capture Pane Context', executable='/bin/sh',
                      arguments=['-c', 'printf "%s/%s" "$SLATE_TERM_TAB_ID" "$SLATE_TERM_PANE_ID" > "$MARKER"; /bin/sleep 1'],
                      environment={'MARKER': str(marker)})], headerButtons=buttons)
-            rpc('plugins.register', manifest=manifest)
+            rpc('plugins.register', packagePath=package_fixture(manifest, directory))
             assert cli('plugins', 'status', 'header-tools') == [], 'Buttons must not start a hidden service or panel'
             assert ids('p1') == ['all', 'terminal', 'extra-a', 'extra-b', 'extra-c']
             click('p1', 'all')
@@ -135,7 +136,7 @@ with tempfile.TemporaryDirectory(prefix='slate-header-buttons-', dir='/tmp') as 
             panel = directory / 'panel'
             panel.mkdir()
             (panel / 'index.html').write_text('<!doctype html><title>Notes</title><p>Plugin widget fixture</p>')
-            rpc('plugins.register', manifest=dict(id='notes-panel', title='Notes', source=dict(kind='directory', path=str(panel))))
+            rpc('plugins.register', packagePath=package_fixture(dict(id='notes-panel', title='Notes', source=dict(kind='directory', path=str(panel))), directory))
             cli('panes', 'type', '--pane', p2, '--type', 'notes-panel', '--force')
             assert ids(p2) == ['all', 'widget', 'extra-a', 'extra-b', 'extra-c']
             click(p2, 'widget')
@@ -149,7 +150,7 @@ with tempfile.TemporaryDirectory(prefix='slate-header-buttons-', dir='/tmp') as 
             eventually('Restored headers', lambda: ids(p2) == ['all', 'widget', 'extra-a', 'extra-b', 'extra-c'])
             click(p2, 'widget')
             changed = dict(manifest, headerButtons=[dict(buttons[0], paneTypes=['browser'])])
-            rpc('plugins.register', manifest=changed, replace=True)
+            rpc('plugins.register', packagePath=package_fixture(changed, directory), replace=True)
             assert ids('p1') == [] and ids(p2) == [], 'Replaced selectors left stale buttons'
             cli('panes', 'type', '--pane', p2, '--type', 'browser', '--force')
             assert ids(p2) == ['all']
@@ -164,7 +165,7 @@ with tempfile.TemporaryDirectory(prefix='slate-header-buttons-', dir='/tmp') as 
             cli('rpc', 'debug.paneHeader', '--params', json.dumps(dict(pane=p2, clickAction='plugin.header-tools.header.all')), ok=False)
             # Failed manifests are atomic and do not leave any UI contributions.
             bad = dict(manifest, headerButtons=[dict(buttons[0], command='missing')])
-            cli('rpc', 'plugins.register', '--params', json.dumps(dict(manifest=bad)), ok=False)
+            cli('rpc', 'plugins.register', '--params', json.dumps(dict(packagePath=package_fixture(bad, directory))), ok=False)
             assert header(p2)['headerActions'] == []
             print('PASS plugin header buttons: all/builtin/widget selectors, exact clicked-pane routing, direct/overflow dispatch, busy state, no hidden service, persistence, live replacement/removal, and light/dark/narrow renders')
         finally:

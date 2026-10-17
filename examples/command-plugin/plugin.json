@@ -15,7 +15,7 @@
       "id": "split-left",
       "title": "Split Left",
       "executable": "/bin/sh",
-      "arguments": ["/absolute/path/to/slate-term/examples/command-plugin/split-left.sh"],
+      "arguments": ["{pluginRoot}/split-left.sh"],
       "timeoutSeconds": 10
     }
   ]

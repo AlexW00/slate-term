@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Shared data/panel restoration lifecycle and native controls. Run through verify-vm.py."""
 import json
+from pathlib import Path
 import shutil
 import subprocess
 import time
 import uuid
 from api_fixture import AppFixture, APP, ROOT, eventually
+from plugin_package_fixture import package_fixture
 
 subprocess.run(['node', str(ROOT / 'Tests/PluginPersistence/Example.mjs')], check=True, timeout=15)
 
@@ -66,8 +68,8 @@ def restart(app, before_launch=None):
 
 with AppFixture('plugin-persistence') as app:
     root = assets(app)
-    app.rpc('plugins.register', manifest=dict(id='notes', title='Notes', scope='tab', source=dict(kind='directory', path=str(root)),
-        layoutFields=[dict(id='project', label='Project', kind='text', required=True, defaultValue='default-project')]))
+    installed = app.rpc('plugins.register', packagePath=package_fixture(dict(id='notes', title='Notes', scope='tab', source=dict(kind='directory', path=str(root)),
+        layoutFields=[dict(id='project', label='Project', kind='text', required=True, defaultValue='default-project')]), app.root))
     api = app.rpc('api.describe')
     assert api['pluginPersistence']['version'] == 1
     assert all(name not in api['methods'] for name in ['storage.get', 'storage.set', 'storage.delete'])
@@ -172,10 +174,12 @@ with AppFixture('plugin-persistence') as app:
     assert app.rpc('plugins.panelState.get', pane=a) == old
 
     def change_defaults():
-        catalog_file = app.root / 'state/plugins.json'
-        catalog = json.loads(catalog_file.read_text())
-        catalog['registrations'][0]['layoutFields'][0]['defaultValue'] = 'changed-default'
-        catalog_file.write_text(json.dumps(catalog))
+        # Test-only startup fault injection: authoring files no longer back the
+        # installed manifest. Change the managed default while the app is stopped.
+        manifest_file = Path(installed['packageRoot']) / 'plugin.json'
+        manifest = json.loads(manifest_file.read_text())
+        manifest['layoutFields'][0]['defaultValue'] = 'changed-default'
+        manifest_file.write_text(json.dumps(manifest))
     restart(app, change_defaults)
     eventually('restored panel', lambda: js(a, 'window.fixtureReady===true'))
     assert app.rpc('plugins.panelState.get', pane=a) == old
@@ -210,8 +214,8 @@ with AppFixture('plugin-persistence') as app:
     app.rpc('plugins.panelState.get', pane=b, error=-32051)
     assert not app.rpc('plugins.status')
     # Required fields without defaults reject plain opening before changing the old pane.
-    app.rpc('plugins.register', manifest=dict(id='required', title='Required', source=dict(kind='directory', path=str(root)),
-        layoutFields=[dict(id='project', label='Project', kind='text', required=True)]))
+    app.rpc('plugins.register', packagePath=package_fixture(dict(id='required', title='Required', source=dict(kind='directory', path=str(root)),
+        layoutFields=[dict(id='project', label='Project', kind='text', required=True)]), app.root))
     before = app.rpc('workspace.get')
     app.rpc('command.run', id='pane.type', pane='p1', type='required', force=True, error=-32602)
     assert app.rpc('workspace.get') == before and not app.rpc('plugins.status')
@@ -220,7 +224,7 @@ for mode in ['disabled', 'suspended']:
     config = '[layout]\nrestore_workspace = false\n' if mode == 'disabled' else ''
     with AppFixture('plugin-persistence-' + mode, configuration=config, workspace_source='preserve old snapshot') as app:
         root = assets(app)
-        app.rpc('plugins.register', manifest=dict(id='notes', title='Notes', source=dict(kind='directory', path=str(root))))
+        app.rpc('plugins.register', packagePath=package_fixture(dict(id='notes', title='Notes', source=dict(kind='directory', path=str(root))), app.root))
         app.rpc('command.run', id='pane.type', pane='p1', type='notes', force=True)
         assert patch_panel(app, 'p1', 'selected', 'one')['workspacePersistence'] == mode
         assert patch_data(app, 'notes', 'durable', True)['persisted'] is True

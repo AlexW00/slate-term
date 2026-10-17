@@ -1,13 +1,13 @@
 # Trusted plugins
 
-A plugin can provide **commands, a panel, a manual background service, or a combination**. Commands do not require an open pane, web view, HTTP server, or background service. Existing panel manifests remain valid. [Manual background services](background-services.md) have distinct lifetimes and shared-API start/stop controls; registration never activates them.
+A plugin can provide **commands, a panel, a manual background service, or a combination**. Commands do not require an open pane, web view, HTTP server, or background service. [Manual background services](background-services.md) have distinct lifetimes and shared-API start/stop controls; registration never activates them.
 
 Registration grants the loaded code access to terminal content and workspace commands. Register only code and origins you trust. Plugins are not a sandbox for untrusted code; ordinary Browser panes have no plugin bridge.
 
-Use **Settings → Plugins → Register Plugin…**, or:
+Use **Settings → Plugins → Install Plugin…** to select a ZIP, or:
 
 ```sh
-slate-term plugins register --manifest /absolute/path/plugin.json
+slate-term plugins register --package /absolute/path/plugin.zip
 slate-term panes type --pane p2 --type notes --force
 slate-term plugins status notes
 slate-term plugins logs --instance-id INSTANCE_ID
@@ -29,6 +29,20 @@ The colored status icon’s tooltip contains the runtime details (including the 
 
 All trusted clients (CLI/socket, registered page and service) discover these methods through `api.describe.pluginManagement`; pages can use `workspace.call("plugins.disable", {id, force: true})` or the generated `workspace.rpc` adapters. There are no parameterless picker/shortcut actions for per-plugin lifecycle changes; use Settings or the ID-targeted API/CLI.
 
+## Managed ZIP packages
+
+A plugin is a `.zip` with `plugin.json` at its root, plus its local HTML, scripts and assets. Do not add an enclosing folder. From the authoring directory, run `zip -r /tmp/tools.zip plugin.json web scripts` (include only directories your plugin uses). `plugins validate --package ZIP` validates offline without installing or running code.
+
+Slate copies the ZIP and validates/extracts it under `~/Library/Application Support/SlateTerm/plugins/packages/<id>/<installation-id>/`. Deleting the download or original authoring folder does not affect installed plugins. Runtime uses that generation’s `contents/` directory. `plugins/registry.json` is private, pretty-printed JSON with `schemaVersion:1` and a `plugins` array of `{id, installationID, enabled, archiveSHA256}`. Inspect it freely; quit Slate before manual edits. The app is its only live writer. No old catalog/loose JSON registration is loaded or migrated; reinstall development plugins as ZIPs.
+
+Paths in `source.path` and working `directory` are package-relative (`"."` means package root). Omitted working directories default to package root. Executables are either explicit absolute external prerequisites, such as `/bin/sh`, or package-relative `./bin/tool`. Arguments are literal except for a standalone `{pluginRoot}` or `{pluginRoot}/relative/path` prefix; the existing panel-process `{port}` token still applies. No shell expansion or dependency installation is performed. All launchers receive authoritative `SLATE_TERM_PLUGIN_ROOT`. Plugin-owned persistent values belong in the existing data/settings APIs, not the managed code tree.
+
+Validation rejects escaping/duplicate/case-or-Unicode-colliding paths, links, special files, encryption, malformed/checksum-failing archives, ZIP64/multi-disk archives and enclosing-folder manifests. Limits: 128 MiB compressed, 512 MiB extracted, 64 MiB per file, 10,000 entries, 256 KiB manifest, 32 path components and 1,024 UTF-8 bytes per entry. Static serving remains limited to 16 MiB per file. Installation never runs code or starts services.
+
+Disable retains installed files. Replacement preserves the enabled choice and saved user data, but needs this plugin’s panes closed first. Removal deletes managed code after readers/process cleanup releases it, retaining saved data/settings/shortcuts. Old generations remain on disk if cleanup cannot be confirmed; `plugins.status` reports pending cleanup. Orphans left by interrupted/previous app sessions are retained conservatively rather than deleting files whose former process ownership cannot be proven. Failed preparation/persistence leaves the previous installation and work intact. Atomic registry replacement is not a power-loss durability guarantee.
+
+`plugins.register {packagePath, replace?:boolean}` installs the host-readable absolute local ZIP; `plugins.validate {packagePath}` validates without granting trust. Both reject unknown fields and old `manifest` inputs. Trusted socket/page/service callers share these methods; pages can use `workspace.rpc["plugins.validate"]({packagePath})`. `api.describe.pluginManagement` advertises the format, inputs, bounds and lifecycle. `plugins.list` includes installation identity, enabled choice, availability/diagnostic and managed `packageRoot`, alongside available manifest contributions. Invalid inputs return `-32602`, active replacement panes `-32010`, and stale/concurrent preparations `-32050`. Reads never fetch a missing ZIP from Downloads. Corrupt registry bytes are preserved; missing/corrupt packages stay listed as unavailable for explicit repair/removal.
+
 ## Command-only plugins
 
 ```json
@@ -39,7 +53,7 @@ All trusted clients (CLI/socket, registered page and service) discover these met
     "id": "split-left",
     "title": "Split Left",
     "executable": "/bin/sh",
-    "arguments": ["/absolute/path/to/split-left.sh"],
+    "arguments": ["{pluginRoot}/scripts/split-left.sh"],
     "timeoutSeconds": 30
   }]
 }
@@ -53,7 +67,7 @@ set -eu
 "$SLATE_TERM_CLI" command run split.left
 ```
 
-Register the manifest normally, then invoke it without opening a plugin panel:
+Package `plugin.json` and `scripts/split-left.sh` into a ZIP and install it, then invoke it without opening a plugin panel:
 
 ```sh
 slate-term command list
@@ -62,7 +76,7 @@ slate-term command run plugin.tools.split-left
 
 Commands have namespaced IDs `plugin.<plugin-id>.<command-id>`. A local command ID is a lowercase letter followed by lowercase letters, digits, or hyphens (up to 64 bytes). A manifest supports at most 32 unique commands. Commands can also be included alongside a panel's existing `source`, `scope`, and `process` fields. A plugin without `source` must have commands and cannot declare a managed HTTP `process`. Panel `scope` does not control command lifetime.
 
-Each command declares an absolute `executable`, optional literal `arguments` (default `[]`), absolute `directory`, `environment` (string map), and `timeoutSeconds` (default 30; 0.1–295). Nothing is implicitly shell-expanded or evaluated. Invoke `/bin/sh` or another interpreter explicitly for scripts. Without `directory`, the command inherits the app's working directory, **not** a terminal's current directory. Use `context get` when terminal context is needed.
+Each command declares an absolute external or `./` package-relative `executable`, optional `arguments` (default `[]`), package-relative `directory`, `environment` (string map), and `timeoutSeconds` (default 30; 0.1–295). Nothing is implicitly shell-expanded or evaluated. Invoke `/bin/sh` or another interpreter explicitly for scripts. Without `directory`, the command uses its installed package root, **not** a terminal's current directory. Use `context get` when terminal context is needed.
 
 ### Native frame buttons
 
@@ -85,7 +99,7 @@ Plugins may contribute native pane-header buttons immediately left of Close. Add
 - `id` uses the command-local identifier grammar (lowercase letter, then lowercase letters/digits/hyphens; at most 64 bytes). IDs must be unique within the plugin, with at most **8 buttons**. `title` is required, up to 100 characters without control characters; it supplies the tooltip/accessibility label, prefixed by the plugin title. `symbol` is an SF Symbols name (up to 128 ASCII letters/digits/dots/hyphens, lowercase); unavailable system symbols use a generic plugin icon. No remote/custom images are loaded.
 - The host preserves registration/button order, shows up to three direct buttons, and puts remaining actions in a native **More Plugin Actions** menu as the pane narrows. Below 180 points, contributions are hidden to preserve the structural controls; their commands remain available through the picker/menu/shortcuts. The title remains centered across the full pane.
 - A click captures the **clicked pane and its current tab**, even if another pane/window is focused. Commands receive the normal `SLATE_TERM_PANE_ID`/`SLATE_TERM_TAB_ID`, settings, and CLI environment. Rendering buttons does not start a plugin process or require a plugin panel to be open. Busy actions are disabled until the invocation finishes.
-- Register through the existing `plugins.register` RPC or `slate-term plugins register --manifest …`. Manifest contributions persist across app launches and update existing/new headers on registration, replacement, pane-type changes, and removal. Replacement/unregister removes old buttons and cancels owned running commands using the existing policy. A failed registration leaves the previous catalog/UI intact. There is no document-owned JavaScript callback registration API in this version.
+- Register through the existing `plugins.register` RPC or `slate-term plugins register --package …`. Manifest contributions persist across app launches and update existing/new headers on registration, replacement, pane-type changes, and removal. Replacement/unregister removes old buttons and cancels owned running commands using the existing policy. A failed registration leaves the previous catalog/UI intact. There is no document-owned JavaScript callback registration API in this version.
 
 See [`examples/command-plugin/plugin.json`](../examples/command-plugin/plugin.json) for a complete command-backed button. `scripts/verify-plugin-header-buttons.py` exercises native rendering, filtering, routing, busy state, overflow, persistence and cleanup without using the user's clipboard.
 
@@ -141,7 +155,7 @@ A static panel:
   "scope": "tab",
   "source": {
     "kind": "directory",
-    "path": "/absolute/path/to/notes",
+    "path": "web",
     "entry": "index.html"
   }
 }
@@ -158,9 +172,9 @@ A managed HTTP server:
   "scope": "global",
   "source": { "kind": "url", "url": "http://127.0.0.1:0/" },
   "process": {
-    "executable": "/absolute/path/to/server",
+    "executable": "./bin/server",
     "arguments": ["--port", "{port}"],
-    "directory": "/absolute/path/to/project",
+    "directory": ".",
     "environment": {},
     "restartLimit": 3,
     "readyTimeoutSeconds": 10

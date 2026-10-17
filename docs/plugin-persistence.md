@@ -106,6 +106,8 @@ Save user content during editing, not in unload/quit callbacks. Keep a plugin-ow
 - **Restore workspace on launch** affects panel restoration only, never shared-data retention. No per-panel persistence toggle.
 - Templates/Spotlight launchers create fresh panel identities/empty state while accessing the same shared data. Capture includes starting configuration only. Closing and relaunching a launcher does not resume the old panel; use configured stable document/project references.
 
+Installed code is separate from user data: [managed ZIP packages](plugins.md#managed-zip-packages) live under application support `plugins/`, while shared values and panel records keep their existing state/workspace locations. Package replacement/uninstall never deletes shared data, settings or shortcuts. Old loose-manifest catalogs are not migrated; installing a repackaged ZIP with the same plugin ID reconnects retained shared data.
+
 ## Breaking development formats
 
 `storage.get/set/delete`, `workspace.storage` and `host.plugin.storage.changed` are removed. No automatic mapping from old pane/tab/global stores is safe. Old `state/plugin-data/` files remain untouched and unused. Workspace snapshots now use schema 2; old snapshots are preserved, rejected and trigger the existing recovery workspace with autosave suspended. While Slate is stopped, move the old `state/workspace.json` aside if you want a fresh development workspace. No migration, deletion or automatic overwrite is performed.

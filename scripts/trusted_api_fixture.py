@@ -4,6 +4,7 @@ import http.server
 import json
 import threading
 from api_fixture import eventually
+from plugin_package_fixture import package_fixture
 
 
 def verify_trusted_api(app, service_call):
@@ -11,7 +12,7 @@ def verify_trusted_api(app, service_call):
     assets.mkdir()
     (assets / 'index.html').write_text('<!doctype html><title>Parity</title><input id="value" value="before"><iframe src="child.html"></iframe>')
     (assets / 'child.html').write_text('<!doctype html><p>child</p>')
-    app.rpc('plugins.register', manifest=dict(id='parity.fixture', title='Parity', scope='global', source=dict(kind='directory', path=str(assets))))
+    app.rpc('plugins.register', packagePath=package_fixture(dict(id='parity.fixture', title='Parity', scope='global', source=dict(kind='directory', path=str(assets))), app.root))
     panel = app.rpc('command.run', id='split.right', pane='p1')['paneId']
     app.rpc('command.run', id='pane.type', pane=panel, type='parity.fixture', force=True)
     sibling = app.rpc('command.run', id='split.down', pane=panel)['paneId']
@@ -52,8 +53,12 @@ def verify_trusted_api(app, service_call):
     guards = dict(expectedViewId=target['viewId'], expectedDocumentId=target['documentId'])
     for name, call in clients:
         managed = 'managed-' + name
-        call('plugins.register', {'manifest': dict(id=managed, title=managed,
-             commands=[dict(id='test', title='Test', executable='/usr/bin/true')])})
+        package = {'packagePath': package_fixture(dict(id=managed, title=managed,
+             commands=[dict(id='test', title='Test', executable='/usr/bin/true')]), app.root)}
+        assert call('plugins.validate', package)['id'] == managed
+        call('plugins.register', {'manifest': {}}, error=-32602)
+        installed = call('plugins.register', package)
+        assert installed['id'] == managed and installed['available'] and installed['enabled']
         assert call('plugins.disable', {'id': managed})['enabled'] is False
         assert not next(p for p in cli('plugins.list') if p['id'] == managed)['enabled']
         assert call('plugins.enable', {'id': managed})['enabled'] is True

@@ -5,6 +5,7 @@ import subprocess
 import socket
 import time
 from api_fixture import AppFixture, CLI, ROOT, eventually
+from plugin_package_fixture import package_fixture
 
 with AppFixture('layout-api') as app:
     def pane(pane_id='p1'):
@@ -155,7 +156,7 @@ with AppFixture('layout-api') as app:
     directory = app.root / 'panel'
     directory.mkdir()
     (directory / 'index.html').write_text('<!doctype html><title>Layout fixture</title>')
-    app.rpc('plugins.register', manifest={'id': 'fixture', 'title': 'Fixture', 'source': {'kind': 'directory', 'path': str(directory)}})
+    app.rpc('plugins.register', packagePath=package_fixture({'id': 'fixture', 'title': 'Fixture', 'source': {'kind': 'directory', 'path': str(directory)}}, app.root))
     app.rpc('command.run', id='pane.type', pane='p3', type='fixture', force=True)
 
     def evaluate(script):

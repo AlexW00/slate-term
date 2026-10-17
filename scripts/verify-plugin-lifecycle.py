@@ -5,6 +5,7 @@ import os
 import subprocess
 import time
 from api_fixture import AppFixture, APP, CLI, ROOT, eventually
+from plugin_package_fixture import package_fixture
 
 with AppFixture('plugin-lifecycle') as app:
     app.rpc('debug.activate')
@@ -15,7 +16,7 @@ with AppFixture('plugin-lifecycle') as app:
                     commands=[dict(id='wait', title='Wait', executable='/bin/sleep', arguments=['20'])],
                     headerButtons=[dict(id='wait', title='Wait', symbol='clock', command='wait')],
                     service=dict(executable='/bin/sleep', arguments=['60']))
-    app.rpc('plugins.register', manifest=manifest)
+    app.rpc('plugins.register', packagePath=package_fixture(manifest, app.root))
     description = app.rpc('api.describe')
     assert description['pluginManagement']['persisted']
     assert {'plugins.enable', 'plugins.disable'} <= set(description['methods'])
@@ -41,8 +42,11 @@ with AppFixture('plugin-lifecycle') as app:
     assert app.rpc('plugins.list')[0]['enabled'], 'Stale native confirmation must not close panes'
     app.rpc('command.run', id='tab.focus', tab='t1')
     # A failed catalog write must not close panes or remove contributions.
-    catalog = app.root / 'state/plugins.json'
+    catalog = app.root / 'plugins/registry.json'
     saved = catalog.read_bytes()
+    registry = json.loads(saved)
+    assert registry['schemaVersion'] == 1 and registry['plugins'][0]['enabled'] is True
+    assert set(registry['plugins'][0]) == {'id', 'installationID', 'enabled', 'archiveSHA256'}
     catalog.chmod(0o644)
     try:
         failure = app.cli('plugins', 'disable', 'lifecycle', '--force', error=True)
@@ -108,7 +112,7 @@ with AppFixture('plugin-lifecycle') as app:
     # Scoped data files remain on disk even though the original pane was explicitly closed.
     assert any('keep me' in p.read_text() for p in (app.root / 'state/plugin-data-v2').rglob('*.json'))
     controller = dict(id='controller', title='Controller', source=dict(kind='directory', path=str(assets)))
-    app.rpc('plugins.register', manifest=controller)
+    app.rpc('plugins.register', packagePath=package_fixture(controller, app.root))
     control_pane = app.rpc('command.run', id='split.down', pane='p1')['paneId']
     app.rpc('command.run', id='pane.type', pane=control_pane, type='controller', force=True)
     eventually('controller bridge', lambda: app.rpc('debug.pluginEval', pane=control_pane, script='typeof workspace') == 'object')

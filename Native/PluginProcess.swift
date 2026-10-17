@@ -60,6 +60,7 @@ final class PluginProcess {
         try Self.validate(executable: executable, arguments: arguments, directory: directory, environment: environment)
         resources = try Self.spawn(executable: executable, arguments: arguments, directory: directory, environment: environment)
         pid = resources.pid
+        PackageFiles.track(root: environment["SLATE_TERM_PLUGIN_ROOT"], cleanup: resources.reapObservation)
         installSources()
     }
 
@@ -391,4 +392,58 @@ private nonisolated final class ProcessResources: @unchecked Sendable {
         readSources.forEach { $0.cancel() }
         exitSource?.cancel()
     }
+}
+
+/// Package readers and process receipts outlive public runtime retirement. Only the
+/// host supplies deletion closures after its registry commit; unconfirmed cleanup retains files.
+@MainActor
+final class PackageFiles {
+    private static var readers: [String: Int] = [:]
+    private static var processes: [String: [ProcessCleanup]] = [:]
+    private static var pending: [String: Task<Void, Never>] = [:]
+    private(set) static var diagnostics: [String: String] = [:]
+
+    static func retain(root: String, reason: String) { diagnostics[root] = reason }
+
+    static func track(root: String?, cleanup: ProcessCleanup) {
+        guard let root else { return }
+        processes[root, default: []].removeAll { $0.snapshot.confirmed }
+        processes[root, default: []].append(cleanup)
+    }
+    static func acquire(_ root: String?) -> PackageReadLease? {
+        guard let root else { return nil }
+        readers[root, default: 0] += 1
+        return PackageReadLease(root: root)
+    }
+    fileprivate static func release(_ root: String) {
+        readers[root, default: 0] -= 1
+        if readers[root] == 0 { readers.removeValue(forKey: root) }
+    }
+    static func retire(root: String, remove: @escaping @Sendable () throws -> Void) {
+        guard pending[root] == nil else { return }
+        diagnostics[root] = "Package cleanup pending"
+        pending[root] = Task {
+            while readers[root, default: 0] > 0 || processes[root, default: []].contains(where: { !$0.snapshot.finished }) {
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            guard processes[root, default: []].allSatisfy({ $0.snapshot.confirmed }) else {
+                diagnostics[root] = "Package retained: process cleanup unconfirmed"
+                pending.removeValue(forKey: root)
+                return
+            }
+            do {
+                try await Task.detached { try remove() }.value
+                diagnostics.removeValue(forKey: root)
+                processes.removeValue(forKey: root)
+            } catch { diagnostics[root] = "Package cleanup failed: \(error)" }
+            pending.removeValue(forKey: root)
+        }
+    }
+}
+
+@MainActor
+final class PackageReadLease {
+    private let root: String
+    fileprivate init(root: String) { self.root = root }
+    isolated deinit { PackageFiles.release(root) }
 }

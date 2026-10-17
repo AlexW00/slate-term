@@ -6,10 +6,12 @@ import Foundation
 public struct PrivateJSONStore: Sendable {
     public let url: URL
     private let maximumBytes: Int
-    public init(url: URL, maximumBytes: Int = 2_097_152) throws {
+    private let prettyPrinted: Bool
+    public init(url: URL, maximumBytes: Int = 2_097_152, prettyPrinted: Bool = false) throws {
         guard url.isFileURL, maximumBytes > 0 else { throw ConfigurationError.invalid("Invalid private store location or size limit") }
         self.url = url
         self.maximumBytes = maximumBytes
+        self.prettyPrinted = prettyPrinted
         let directory = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         var info = stat()
@@ -29,8 +31,9 @@ public struct PrivateJSONStore: Sendable {
     public func save<Value: Encodable>(_ value: Value) throws {
         _ = try checkExisting()
         let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let data = try encoder.encode(value)
+        encoder.outputFormatting = prettyPrinted ? [.sortedKeys, .prettyPrinted, .withoutEscapingSlashes] : [.sortedKeys]
+        var data = try encoder.encode(value)
+        if prettyPrinted { data.append(10) }
         guard data.count <= maximumBytes else { throw ConfigurationError.invalid("Private JSON document exceeds its size limit") }
         let temporary = url.deletingLastPathComponent().appendingPathComponent("\(UUID().uuidString).tmp")
         defer { try? FileManager.default.removeItem(at: temporary) }

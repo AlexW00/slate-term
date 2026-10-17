@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from plugin_package_fixture import package_fixture
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP = ROOT / '.derived/Build/Products/Debug/Slate Terminal.app/Contents/MacOS/Slate Terminal'
@@ -99,10 +100,8 @@ elif mode=='wait':
             dict(id='timeout', title='Timeout', executable=sys.executable, arguments=[str(script), 'wait', str(directory / 'timeout.json')], timeoutSeconds=.3),
             dict(id='missing', title='Missing', executable='/nonexistent/slate-command'),
         ], **extra)
-        path = directory / (plugin + '.json')
-        path.write_text(json.dumps(manifest))
-        cli('plugins', 'register', '--manifest', str(path))
-        return manifest
+        package = package_fixture(manifest, directory)
+        return cli('plugins', 'register', '--package', package)
 
     def capture(name):
         time.sleep(.3)
@@ -113,7 +112,7 @@ elif mode=='wait':
         assert rpc('config.get')['error'] is None
         assert rpc('config.get')['unavailableCommands'] == ['plugin.tools.inspect']
         assert 'Key was not handled' in rpc('debug.key', chord='cmd+shift+j', workspaceOnly=True, fail=True)
-        manifest = register()
+        installed = register()
         assert statuses() == [], 'Registration must not start a process'
         assert rpc('config.get')['unavailableCommands'] == []
         commands = cli('command', 'list')
@@ -124,7 +123,7 @@ elif mode=='wait':
         assert result['state'] == 'succeeded' and result['exitCode'] == 0
         assert result['stderr'] == '', 'Supervisor diagnostics must not contaminate command stderr'
         data = json.loads(result['stdout'])
-        assert pathlib.Path(data['cwd']).resolve() == directory.resolve() and data['args'] == ['literal $HOME; not shell'], data
+        assert pathlib.Path(data['cwd']).resolve() == pathlib.Path(installed['packageRoot']).resolve() and data['args'] == ['literal $HOME; not shell'], data
         assert data['environment']['SLATE_TERM_SOCKET'] == env['SLATE_TERM_SOCKET']
         assert data['environment']['SLATE_TERM_PANE_ID'] == 'p1'
         assert 'SLATE_TERM_TOKEN' not in data['environment'] and 'SLATE_TERM_INTEGRATION' not in data['environment']

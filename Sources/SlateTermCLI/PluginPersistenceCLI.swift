@@ -4,7 +4,7 @@ import SlateTermCore
 
 extension Plugins {
     func runPersistence() throws {
-        guard let verb = id, ["get", "patch", "reset"].contains(verb), manifest == nil, instanceId == nil, !replace, expectedWriteRevision == nil else {
+        guard let verb = id, ["get", "patch", "reset"].contains(verb), package == nil, instanceId == nil, !replace, expectedWriteRevision == nil else {
             throw ValidationError("Use plugins data|panel-state get|patch|reset; registration/process/settings options do not apply")
         }
         let data = action == .data

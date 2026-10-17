@@ -12,6 +12,7 @@ import sys
 import tempfile
 import threading
 import time
+from plugin_package_fixture import package_fixture
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP = ROOT / ".derived/Build/Products/Debug/Slate Terminal.app/Contents/MacOS/Slate Terminal"
@@ -102,7 +103,7 @@ http.server.ThreadingHTTPServer(('127.0.0.1',port),Handler).serve_forever()
                         "process": {"executable": sys.executable, "arguments": [str(server), str(directory / (name + ".pids")), mode, "{port}"],
                                     "directory": temporary, "environment": {"PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"},
                                     "restartLimit": restarts, "readyTimeoutSeconds": 1.5}}))
-                    cli("plugins", "register", "--manifest", str(manifest))
+                    cli("plugins", "register", "--package", package_fixture(manifest, directory))
 
                 def open_plugin(name, split="p1"):
                     pane = cli("panes", "split", "--down", "--pane", split)["paneId"]

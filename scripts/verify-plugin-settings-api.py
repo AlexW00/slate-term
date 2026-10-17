@@ -2,6 +2,7 @@
 """Typed own-namespace writes, TOML/native-writer compatibility, isolation and change hooks."""
 import json
 from api_fixture import AppFixture, eventually
+from plugin_package_fixture import package_fixture
 
 source = '''# keep application comment
 [terminal]
@@ -44,7 +45,7 @@ with AppFixture('plugin-settings-api', source) as app:
     panel.mkdir()
     (panel / 'index.html').write_text('<!doctype html><title>Settings fixture</title><p>Settings fixture</p>')
     for plugin in ['acme.tools', 'other']:
-        app.rpc('plugins.register', manifest={'id': plugin, 'title': plugin, 'source': {'kind': 'directory', 'path': str(panel)}})
+        app.rpc('plugins.register', packagePath=package_fixture({'id': plugin, 'title': plugin, 'source': {'kind': 'directory', 'path': str(panel)}}, app.root))
     app.rpc('command.run', id='pane.type', pane='p1', type='acme.tools', force=True)
     p2 = app.rpc('command.run', id='split.right', pane='p1')['paneId']
     app.rpc('command.run', id='pane.type', pane=p2, type='other', force=True)

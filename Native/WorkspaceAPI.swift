@@ -158,7 +158,15 @@ extension WorkspaceHost {
             "presence": PresenceController.descriptor,
             "backgroundServices": Self.serviceDescriptor,
             "pluginManagement": .object([
-                "version": .integer(1), "enableMethod": .string("plugins.enable"), "disableMethod": .string("plugins.disable"),
+                "version": .integer(2), "enableMethod": .string("plugins.enable"), "disableMethod": .string("plugins.disable"),
+                "installMethod": .string("plugins.register"), "validateMethod": .string("plugins.validate"),
+                "installRequired": .array([.string("packagePath")]), "installOptional": .array([.string("replace")]),
+                "format": .string("zip"), "manifest": .string("plugin.json"), "managedFiles": .bool(true),
+                "registry": .string("plugins/registry.json"), "packageRootEnvironment": .string("SLATE_TERM_PLUGIN_ROOT"),
+                "limits": .object(["archiveBytes": .integer(134_217_728), "extractedBytes": .integer(536_870_912),
+                    "fileBytes": .integer(67_108_864), "entries": .integer(10_000), "manifestBytes": .integer(262_144)]),
+                "errors": .object(["invalid": .integer(-32602), "conflict": .integer(APIError.conflict),
+                    "inUse": .integer(-32010), "writeFailed": .integer(APIError.settingsWriteFailed)]),
                 "removeMethod": .string("plugins.unregister"), "required": .array([.string("id")]),
                 "forceClosesPanes": .bool(true), "persisted": .bool(true), "retainsSavedData": .bool(true),
                 "listEnabledField": .string("enabled"), "enableStartsProcesses": .bool(false)

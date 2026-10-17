@@ -75,7 +75,7 @@ slate-term terminal run --pane p1 --command 'printf "hello\\n"'
 slate-term terminal wait --pane p1 --contains READY --timeout-milliseconds 5000
 slate-term panes type --pane p2 --type browser --force
 slate-term context get
-slate-term plugins register --manifest /absolute/path/plugin.json
+slate-term plugins register --package /absolute/path/plugin.zip
 slate-term plugins list
 slate-term plugins service list
 slate-term plugins service start controller

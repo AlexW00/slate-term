@@ -2,6 +2,7 @@
 """appearance.get parity, host.appearance.changed publication and plugin page theme injection."""
 import json
 from api_fixture import AppFixture, eventually
+from plugin_package_fixture import package_fixture
 
 MOCHA, LATTE = '#1e1e2e', '#eff1f5'
 source = '[appearance]\ntheme = "dark"\n[terminal]\nshell = "/bin/zsh"\nlight_theme = "Catppuccin Latte"\ndark_theme = "Catppuccin Mocha"\n'
@@ -23,7 +24,7 @@ with AppFixture('theme-api', source) as app:
     panel = app.root / 'panel'
     panel.mkdir()
     (panel / 'index.html').write_text('<!doctype html><title>Theme Fixture</title><iframe srcdoc="<p>child</p>"></iframe>')
-    app.rpc('plugins.register', manifest={'id': 'theme-fixture', 'title': 'Theme Fixture', 'source': {'kind': 'directory', 'path': str(panel)}})
+    app.rpc('plugins.register', packagePath=package_fixture({'id': 'theme-fixture', 'title': 'Theme Fixture', 'source': {'kind': 'directory', 'path': str(panel)}}, app.root))
     app.rpc('command.run', id='pane.type', pane='p1', type='theme-fixture', force=True)
 
     def evaluate(script):

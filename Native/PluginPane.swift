@@ -55,7 +55,7 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = instance.dataStore
         if case .directory(let path, _) = instance.registration.source {
-            configuration.setURLSchemeHandler(PluginSchemeHandler(root: URL(fileURLWithPath: path), origin: instance.origin), forURLScheme: "plugin")
+            configuration.setURLSchemeHandler(PluginSchemeHandler(root: URL(fileURLWithPath: path), origin: instance.origin, packageRoot: instance.registration.packageRoot), forURLScheme: "plugin")
         }
         web = WKWebView(frame: .zero, configuration: configuration)
         super.init(nibName: nil, bundle: nil)
@@ -463,9 +463,12 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
 private final class PluginSchemeHandler: NSObject, WKURLSchemeHandler {
     private let root: URL
     private let origin: PluginOrigin
+    private let packageLease: PackageReadLease?
     private var requests: [ObjectIdentifier: Task<Void, Never>] = [:]
     private var closed = false
-    init(root: URL, origin: PluginOrigin) { self.root = root; self.origin = origin }
+    init(root: URL, origin: PluginOrigin, packageRoot: String?) {
+        self.root = root; self.origin = origin; packageLease = PackageFiles.acquire(packageRoot)
+    }
     func webView(_ webView: WKWebView, start urlSchemeTask: any WKURLSchemeTask) {
         guard !closed else { urlSchemeTask.didFailWithError(CancellationError()); return }
         guard let url = urlSchemeTask.request.url, origin.matches(url), let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
@@ -473,13 +476,14 @@ private final class PluginSchemeHandler: NSObject, WKURLSchemeHandler {
         }
         guard requests.count < 64 else { urlSchemeTask.didFailWithError(RPCFailure(code: -32023, message: "Too many asset requests")); return }
         let id = ObjectIdentifier(urlSchemeTask)
-        let root = root, path = components.percentEncodedPath, origin = origin
+        let root = root, path = components.percentEncodedPath, origin = origin, lease = packageLease
         requests[id] = Task { [weak self] in
             defer { self?.requests.removeValue(forKey: id) }
             do {
                 // Disk/network-volume I/O must not block native input. Reads are
                 // bounded even if an author replaces or grows an asset mid-load.
                 let (data, mime) = try await Task.detached(priority: .userInitiated) {
+                    defer { withExtendedLifetime(lease) {} }
                     let file = try PluginAssets(root: root).file(forPercentEncodedPath: path)
                     let handle = try FileHandle(forReadingFrom: file)
                     defer { try? handle.close() }

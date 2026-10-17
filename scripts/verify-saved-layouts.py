@@ -13,6 +13,7 @@ import sys
 import tempfile
 import time
 import uuid
+from plugin_package_fixture import package_fixture
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP = pathlib.Path(os.environ.get('SLATE_TERM_TEST_APP', ROOT / '.derived/Build/Products/Debug/Slate Terminal.app/Contents/MacOS/Slate Terminal'))
@@ -235,10 +236,10 @@ with fixture_directory() as temporary:
 
             # Plugin schema flows into native inspector and fresh bridge configuration.
             plugin = base / 'plugin'; plugin.mkdir(); (plugin / 'index.html').write_text('<title>Dashboard</title><h1>Layout fixture</h1>')
-            rpc('plugins.register', manifest={'id': 'dashboard', 'title': 'Dashboard', 'source': {'kind': 'directory', 'path': str(plugin)},
+            rpc('plugins.register', packagePath=package_fixture({'id': 'dashboard', 'title': 'Dashboard', 'source': {'kind': 'directory', 'path': str(plugin)},
                 'layoutFields': [{'id': 'folder', 'label': 'Project Folder', 'kind': 'directory', 'required': True},
                                  {'id': 'view', 'label': 'View', 'kind': 'choice', 'options': ['board', 'list'], 'defaultValue': 'board'},
-                                 {'id': 'completed', 'label': 'Show Completed', 'kind': 'boolean', 'defaultValue': False}]})
+                                 {'id': 'completed', 'label': 'Show Completed', 'kind': 'boolean', 'defaultValue': False}]}, base))
             recipe = copy.deepcopy(original); recipe['id'] = str(uuid.uuid4()); recipe['name'] = 'Dashboard'
             recipe['tabs'][0]['panes'][0].update(type='dashboard', title='Project', configuration={'folder': temporary, 'view': 'list', 'completed': True})
             entry = rpc('layouts.create', definition=recipe)
@@ -279,8 +280,8 @@ path=pathlib.Path(os.environ['TEST_CONTEXT']); temporary=path.with_suffix('.tmp'
 temporary.write_text(json.dumps({k:os.environ[k] for k in keys})); temporary.replace(path)
 while True: time.sleep(1)
 ''')
-            rpc('plugins.register', manifest={'id': 'layoutworker', 'title': 'Layout Worker', 'service': {
-                'executable': sys.executable, 'arguments': [str(worker)], 'environment': {'TEST_CONTEXT': str(context_file)}}})
+            rpc('plugins.register', packagePath=package_fixture({'id': 'layoutworker', 'title': 'Layout Worker', 'service': {
+                'executable': sys.executable, 'arguments': [str(worker)], 'environment': {'TEST_CONTEXT': str(context_file)}}}, base))
             rpc('plugins.service.start', id='layoutworker')
             eventually('service ready', lambda: context_file.exists())
             service_env = dict(env, **json.loads(context_file.read_text()))

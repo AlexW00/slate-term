@@ -7,6 +7,7 @@ import signal
 import subprocess
 import tempfile
 import time
+from plugin_package_fixture import package_fixture
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP = ROOT / ".derived/Build/Products/Debug/Slate Terminal.app/Contents/MacOS/Slate Terminal"
@@ -157,7 +158,7 @@ with tempfile.TemporaryDirectory(prefix="slate-pane-titles-", dir="/tmp") as tem
             assets = directory / 'rename-plugin'
             assets.mkdir()
             (assets / 'index.html').write_text('<!doctype html><title>Rename fixture</title>')
-            rpc('plugins.register', manifest=dict(id='rename.fixture', title='Rename Fixture', source=dict(kind='directory', path=str(assets))))
+            rpc('plugins.register', packagePath=package_fixture(dict(id='rename.fixture', title='Rename Fixture', source=dict(kind='directory', path=str(assets))), directory))
             cli('panes', 'type', '--pane', p2, '--type', 'rename.fixture', '--force')
             eventually('registered bridge ready', lambda: rpc('debug.pluginEval', pane=p2, script='typeof workspace') == 'object')
             assert rpc('debug.pluginEval', pane=p2, script="(await workspace.call('command.list')).some(c => c.id === 'pane.rename')")

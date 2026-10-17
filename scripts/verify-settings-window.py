@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from plugin_package_fixture import package_fixture
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP = pathlib.Path(os.environ.get('SLATE_TERM_TEST_APP', ROOT / '.derived/Build/Products/Debug/Slate Terminal.app/Contents/MacOS/Slate Terminal'))
@@ -119,8 +120,8 @@ with http.server.ThreadingHTTPServer(('127.0.0.1', 0), Page) as server:
                 rpc('debug.settings', section='General', width=740, height=520)
                 time.sleep(0.5)
                 rpc('debug.screenshot', settings=True, path=str(ROOT / 'artifacts/settings-general-small.png'))
-                rpc('plugins.register', manifest={'id': 'settings-status-fixture', 'title': 'Status Fixture',
-                    'source': {'kind': 'url', 'url': f'http://127.0.0.1:{server.server_port}/plugin'}, 'scope': 'pane'})
+                rpc('plugins.register', packagePath=package_fixture({'id': 'settings-status-fixture', 'title': 'Status Fixture',
+                    'source': {'kind': 'url', 'url': f'http://127.0.0.1:{server.server_port}/plugin'}, 'scope': 'pane'}, directory))
                 state = rpc('debug.settings', section='Plugins')
                 assert state['pluginStatuses'] == ['Not running'], state
                 time.sleep(0.4)

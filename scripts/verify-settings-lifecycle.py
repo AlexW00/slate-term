@@ -2,6 +2,7 @@
 """Source/apply outcomes and whole-envelope isolation for own-plugin settings."""
 import json
 from api_fixture import AppFixture, eventually
+from plugin_package_fixture import package_fixture
 
 source = '[terminal]\nshell="/bin/zsh"\n[plugins."private.owner"]\ntoken="PRIVATE_OLD"\n'
 with AppFixture('settings-lifecycle', source) as app:
@@ -10,7 +11,7 @@ with AppFixture('settings-lifecycle', source) as app:
     panel.mkdir()
     (panel / 'index.html').write_text('<!doctype html><title>Settings lifecycle</title>')
     for name in ['private.owner', 'unrelated.reader']:
-        app.rpc('plugins.register', manifest=dict(id=name, title=name, scope='pane', source=dict(kind='directory', path=str(panel))))
+        app.rpc('plugins.register', packagePath=package_fixture(dict(id=name, title=name, scope='pane', source=dict(kind='directory', path=str(panel))), app.root))
     app.rpc('command.run', id='pane.type', pane='p1', type='private.owner', force=True)
     p2 = app.rpc('command.run', id='split.right', pane='p1')['paneId']
     app.rpc('command.run', id='pane.type', pane=p2, type='unrelated.reader', force=True)

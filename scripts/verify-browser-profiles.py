@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 from api_fixture import AppFixture, APP, ROOT, eventually
+from plugin_package_fixture import package_fixture
 
 # Rendered evidence is a separate, opt-in check requiring a fully visible owned window.
 CAPTURE_UI = os.environ.get('SLATE_TERM_CAPTURE_BROWSER_UI') == '1'
@@ -164,8 +165,8 @@ with http.server.ThreadingHTTPServer(('127.0.0.1', 0), Page) as server:
             (assets / 'index.html').write_text('<!doctype html><title>Browser Controller</title><p>Trusted controller</p>')
             worker = app.root / 'worker.py'
             worker.write_text('import os,json,pathlib,time\npathlib.Path(os.environ["CONTEXT_FILE"]).write_text(json.dumps(dict(os.environ)))\nwhile True: time.sleep(1)\n')
-            app.rpc('plugins.register', manifest=dict(id='profile.fixture', title='Controller', source=dict(kind='directory', path=str(assets)),
-                service=dict(executable=sys.executable, arguments=[str(worker)], environment={'CONTEXT_FILE': str(app.root / 'service-context')}, readyTimeoutSeconds=30)))
+            app.rpc('plugins.register', packagePath=package_fixture(dict(id='profile.fixture', title='Controller', source=dict(kind='directory', path=str(assets)),
+                service=dict(executable=sys.executable, arguments=[str(worker)], environment={'CONTEXT_FILE': str(app.root / 'service-context')}, readyTimeoutSeconds=30)), app.root))
             # Default service readiness is explicit; the endpoint is usable while starting.
             command('pane.type', pane=p3, type='profile.fixture', force=True)
             eventually('controller bridge', lambda: app.rpc('debug.pluginEval', pane=p3, script='typeof workspace') == 'object')

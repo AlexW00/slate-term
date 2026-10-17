@@ -3,7 +3,9 @@
 import concurrent.futures
 import json
 import socket
+from pathlib import Path
 from api_fixture import AppFixture, eventually
+from plugin_package_fixture import package_fixture
 
 with AppFixture('command-lifecycle') as app:
     missing = app.root / 'removed-working-directory'
@@ -16,8 +18,11 @@ with AppFixture('command-lifecycle') as app:
         dict(id='cancel', title='Cancel', executable='/bin/sleep', arguments=['10']),
         dict(id='delayed', title='Delayed', executable='/bin/sleep', arguments=['1']),
     ]
-    app.rpc('plugins.register', manifest=dict(id='lifecycle', title='Lifecycle', commands=commands))
-    missing.rmdir()
+    installed = app.rpc('plugins.register', packagePath=package_fixture(dict(id='lifecycle', title='Lifecycle', commands=commands), app.root))
+    # Inject a runtime launch fault in the installed generation, not its source.
+    runtime_directory = Path(installed['commands'][2]['directory'])
+    assert runtime_directory.is_relative_to(Path(installed['packageRoot']))
+    runtime_directory.rmdir()
 
     def facts(cursor):
         return app.rpc('events.poll', after=cursor, topics=['host.command.*'], waitMilliseconds=0)['events']

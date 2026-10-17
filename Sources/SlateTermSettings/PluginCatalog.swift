@@ -1,92 +1,106 @@
 import Foundation
 import SlateTermCore
 
+/// The registry is the commit pointer. Only the host holding the state lease writes it.
 public struct PluginCatalog: Sendable {
     private let store: PrivateJSONStore
-    public private(set) var registrations: [PluginRegistration]
-    public private(set) var disabledPlugins: Set<String>
+    public let packages: PluginPackageStore
+    public private(set) var records: [InstalledPlugin]
+    public private(set) var registrations: [PluginRegistration] = []
+    public private(set) var diagnostics: [String: String] = [:]
+    public var disabledPlugins: Set<String> { Set(records.filter { !$0.enabled }.map(\.id)) }
     public var activeRegistrations: [PluginRegistration] { registrations.filter { !disabledPlugins.contains($0.id) } }
-    public private(set) var enabledServices: Set<String>
-    public static let maximumEnabledServices = 16
+    public private(set) var revision = UUID()
 
     public init(directory: URL) throws {
-        store = try PrivateJSONStore(url: directory.appendingPathComponent("plugins.json"))
-        if let snapshot = try store.load(Snapshot.self) {
-            guard snapshot.schemaVersion == 3, snapshot.registrations.count <= 64,
-                  Set(snapshot.registrations.map(\.id)).count == snapshot.registrations.count else {
-                throw ConfigurationError.invalid("Invalid plugin catalog version, count, or duplicate identity")
+        packages = try PluginPackageStore(directory: directory)
+        store = try PrivateJSONStore(url: directory.appendingPathComponent("registry.json"), prettyPrinted: true)
+        let snapshot = try store.load(Snapshot.self) ?? Snapshot(schemaVersion: 1, plugins: [])
+        guard snapshot.schemaVersion == 1, snapshot.plugins.count <= 64,
+              Set(snapshot.plugins.map(\.id)).count == snapshot.plugins.count else {
+            throw ConfigurationError.invalid("Invalid plugin registry version, count, or duplicate identity")
+        }
+        for record in snapshot.plugins {
+            try PluginPersistence.validateID(record.id)
+            guard record.archiveSHA256.count == 64, record.archiveSHA256.allSatisfy({ $0.isHexDigit && !$0.isUppercase }) else {
+                throw ConfigurationError.invalid("Invalid plugin archive digest")
             }
-            registrations = snapshot.registrations
-            guard Set(snapshot.disabledPlugins).count == snapshot.disabledPlugins.count,
-                  Set(snapshot.disabledPlugins).isSubset(of: Set(registrations.map(\.id))) else {
-                throw ConfigurationError.invalid("Invalid disabled plugins in plugin catalog")
-            }
-            let disabled = Set(snapshot.disabledPlugins)
-            disabledPlugins = disabled
-            let enabled = snapshot.enabledServices
-            guard enabled.count <= Self.maximumEnabledServices, Set(enabled).count == enabled.count,
-                  Set(enabled).isSubset(of: Set(registrations.filter { $0.service != nil && !disabled.contains($0.id) }.map(\.id))) else {
-                throw ConfigurationError.invalid("Invalid enabled background services in plugin catalog")
-            }
-            enabledServices = Set(enabled)
-        } else { registrations = []; enabledServices = []; disabledPlugins = [] }
+        }
+        records = snapshot.plugins.sorted { $0.id < $1.id }
+        for record in records {
+            do { registrations.append(try packages.load(record)) }
+            catch { diagnostics[record.id] = String(describing: error) }
+        }
     }
 
-    public mutating func register(_ registration: PluginRegistration, replace: Bool) throws {
-        let exists = registrations.contains { $0.id == registration.id }
-        guard !exists || replace else { throw ConfigurationError.invalid("Plugin is already registered; pass --replace to replace it") }
-        var next = registrations.filter { $0.id != registration.id }
-        next.append(registration)
-        guard next.count <= 64 else { throw ConfigurationError.invalid("At most 64 plugin types may be registered") }
-        next.sort { $0.id < $1.id }
-        // Even an identical replacement is a new registration, not renewed consent.
-        try commit(next, enabled: enabledServices.subtracting([registration.id]), disabled: disabledPlugins)
+    /// Publishes complete files before the registry pointer. Failed persistence never retires old work.
+    @discardableResult
+    public mutating func register(_ prepared: PreparedPluginPackage, replace: Bool) throws -> PluginRegistration {
+        let id = prepared.manifest.id
+        let previous = records.first { $0.id == id }
+        guard previous == nil || replace else { throw RPCFailure(code: -32602, message: "Plugin is already installed; pass --replace") }
+        guard previous != nil || records.count < 64 else { throw RPCFailure(code: -32602, message: "At most 64 plugins may be installed") }
+        let record = InstalledPlugin(id: id, installationID: prepared.installationID, enabled: previous?.enabled ?? true, archiveSHA256: prepared.archiveSHA256)
+        // Validate resolution before any filesystem publication.
+        let registration = try prepared.manifest.registration(root: packages.root(record), validateFiles: false)
+        let destination: URL
+        do { destination = try packages.publish(prepared) }
+        catch { throw RPCFailure(code: APIError.settingsWriteFailed, message: "Could not publish plugin files; previous installation retained: \(error)") }
+        do {
+            try commit(records.filter { $0.id != id } + [record])
+        } catch {
+            try? FileManager.default.removeItem(at: destination)
+            throw error
+        }
+        registrations.removeAll { $0.id == id }
+        registrations.append(registration)
+        registrations.sort { $0.id < $1.id }
+        diagnostics.removeValue(forKey: id)
+        return registration
     }
 
     public mutating func remove(_ id: String) throws {
-        guard registrations.contains(where: { $0.id == id }) else { throw ConfigurationError.invalid("Plugin is not registered: \(id)") }
-        let next = registrations.filter { $0.id != id }
-        try commit(next, enabled: enabledServices.subtracting([id]), disabled: disabledPlugins.subtracting([id]))
+        guard records.contains(where: { $0.id == id }) else { throw ConfigurationError.invalid("Plugin is not installed: \(id)") }
+        try commit(records.filter { $0.id != id })
+        registrations.removeAll { $0.id == id }
+        diagnostics.removeValue(forKey: id)
+        // Runtime owners retire files separately, after their cleanup receipts confirm release.
     }
 
     @discardableResult
     public mutating func setEnabled(_ id: String, enabled: Bool) throws -> Bool {
-        guard registrations.contains(where: { $0.id == id }) else {
-            throw ConfigurationError.invalid("Plugin is not registered: \(id)")
-        }
-        guard disabledPlugins.contains(id) == enabled else { return false }
-        var disabled = disabledPlugins
-        if enabled { disabled.remove(id) } else { disabled.insert(id) }
-        try commit(registrations, enabled: enabledServices.subtracting([id]), disabled: disabled)
+        guard let index = records.firstIndex(where: { $0.id == id }) else { throw ConfigurationError.invalid("Plugin is not installed: \(id)") }
+        if enabled, diagnostics[id] != nil { throw RPCFailure(code: -32602, message: "Repair the unavailable plugin before enabling it") }
+        guard records[index].enabled != enabled else { return false }
+        var next = records
+        next[index].enabled = enabled
+        try commit(next)
         return true
     }
 
-    @discardableResult
-    public mutating func setServiceEnabled(_ id: String, enabled: Bool) throws -> Bool {
-        guard activeRegistrations.contains(where: { $0.id == id && $0.service != nil }) else {
-            throw ConfigurationError.invalid("A registered background service is required")
-        }
-        guard enabledServices.contains(id) != enabled else { return false }
-        var next = enabledServices
-        if enabled { next.insert(id) } else { next.remove(id) }
-        guard next.count <= Self.maximumEnabledServices else {
-            throw ConfigurationError.invalid("At most \(Self.maximumEnabledServices) background services may be enabled")
-        }
-        try commit(registrations, enabled: next, disabled: disabledPlugins)
-        return true
+    public func list() -> JSONValue {
+        .array(records.map { record in
+            let registration = registrations.first { $0.id == record.id }
+            var info = registration.flatMap { try? JSONValue.encoding($0).object } ?? [:]
+            info.merge([
+                "id": .string(record.id), "title": .string(registration?.title ?? record.id),
+                "enabled": .bool(record.enabled), "installationID": .string(record.installationID.uuidString.lowercased()),
+                "available": .bool(registration != nil), "diagnostic": diagnostics[record.id].map(JSONValue.string) ?? .null,
+                "packageRoot": .string(packages.root(record).path)
+            ]) { _, value in value }
+            return .object(info)
+        })
     }
 
-    private mutating func commit(_ registrations: [PluginRegistration], enabled: Set<String>, disabled: Set<String>) throws {
-        try store.save(Snapshot(schemaVersion: 3, registrations: registrations, enabledServices: enabled.sorted(), disabledPlugins: disabled.sorted()))
-        self.registrations = registrations
-        enabledServices = enabled
-        disabledPlugins = disabled
+    private mutating func commit(_ records: [InstalledPlugin]) throws {
+        let sorted = records.sorted { $0.id < $1.id }
+        do { try store.save(Snapshot(schemaVersion: 1, plugins: sorted)) }
+        catch { throw RPCFailure(code: APIError.settingsWriteFailed, message: "Could not save plugin registry; previous state retained: \(error)") }
+        self.records = sorted
+        revision = UUID()
     }
-
     private struct Snapshot: Codable {
         let schemaVersion: Int
-        let registrations: [PluginRegistration]
-        let enabledServices: [String]
-        let disabledPlugins: [String]
+        let plugins: [InstalledPlugin]
     }
 }

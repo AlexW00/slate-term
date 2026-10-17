@@ -3,6 +3,7 @@
 import json
 import socket
 from api_fixture import AppFixture, eventually
+from plugin_package_fixture import package_fixture
 
 with AppFixture('causation') as app:
     assert app.rpc('api.describe')['causation']['version'] == 1
@@ -43,8 +44,8 @@ with AppFixture('causation') as app:
     panel = app.root / 'panel'
     panel.mkdir()
     (panel / 'index.html').write_text('<!doctype html><title>Causation fixture</title><p>Owned plugin</p>')
-    app.rpc('plugins.register', manifest={'id': 'causal.fixture', 'title': 'Causation fixture', 'scope': 'global',
-                                         'source': {'kind': 'directory', 'path': str(panel)}})
+    app.rpc('plugins.register', packagePath=package_fixture({'id': 'causal.fixture', 'title': 'Causation fixture', 'scope': 'global',
+                                         'source': {'kind': 'directory', 'path': str(panel)}}, app.root))
     app.rpc('command.run', id='pane.type', pane='p1', type='causal.fixture', force=True)
     second = app.rpc('command.run', id='split.right', pane='p1')['paneId']
     app.rpc('command.run', id='pane.type', pane=second, type='causal.fixture', force=True)
