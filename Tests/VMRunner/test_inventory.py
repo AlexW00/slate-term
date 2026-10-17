@@ -17,14 +17,14 @@ class InventoryTests(unittest.TestCase):
     def test_full_inventory_includes_every_script_and_three_app_iterations(self):
         inventory.validate(REPO)
         selected = inventory.select([], complete=True)
-        self.assertEqual(len(selected), 85)
+        self.assertEqual(len(selected), 86)
         self.assertIn('plugin-packages', [gate.name for gate in selected])
         self.assertTrue({'shell-hooks', 'shells'} <= {gate.name for gate in selected})
         self.assertEqual([gate.name for gate in selected], list(inventory.ORDER))
         self.assertEqual([gate.name for gate in selected if gate.command[-1] == 'scripts/verify-app.py'],
                          ['app-1', 'app-2', 'app-3'])
         self.assertEqual(sum(gate.native is not None for gate in selected), 19)
-        self.assertEqual(sum(gate.location == 'host' for gate in selected), 6)
+        self.assertEqual(sum(gate.location == 'host' for gate in selected), 7)
         self.assertTrue(all(gate.location == 'vm' for gate in selected if gate.native))
 
     def test_selection_alias_does_not_collapse_distinct_app_iterations(self):

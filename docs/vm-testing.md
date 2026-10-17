@@ -10,9 +10,9 @@ bash scripts/verify-all.sh                          # Complete suite
 # Equivalent: python3 scripts/verify-vm.py --all
 ```
 
-No selection only lists tests; it does not build or launch anything. `scripts/verification_gates.py` is the shared inventory for selection, full execution and completeness checks: **83 invocations**, including six host checks, all 19 native recipes and three separate app iterations. `app` aliases `app-1`; `--all` includes `app-1`, `app-2` and `app-3`. Unregistered verification scripts fail inventory validation rather than being silently omitted.
+No selection only lists tests; it does not build or launch anything. `scripts/verification_gates.py` is the shared inventory for selection, full execution and completeness checks: **86 invocations**, including seven host checks, all 19 native recipes and three separate app iterations. `app` aliases `app-1`; `--all` includes `app-1`, `app-2` and `app-3`. Unregistered verification scripts fail inventory validation rather than being silently omitted.
 
-**Build on the host; execute native/UI tests sequentially only in the VM.** The six host-classified gates are engine build, package tests, runner tests, mutation checks, app build and whitespace. There is no guest compilation or host GUI fallback. Direct native shell scripts normally compile and execute on the same machine; use the VM runner instead.
+**Build on the host; execute native/UI tests sequentially only in the VM.** The seven host-classified gates are engine build, package tests, runner tests, release-tooling tests, mutation checks, app build and whitespace. There is no guest compilation or host GUI fallback. Direct native shell scripts normally compile and execute on the same machine; use the VM runner instead.
 
 ## Prerequisites
 

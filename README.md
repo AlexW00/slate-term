@@ -58,6 +58,10 @@ In Xcode select **SlateTermApp**, not `slate-term` (the package CLI can create a
 
 The Ghostty pin is `554ea65867ffe34bb3e51e09bd016e154a1f9d7a`, built with Zig `0.16.0`. Sources are fetched into `.build/bootstrap/ghostty`; binaries are not checked in. See `scripts/build-ghostty.sh` for the pin and toolchain checksum.
 
+## Release builds and licensing
+
+Original Slate code is licensed under [GPL-3.0-or-later](COPYING.md). Third-party licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). See [release builds and credentials](docs/releasing.md) for CI checks, signed/notarized draft releases, corresponding source, and shared credential injection across worktrees. In-app updates are not implemented by this pipeline.
+
 ## CLI
 
 Inside a terminal pane, `slate-term` is on PATH and automatically targets that pane/tab:

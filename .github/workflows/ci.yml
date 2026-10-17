@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source:
+    name: Source and release-tooling checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Scan source and complete fetched history
+        run: python3 scripts/security-scan.py
+      - name: Check release tooling
+        run: python3 -m unittest discover -s Tests/Release -v
+      - name: Check verification inventory
+        run: python3 -m unittest discover -s Tests/VMRunner -v
+      - name: Check shell syntax
+        run: |
+          bash -n scripts/build-ghostty.sh
+          bash -n scripts/release-build.sh
+          bash -n scripts/release-package.sh
+      - name: Check workflow syntax
+        run: python3 scripts/check-workflows.py
+
+  macos:
+    name: Apple Silicon build and package tests
+    needs: source
+    runs-on: xcode-27
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Toolchain
+        id: toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          xcrun --sdk macosx --show-sdk-version
+          echo "build=$(xcodebuild -version | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - name: Cache pinned engine inputs
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            .tools/zig-*
+            .build/bootstrap
+          key: ghostty-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.build }}-${{ hashFiles('scripts/build-ghostty.sh', 'patches/**') }}
+      - name: Package unit tests
+        run: swift test --jobs 4 --only-use-versions-from-resolved-file
+      - name: Build pinned engine
+        run: bash scripts/build-ghostty.sh
+      - name: Build unsigned Release app
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: bash scripts/release-build.sh --version 0.0.0 --build-number "$BUILD_NUMBER"
+      - name: Exercise distribution packaging without credentials
+        run: bash scripts/release-package.sh --unsigned
+      - name: Verify packaged asset checksums
+        working-directory: artifacts/release/assets
+        run: shasum -a 256 -c SHA256SUMS

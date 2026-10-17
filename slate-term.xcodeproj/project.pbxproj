@@ -177,9 +177,18 @@
 				"trap 'rm -rf \"$staging\"' EXIT",
 				"for tool in slate-term slate-layout-launcher; do",
 				"  cp -f \"${BUILT_PRODUCTS_DIR}/$tool\" \"$staging/$tool\"",
+				"  # Package executables need the frameworks beside their installed helper directory.",
+				"  if [[ \"$(otool -l \"$staging/$tool\")\" != *\"path @executable_path/../Frameworks \"* ]]; then",
+				"    install_name_tool -add_rpath @executable_path/../Frameworks \"$staging/$tool\"",
+				"  fi",
 				"  # Nested code must be signed before Xcode signs the app bundle.",
 				"  if [ \"${CODE_SIGNING_ALLOWED:-NO}\" = YES ]; then",
-				"    codesign --force --sign \"${EXPANDED_CODE_SIGN_IDENTITY:--}\" --timestamp=none \"$staging/$tool\"",
+				"    signing_flags=(--timestamp=none)",
+				"    if [ \"${CONFIGURATION}\" = Release ]; then signing_flags=(--timestamp --options runtime); fi",
+				"    codesign --force --sign \"${EXPANDED_CODE_SIGN_IDENTITY:--}\" \"${signing_flags[@]}\" \"$staging/$tool\"",
+				"  else",
+				"    # Changing a load command invalidates the linker signature on Apple Silicon.",
+				"    codesign --force --sign - \"$staging/$tool\"",
 				"  fi",
 				"  cp -f \"$staging/$tool\" \"$helpers/$tool\"",
 				"done",
@@ -337,7 +346,6 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = YWRT8FQN6F;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
@@ -396,8 +404,9 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = YWRT8FQN6F;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;

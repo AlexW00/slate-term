@@ -37,12 +37,13 @@ HOST_COMMANDS = {
     'engine': ('bash', 'scripts/build-ghostty.sh'),
     'model': ('bash', 'scripts/verify-model.sh'),
     'vm-runner': ('python3', '-m', 'unittest', 'discover', '-s', 'Tests/VMRunner', '-v'),
+    'release-tooling': ('python3', '-m', 'unittest', 'discover', '-s', 'Tests/Release', '-v'),
     'mutations': ('python3', 'scripts/verify-model-mutations.py'),
     'build': ('bash', 'scripts/build-app.sh'),
     'whitespace': ('git', 'diff', '--check'),
 }
 ORDER = (
-    'engine', 'model', 'vm-runner', 'mutations',
+    'engine', 'model', 'vm-runner', 'release-tooling', 'mutations',
     'terminal-keys', 'terminal-runs', 'event-hub', 'event-efficiency',
     'plugin-process', 'plugin-listener', 'process-titles', 'pane-movement-native',
     'text-checking', 'pane-titles-native', 'welcome-native', 'dividers-native',

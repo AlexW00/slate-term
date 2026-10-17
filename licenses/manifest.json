@@ -1,0 +1,603 @@
+{
+  "components": {
+    "TOMLDecoder": [
+      {
+        "file": "TOMLDecoder/LICENSE.md",
+        "sha256": "ee59f20a0a5550b0b071a0d9edb31c29629ce4bad2d8f5d0467ee7d574b541cf",
+        "source": {
+          "url": "https://raw.githubusercontent.com/dduan/TOMLDecoder/a2bbd2796fe3064e107de18cb56031052c4fa899/LICENSE.md"
+        }
+      }
+    ],
+    "dear-bindings": [
+      {
+        "file": "dear-bindings/LICENSE.txt",
+        "sha256": "b08fd9947ec127fd7785801cac8b1eea2ab4282008cdaae8e50331d870f30d0d",
+        "source": {
+          "url": "https://raw.githubusercontent.com/dearimgui/dear_bindings/d27d0824350dcaa08c09b1e882ea1ce13f2eb90d/LICENSE.txt"
+        }
+      }
+    ],
+    "freetype": [
+      {
+        "file": "freetype/LICENSE.TXT",
+        "sha256": "2e3bbb7d7c5c396368dd0853a790ec29ce5b8647163dde42a0493fb0d6556b2b",
+        "source": {
+          "path": "LICENSE.TXT",
+          "url": "https://deps.files.ghostty.org/freetype-1220b81f6ecfb3fd222f76cf9106fecfa6554ab07ec7fdc4124b9bb063ae2adf969d.tar.gz",
+          "zig_content_hash": "N-V-__8AAKLKpwC4H27Ps_0iL3bPkQb-z6ZVSrB-x_3EEkub"
+        }
+      },
+      {
+        "file": "freetype/docs/FTL.TXT",
+        "sha256": "08c135755dd589039470f1fdbb400daaabaaa50d0b366d19cebff4d22986baa1",
+        "source": {
+          "path": "docs/FTL.TXT",
+          "url": "https://deps.files.ghostty.org/freetype-1220b81f6ecfb3fd222f76cf9106fecfa6554ab07ec7fdc4124b9bb063ae2adf969d.tar.gz",
+          "zig_content_hash": "N-V-__8AAKLKpwC4H27Ps_0iL3bPkQb-z6ZVSrB-x_3EEkub"
+        }
+      }
+    ],
+    "ghostty": [
+      {
+        "file": "ghostty/LICENSE",
+        "sha256": "386211873e5b7a02f663ae4d7adf96285999f91608f8f9f31fecfd0f4095e6f1",
+        "source": {
+          "ghostty_revision": "554ea65867ffe34bb3e51e09bd016e154a1f9d7a",
+          "path": "LICENSE"
+        }
+      }
+    ],
+    "glslang": [
+      {
+        "file": "glslang/LICENSE.txt",
+        "sha256": "adb783e734e906d1f46db5df29991dbde84bdb0ceab502ac2febb44fe3c2b5f4",
+        "source": {
+          "path": "LICENSE.txt",
+          "url": "https://deps.files.ghostty.org/glslang-12201278a1a05c0ce0b6eb6026c65cd3e9247aa041b1c260324bf29cee559dd23ba1.tar.gz",
+          "zig_content_hash": "N-V-__8AABzkUgISeKGgXAzgtutgJsZc0-kkeqBBscJgMkvy"
+        }
+      },
+      {
+        "file": "glslang/license-checker.cfg",
+        "sha256": "e6ead88c5894007be86546cfd24d6c0b9fafcbf832fc27d8330eb7d46cedc84a",
+        "source": {
+          "path": "license-checker.cfg",
+          "url": "https://deps.files.ghostty.org/glslang-12201278a1a05c0ce0b6eb6026c65cd3e9247aa041b1c260324bf29cee559dd23ba1.tar.gz",
+          "zig_content_hash": "N-V-__8AABzkUgISeKGgXAzgtutgJsZc0-kkeqBBscJgMkvy"
+        }
+      }
+    ],
+    "highway": [
+      {
+        "file": "highway/LICENSE",
+        "sha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1",
+        "source": {
+          "path": "LICENSE",
+          "url": "https://deps.files.ghostty.org/highway-66486a10623fa0d72fe91260f96c892e41aceb06.tar.gz",
+          "zig_content_hash": "N-V-__8AAGmZhABbsPJLfbqrh6JTHsXhY6qCaLAQyx25e0XE"
+        }
+      },
+      {
+        "file": "highway/LICENSE-BSD3",
+        "sha256": "d25e82e26acd42ca3ccc9993622631163425b869b9e16284226d534cff6470f2",
+        "source": {
+          "path": "LICENSE-BSD3",
+          "url": "https://deps.files.ghostty.org/highway-66486a10623fa0d72fe91260f96c892e41aceb06.tar.gz",
+          "zig_content_hash": "N-V-__8AAGmZhABbsPJLfbqrh6JTHsXhY6qCaLAQyx25e0XE"
+        }
+      }
+    ],
+    "imgui": [
+      {
+        "file": "imgui/LICENSE.txt",
+        "sha256": "c80c5789748d955c4a650562baa0d750494e2c7128c2ca66aaebe2e3c4e198bf",
+        "source": {
+          "path": "LICENSE.txt",
+          "url": "https://deps.files.ghostty.org/N-V-__8AAEbOfQBnvcFcCX2W5z7tDaN8vaNZGamEQtNOe0UI.tar.gz",
+          "zig_content_hash": "N-V-__8AAEbOfQBnvcFcCX2W5z7tDaN8vaNZGamEQtNOe0UI"
+        }
+      }
+    ],
+    "iterm2-themes": [
+      {
+        "file": "iterm2-themes/LICENSE",
+        "sha256": "2373168614b527494dff99eb393024608216db79f687d58bad420f6c1e0ad192",
+        "source": {
+          "url": "https://raw.githubusercontent.com/mbadolato/iTerm2-Color-Schemes/31756e77934045c66b28f59463ddb2870606d7ca/LICENSE"
+        }
+      }
+    ],
+    "jetbrains_mono": [
+      {
+        "file": "jetbrains_mono/AUTHORS.txt",
+        "sha256": "33f99c94ef0a0909d7584a5d4bde1fb9b1630daa620f5a788c28c43327e79412",
+        "source": {
+          "path": "AUTHORS.txt",
+          "url": "https://deps.files.ghostty.org/JetBrainsMono-2.304.tar.gz",
+          "zig_content_hash": "N-V-__8AAIC5lwAVPJJzxnCAahSvZTIlG-HhtOvnM1uh-66x"
+        }
+      },
+      {
+        "file": "jetbrains_mono/OFL.txt",
+        "sha256": "30f0c136e3c88e422d0791acd97238870f9054a9729bc34cf2ff0d4ed8cac4ad",
+        "source": {
+          "path": "OFL.txt",
+          "url": "https://deps.files.ghostty.org/JetBrainsMono-2.304.tar.gz",
+          "zig_content_hash": "N-V-__8AAIC5lwAVPJJzxnCAahSvZTIlG-HhtOvnM1uh-66x"
+        }
+      }
+    ],
+    "libpng": [
+      {
+        "file": "libpng/AUTHORS",
+        "sha256": "980af1d09d9a1092e35c463776757c90becb07f9879f6549d46e90e22629f4e1",
+        "source": {
+          "path": "AUTHORS",
+          "url": "https://deps.files.ghostty.org/libpng-1220aa013f0c83da3fb64ea6d327f9173fa008d10e28bc9349eac3463457723b1c66.tar.gz",
+          "zig_content_hash": "N-V-__8AAJrvXQCqAT8Mg9o_tk6m0yf5Fz-gCNEOKLyTSerD"
+        }
+      },
+      {
+        "file": "libpng/LICENSE",
+        "sha256": "7317e078e2d3b5d7ba5a6159e650945153262b44b76f6700f8e9edb261c5143e",
+        "source": {
+          "path": "LICENSE",
+          "url": "https://deps.files.ghostty.org/libpng-1220aa013f0c83da3fb64ea6d327f9173fa008d10e28bc9349eac3463457723b1c66.tar.gz",
+          "zig_content_hash": "N-V-__8AAJrvXQCqAT8Mg9o_tk6m0yf5Fz-gCNEOKLyTSerD"
+        }
+      }
+    ],
+    "libxev": [
+      {
+        "file": "libxev/LICENSE",
+        "sha256": "fcd26bcead569a910dd778cb864e027683498ca414e15db1694a5893eee1b835",
+        "source": {
+          "path": "LICENSE",
+          "url": "https://deps.files.ghostty.org/libxev-9ce8e8e6ff89e583258a7f8e7adeeeaeae8611bf.tar.gz",
+          "zig_content_hash": "libxev-0.0.0-86vtcwIRFADbH4hk-EjROXxlrKIRPQdA41XiTSytYO-F"
+        }
+      }
+    ],
+    "nerd-fonts": [
+      {
+        "file": "nerd-fonts/CC-BY-4.0.txt",
+        "sha256": "8ae9438818c26e4873b91d8c6ad620526c011e27e125677f13031eda903f007c",
+        "source": {
+          "url": "https://raw.githubusercontent.com/creativecommons/legalcode/4d2de083a6dcc5095ed1a30885bc48f868b9bb55/by_4.0.txt"
+        }
+      },
+      {
+        "file": "nerd-fonts/LICENSE",
+        "sha256": "1f6ad4edae6479aaace3112ede5279a23284ae54b2a34db66357aef5f64df160",
+        "source": {
+          "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/LICENSE"
+        }
+      },
+      {
+        "file": "nerd-fonts/devicon-LICENSE",
+        "sha256": "121194741d4a915b9f5890fdd6dd95121f9b1f816517c792358d72d7c838d664",
+        "source": {
+          "url": "https://raw.githubusercontent.com/devicons/devicon/v2.17.0/LICENSE"
+        }
+      },
+      {
+        "file": "nerd-fonts/font-awesome-extension-LICENCE",
+        "sha256": "b47b15d771c4507a75ff65beca3a78168d6af4cca9b45177a1aa817139c64ba5",
+        "source": {
+          "note": "Supplemental upstream glyph notice; font binary remains the pinned Nerd Fonts 3.4.0 resource.",
+          "url": "https://raw.githubusercontent.com/AndreLZGava/font-awesome-extension/09d80249058ee8018a45da30add4339289dbb466/LICENCE"
+        }
+      },
+      {
+        "file": "nerd-fonts/font-logos-LICENSE",
+        "sha256": "88d9b4eb60579c191ec391ca04c16130572d7eedc4a86daa58bf28c6e14c9bcd",
+        "source": {
+          "url": "https://raw.githubusercontent.com/lukas-w/font-logos/v1.3.0/LICENSE"
+        }
+      },
+      {
+        "file": "nerd-fonts/hack-LICENSE.md",
+        "sha256": "1f61bb7c790c59b4b0ecdf304628b94e42ae4c8020094a8c3da73381ab212623",
+        "source": {
+          "note": "Supplemental upstream glyph notice; font binary remains the pinned Nerd Fonts 3.4.0 resource.",
+          "url": "https://raw.githubusercontent.com/source-foundry/Hack/b47d21f808fbf4784565feccde2213ef2af924b3/LICENSE.md"
+        }
+      },
+      {
+        "file": "nerd-fonts/license-audit.md",
+        "sha256": "22c490a48e08adcabab0b06d317fe6c6310a420e081d8ebff7f44d0210096cd1",
+        "source": {
+          "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/license-audit.md"
+        }
+      },
+      {
+        "file": "nerd-fonts/power-symbols-LICENSE.txt",
+        "sha256": "11aef1cdf2d58d822e6857e2574870ccc59d4900052bf5c098e319d750e7ac3d",
+        "source": {
+          "note": "Supplemental upstream glyph notice; font binary remains the pinned Nerd Fonts 3.4.0 resource.",
+          "url": "https://raw.githubusercontent.com/jloughry/Unicode/805536fb6f93604da985d80e0c6b099f98f8b4d9/LICENSE.txt"
+        }
+      },
+      {
+        "file": "nerd-fonts/seti-ui-LICENSE.md",
+        "sha256": "d4d2d888c6a0a220a7b0e2d6013cf37539b0e05ef937002b3b33bdb364575b88",
+        "source": {
+          "url": "https://raw.githubusercontent.com/jesseweed/seti-ui/6c358eb9ce5cc20bccd72cc4d7179fd485cd8fe7/LICENSE.md"
+        }
+      },
+      {
+        "file": "nerd-fonts/src/glyphs/codicons/LICENSE.txt",
+        "sha256": "d6239afa918961b465b07bf7411cbe34ff6685854f58553db7966f4881a0211f",
+        "source": {
+          "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/codicons/LICENSE.txt"
+        }
+      },
+      {
+        "file": "nerd-fonts/src/glyphs/font-awesome/LICENSE.txt",
+        "sha256": "de784a808496d49f5f80dd9d1d6e9a51cff712cfbc339e7c25155631ae3cdb5d",
+        "source": {
+          "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/font-awesome/LICENSE.txt"
+        }
+      },
+      {
+        "file": "nerd-fonts/src/glyphs/materialdesign/LICENSE",
+        "sha256": "3bae6305bcaa6d10219b999f65c342034c2d40b1c0e8567fa08605e73ccba829",
+        "source": {
+          "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/materialdesign/LICENSE"
+        }
+      },
+      {
+        "file": "nerd-fonts/src/glyphs/octicons/LICENSE",
+        "sha256": "4f886642f9e8d99eeadd484acdac011c3fde8a338faf52f5ca1408c13b9a9b63",
+        "source": {
+          "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/octicons/LICENSE"
+        }
+      },
+      {
+        "file": "nerd-fonts/src/glyphs/pomicons/LICENSE",
+        "sha256": "cb4797a9745683f287c28833db596e9d68ec43082d59359b3a49c504f0f610ce",
+        "source": {
+          "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/pomicons/LICENSE"
+        }
+      },
+      {
+        "file": "nerd-fonts/src/glyphs/powerline-extra/LICENSE",
+        "sha256": "544307a58e6826c24145b2af1c3578b53e2e21ae0e6c67ab4c6abd544304d26a",
+        "source": {
+          "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/powerline-extra/LICENSE"
+        }
+      },
+      {
+        "file": "nerd-fonts/src/glyphs/powerline-symbols/LICENSE.txt",
+        "sha256": "46d5355e4734468135d8e4a30d0916292cc4df2b3ec30aa68c866f82497933be",
+        "source": {
+          "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/powerline-symbols/LICENSE.txt"
+        }
+      },
+      {
+        "file": "nerd-fonts/src/glyphs/weather-icons/OFL-FAQ.txt",
+        "sha256": "8acd621722e71dc89de0087a264497b8964d240eedc53677f6344ab20ce36fd7",
+        "source": {
+          "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/weather-icons/OFL-FAQ.txt"
+        }
+      },
+      {
+        "file": "nerd-fonts/src/glyphs/weather-icons/OFL.txt",
+        "sha256": "69cdedc8a4f57a30d68e4f045af8b9cce0ec3b1a6e7eec1ad41737c894f26790",
+        "source": {
+          "url": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/fa7b859994228a9c8759f99c55a8d31ee92a1b5e/src/glyphs/weather-icons/OFL.txt"
+        }
+      }
+    ],
+    "nerd-fonts-vendor": [
+      {
+        "file": "nerd-fonts-vendor/LICENSE",
+        "sha256": "1f6ad4edae6479aaace3112ede5279a23284ae54b2a34db66357aef5f64df160",
+        "source": {
+          "ghostty_revision": "554ea65867ffe34bb3e51e09bd016e154a1f9d7a",
+          "path": "vendor/nerd-fonts/LICENSE"
+        }
+      }
+    ],
+    "nerd_fonts_symbols_only": [
+      {
+        "file": "nerd_fonts_symbols_only/FONT-METADATA.txt",
+        "sha256": "bb07d498f99a9a7fb5cadbbda584c7518e548f27520b2e272f47ab6a1f12994b",
+        "source": {
+          "path": "SymbolsNerdFont-Regular.ttf",
+          "selection": "copyright, trademark, manufacturer, designer, license and license URL name records",
+          "zig_content_hash": "N-V-__8AAMVLTABmYkLqhZPLXnMl-KyN38R8UVYqGrxqO26s"
+        }
+      },
+      {
+        "file": "nerd_fonts_symbols_only/LICENSE",
+        "sha256": "84a7a98c82140fb12c37fe42b93805baa16024cb3e5acc599b7ffe612c55d847",
+        "source": {
+          "path": "LICENSE",
+          "url": "https://deps.files.ghostty.org/NerdFontsSymbolsOnly-3.4.0.tar.gz",
+          "zig_content_hash": "N-V-__8AAMVLTABmYkLqhZPLXnMl-KyN38R8UVYqGrxqO26s"
+        }
+      }
+    ],
+    "oniguruma": [
+      {
+        "file": "oniguruma/AUTHORS",
+        "sha256": "172a2a72c080d3067969599308c91385af86fdeb2419f8ad687883ca5a8ff912",
+        "source": {
+          "path": "AUTHORS",
+          "url": "https://deps.files.ghostty.org/oniguruma-1220c15e72eadd0d9085a8af134904d9a0f5dfcbed5f606ad60edc60ebeccd9706bb.tar.gz",
+          "zig_content_hash": "N-V-__8AAHjwMQDBXnLq3Q2QhaivE0kE2aD138vtX2Bq1g7c"
+        }
+      },
+      {
+        "file": "oniguruma/COPYING",
+        "sha256": "70ba5469ea0bab6e18a32d7009068f996503168d27be57747e08da34337ff26f",
+        "source": {
+          "path": "COPYING",
+          "url": "https://deps.files.ghostty.org/oniguruma-1220c15e72eadd0d9085a8af134904d9a0f5dfcbed5f606ad60edc60ebeccd9706bb.tar.gz",
+          "zig_content_hash": "N-V-__8AAHjwMQDBXnLq3Q2QhaivE0kE2aD138vtX2Bq1g7c"
+        }
+      }
+    ],
+    "pixels": [
+      {
+        "file": "pixels/LICENSE",
+        "sha256": "6a1ee543e5282cd9061881edf462e6fdab181f328da71fc2c9a6950a80e94d01",
+        "source": {
+          "path": "LICENSE",
+          "url": "https://deps.files.ghostty.org/pixels-12207ff340169c7d40c570b4b6a97db614fe47e0d83b5801a932dcd44917424c8806.tar.gz",
+          "zig_content_hash": "N-V-__8AADYiAAB_80AWnH1AxXC0tql9thT-R-DYO1gBqTLc"
+        }
+      }
+    ],
+    "simdutf": [
+      {
+        "file": "simdutf/LICENSE-APACHE",
+        "sha256": "3d34610fc6b5e1b0bfe4e2f36171c2d62c28ef05cb8d704f5a0073be41a43b3d",
+        "source": {
+          "url": "https://raw.githubusercontent.com/simdutf/simdutf/ca7acbcea967b5dcbab490066e99e3a6e6925539/LICENSE-APACHE"
+        }
+      },
+      {
+        "file": "simdutf/LICENSE-MIT",
+        "sha256": "fc8dbc04e03ad4efc08a647ffe7f995b811a95bc04c0e85a56d5277c6593fa5f",
+        "source": {
+          "url": "https://raw.githubusercontent.com/simdutf/simdutf/ca7acbcea967b5dcbab490066e99e3a6e6925539/LICENSE-MIT"
+        }
+      },
+      {
+        "file": "simdutf/TORCH-NOTICE.txt",
+        "sha256": "204bbed08ddeeecb362b4da36d3479a0167b7356a9d6024a24f9833affbe228a",
+        "source": {
+          "ghostty_revision": "554ea65867ffe34bb3e51e09bd016e154a1f9d7a",
+          "path": "pkg/simdutf/vendor/simdutf.h",
+          "selection": "embedded Torch license comment"
+        }
+      }
+    ],
+    "spirv_cross": [
+      {
+        "file": "spirv_cross/LICENSE",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "source": {
+          "path": "LICENSE",
+          "url": "https://deps.files.ghostty.org/spirv_cross-1220fb3b5586e8be67bc3feb34cbe749cf42a60d628d2953632c2f8141302748c8da.tar.gz",
+          "zig_content_hash": "N-V-__8AANb6pwD7O1WG6L5nvD_rNMvnSc9Cpg1ijSlTYywv"
+        }
+      }
+    ],
+    "stb": [
+      {
+        "file": "stb/stb_image.h.LICENSE",
+        "sha256": "7587efcca32db8f95bf5860dea6dfa4be410ee723e1964db3689c8ddf2a2e4a9",
+        "source": {
+          "ghostty_revision": "554ea65867ffe34bb3e51e09bd016e154a1f9d7a",
+          "path": "src/stb/stb_image.h",
+          "selection": "final dual-license comment"
+        }
+      },
+      {
+        "file": "stb/stb_image_resize.h.LICENSE",
+        "sha256": "7587efcca32db8f95bf5860dea6dfa4be410ee723e1964db3689c8ddf2a2e4a9",
+        "source": {
+          "ghostty_revision": "554ea65867ffe34bb3e51e09bd016e154a1f9d7a",
+          "path": "src/stb/stb_image_resize.h",
+          "selection": "final dual-license comment"
+        }
+      }
+    ],
+    "swift-argument-parser": [
+      {
+        "file": "swift-argument-parser/LICENSE.txt",
+        "sha256": "770af8291f708538d8ff885a0bbc4e045cd700531741c4f99528d435c14d7f55",
+        "source": {
+          "url": "https://raw.githubusercontent.com/apple/swift-argument-parser/41982a3656a71c768319979febd796c6fd111d5c/LICENSE.txt"
+        }
+      }
+    ],
+    "uucode": [
+      {
+        "file": "uucode/LICENSE.md",
+        "sha256": "312e901e142be2477b4ca859e9311f9e3f80d33372991759b7921c1893605f33",
+        "source": {
+          "url": "https://raw.githubusercontent.com/jacobsandlund/uucode/9d55524551411b493cca41ca06363625d90aff1e/LICENSE.md"
+        }
+      },
+      {
+        "file": "uucode/licenses/LICENSE_Bjoern_Hoehrmann",
+        "sha256": "de219cece932aad5a817bf763393d8d149d378a15d2ad5320e3331eac07626dd",
+        "source": {
+          "url": "https://raw.githubusercontent.com/jacobsandlund/uucode/9d55524551411b493cca41ca06363625d90aff1e/licenses/LICENSE_Bjoern_Hoehrmann"
+        }
+      },
+      {
+        "file": "uucode/licenses/LICENSE_unicode",
+        "sha256": "1eda5a3b026870c737b22e8bcd4954338612c790db688242e003f41a4fa95175",
+        "source": {
+          "url": "https://raw.githubusercontent.com/jacobsandlund/uucode/9d55524551411b493cca41ca06363625d90aff1e/licenses/LICENSE_unicode"
+        }
+      }
+    ],
+    "vaxis": [
+      {
+        "file": "vaxis/LICENSE",
+        "sha256": "cca4ffa6a45c0b17d3e9840b4cbe5be1e76ab84fda69850e0cb3f117729eeeea",
+        "source": {
+          "path": "LICENSE",
+          "url": "https://deps.files.ghostty.org/vaxis-1dbbe575dff4586fe51e3217aa5c3fecdcbb6089.tar.gz",
+          "zig_content_hash": "vaxis-0.6.0-BWNV_CrbCQCscGpzsAlR402rYQ_tV3aAl081c2iRRkka"
+        }
+      }
+    ],
+    "wuffs": [
+      {
+        "file": "wuffs/LICENSE",
+        "sha256": "f8ac2c75e7f629a87565c80d61ff9fe5aa15cdea0bda997d52a4dc13fdbd19cb",
+        "source": {
+          "path": "LICENSE",
+          "url": "https://deps.files.ghostty.org/wuffs-7411f488fe2e2c205c3d3b3d28638b7356522930.tar.gz",
+          "zig_content_hash": "N-V-__8AAP5JWgCGP_AD0teWpa4krRvE9VPZzvviGdbmN4jI"
+        }
+      },
+      {
+        "file": "wuffs/LICENSE-APACHE",
+        "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+        "source": {
+          "path": "LICENSE-APACHE",
+          "url": "https://deps.files.ghostty.org/wuffs-7411f488fe2e2c205c3d3b3d28638b7356522930.tar.gz",
+          "zig_content_hash": "N-V-__8AAP5JWgCGP_AD0teWpa4krRvE9VPZzvviGdbmN4jI"
+        }
+      },
+      {
+        "file": "wuffs/LICENSE-MIT",
+        "sha256": "bb811a4b485eac3caeb8bdc58bbafb355fbcb6116010a7ea9179e5c70b0bc878",
+        "source": {
+          "path": "LICENSE-MIT",
+          "url": "https://deps.files.ghostty.org/wuffs-7411f488fe2e2c205c3d3b3d28638b7356522930.tar.gz",
+          "zig_content_hash": "N-V-__8AAP5JWgCGP_AD0teWpa4krRvE9VPZzvviGdbmN4jI"
+        }
+      }
+    ],
+    "z2d": [
+      {
+        "file": "z2d/COPYING",
+        "sha256": "d8d2562a7cb68ffdfe91fc66af1ed4a8a4e272aa4ab59bea7451ba34b9aba3d4",
+        "source": {
+          "url": "https://raw.githubusercontent.com/vancluever/z2d/7dbae85c81784dba9988320bf9543ed9a81350c8/COPYING"
+        }
+      },
+      {
+        "file": "z2d/LICENSE",
+        "sha256": "c3c0b845181a67c2f926485299855769afa675bc90b18904c3087ae884cb1873",
+        "source": {
+          "url": "https://raw.githubusercontent.com/vancluever/z2d/7dbae85c81784dba9988320bf9543ed9a81350c8/LICENSE"
+        }
+      }
+    ],
+    "zf": [
+      {
+        "file": "zf/LICENSE",
+        "sha256": "0629000344ad0dc3c6e0e4c1b0c4a5cacf090e17d56e8bc5272705e3d35b7def",
+        "source": {
+          "path": "LICENSE",
+          "url": "https://deps.files.ghostty.org/zf-c35c421f84895193246db06c40683c1a30e616ef.tar.gz",
+          "zig_content_hash": "zf-0.11.0-OIRy8X-RAAAwaRXHMYpj2uvBnuGTZWEE_3V7acqHQNtW"
+        }
+      }
+    ],
+    "zig-runtime": [
+      {
+        "file": "zig-runtime/LICENSE",
+        "sha256": "5c537d6853e005298a285d508cff9ac7192cea23576c840d485b2b586a7ff177",
+        "source": {
+          "archive_sha256": "b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489",
+          "path": "LICENSE",
+          "url": "https://ziglang.org/download/0.16.0/zig-aarch64-macos-0.16.0.tar.xz",
+          "version": "0.16.0"
+        }
+      },
+      {
+        "file": "zig-runtime/lib/libcxx/LICENSE.TXT",
+        "sha256": "539dd7aed86e8a4f12cbdd0e6c50c189c7d74847e4fecc64ce2c6ee3a01da38b",
+        "source": {
+          "archive_sha256": "b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489",
+          "path": "lib/libcxx/LICENSE.TXT",
+          "url": "https://ziglang.org/download/0.16.0/zig-aarch64-macos-0.16.0.tar.xz",
+          "version": "0.16.0"
+        }
+      },
+      {
+        "file": "zig-runtime/lib/libcxxabi/LICENSE.TXT",
+        "sha256": "e2b35be49f7284a45b7baca8fc7b3ab7440e7902392b2528a457816b5bb2a15c",
+        "source": {
+          "archive_sha256": "b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489",
+          "path": "lib/libcxxabi/LICENSE.TXT",
+          "url": "https://ziglang.org/download/0.16.0/zig-aarch64-macos-0.16.0.tar.xz",
+          "version": "0.16.0"
+        }
+      },
+      {
+        "file": "zig-runtime/lib/libunwind/LICENSE.TXT",
+        "sha256": "b5efebcaca80879234098e52d1725e6d9eb8fb96a19fce625d39184b705f7b6d",
+        "source": {
+          "archive_sha256": "b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489",
+          "path": "lib/libunwind/LICENSE.TXT",
+          "url": "https://ziglang.org/download/0.16.0/zig-aarch64-macos-0.16.0.tar.xz",
+          "version": "0.16.0"
+        }
+      }
+    ],
+    "zig_objc": [
+      {
+        "file": "zig_objc/LICENSE",
+        "sha256": "fcd26bcead569a910dd778cb864e027683498ca414e15db1694a5893eee1b835",
+        "source": {
+          "path": "LICENSE",
+          "url": "https://deps.files.ghostty.org/zig_objc-c8de82ff80281215ad92900866dab7103a8efa8b.tar.gz",
+          "zig_content_hash": "zig_objc-0.0.0-Ir_Sp9gsAQCPAJc0oF5xoWePHWP6Y6tCphDeyNUThJoi"
+        }
+      }
+    ],
+    "zigimg": [
+      {
+        "file": "zigimg/LICENSE",
+        "sha256": "57d0bd32e00043f6387cc7b86ed351f10c190a3d6266bbfa3fa21a1c3200e48f",
+        "source": {
+          "url": "https://raw.githubusercontent.com/zigimg/zigimg/d695acd97c02e57bb151e8f659d1280f5cd6ca70/LICENSE"
+        }
+      }
+    ],
+    "zlib": [
+      {
+        "file": "zlib/LICENSE",
+        "sha256": "845efc77857d485d91fb3e0b884aaa929368c717ae8186b66fe1ed2495753243",
+        "source": {
+          "path": "LICENSE",
+          "url": "https://deps.files.ghostty.org/zlib-1220fed0c74e1019b3ee29edae2051788b080cd96e90d56836eea857b0b966742efb.tar.gz",
+          "zig_content_hash": "N-V-__8AAB0eQwD-0MdOEBmz7intriBReIsIDNlukNVoNu6o"
+        }
+      },
+      {
+        "file": "zlib/contrib/dotzlib/LICENSE_1_0.txt",
+        "sha256": "36266a8fd073568394cb81cdb2b124f7fdae2c64c1a7ed09db34b4d22efa2951",
+        "source": {
+          "path": "contrib/dotzlib/LICENSE_1_0.txt",
+          "url": "https://deps.files.ghostty.org/zlib-1220fed0c74e1019b3ee29edae2051788b080cd96e90d56836eea857b0b966742efb.tar.gz",
+          "zig_content_hash": "N-V-__8AAB0eQwD-0MdOEBmz7intriBReIsIDNlukNVoNu6o"
+        }
+      }
+    ]
+  },
+  "ghostty_disabled_features": [
+    "i18n",
+    "sentry"
+  ],
+  "ghostty_revision": "554ea65867ffe34bb3e51e09bd016e154a1f9d7a",
+  "schema": 1,
+  "swift_pins": {
+    "swift-argument-parser": "41982a3656a71c768319979febd796c6fd111d5c",
+    "tomldecoder": "a2bbd2796fe3064e107de18cb56031052c4fa899"
+  },
+  "zig_version": "0.16.0"
+}

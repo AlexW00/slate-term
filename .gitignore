@@ -9,3 +9,22 @@ __pycache__/
 *.py[cod]
 
 .derived-settings/
+
+# Local Xcode state and release outputs.
+xcuserdata/
+.derived-release/
+
+# Credentials belong in the system keychain, 1Password, or GitHub Secrets.
+.env*
+!.env.example
+!.env.sample
+!*.env.op.example
+*.p12
+*.pfx
+*.p8
+*.pem
+*.key
+*.keychain
+*.keychain-db
+*.mobileprovision
+*.provisionprofile
