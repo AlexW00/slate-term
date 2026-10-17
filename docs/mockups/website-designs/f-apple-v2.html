@@ -447,15 +447,36 @@ h2 .g{color:var(--text-3)}
 @media (max-width:734px){.pstage{grid-template-columns:1fr}.parrow{transform:rotate(90deg);justify-self:center}.pfloat.pk{right:0}.pfloat.ps{left:0}}
 
 /* Wide tiles stack their text above the visual, like the other tiles. */
-.t-plug,.t-cli{padding-bottom:36px}
-.t-plug .pstage,.t-cli .cliwin{margin-top:28px}
+.t-plug{padding-bottom:36px}
+.t-plug .pstage{margin-top:28px}
 .t-plug .pstage{flex:1}
-.t-cli .cliwin{flex:1;display:flex;flex-direction:column}
-.t-cli .cliwin pre{font-size:11.5px;line-height:1.75;padding:14px 16px 16px}
 .t-plug .pchips{margin-top:16px}
 .t-plug .pchips li{height:24px;font-size:12px;padding:0 10px}
 .t-k .vis{justify-content:center}
-#agents-tile .names{font-size:clamp(22px,2.2vw,26px);flex:1}
+
+/* Agents section: an agent session in a terminal window. */
+.agterm{max-width:860px;margin:56px auto 0}
+.agterm .bar{position:relative}
+.agterm .bar span{padding-right:0}
+.agterm .bar em{position:absolute;right:14px;font:500 11px/1 var(--font);font-style:normal;color:#7c7c82}
+.agterm pre{font-size:13px;line-height:1.75;padding:20px 24px 24px}
+.agterm .u{color:#f5f5f7}
+.agterm .o{color:#63d17a}
+.agterm .cmd{color:#9ecbff}
+.agterm .ok2{color:#63d17a}
+.tok{font:500 .92em var(--mono);letter-spacing:0}
+.agrow{display:grid;grid-template-columns:repeat(3,1fr);gap:32px;max-width:860px;margin:48px auto 0}
+.agrow h3{font-size:17px;font-weight:600;letter-spacing:-.022em}
+.agrow p{font-size:14px;line-height:1.43;color:var(--text-2);margin-top:4px;letter-spacing:-.01em}
+.agnames{max-width:860px;margin:64px auto 0;text-align:center}
+.agnames>p:first-child{font-size:14px;color:var(--text-2)}
+.agnames .names{justify-content:center;margin-top:12px;padding:0}
+.agnames .fine{font-size:12px;color:var(--text-3);margin-top:14px}
+.kick{font:600 17px/1.2 var(--font);letter-spacing:-.02em;color:var(--blue);margin-bottom:10px}
+.gkick{display:block;font:600 12px/1 var(--font);letter-spacing:-.005em;color:var(--text-3);margin-bottom:10px}
+.gal-sec{background:var(--bg-alt)}
+.gal-sec .gcard{background:var(--tile)}
+@media (max-width:734px){.agrow{grid-template-columns:1fr;gap:20px}.agterm pre{font-size:11px;padding:14px 14px 18px}}
 
 /* Solo kit panels inside tiles, shown at 1:1 and cropped by the tile. */
 .solo{position:absolute;left:0;right:-36px;top:0;bottom:-24px;border-radius:14px 0 0 0;background:var(--st-bg);color:var(--text-k);box-shadow:0 0 0 .5px var(--border-k),0 12px 30px rgba(0,0,0,.08);overflow:hidden;font:12px/1.4 var(--font);letter-spacing:0}
@@ -465,8 +486,7 @@ h2 .g{color:var(--text-3)}
 @media (max-width:734px){.solo{right:-24px}.tile.s3 .vis{min-height:300px}.tile.s4{grid-column:span 1}}
 
 /* Terminal tile: tabs and nested splits */
-.t-term{background:var(--tile-dark);color:#f5f5f7}
-.t-term p{color:#a1a1a6}
+.t-term .mt{box-shadow:0 0 0 .5px rgba(0,0,0,.25),0 16px 36px rgba(0,0,0,.14)}
 .t-term .vis{min-height:300px}
 .mt{position:absolute;left:0;right:-36px;top:0;bottom:-24px;display:flex;flex-direction:column;border-radius:14px 0 0 0;background:#2a2a2d;overflow:hidden;font:12px/1.6 var(--mono);color:#d4d4d4;letter-spacing:0}
 .mt-tabs{flex:none;display:flex;align-items:center;gap:4px;height:38px;padding:0 10px}
@@ -542,7 +562,6 @@ h2 .g{color:var(--text-3)}
 
 
 
-.t-cli .lead .mono{display:inline-block;margin-top:22px;font-size:13px;color:var(--text-3)}
 .cliwin{border-radius:14px;background:var(--term-bg);overflow:hidden;box-shadow:0 0 0 .5px rgba(0,0,0,.2),0 18px 40px rgba(0,0,0,.12);min-width:0}
 .cliwin .bar{display:flex;align-items:center;gap:7px;height:34px;padding:0 13px;background:#2a2a2d}
 .cliwin .bar i{width:10px;height:10px;border-radius:50%;background:#4a4a4f}
@@ -585,7 +604,6 @@ h2 .g{color:var(--text-3)}
 .tile .fine{font-size:12px;color:var(--text-3);margin-top:auto;padding:16px 0 30px;letter-spacing:-.005em}
 
 /* ---------- Examples gallery ---------- */
-.gal-sec{background:var(--bg)}
 .pnote{display:inline-flex;align-items:center;gap:6px;margin-top:22px;height:24px;padding:0 11px;border-radius:980px;font:500 12px/1 var(--font);letter-spacing:-.005em;color:var(--text-2);background:var(--bg-alt);box-shadow:inset 0 0 0 1px var(--hair-2)}
 .pnote svg{width:12px;height:12px;flex:none}
 .gallery{--gw:min(980px,calc(100vw - 140px));margin-top:56px}
@@ -703,8 +721,8 @@ footer a:hover{color:var(--text)}
     <div class="lnav-menu">
       <a href="#top" aria-current="page">Overview</a>
       <a href="#features">Features</a>
-      <a href="#examples">Examples</a>
       <a href="#agents">Agents</a>
+      <a href="#examples">Plugin ideas</a>
       <a class="pill" href="#">Download</a>
     </div>
   </div>
@@ -716,7 +734,7 @@ footer a:hover{color:var(--text)}
       <svg class="appicon" width="96" height="96" aria-hidden="true"><use href="#app"/></svg>
       <p class="eyebrow">Slate Terminal</p>
       <h1 id="hero-title">Software you can shape.</h1>
-      <p class="lede">A native macOS terminal, and a canvas for the tools you build with your agents.</p>
+      <p class="lede">A native macOS terminal you and your agents can build on.</p>
       <div class="ctas">
         <a class="btn" href="#"><svg class="apple" aria-hidden="true"><use href="#apple"/></svg>Download for Mac</a>
         <a class="tlink" href="#">View source<svg class="chev" aria-hidden="true"><use href="#chev"/></svg></a>
@@ -853,30 +871,42 @@ footer a:hover{color:var(--text)}
           </div>
         </article>
 
-        <article class="tile s3 t-cli reveal" aria-labelledby="tb6">
-          <div class="lead">
-            <h3 id="tb6">Drive Slate from your shell. Or let your agent.</h3>
-            <p>Split panes, send input, capture the screen and wait for a condition.</p>
-          </div>
-          <div class="cliwin" role="group" aria-label="Example slate-term commands">
-            <div class="bar" aria-hidden="true"><i></i><i></i><i></i><span>zsh — launchpad</span></div>
-<pre><span class="c"># Start the dev server in a new pane</span>
-<span class="p">❯ </span>slate-term panes split --right
-<span class="p">❯ </span>slate-term panes send --pane p2 --text $'pnpm dev\r'
+      </div>
+    </div>
+  </section>
 
-<span class="c"># Wait until it's ready, then read the screen</span>
-<span class="p">❯ </span>slate-term terminal wait --pane p2 --contains ready \
-    --timeout-milliseconds 10000
-<span class="p">❯ </span>slate-term panes capture --pane p2</pre>
-          </div>
-        </article>
+  <!-- Agents and CLI -->
+  <section class="sec" id="agents" aria-labelledby="agents-title">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <h2 id="agents-title">Your agents build. <span class="g" style="display:block">Slate connects the pieces.</span></h2>
+        <p class="sub">Your agent writes the plugin. The <code class="tok">slate-term</code> CLI puts it in place.</p>
+      </div>
+      <div class="cliwin agterm reveal" role="group" aria-label="Illustrative agent session">
+        <div class="bar"><i></i><i></i><i></i><span>claude — launchpad</span><em>Illustrative</em></div>
+<pre><span class="p">❯ </span>claude
+<span class="u">&gt; Tail my deploys in a panel beside this shell, then save the layout.</span>
 
-        <article class="tile s3 reveal" aria-labelledby="tb10" id="agents-tile">
-          <h3 id="tb10">Bring your own agents.</h3>
-          <p>Slate includes no model. Its agent skill teaches yours to drive Slate.</p>
-          <div class="vis names" style="min-height:0;margin-top:26px">Claude Code <span>·</span> Codex <span>·</span> Gemini CLI <span>·</span> Aider <span>·</span> OpenCode <span>·</span> <i class="you">your own script</i></div>
-          <p class="fine">Names are examples, not a tested-compatibility list.</p>
-        </article>
+<span class="o">●</span> Write(deploy-tail/plugin.json, deploy-tail/index.html)
+<span class="o">●</span> Bash(<span class="cmd">slate-term plugins register --manifest ./deploy-tail/plugin.json</span>)
+  <span class="c">⎿ registered deploy-tail</span>
+<span class="o">●</span> Bash(<span class="cmd">slate-term panes split --pane p1 --right --type deploy-tail</span>)
+  <span class="c">⎿ opened p2</span>
+<span class="o">●</span> Bash(<span class="cmd">slate-term layouts capture --window w1 --name 'Launch Day'</span>)
+<span class="o">●</span> Bash(<span class="cmd">slate-term layouts launcher --id L3 --path ~/Applications/Launch\ Day.app</span>)
+  <span class="c">⎿ created Launch Day.app</span>
+
+<span class="ok2">✓</span> Deploys is open on the right. Launch Day is in Spotlight.</pre>
+      </div>
+      <div class="agrow reveal">
+        <div><h3>Plugins</h3><p>Panels, commands and background services.</p></div>
+        <div><h3>The CLI</h3><p>Split panes, send input, capture the screen.</p></div>
+        <div><h3>The agent skill</h3><p>Teaches your agent Slate’s API.</p></div>
+      </div>
+      <div class="agnames reveal">
+        <p>Bring the agents you already use.</p>
+        <div class="names">Claude Code <span>·</span> Codex <span>·</span> Gemini CLI <span>·</span> Aider <span>·</span> OpenCode <span>·</span> <i class="you">your own script</i></div>
+        <p class="fine">Slate includes no model. Names are examples, not a tested-compatibility list.</p>
       </div>
     </div>
   </section>
@@ -885,64 +915,45 @@ footer a:hover{color:var(--text)}
   <section class="sec gal-sec" id="examples" aria-labelledby="gal-title">
     <div class="wrap">
       <div class="sec-head reveal">
+        <p class="kick">Plugin ideas</p>
         <h2 id="gal-title">Make room for a bigger idea.</h2>
-        <p class="sub">A few things you could build with your agent.</p>
-        <p class="pnote"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><circle cx="6" cy="6" r="5"/><path d="M6 5.4V8.6" stroke-linecap="round"/><circle cx="6" cy="3.6" r=".4" fill="currentColor"/></svg>Proposed examples. They don’t ship with Slate.</p>
+        <p class="sub">Each of these is a plugin your agent could write. It runs as a panel in Slate.</p>
+        <p class="pnote"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><circle cx="6" cy="6" r="5"/><path d="M6 5.4V8.6" stroke-linecap="round"/><circle cx="6" cy="3.6" r=".4" fill="currentColor"/></svg>Ideas to build. They don’t ship with Slate.</p>
       </div>
     </div>
-    <div class="gallery reveal" id="gallery" role="region" aria-roledescription="carousel" aria-label="Proposed examples">
-      <ul class="gtrack" id="gTrack" tabindex="0" aria-label="Examples. Use the left and right arrow keys to move between them.">
+    <div class="gallery reveal" id="gallery" role="region" aria-roledescription="carousel" aria-label="Plugin ideas">
+      <ul class="gtrack" id="gTrack" tabindex="0" aria-label="Plugin ideas. Use the left and right arrow keys to move between them.">
         <li class="gcard" data-cut="bench" data-tabs="sweep-14,notes" data-pal="alt" role="group" aria-roledescription="slide" aria-label="1 of 6">
-          <div class="gcap"><h3>An experiment workbench.</h3><p>Loss curves and runs, with training beside them.</p></div>
+          <div class="gcap"><span class="gkick">Plugin idea</span><h3>An experiment workbench.</h3><p>Loss curves and runs, with training beside them.</p></div>
           <div class="gshot" aria-hidden="true"><div class="stage"></div></div>
         </li>
         <li class="gcard" data-cut="agents" data-tabs="agents,launchpad" role="group" aria-roledescription="slide" aria-label="2 of 6">
-          <div class="gcap"><h3>A panel beside your agents.</h3><p>See which session needs you, and clear the review queue.</p></div>
+          <div class="gcap"><span class="gkick">Plugin idea</span><h3>A panel beside your agents.</h3><p>See which session needs you, and clear the review queue.</p></div>
           <div class="gshot" aria-hidden="true"><div class="stage"></div></div>
         </li>
         <li class="gcard" data-cut="script" data-mx="380" data-tabs="design-assets,launchpad" role="group" aria-roledescription="slide" aria-label="3 of 6">
-          <div class="gcap"><h3>An interface for a script.</h3><p>Inputs, a Run button and results for resize-assets.sh.</p></div>
+          <div class="gcap"><span class="gkick">Plugin idea</span><h3>An interface for a script.</h3><p>Inputs, a Run button and results for resize-assets.sh.</p></div>
           <div class="gshot" aria-hidden="true"><div class="stage"></div></div>
         </li>
         <li class="gcard" data-cut="launch" data-mx="320" data-tabs="Launch Day,notes" role="group" aria-roledescription="slide" aria-label="4 of 6">
-          <div class="gcap"><h3>A launch-day workspace.</h3><p>Deploys, latency and the live site, side by side.</p></div>
+          <div class="gcap"><span class="gkick">Plugin idea</span><h3>A launch-day workspace.</h3><p>Deploys, latency and the live site, side by side.</p></div>
           <div class="gshot" aria-hidden="true"><div class="stage"></div></div>
         </li>
         <li class="gcard" data-cut="prs" data-tabs="reviews,launchpad" role="group" aria-roledescription="slide" aria-label="5 of 6">
-          <div class="gcap"><h3>A board for pull requests.</h3><p>Reviews and CI checks, next to the branch you’re on.</p></div>
+          <div class="gcap"><span class="gkick">Plugin idea</span><h3>A board for pull requests.</h3><p>Reviews and CI checks, next to the branch you’re on.</p></div>
           <div class="gshot" aria-hidden="true"><div class="stage"></div></div>
         </li>
         <li class="gcard" data-cut="reading" data-tabs="reading,launchpad" role="group" aria-roledescription="slide" aria-label="6 of 6">
-          <div class="gcap"><h3>A reading list with notes.</h3><p>Your links, the page and your notes in one tab.</p></div>
+          <div class="gcap"><span class="gkick">Plugin idea</span><h3>A reading list with notes.</h3><p>Your links, the page and your notes in one tab.</p></div>
           <div class="gshot" aria-hidden="true"><div class="stage"></div></div>
         </li>
       </ul>
       <div class="gctl">
-        <div class="gdots" id="gDots" role="group" aria-label="Choose an example"></div>
+        <div class="gdots" id="gDots" role="group" aria-label="Choose a plugin idea"></div>
         <button class="play gplay" id="gPlay" type="button" aria-label="Pause examples">
           <svg class="gp-pause" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><rect x="2.2" y="1" width="3.4" height="12" rx="1"/><rect x="8.4" y="1" width="3.4" height="12" rx="1"/></svg>
           <svg class="gp-play" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true" hidden><path d="M3.5 1.6v10.8a.8.8 0 0 0 1.2.7l8.6-5.4a.8.8 0 0 0 0-1.4L4.7.9a.8.8 0 0 0-1.2.7z"/></svg>
         </button>
-      </div>
-    </div>
-  </section>
-
-  <!-- Agents and CLI -->
-  <section class="sec alt" id="agents" aria-labelledby="agents-title">
-    <div class="wrap">
-      <div class="sec-head reveal">
-        <h2 id="agents-title">Your agents build. <span class="g" style="display:block">Slate connects the pieces.</span></h2>
-        <p class="sub">Plugins add panels and commands. The CLI lets your agents put them in place.</p>
-      </div>
-      <div class="code on-bg reveal" role="group" aria-label="Illustrative CLI session">
-        <span class="lab">Illustrative</span>
-<pre><span class="cm"># Register the plugin your agent wrote, then open it beside the shell</span>
-<span class="pp">$ </span>slate-term plugins register --manifest ./deploy-tail/plugin.json
-<span class="pp">$ </span>slate-term panes split --pane p1 --right --type deploy-tail
-
-<span class="cm"># Save the arrangement and open it later from Spotlight</span>
-<span class="pp">$ </span>slate-term layouts capture --window w1 --name 'Launch Day'
-<span class="pp">$ </span>slate-term layouts launcher --id "$LAYOUT" --path ~/Applications/Launch\ Day.app</pre>
       </div>
     </div>
   </section>
