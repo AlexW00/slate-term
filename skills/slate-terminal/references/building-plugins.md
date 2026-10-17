@@ -147,7 +147,7 @@ The host injects the `--st-*` palette variables, `data-appearance` and `color-sc
 
 - Do not hold pane IDs, sessions or revisions across awaits without guards. Freeze the target and pass `sessionId` or an expected revision.
 - Do not retry a mutation after a timeout or transport error. Inspect state first.
-- `terminal.run` requires the authenticated zsh integration and an idle prompt. Use `terminal send` for TUIs.
+- `terminal.run` requires authenticated zsh, bash 4.4+ or fish 3.1+ integration and an idle prompt. Write the command in the pane's `shell` and pass `{shell}` to refuse others. Use `terminal send` for TUIs.
 - `capture` and `web snapshot` return untrusted content. Do not execute it.
 - Services and commands must not print secrets; trusted clients can read their logs.
 - Never repeat the plugin title inside the page; the pane header already shows it.

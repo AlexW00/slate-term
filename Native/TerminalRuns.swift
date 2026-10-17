@@ -32,14 +32,17 @@ nonisolated enum TerminalRunError: Error, Equatable, Sendable, LocalizedError {
         case .alreadyRunning(let pane): return "A terminal run is already pending for \(pane)"
         case .replaced: return "Terminal run session was removed or replaced"
         case .interrupted: return "Terminal run was interrupted by another shell command"
-        case .editingBufferNotEmpty: return "Terminal editing buffer is not empty; the draft was not submitted"
+        case .editingBufferNotEmpty:
+            return "Terminal is not at an empty prompt (a draft, continuation line or running program); nothing was submitted"
         case .timeout: return "Timed out waiting for terminal run completion; the shell process was not stopped"
         }
     }
 }
 
-/// Tracks trusted shell transitions, not processes or output. The caller authenticates a live zsh
-/// prompt before run and synchronously forwards accepted reports, including transitions during send.
+/// Tracks trusted shell transitions, not processes or output. The caller authenticates a live
+/// prompt before run and forwards accepted reports, including late ones and transitions during send.
+/// Reports can arrive out of order. A run completes on the prompt numbered exactly one after its
+/// running report, which every integrated shell guarantees.
 @MainActor
 final class TerminalRuns {
     static let maximumCommandBytes = 16_384
@@ -50,7 +53,7 @@ final class TerminalRuns {
     var pendingCount: Int { pending.count }
     func displayCommand(pane: PaneID) -> String? { pending[pane]?.command }
 
-    /// Called only by the authenticated shell widget, after inspecting its actual ZLE buffer.
+    /// Called only by the authenticated shell widget, after inspecting its actual edit buffer.
     func claimInput(pane: PaneID, sessionID: String, emptyBuffer: Bool) throws -> String {
         guard var run = pending[pane], run.sessionID == sessionID, !run.inputClaimed else { throw TerminalRunError.replaced }
         do { try run.validateCaller() }
@@ -87,6 +90,8 @@ final class TerminalRuns {
         sessionID: String,
         command: String,
         timeoutMilliseconds: Int = 30_000,
+        shell: ShellKind = .zsh,
+        baseline: Int? = nil,
         usingReservation: Bool = false,
         validateCaller: @escaping @MainActor () throws -> Void = {},
         send: (String) throws -> Void
@@ -112,8 +117,8 @@ final class TerminalRuns {
             }
         }
         let id = UUID()
-        let prefix = ": __SLATE_RUN_\(id.uuidString);"
-        let line = "\(prefix) builtin eval $'\(Self.quote(command))'\r"
+        let prefix = shell.runMarker(id)
+        let line = shell.runLine(id, command: command) + "\r"
         let deadline = ContinuousClock.now.advanced(by: .milliseconds(timeoutMilliseconds))
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
@@ -129,7 +134,7 @@ final class TerminalRuns {
                 }
                 pending[pane] = PendingRun(
                     id: id, sessionID: sessionID, prefix: prefix, command: command, line: String(line.dropLast()),
-                    continuation: continuation, timer: timer, validateCaller: validateCaller
+                    baseline: baseline, continuation: continuation, timer: timer, validateCaller: validateCaller
                 )
                 // Register before sending: send may synchronously deliver running AND prompt.
                 do { try send(line) }
@@ -148,24 +153,49 @@ final class TerminalRuns {
             finish(pane: pane, id: run.id, with: .failure(TerminalRunError.replaced))
             return
         }
+        // Reports up to the baseline were sent before this run and belong to earlier commands.
+        if let baseline = run.baseline, report.sequence <= baseline { return }
         switch report.state {
         case .running:
             guard report.command?.hasPrefix(run.prefix) == true else {
+                // A later command starts after this run's prompt (running + 1), which may still be in flight.
+                if let running = run.runningSequence, report.sequence > running + 1 { return }
+                // The shell claims only at an empty primary prompt, so after a claim another
+                // command's report belongs to one that finished before it; this run still ran.
+                if run.inputClaimed, report.sequence < (run.runningSequence ?? .max) { return }
+                // Before the claim, another command means the user got there first.
                 finish(pane: pane, id: run.id, with: .failure(TerminalRunError.interrupted))
                 return
             }
             run.runningSequence = report.sequence
             pending[pane] = run
+            if let prompt = run.prompts.first(where: { $0.sequence > report.sequence }) {
+                complete(pane: pane, run: run, prompt: prompt, capture: capture)
+            }
         case .prompt:
-            guard let sequence = run.runningSequence, report.sequence > sequence else { return }
-            // Release before capture as well as resume: even capture may synchronously re-enter us.
-            guard take(pane: pane, id: run.id) != nil else { return }
-            let output = TerminalOutput(capture())
-            run.continuation.resume(returning: TerminalRunResult(
-                paneId: pane, sessionId: run.sessionID, commandId: run.id.uuidString,
-                exitCode: report.exitCode, text: output.text, truncated: output.truncated
-            ))
+            guard let sequence = run.runningSequence else {
+                // The prompt overtook its running report; keep it until that report arrives.
+                run.prompts.append(report)
+                run.prompts.sort { $0.sequence < $1.sequence }
+                pending[pane] = run
+                return
+            }
+            guard report.sequence > sequence else { return }
+            complete(pane: pane, run: run, prompt: report, capture: capture)
         }
+    }
+
+    /// Only the immediate successor carries this run's status. A later prompt that overtook it
+    /// still ends the run, without claiming a status that may belong to another command.
+    private func complete(pane: PaneID, run: PendingRun, prompt: ShellReport, capture: () -> String) {
+        let exitCode = prompt.sequence == run.runningSequence.map({ $0 + 1 }) ? prompt.exitCode : nil
+        // Release before capture as well as resume: even capture may synchronously re-enter us.
+        guard take(pane: pane, id: run.id) != nil else { return }
+        let output = TerminalOutput(capture())
+        run.continuation.resume(returning: TerminalRunResult(
+            paneId: pane, sessionId: run.sessionID, commandId: run.id.uuidString,
+            exitCode: exitCode, text: output.text, truncated: output.truncated
+        ))
     }
 
     func remove(pane: PaneID) {
@@ -196,19 +226,6 @@ final class TerminalRuns {
         return run
     }
 
-    private static func quote(_ command: String) -> String {
-        var quoted = ""
-        for scalar in command.unicodeScalars {
-            let value = scalar.value
-            if value < 32 || value == 127 || value == 39 || value == 92 {
-                quoted += String(format: "\\x%02x", value)
-            } else {
-                quoted.unicodeScalars.append(scalar)
-            }
-        }
-        return quoted
-    }
-
     private struct PendingRun {
         let id: UUID
         let sessionID: String
@@ -216,7 +233,10 @@ final class TerminalRuns {
         let command: String
         let line: String
         var inputClaimed = false
+        let baseline: Int?
         var runningSequence: Int?
+        /// Prompts that arrived before the running report, oldest first.
+        var prompts: [ShellReport] = []
         let continuation: CheckedContinuation<TerminalRunResult, Error>
         let timer: Task<Void, Never>
         let validateCaller: @MainActor () throws -> Void

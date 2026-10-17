@@ -248,7 +248,7 @@ await workspace.panelState.patch([{op:"set", key:"selected", value:"draft"}], {
 });
 ```
 
-Terminal operations use the active terminal in the plugin's context; an explicit terminal `pane` overrides that history. A nonterminal focus does not erase it. Run/wait accept `{signal}` as a final options argument. Run requires authenticated zsh prompt/empty-buffer checks; it is not a generic TUI command runner. See [automation](automation.md) for limits, deadlines and the distinction between current-screen text and command stdout. `workspace.plugin` contains the type ID, logical `instanceId`, `viewId`, `paneId`, and scope.
+Terminal operations use the active terminal in the plugin's context; an explicit terminal `pane` overrides that history. A nonterminal focus does not erase it. Run/wait accept `{signal}` as a final options argument. Run requires authenticated prompt/empty-buffer checks in zsh, bash 4.4+ or fish 3.1+, and the command is written in the pane's shell language; pass `{shell: 'bash'}` to refuse other shells. It is not a generic TUI command runner. See [automation](automation.md) for limits, deadlines and the distinction between current-screen text and command stdout. `workspace.plugin` contains the type ID, logical `instanceId`, `viewId`, `paneId`, and scope.
 
 Guarded pane split/move/resize, manual titles and native tab rearrangement are available through `workspace.panes`, `workspace.layout` and `workspace.tabs`; see [layout/page adapters](layout-api.md#registered-page-adapters). They use captured/live validated targets and explicit revisions rather than retargeting current focus. Window operations are available through the same `workspace.call`/`command.run` route.
 

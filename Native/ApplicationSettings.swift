@@ -14,6 +14,8 @@ final class ApplicationSettings {
     let paletteDirectory: URL
     let engineURL: URL
     private let shellDirectory: URL
+    private let bashInit: URL
+    private let fishInit: URL
     let welcome: WelcomeStore
     private let store: WorkspaceStore
     private let closeWarningStore: PrivateJSONStore
@@ -62,6 +64,13 @@ final class ApplicationSettings {
         let bootstrap = shellDirectory.appendingPathComponent(".zshenv")
         try SlateTermSettings.ShellIntegration.zshBootstrap.write(to: bootstrap, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: bootstrap.path)
+        bashInit = shellDirectory.deletingLastPathComponent().appendingPathComponent("shell-bash/init.bash")
+        fishInit = shellDirectory.deletingLastPathComponent().appendingPathComponent("shell-fish/init.fish")
+        for (url, text) in [(bashInit, SlateTermSettings.ShellIntegration.bashHooks), (fishInit, SlateTermSettings.ShellIntegration.fishHooks)] {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        }
         var configuration = AppConfiguration.defaults
         var palettes = try configuration.terminal.resolvePalettes(directory: paletteDirectory)
         do {
@@ -120,13 +129,30 @@ final class ApplicationSettings {
 
     func shellEnvironment() -> [String: String] {
         guard !useIsolatedShell, current.terminal.shellIntegration == .auto,
-              URL(fileURLWithPath: current.terminal.shell).lastPathComponent == "zsh" else { return [:] }
+              let kind = ShellKind(executablePath: current.terminal.shell) else { return [:] }
+        switch kind {
+        case .zsh: break
+        case .bash:
+            // Runs at the first prompt; see ShellIntegration.bashBootstrap.
+            return ["PROMPT_COMMAND": SlateTermSettings.ShellIntegration.bashBootstrap, "SLATE_TERM_BASH_INIT": bashInit.path]
+        case .fish: return [:]  // Loaded by --init-command; see engineConfiguration.
+        }
         let original = ProcessInfo.processInfo.environment["ZDOTDIR"]
         // Surface environment overrides are applied after engine injection.
         // Redirect its saved dot-directory; replacing ZDOTDIR would bypass the
         // engine's own bootstrap and silently remove OSC 133 and PATH integration.
         return ["GHOSTTY_ZSH_ZDOTDIR": shellDirectory.path, "SLATE_TERM_USER_ZDOTDIR": original ?? "",
                 "SLATE_TERM_USER_ZDOTDIR_SET": original == nil ? "0" : "1"]
+    }
+
+    /// fish loads Slate's hooks after config.fish. The engine runs the command through a
+    /// POSIX shell, so the path goes in single quotes inside double quotes; paths that
+    /// would need more escaping get no integration rather than a fragile command line.
+    private func fishInitArguments(_ configuration: AppConfiguration) -> String {
+        guard configuration.terminal.shellIntegration == .auto,
+              ShellKind(executablePath: configuration.terminal.shell) == .fish,
+              !fishInit.path.contains(where: { "'\"$`\\".contains($0) }) else { return "" }
+        return " -C \"source '\(fishInit.path)'\""
     }
 
     func validate() throws -> AppConfiguration {
@@ -203,7 +229,7 @@ final class ApplicationSettings {
         }
         // SurfaceOptions.command forces wait-after-command. Configure the command
         // here instead, retaining normal shell-exit semantics and test isolation.
-        let command = useIsolatedShell ? "/bin/sh --noprofile --norc" : shell
+        let command = useIsolatedShell ? "/bin/sh --noprofile --norc" : shell + fishInitArguments(configuration)
         return """
         command = shell:\(command)
         wait-after-command = false

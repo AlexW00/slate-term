@@ -41,7 +41,9 @@ public final class UnixServer {
                 guard bind(descriptor, address, length) == 0 else { throw SocketError.system("bind", errno) }
             }
             bound = true
-            guard chmod(path, 0o600) == 0, listen(descriptor, 16) == 0 else {
+            // Every shell reports its first prompt at launch, while the app is still busy.
+            // A short queue would refuse connections from large restored layouts.
+            guard chmod(path, 0o600) == 0, listen(descriptor, SOMAXCONN) == 0 else {
                 throw SocketError.system("listen", errno)
             }
         } catch {

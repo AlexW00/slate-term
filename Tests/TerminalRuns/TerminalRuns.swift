@@ -19,6 +19,8 @@ struct TerminalRunsChecks {
             try await checkCapacityAndClose()
             try await checkLayoutReservations()
             try await checkRacesAndLifetime()
+            try await checkReorderedReports()
+            try await checkShellRunLines()
             print("PASS all terminal run checks")
         } catch {
             fputs("FAIL terminal runs: \(error)\n", stderr)
@@ -213,6 +215,87 @@ struct TerminalRunsChecks {
         print("PASS matching marker boundary, preexec-before-prompt and greater-sequence requirement, pane isolation and different-command interruption")
     }
 
+    /// Reports travel on separate connections, so they can arrive in any order.
+    static func checkReorderedReports() async throws {
+        let runs = TerminalRuns()
+        defer { runs.close() }
+        let pane = PaneID(1)
+        func running(_ line: String) -> String { String(line.dropLast()) }
+
+        // The prompt overtakes its running report.
+        var (task, line) = try await start(runs, baseline: 5)
+        runs.observe(pane: pane, sessionID: "s", report: report(.prompt, 7, exit: 3)) { "early" }
+        try require(runs.pendingCount == 1, "a prompt without its running report completed the run")
+        runs.observe(pane: pane, sessionID: "s", report: report(.running, 6, command: running(line))) { "late" }
+        var result = try await task.value
+        try require(result.exitCode == 3 && result.text == "late", "overtaking prompt lost its status")
+
+        // Reports sent before the run belong to earlier commands, even when they arrive late.
+        (task, line) = try await start(runs, baseline: 10)
+        runs.observe(pane: pane, sessionID: "s", report: report(.running, 9, command: "make")) { "never" }
+        runs.observe(pane: pane, sessionID: "s", report: report(.prompt, 10, exit: 1)) { "never" }
+        try require(runs.pendingCount == 1, "an earlier command's late report affected the run")
+        runs.observe(pane: pane, sessionID: "s", report: report(.running, 11, command: running(line))) { "" }
+        runs.observe(pane: pane, sessionID: "s", report: report(.prompt, 12, exit: 0)) { "done" }
+        try require(try await task.value.exitCode == 0, "baseline run did not complete")
+
+        // A later command's prompt overtakes the run's own: end the run without claiming that status.
+        (task, line) = try await start(runs, baseline: 10)
+        runs.observe(pane: pane, sessionID: "s", report: report(.running, 11, command: running(line))) { "" }
+        runs.observe(pane: pane, sessionID: "s", report: report(.running, 13, command: "later")) { "never" }
+        try require(runs.pendingCount == 1, "a later command interrupted a run that already started")
+        runs.observe(pane: pane, sessionID: "s", report: report(.prompt, 14, exit: 9)) { "after later" }
+        result = try await task.value
+        try require(result.exitCode == nil, "another command's status was reported as the run's")
+        runs.observe(pane: pane, sessionID: "s", report: report(.prompt, 12, exit: 0)) { fatalError("finished run captured again") }
+
+        // After the widget claimed the line, a later command's running report may overtake ours.
+        (task, line) = try await start(runs, baseline: 10)
+        _ = try runs.claimInput(pane: pane, sessionID: "s", emptyBuffer: true)
+        runs.observe(pane: pane, sessionID: "s", report: report(.running, 13, command: "later")) { "never" }
+        runs.observe(pane: pane, sessionID: "s", report: report(.running, 11, command: running(line))) { "" }
+        runs.observe(pane: pane, sessionID: "s", report: report(.prompt, 12, exit: 4)) { "claimed" }
+        try require(try await task.value.exitCode == 4, "overtaking later command broke a claimed run")
+
+        // The shell claims only at an empty prompt, so after a claim an earlier command's late report
+        // means that command had finished; the run still executed and completes normally.
+        (task, line) = try await start(runs, baseline: 10)
+        _ = try runs.claimInput(pane: pane, sessionID: "s", emptyBuffer: true)
+        runs.observe(pane: pane, sessionID: "s", report: report(.running, 11, command: "true")) { "never" }
+        runs.observe(pane: pane, sessionID: "s", report: report(.running, 13, command: running(line))) { "" }
+        runs.observe(pane: pane, sessionID: "s", report: report(.running, 11, command: "true")) { "never" }
+        runs.observe(pane: pane, sessionID: "s", report: report(.prompt, 14, exit: 5)) { "ran" }
+        result = try await task.value
+        try require(result.exitCode == 5, "a finished earlier command marked a claimed run as interrupted")
+        // The prompt number of the run itself is never another command's start.
+        (task, line) = try await start(runs, baseline: 10)
+        runs.observe(pane: pane, sessionID: "s", report: report(.running, 11, command: running(line))) { "" }
+        runs.observe(pane: pane, sessionID: "s", report: report(.running, 12, command: "impossible")) { "never" }
+        try await expectError(.interrupted) { try await task.value }
+
+        // Before the claim, any other command means the user got there first.
+        (task, _) = try await start(runs, baseline: 10)
+        runs.observe(pane: pane, sessionID: "s", report: report(.running, 11, command: "typed first")) { "never" }
+        try await expectError(.interrupted) { try await task.value }
+        try require(runs.pendingCount == 0, "reordering leaked a run")
+        print("PASS reordered prompts, late earlier reports, overtaking later commands and claimed runs")
+    }
+
+    static func checkShellRunLines() async throws {
+        let runs = TerminalRuns()
+        defer { runs.close() }
+        for shell in ShellKind.allCases {
+            let (task, line) = try await start(runs, shell: shell)
+            try require(line.hasPrefix(shell == .fish ? "true __SLATE_RUN_" : ": __SLATE_RUN_") && line.hasSuffix("\r"), "\(shell) run line")
+            try require(!line.dropLast().unicodeScalars.contains { $0.value < 32 }, "\(shell) run line has control characters")
+            let marker = String(line[...line.firstIndex(of: ";")!])
+            runs.observe(pane: PaneID(1), sessionID: "s", report: report(.running, 1, command: marker + " eval")) { "" }
+            runs.observe(pane: PaneID(1), sessionID: "s", report: report(.prompt, 2, exit: 0)) { "\(shell)" }
+            try require(try await task.value.text == "\(shell)", "\(shell) marker did not complete")
+        }
+        print("PASS zsh, bash and fish run lines carry their own marker and complete")
+    }
+
     static func checkOutputBounds() async throws {
         let runs = TerminalRuns()
         defer { runs.close() }
@@ -372,10 +455,12 @@ struct TerminalRunsChecks {
         print("PASS completion/cancellation/deadline races and tracker release after maximum-deadline cancellation")
     }
 
-    static func start(_ runs: TerminalRuns, pane: PaneID = PaneID(1), sessionID: String = "s", timeout: Int = 5_000) async throws -> (Task<TerminalRunResult, Error>, String) {
+    static func start(_ runs: TerminalRuns, pane: PaneID = PaneID(1), sessionID: String = "s", timeout: Int = 5_000,
+                      shell: ShellKind = .zsh, baseline: Int? = nil) async throws -> (Task<TerminalRunResult, Error>, String) {
         var sent: String?
         let task = Task {
-            try await runs.run(pane: pane, sessionID: sessionID, command: "echo test", timeoutMilliseconds: timeout) { line in sent = line }
+            try await runs.run(pane: pane, sessionID: sessionID, command: "echo test", timeoutMilliseconds: timeout,
+                               shell: shell, baseline: baseline) { line in sent = line }
         }
         try await eventually("run did not send") { sent != nil }
         return (task, sent!)

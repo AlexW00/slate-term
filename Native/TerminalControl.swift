@@ -27,6 +27,7 @@ final class TerminalControl {
     func releaseStartup(_ pane: PaneID) { runs.releaseReservation(pane) }
     func remove(pane: PaneID) { runs.remove(pane: pane) }
     func close() { closed = true; runs.close() }
+    /// Late reports are forwarded too: run tracking pairs commands with prompts by sequence.
     func observe(pane: PaneID, sessionID: String, report: ShellReport) {
         guard let target = lookup(pane), target.sessionID == sessionID else { runs.remove(pane: pane); return }
         runs.observe(pane: pane, sessionID: sessionID, report: report, capture: { target.view.capture() })
@@ -40,7 +41,7 @@ final class TerminalControl {
         case "send": fields = ["text"]
         case "key": fields = ["key"]
         case "capture": fields = []
-        case "run": fields = ["command", "timeoutMilliseconds"]
+        case "run": fields = ["command", "timeoutMilliseconds", "shell"]
         case "wait": fields = ["contains", "afterSequence", "timeoutMilliseconds"]
         default: throw RPCFailure(code: -32601, message: "Unknown terminal action")
         }
@@ -77,13 +78,28 @@ final class TerminalControl {
             timeout = milliseconds
         } else { timeout = 30_000 }
         if action == "run" {
-            guard target.report?.state == .prompt else {
+            var expected: ShellKind?
+            if let value = params["shell"] {
+                guard let name = value.string, let kind = ShellKind(rawValue: name) else {
+                    throw RPCFailure(code: -32602, message: "shell must be zsh, bash or fish")
+                }
+                expected = kind
+            }
+            guard let report = target.report, report.state == .prompt else {
                 throw RPCFailure(code: -32041, message: "Run requires a known idle prompt from shell integration; use literal send for other terminal applications")
+            }
+            // The command is source code in the pane's shell language; never run it in another shell.
+            if let expected, expected != report.shellKind {
+                throw RPCFailure(code: -32041, message: "Pane runs \(report.shellKind.rawValue), not \(expected.rawValue); the command was not submitted")
+            }
+            guard report.acceptsRunInput else {
+                throw RPCFailure(code: -32041, message: "Run requires bash 4.4 or later, which can check the edit line before submitting; this shell reports state only")
             }
             guard let command = params["command"]?.string else { throw RPCFailure(code: -32602, message: "command must be a string") }
             do {
                 let result = try await runs.run(pane: pane, sessionID: target.sessionID, command: command,
-                    timeoutMilliseconds: timeout, usingReservation: startup, validateCaller: validateCaller,
+                    timeoutMilliseconds: timeout, shell: report.shellKind, baseline: report.sequence,
+                    usingReservation: startup, validateCaller: validateCaller,
                     send: { _ in try target.view.send(target.runKey) })
                 return try .encoding(result)
             } catch let error as TerminalRunError {
