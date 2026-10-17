@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Slate — website content wireframe</title>
+  <style>
+    /* Layout scaffolding only: no brand palette, imagery, animation, or final typography. */
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #222; background: #fff; font: 16px/1.6 system-ui, sans-serif; }
+    a { color: inherit; text-underline-offset: 3px; }
+    a:focus-visible, summary:focus-visible { outline: 2px solid #222; outline-offset: 5px; }
+    .wrap { width: min(1080px, calc(100% - 40px)); margin-inline: auto; }
+    .draft-banner { padding: 10px 20px; background: #eee; text-align: center; font-size: 13px; }
+    .site-header, nav, .actions, footer { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 24px; }
+    .site-header { justify-content: space-between; padding-block: 24px; border-bottom: 1px solid #ccc; }
+    .brand { font-weight: 700; }
+    section { padding-block: 48px; border-bottom: 1px solid #ccc; }
+    h1, h2, h3, p { margin: 0 0 16px; }
+    h1 { font-size: clamp(32px, 5vw, 52px); line-height: 1.15; }
+    h2 { font-size: 28px; line-height: 1.25; }
+    h3 { font-size: 20px; line-height: 1.3; }
+    p { max-width: 65ch; }
+    .label { margin-bottom: 14px; font: 12px/1.5 ui-monospace, monospace; text-transform: uppercase; letter-spacing: .05em; }
+    .hero { padding-bottom: 24px; border: 0; }
+    .intro { font-size: 19px; max-width: 58ch; }
+    .actions { margin-block: 24px 12px; gap: 12px; }
+    button { border: 1px solid #777; padding: 10px 16px; background: #eee; color: #444; font: inherit; }
+    button:disabled { cursor: not-allowed; opacity: 1; }
+    .note { color: #555; font-size: 13px; }
+    .note strong { font-weight: 600; }
+    .demo { padding-top: 0; }
+    figure { margin: 0; }
+    .placeholder { border: 1px dashed #888; background: #f3f3f3; display: grid; place-content: center; text-align: center; padding: 24px; aspect-ratio: 16 / 9; }
+    .placeholder p { margin: 4px auto; max-width: 45ch; }
+    .placeholder strong { display: block; }
+    figcaption { margin-top: 12px; }
+    details { margin-top: 18px; padding: 12px 16px; border: 1px solid #ccc; font-size: 14px; }
+    summary { cursor: pointer; font-weight: 600; }
+    details p, details ol, details ul { margin-top: 12px; margin-bottom: 0; }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; margin-top: 28px; }
+    .grid article { min-width: 0; }
+    .grid .placeholder { padding: 16px; margin-bottom: 20px; }
+    .grid p { margin-bottom: 0; }
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; align-items: center; }
+    .steps { padding: 0; list-style: none; counter-reset: step; }
+    .steps li { border-top: 1px solid #ccc; padding-top: 16px; counter-increment: step; }
+    .steps h3::before { content: counter(step) ". "; }
+    .mechanism { border-left: 2px solid #aaa; padding-left: 20px; margin-top: 28px; }
+    footer { justify-content: space-between; padding-block: 24px; font-size: 14px; }
+    @media (max-width: 700px) {
+      .grid, .split { grid-template-columns: 1fr; }
+      section { padding-block: 32px; }
+      .hero { padding-bottom: 20px; }
+      .demo { padding-top: 0; }
+      .placeholder { padding: 18px; }
+      .site-header { align-items: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <div class="draft-banner">Content wireframe · Draft copy and media placeholders · Not a visual design or release announcement</div>
+  <div class="wrap">
+    <header class="site-header">
+      <a class="brand" href="#top">Slate Terminal</a>
+      <nav aria-label="Page sections">
+        <a href="#demo">Demo outline</a>
+        <a href="#examples">Examples</a>
+        <a href="#how-it-works">How it works</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="hero-title">
+        <p class="label">01 / Promise · Native macOS terminal</p>
+        <h1 id="hero-title">Software you can shape.</h1>
+        <p class="intro">A native macOS terminal and a canvas for your ideas. Build tools with your AI agents, bring them into your workflow, and refine them as you go.</p>
+        <div class="actions">
+          <button disabled aria-describedby="hero-cta-note">Download for Mac</button>
+          <button disabled aria-describedby="hero-cta-note">View source</button>
+        </div>
+        <p class="note" id="hero-cta-note">CTA placeholders — release download and public source URL to be confirmed.</p>
+      </section>
+
+      <section class="demo" id="demo" aria-label="Main product demo placeholder">
+        <figure>
+          <div class="placeholder">
+            <p class="label">02 / Main demo · Video placeholder</p>
+            <strong>From a terminal to a tool you can use.</strong>
+            <p>Open Slate → build with an agent → use the result → change it.</p>
+          </div>
+          <figcaption>Start with an idea. Build something useful. Keep making it better.</figcaption>
+        </figure>
+        <details>
+          <summary>Production note: demo storyboard</summary>
+          <ol>
+            <li>Open Slate and start Claude Code in a terminal pane.</li>
+            <li>Time-compress building a substantial plugin app, such as an experiment workbench. Show the CLI registering and opening its panel. Label accelerated footage.</li>
+            <li>Slow down to show the tool being used. Request a meaningful change, then show the revised interface in the same workflow.</li>
+            <li>Finish with quick cuts between the three examples below.</li>
+          </ol>
+          <p>No video exists here yet. The tool must actually work before filming; avoid portraying a static mockup as an agent-built app.</p>
+        </details>
+      </section>
+
+      <section id="examples" aria-labelledby="examples-title">
+        <p class="label">03 / Possibilities · Three short examples</p>
+        <h2 id="examples-title">Build what’s missing.</h2>
+        <p>A small panel beside your terminal. A visual interface for a script. An app that becomes the focus of your workspace.</p>
+        <div class="grid">
+          <article>
+            <div class="placeholder"><strong>Clip 01 placeholder<br>Terminal + project panel</strong></div>
+            <h3>Keep context beside your agent.</h3>
+            <p>Build a project panel for tasks, notes, and the next thing you want to try.</p>
+          </article>
+          <article>
+            <div class="placeholder"><strong>Clip 02 placeholder<br>Script + visual controls</strong></div>
+            <h3>Give your script an interface.</h3>
+            <p>Add inputs, buttons, and results to a workflow you already use.</p>
+          </article>
+          <article>
+            <div class="placeholder"><strong>Clip 03 placeholder<br>Expanded plugin app</strong></div>
+            <h3>Make room for a bigger idea.</h3>
+            <p>Build an experiment workbench. Compare runs, inspect results, and adjust it as you learn.</p>
+          </article>
+        </div>
+        <p class="note" style="margin-top: 20px">Production note: proposed examples to build and record, not bundled features or finished demos.</p>
+      </section>
+
+      <section aria-labelledby="foundation-title">
+        <p class="label">04 / Foundation</p>
+        <div class="split">
+          <div>
+            <h2 id="foundation-title">A blank slate.<br>Not a blank start.</h2>
+            <p>A native macOS terminal, powered by Ghostty. Tabs, split panes, and your familiar command-line tools. Useful before you customize a thing.</p>
+            <p>Add a panel when it helps. Give it more room when you need to focus. Save the arrangement to use again.</p>
+          </div>
+          <figure>
+            <div class="placeholder"><strong>Screenshot placeholder</strong><p>A real terminal workspace, before custom plugins.</p></div>
+            <figcaption class="note">Production note: capture an actual Slate window, not a redesigned product mockup.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section id="how-it-works" aria-labelledby="iteration-title">
+        <p class="label">05 / Mechanism + iteration</p>
+        <h2 id="iteration-title">Use it. Change it. Keep going.</h2>
+        <p>Slate’s powerful plugin system and CLI give you and your AI agents the tools to create custom panels, commands, and interfaces—right where you work.</p>
+        <ol class="grid steps">
+          <li><h3>Build</h3><p>Work with your agent to turn an idea into a working tool.</p></li>
+          <li><h3>Use</h3><p>Bring it into your workspace and try it on the real task.</p></li>
+          <li><h3>Refine</h3><p>Adjust what’s missing. Keep what works. Repeat as your needs change.</p></li>
+        </ol>
+        <div class="mechanism">
+          <p><strong>Your agent builds. Slate connects the pieces.</strong><br>Plugins provide the interfaces and commands. The CLI lets your agent register tools, arrange panes, and interact with the workspace.</p>
+        </div>
+        <details>
+          <summary>Production note: show the mechanism, not an invented prompt UI</summary>
+          <p>Use a short crop from the real agent session showing a plugin registered through <code>slate-term</code>, followed by the working panel. Agents run through the user’s chosen tools; Slate is not a hosted model or chat service.</p>
+          <p>Saved layouts can have local Spotlight launchers. These require Slate; do not describe them as exported, independently distributable apps.</p>
+        </details>
+      </section>
+
+      <section aria-labelledby="closing-title">
+        <p class="label">06 / Closing action</p>
+        <h2 id="closing-title">A solid terminal. Yours to shape.</h2>
+        <p>Start with the tools you know. Build the ones you’re missing.</p>
+        <p><strong>Native macOS. Open source.</strong></p>
+        <div class="actions">
+          <button disabled aria-describedby="closing-cta-note">Download for Mac</button>
+          <button disabled aria-describedby="closing-cta-note">View source</button>
+        </div>
+        <p class="note" id="closing-cta-note">Draft positioning — confirm the license, source URL, release artifact, and supported macOS version before publishing.</p>
+      </section>
+    </main>
+
+    <footer>
+      <span>Slate Terminal · Content wireframe</span>
+      <a href="#publication-notes">Publication notes</a>
+    </footer>
+    <aside id="publication-notes" aria-label="Editorial notes" style="padding-bottom: 32px">
+      <details>
+        <summary>Editorial notes and reference sites</summary>
+        <p>This file is layout scaffolding only. All media are labeled placeholders; download and source buttons are deliberately disabled. It works offline without fonts, scripts, or third-party assets.</p>
+        <p>Content references: <a href="https://vmpal.com/">VMPal</a> for clear product framing and agent capabilities; <a href="https://appview.dev/">AppView</a> for early examples and compact benefit-led sections. No branding or copy is borrowed.</p>
+        <ul>
+          <li>Resolve the public source URL and license before publishing “open source.”</li>
+          <li>Verify release availability, platform requirements, signing, and notarization before enabling download links.</li>
+          <li>Build and record the examples; keep accelerated footage clearly labeled.</li>
+          <li>Current app-like launchers open saved layouts in Slate. They are not standalone app exports.</li>
+          <li>No pricing, testimonials, user counts, compatibility promises, or performance benchmarks are invented here.</li>
+        </ul>
+      </details>
+    </aside>
+  </div>
+</body>
+</html>

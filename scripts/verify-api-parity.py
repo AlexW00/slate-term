@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """First-pass production API/CLI/registered-page parity. Run only through verify-vm.py."""
 import json
+import time
 import os
 import subprocess
 import sys
-from api_fixture import AppFixture, APP, eventually
+from api_fixture import AppFixture, APP, ROOT, eventually
 
 assert subprocess.check_output(['/usr/sbin/sysctl', '-n', 'hw.model'], text=True).strip().startswith('VirtualMac'), 'Run this UI gate through scripts/verify-vm.py'
 
@@ -92,8 +93,24 @@ with AppFixture('api-parity') as app:
     # Persisted suppression survives a real owned-app restart.
     app.process.terminate(); app.process.wait(timeout=10)
     app.ready.unlink()
+    launched = time.time()
     app.process = subprocess.Popen([str(APP)], env=app.env, stdout=app.log, stderr=app.log, start_new_session=True)
+    probe = subprocess.Popen(['/usr/bin/sample', str(app.process.pid), '9', '2', '-file', str(ROOT / 'artifacts/api-parity-launch-sample.txt')],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     eventually('restarted fixture', lambda: app.ready.exists() and app.process.poll() is None)
+    print(f'TIMING launched={launched:.3f} ready_seen={time.time():.3f}', flush=True)
+    import socket as _socket
+    for _ in range(30):
+        started = time.time()
+        with _socket.socket(_socket.AF_UNIX) as probe_socket:
+            probe_socket.settimeout(10)
+            probe_socket.connect(app.ready.read_text().strip())
+            probe_socket.sendall(b'{"jsonrpc":"2.0","id":1,"method":"hello","params":{"protocolVersion":1}}\n')
+            probe_socket.recv(65536)
+        print(f'TIMING hello at={started:.3f} took={time.time() - started:.3f}', flush=True)
+        time.sleep(0.1)
+    probe.wait(timeout=10)
+    print('TIMING trace', (app.root / 'shell-reports.log').read_text(), flush=True)
     app.path = app.ready.read_text().strip(); app.env['SLATE_TERM_SOCKET'] = app.path
     assert app.rpc('config.get')['closeWarning']['suppressed']
     assert app.rpc('config.get')['typeWarning']['suppressed']

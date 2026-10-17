@@ -1,6 +1,16 @@
 # Slate Terminal
 
-A native macOS terminal workspace, implemented in verification-gated increments from the v0.2 specification.
+**Software you can shape.**
+
+Slate is a native macOS terminal and a canvas for your ideas. Its powerful plugin system and CLI give you and your AI agents the tools to build panels, interfaces, and app-like workflows—and refine them as you go.
+
+A solid terminal first. A workspace you can keep shaping. Built around an open-source philosophy.
+
+Read the [core philosophy](docs/core-philosophy.md), including publication prerequisites, or open the [website content wireframe](docs/mockups/website.html) in a browser for the draft page structure and demo placeholders.
+
+## Development status
+
+Implemented in verification-gated increments from the v0.2 specification.
 
 **Status: v0.2 implementation and the full automated suite verified on Apple Silicon/macOS 27. Manual release QA remains; not release-certified.**
 

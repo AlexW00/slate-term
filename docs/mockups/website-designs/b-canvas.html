@@ -1,0 +1,1178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Slate Terminal</title>
+<meta name="description" content="Software you can shape. A native macOS terminal and a canvas for the tools you and your agents build.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Design B, "Canvas": dark, cinematic, editorial. One accent: electric mint. */
+:root {
+  color-scheme: dark;
+  --bg: #121417;
+  --bg-2: #0d0f11;
+  --bg-3: #181b1f;
+  --line: rgba(255,255,255,.08);
+  --line-2: rgba(255,255,255,.14);
+  --fg: #eceef0;
+  --fg-2: #b4b9c0;
+  --muted: #7d838c;
+  --accent: #6ef0c0;
+  --accent-ink: #062218;
+  --accent-dim: rgba(110,240,192,.14);
+  --note: #e8c37a;
+  --display: "Inter Tight", ui-sans-serif, system-ui, -apple-system, "Helvetica Neue", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --gutter: clamp(16px, 4vw, 56px);
+  --maxw: 1240px;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font: 400 17px/1.6 var(--display);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+/* Faint noise across the page. */
+body::before {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 100; opacity: .05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+.wrap { width: min(var(--maxw), 100% - 2 * var(--gutter)); margin-inline: auto; }
+.mono { font-family: var(--mono); }
+.eyebrow {
+  display: flex; align-items: center; gap: 12px; margin: 0 0 22px;
+  font: 500 12px/1.4 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
+}
+.eyebrow b { color: var(--accent); font-weight: 500; }
+.eyebrow::after { content: ""; flex: 0 1 64px; height: 1px; background: var(--line-2); }
+h1, h2, h3 { font-family: var(--display); margin: 0; letter-spacing: -.035em; line-height: .98; font-weight: 700; }
+h2 { font-size: clamp(38px, 6vw, 76px); }
+h3 { font-size: 24px; letter-spacing: -.02em; line-height: 1.15; font-weight: 600; }
+p { margin: 0; }
+.lede { font-size: clamp(18px, 1.6vw, 21px); color: var(--fg-2); max-width: 56ch; line-height: 1.5; }
+.skip { position: absolute; left: 12px; top: -60px; z-index: 200; background: var(--accent); color: var(--accent-ink); padding: 8px 14px; border-radius: 8px; font-weight: 600; text-decoration: none; }
+.skip:focus { top: 12px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; gap: 10px; height: 46px; padding: 0 20px;
+  border-radius: 999px; border: 1px solid var(--line-2); text-decoration: none;
+  font: 600 15px/1 var(--display); letter-spacing: -.01em; color: var(--fg);
+  transition: background-color .2s ease, border-color .2s ease, transform .15s ease;
+}
+.btn:hover { border-color: rgba(255,255,255,.3); background: rgba(255,255,255,.04); }
+.btn:active { transform: scale(.97); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.btn.primary:hover { background: #8ff5cf; }
+.btn svg { width: 16px; height: 16px; flex: none; }
+.pending { font: 400 12px/1.5 var(--mono); color: var(--muted); }
+.pending::before { content: "◌ "; color: var(--note); }
+
+/* Production notes are visibly distinct from public copy. */
+.prod-note {
+  display: inline-flex; gap: 10px; align-items: baseline; flex-wrap: wrap;
+  font: 400 12px/1.5 var(--mono); color: var(--note);
+  border: 1px dashed rgba(232,195,122,.45); border-radius: 6px; padding: 6px 10px;
+  background: rgba(232,195,122,.05);
+}
+.prod-note strong { font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+
+/* Header */
+.site-header { position: sticky; top: 0; z-index: 50; backdrop-filter: blur(14px) saturate(140%); -webkit-backdrop-filter: blur(14px) saturate(140%); background: rgba(18,20,23,.72); border-bottom: 1px solid var(--line); }
+.site-header .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; gap: 24px; }
+.brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; font-weight: 700; letter-spacing: -.02em; font-size: 17px; }
+.brand-mark { width: 26px; height: 26px; border-radius: 7px; background: linear-gradient(145deg, #2a2f35, #16191c); border: 1px solid var(--line-2); display: grid; place-items: center; }
+.brand-mark span { width: 10px; height: 2px; background: var(--accent); border-radius: 2px; transform: translate(1px, 3px); box-shadow: -5px -6px 0 -0px transparent; }
+.brand-mark::before { content: "›"; position: absolute; font: 700 13px/1 var(--mono); color: var(--fg); transform: translate(-6px, -2px); }
+.brand-mark { position: relative; }
+.nav { display: flex; gap: 26px; font-size: 14px; color: var(--fg-2); }
+.nav a { text-decoration: none; }
+.nav a:hover { color: var(--fg); }
+.site-header .btn { height: 36px; padding: 0 14px; font-size: 13px; }
+@media (max-width: 860px) { .nav { display: none; } }
+
+/* Hero */
+.hero { position: relative; padding: clamp(28px, 5vh, 60px) 0 clamp(20px, 3vh, 32px); }
+.hero-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 32px 56px; align-items: end; }
+.hero h1 { font-size: clamp(50px, 6.9vw, 104px); letter-spacing: -.055em; line-height: .9; font-weight: 800; }
+.hero h1 .soft { color: var(--muted); }
+.hero h1 .caret { display: inline-block; width: .08em; height: .78em; background: var(--accent); margin-left: .06em; vertical-align: -.04em; animation: blink 1.1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.hero .category { font: 500 12px/1.5 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--accent); margin-bottom: 14px; }
+.hero .actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 26px 0 12px; }
+@media (max-width: 860px) { .hero-grid { grid-template-columns: 1fr; } }
+
+/* Stage: the full-bleed demo */
+.stage {
+  position: relative; padding: 18px 0 28px; isolation: isolate;
+  background:
+    radial-gradient(60% 50% at 50% 30%, rgba(110,240,192,.10), transparent 70%),
+    linear-gradient(var(--bg) 0, var(--bg-2) 30%, var(--bg-2) 85%, var(--bg) 100%);
+}
+.stage::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; opacity: .5;
+  background-image:
+    linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(80% 70% at 50% 45%, #000 30%, transparent 85%);
+  -webkit-mask-image: radial-gradient(80% 70% at 50% 45%, #000 30%, transparent 85%);
+}
+.hud { width: min(1400px, 100% - 2 * var(--gutter)); margin: 0 auto 14px; display: flex; justify-content: space-between; align-items: center; gap: 8px 20px; flex-wrap: wrap; font: 500 12px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); min-height: 28px; }
+.hud .speed { display: inline-flex; align-items: center; gap: 10px; height: 28px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line-2); transition: background-color .3s, color .3s, border-color .3s; }
+.hud .speed.fast { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
+.hud .speed .ff { letter-spacing: -.2em; }
+.hud .clock { font-variant-numeric: tabular-nums; color: var(--fg-2); }
+.hud .clock b { color: var(--fg); font-weight: 600; }
+.screen-outer { width: min(1400px, 100% - 2 * var(--gutter)); margin: 0 auto; perspective: 2000px; }
+.fit { position: relative; width: 100%; height: calc(800px * var(--s, .5)); }
+.fit > .canvas { position: absolute; left: 0; top: 0; width: 1280px; height: 800px; transform-origin: 0 0; transform: scale(var(--s, .5)); }
+.cam { transform-origin: 50% 46%; transition: transform 1.4s cubic-bezier(.2,.7,.2,1); border-radius: calc(14px * var(--s, .5)); box-shadow: 0 40px 120px -30px rgba(0,0,0,.9), 0 0 0 1px rgba(255,255,255,.06); }
+.controls { width: min(1400px, 100% - 2 * var(--gutter)); margin: 18px auto 0; display: grid; grid-template-columns: auto 1fr; gap: 14px 18px; align-items: start; }
+.play {
+  width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line-2); background: rgba(255,255,255,.04);
+  color: var(--fg); display: grid; place-items: center; cursor: pointer; padding: 0;
+}
+.play:hover { border-color: var(--accent); }
+.play svg { width: 14px; height: 14px; }
+.chapters { list-style: none; margin: 0; padding: 0; display: flex; gap: 6px; min-width: 0; }
+.chapters li { min-width: 0; }
+.chap { all: unset; box-sizing: border-box; display: block; width: 100%; cursor: pointer; padding: 6px 0 4px; }
+.chap:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.chap .bar { display: block; height: 3px; border-radius: 3px; background: rgba(255,255,255,.12); overflow: hidden; }
+.chap .bar i { display: block; height: 100%; width: 0; background: var(--fg-2); }
+.chap.active .bar i { background: var(--accent); }
+.chap .lab { display: flex; gap: 8px; margin-top: 9px; font: 500 11px/1.3 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chap .lab b { color: var(--fg-2); font-weight: 500; }
+.chap.active .lab { color: var(--fg); }
+.chap.active .lab b { color: var(--accent); }
+.chap:hover .lab { color: var(--fg); }
+.stage-foot { grid-column: 2; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center; }
+.stage-foot p { font-size: 14px; color: var(--fg-2); }
+@media (max-width: 700px) {
+  .chap .lab span { display: none; }
+  .controls { grid-template-columns: auto 1fr; }
+  .stage-foot { grid-column: 1 / -1; }
+}
+
+/* ===== Canvas internals (design pixels, scaled as one unit) ===== */
+.win {
+  --w-bg: #1d1f23; --p-bg: #141619; --p-hd: #1c1f23; --p-fg: #c8ccd2; --p-dim: #747a83; --p-ac: #8ab4f8; --p-line: rgba(255,255,255,.07); --p-ok: #7fd18b; --p-warn: #e7b35a; --p-err: #f07178; --p-sel: rgba(138,180,248,.16);
+  position: relative; width: 1280px; height: 800px; border-radius: 14px; overflow: hidden;
+  background: var(--w-bg); color: var(--p-fg); font: 400 13px/1.5 var(--mono);
+  transition: background-color .9s ease;
+}
+.win[data-theme="tide"] { --w-bg: #0d1a19; --p-bg: #08110f; --p-hd: #102220; --p-fg: #d4efe6; --p-dim: #6f948a; --p-ac: #6ef0c0; --p-line: rgba(110,240,192,.10); --p-sel: rgba(110,240,192,.16); }
+.titlebar { height: 38px; display: flex; align-items: center; padding: 0 14px; gap: 8px; position: relative; }
+.lights { display: flex; gap: 8px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; }
+.lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+.tabs { position: absolute; left: 50%; transform: translateX(-50%); display: flex; gap: 4px; font: 500 12px/1 var(--display); }
+.tabs span { padding: 7px 16px; border-radius: 7px; color: var(--p-dim); }
+.tabs span.on { background: rgba(255,255,255,.07); color: var(--p-fg); }
+.content { position: absolute; left: 6px; right: 6px; top: 38px; bottom: 6px; }
+.scene { position: absolute; inset: 0; opacity: 0; visibility: hidden; transition: opacity .28s ease, visibility 0s linear .28s; }
+.scene.on { opacity: 1; visibility: visible; transition: opacity .28s ease; }
+.pane { position: absolute; padding: 3px; transition: left .7s cubic-bezier(.2,.8,.2,1), top .7s cubic-bezier(.2,.8,.2,1), width .7s cubic-bezier(.2,.8,.2,1), height .7s cubic-bezier(.2,.8,.2,1), opacity .5s ease, transform .5s cubic-bezier(.2,.8,.2,1); }
+.pane.off { opacity: 0; transform: scale(.94); pointer-events: none; }
+.pbox { position: absolute; inset: 3px; background: var(--p-bg); border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; border: 1px solid var(--p-line); transition: background-color .9s ease, border-color .9s ease, box-shadow .6s ease; }
+.pane.fresh .pbox { box-shadow: 0 0 0 1.5px var(--accent), 0 0 40px rgba(110,240,192,.35); }
+.pane.dim .pbox > .pbody { opacity: .72; }
+.phd { height: 28px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--p-hd); border-bottom: 1px solid var(--p-line); font: 500 11.5px/1 var(--display); color: var(--p-dim); position: relative; transition: background-color .9s ease; }
+.phd .grip { letter-spacing: -2px; font-size: 10px; opacity: .6; }
+.phd .ptype { display: inline-flex; gap: 4px; align-items: center; }
+.phd .ptype::after { content: "⌄"; font-size: 10px; transform: translateY(-2px); }
+.phd .ptitle { position: absolute; left: 50%; transform: translateX(-50%); color: var(--p-fg); white-space: nowrap; max-width: 55%; overflow: hidden; text-overflow: ellipsis; padding: 3px 8px; border-radius: 5px; transition: background-color .4s, color .4s; }
+.phd .ptitle.renamed { background: var(--accent); color: var(--accent-ink); }
+.phd .x { margin-left: auto; opacity: .5; }
+.pbody { flex: 1; min-height: 0; position: relative; overflow: hidden; }
+.term { padding: 10px 12px; display: flex; flex-direction: column; height: 100%; overflow: hidden; white-space: pre-wrap; word-break: break-word; font-size: 12.5px; line-height: 1.55; }
+.term .d { color: var(--p-dim); } .term .a { color: var(--p-ac); } .term .ok { color: var(--p-ok); } .term .w { color: var(--p-warn); } .term .e { color: var(--p-err); } .term .u { color: #fff; }
+.term .cur { display: inline-block; width: 7px; height: 15px; background: var(--p-fg); vertical-align: -3px; animation: blink 1s steps(1) infinite; }
+.term .box { border: 1px solid var(--p-line); border-radius: 6px; padding: 6px 10px; margin: 2px 0 4px; }
+.term .tool { color: var(--p-fg); } .term .tool::before { content: "⏺ "; color: var(--p-ac); }
+.term .sub { color: var(--p-dim); padding-left: 16px; }
+
+/* Browser pane */
+.urlbar { height: 30px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 10px; border-bottom: 1px solid var(--p-line); font-size: 11.5px; color: var(--p-dim); }
+.urlbar .u { flex: 1; background: rgba(255,255,255,.05); border-radius: 6px; padding: 4px 10px; color: var(--p-fg); }
+.site { position: absolute; inset: 30px 0 0; background: #f4f1ea; color: #1b1d1f; font-family: var(--display); padding: 18px 22px; overflow: hidden; }
+.site nav { display: flex; justify-content: space-between; font-size: 12px; font-weight: 600; }
+.site nav span:last-child { display: flex; gap: 14px; font-weight: 500; color: #666; }
+.site h4 { font-size: 40px; letter-spacing: -.04em; line-height: .95; margin: 26px 0 10px; font-weight: 800; }
+.site p { font-size: 12px; color: #555; max-width: 40ch; }
+.site .cta { display: inline-block; margin-top: 12px; background: #1b1d1f; color: #fff; font-size: 11px; padding: 7px 12px; border-radius: 999px; }
+.site .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 22px; }
+.site .cards i { height: 74px; border-radius: 10px; background: linear-gradient(135deg, #ffcf7a, #ff7f5c); }
+.site .cards i:nth-child(2) { background: linear-gradient(135deg, #8fd3ff, #5a7cff); }
+.site .cards i:nth-child(3) { background: linear-gradient(135deg, #b9f5d8, #3fbf8f); }
+.site .badge { position: absolute; right: 18px; top: 60px; background: #1b1d1f; color: #6ef0c0; font: 600 10px/1 var(--mono); padding: 6px 8px; border-radius: 6px; opacity: 0; transition: opacity .4s; }
+.site .badge.on { opacity: 1; }
+
+/* Plugin panel common */
+.plug { padding: 12px 14px; height: 100%; font-family: var(--display); font-size: 12px; display: flex; flex-direction: column; gap: 10px; }
+.plug h5 { margin: 0; font: 600 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--p-dim); display: flex; justify-content: space-between; }
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--p-ok); flex: none; }
+.dot.run { background: var(--p-ac); box-shadow: 0 0 0 3px var(--p-sel); animation: pulse 1.2s ease-in-out infinite; }
+.dot.warn { background: var(--p-warn); } .dot.err { background: var(--p-err); } .dot.idle { background: var(--p-dim); }
+@keyframes pulse { 50% { opacity: .45; } }
+.log { font: 400 11.5px/1.6 var(--mono); display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+.log div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.log .t { color: var(--p-dim); } .log .ok { color: var(--p-ok); } .log .w { color: var(--p-warn); } .log .e { color: var(--p-err); }
+.deploy-head { display: flex; gap: 10px; align-items: center; font-size: 12px; }
+.deploy-head .pill { padding: 3px 8px; border-radius: 999px; background: var(--p-sel); color: var(--p-ac); font: 600 10.5px/1.3 var(--mono); }
+.deploy-head .meter { flex: 1; height: 4px; background: rgba(255,255,255,.08); border-radius: 4px; overflow: hidden; }
+.deploy-head .meter i { display: block; height: 100%; background: var(--p-ac); width: 0; }
+.board { display: flex; flex-direction: column; gap: 14px; flex: 1; min-height: 0; }
+.col h6 { margin: 0 0 6px; font: 600 10.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--p-dim); display: flex; justify-content: space-between; }
+.card { background: rgba(255,255,255,.04); border: 1px solid var(--p-line); border-radius: 7px; padding: 7px 9px; margin-bottom: 6px; font-size: 12px; line-height: 1.3; color: var(--p-fg); }
+.card small { display: flex; gap: 6px; align-items: center; margin-top: 5px; font: 500 10px/1 var(--mono); color: var(--p-dim); }
+.card .prog { height: 3px; background: rgba(255,255,255,.08); border-radius: 3px; margin-top: 6px; overflow: hidden; }
+.card .prog i { display: block; height: 100%; background: var(--p-ac); }
+.metric-big { font: 700 30px/1 var(--display); letter-spacing: -.03em; color: var(--p-fg); }
+.metric-big small { font-size: 12px; color: var(--p-dim); font-weight: 500; letter-spacing: 0; margin-left: 4px; }
+.metric-sub { font: 500 10.5px/1 var(--mono); color: var(--p-ok); }
+.chart { flex: 1; min-height: 0; width: 100%; }
+.chart path { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; }
+
+/* Overlays inside the window */
+.ov { position: absolute; z-index: 20; opacity: 0; visibility: hidden; transition: opacity .2s ease, transform .25s cubic-bezier(.2,.8,.2,1), visibility 0s linear .25s; }
+.ov.on { opacity: 1; visibility: visible; transition: opacity .2s ease, transform .25s cubic-bezier(.2,.8,.2,1); }
+.palette { left: 50%; top: 110px; width: 560px; transform: translate(-50%, -8px) scale(.98); border-radius: 18px; padding: 8px; background: rgba(40,44,50,.55); backdrop-filter: blur(24px) saturate(180%); -webkit-backdrop-filter: blur(24px) saturate(180%); border: 1px solid rgba(255,255,255,.18); box-shadow: 0 30px 80px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.2); font-family: var(--display); color: #f2f4f6; }
+.palette.on { transform: translate(-50%, 0) scale(1); }
+.palette .q { font-size: 18px; padding: 10px 12px 12px; border-bottom: 1px solid rgba(255,255,255,.1); }
+.palette .q .ph { color: rgba(255,255,255,.4); }
+.palette ul { list-style: none; margin: 6px 0 0; padding: 0; }
+.palette li { display: flex; justify-content: space-between; padding: 9px 12px; border-radius: 10px; font-size: 14px; color: rgba(255,255,255,.75); }
+.palette li.sel { background: rgba(110,240,192,.22); color: #fff; }
+.palette li kbd { font: 500 11px/1 var(--mono); color: rgba(255,255,255,.5); }
+.toast { right: 18px; top: 50px; transform: translateY(-8px); background: rgba(30,34,38,.85); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,.14); border-radius: 12px; padding: 12px 16px; font-family: var(--display); font-size: 13px; color: #eef; display: flex; gap: 10px; align-items: center; box-shadow: 0 20px 50px rgba(0,0,0,.5); }
+.toast.on { transform: none; }
+.toast b { color: var(--accent); }
+.dim-ov { inset: 0; background: rgba(0,0,0,.35); }
+.spot { left: 50%; top: 210px; width: 640px; transform: translate(-50%, 10px) scale(.97); border-radius: 22px; background: rgba(48,50,56,.7); backdrop-filter: blur(30px) saturate(180%); -webkit-backdrop-filter: blur(30px) saturate(180%); border: 1px solid rgba(255,255,255,.2); box-shadow: 0 40px 100px rgba(0,0,0,.6); font-family: var(--display); color: #fff; overflow: hidden; }
+.spot.on { transform: translate(-50%, 0) scale(1); }
+.spot .q { display: flex; align-items: center; gap: 12px; font-size: 24px; padding: 16px 20px; font-weight: 400; }
+.spot .q svg { width: 22px; height: 22px; opacity: .6; }
+.spot .res { display: flex; gap: 14px; align-items: center; padding: 12px 20px 16px; margin: 0 8px 8px; border-radius: 14px; background: rgba(110,240,192,.18); }
+.spot .appicon { width: 44px; height: 44px; border-radius: 11px; background: linear-gradient(145deg, #2c3238, #121518); border: 1px solid rgba(255,255,255,.2); display: grid; place-items: center; font: 700 18px/1 var(--mono); color: var(--accent); }
+.spot .res b { display: block; font-size: 16px; }
+.spot .res small { color: rgba(255,255,255,.6); font-size: 12px; }
+.caption { left: 0; right: 0; bottom: 0; padding: 140px 44px 36px; transform: translateY(14px); background: linear-gradient(transparent, rgba(5,7,8,.92) 55%); font-family: var(--display); color: #fff; }
+.caption.on { transform: none; }
+.caption .k { font: 600 13px/1 var(--mono); letter-spacing: .14em; color: var(--accent); text-transform: uppercase; margin-bottom: 12px; }
+.caption .h { font-size: 56px; font-weight: 700; letter-spacing: -.045em; line-height: 1; max-width: 22ch; }
+.done-tag { left: 50%; bottom: 26px; transform: translate(-50%, 10px); background: var(--accent); color: var(--accent-ink); font: 600 13px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; padding: 10px 16px; border-radius: 999px; }
+.done-tag.on { transform: translate(-50%, 0); }
+
+/* Cut scene parts */
+.sess { display: flex; flex-direction: column; gap: 6px; }
+.sess div { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; padding: 8px 10px; border-radius: 8px; background: rgba(255,255,255,.03); border: 1px solid var(--p-line); }
+.sess b { font-weight: 600; color: var(--p-fg); } .sess em { font-style: normal; color: var(--p-dim); font: 500 10.5px/1 var(--mono); }
+.sess span.st { font: 500 10.5px/1 var(--mono); color: var(--p-dim); }
+.rq div { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--p-line); }
+.rq code { font: 500 11px/1.3 var(--mono); color: var(--p-fg); }
+.rq .add { color: var(--p-ok); } .rq .del { color: var(--p-err); }
+.rq .btnm { font: 600 10.5px/1 var(--mono); padding: 5px 8px; border-radius: 6px; border: 1px solid var(--p-line); color: var(--p-fg); white-space: nowrap; }
+.rq .btnm.ok { background: var(--p-ok); color: #082010; border-color: transparent; }
+.form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+.field label { display: block; font: 600 10.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--p-dim); margin-bottom: 6px; }
+.field .inp { background: rgba(255,255,255,.05); border: 1px solid var(--p-line); border-radius: 7px; padding: 8px 10px; font: 400 12.5px/1.2 var(--mono); color: var(--p-fg); }
+.seg { display: flex; border: 1px solid var(--p-line); border-radius: 7px; overflow: hidden; }
+.seg span { flex: 1; text-align: center; padding: 8px 0; font: 500 12px/1.2 var(--mono); color: var(--p-dim); }
+.seg span.on { background: var(--p-sel); color: var(--p-ac); }
+.slider { height: 34px; display: flex; align-items: center; gap: 10px; font: 500 12px/1 var(--mono); }
+.slider .track { flex: 1; height: 4px; background: rgba(255,255,255,.1); border-radius: 4px; position: relative; }
+.slider .track i { position: absolute; left: 0; top: 0; bottom: 0; width: 82%; background: var(--p-ac); border-radius: 4px; }
+.slider .track b { position: absolute; left: 82%; top: 50%; width: 14px; height: 14px; border-radius: 50%; background: #fff; transform: translate(-50%, -50%); }
+.runrow { display: flex; align-items: center; gap: 14px; }
+.runbtn { font: 700 14px/1 var(--display); background: var(--p-ac); color: #062218; padding: 11px 22px; border-radius: 9px; transition: transform .15s, filter .15s; }
+.runbtn.press { transform: scale(.94); filter: brightness(1.2); }
+.runrow .meter { flex: 1; height: 6px; background: rgba(255,255,255,.08); border-radius: 6px; overflow: hidden; }
+.runrow .meter i { display: block; height: 100%; width: 0; background: var(--p-ac); }
+.runrow .pct { font: 600 12px/1 var(--mono); min-width: 40px; text-align: right; }
+table.out { width: 100%; border-collapse: collapse; font: 400 12px/1.2 var(--mono); }
+table.out th { text-align: left; font-weight: 600; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--p-dim); padding: 6px 8px; border-bottom: 1px solid var(--p-line); }
+table.out td { padding: 7px 8px; border-bottom: 1px solid var(--p-line); color: var(--p-fg); }
+table.out td.s { color: var(--p-ok); text-align: right; } table.out th:last-child { text-align: right; }
+table.out tr.hide { opacity: 0; }
+.bench { display: grid; grid-template-columns: 220px 1fr; height: 100%; }
+.bench aside { border-right: 1px solid var(--p-line); padding: 14px; display: flex; flex-direction: column; gap: 6px; }
+.bench aside .run { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 7px; font: 500 12px/1.2 var(--mono); color: var(--p-fg); }
+.bench aside .run.sel { background: rgba(255,255,255,.05); }
+.bench aside .run .sw { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.bench aside .run small { margin-left: auto; color: var(--p-dim); }
+.bench main { padding: 16px 18px; display: grid; grid-template-rows: auto 1fr auto; gap: 14px; min-height: 0; }
+.bench .top { display: flex; justify-content: space-between; align-items: end; font-family: var(--display); }
+.bench .top h4 { margin: 0; font-size: 22px; letter-spacing: -.03em; font-weight: 700; color: var(--p-fg); }
+.bench .top span { font: 500 11px/1 var(--mono); color: var(--p-dim); }
+.charts { display: grid; grid-template-columns: 1.4fr 1fr; gap: 14px; min-height: 0; }
+.chartbox { border: 1px solid var(--p-line); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; min-height: 0; }
+.chartbox h6 { margin: 0 0 8px; font: 600 10.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--p-dim); }
+.chartbox svg { flex: 1; width: 100%; min-height: 0; }
+.chartbox .grid line { stroke: var(--p-line); }
+.bars { display: flex; align-items: end; gap: 12px; flex: 1; padding-top: 10px; }
+.bars div { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; justify-content: end; font: 500 10.5px/1 var(--mono); color: var(--p-dim); }
+.bars i { width: 100%; border-radius: 6px 6px 2px 2px; transition: height .3s; }
+
+/* ===== Page sections ===== */
+section.block { padding: clamp(80px, 12vw, 150px) 0; position: relative; }
+section.block + section.block { border-top: 1px solid var(--line); }
+.sec-head { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 24px 64px; align-items: end; margin-bottom: clamp(44px, 6vw, 80px); }
+@media (max-width: 860px) { .sec-head { grid-template-columns: 1fr; } }
+
+/* Range rows */
+.rows { display: flex; flex-direction: column; gap: clamp(56px, 8vw, 110px); }
+.row { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 28px 56px; align-items: center; }
+.row:nth-child(even) { grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); }
+.row:nth-child(even) .row-media { order: 2; }
+.row-media { border-radius: 14px; padding: 10px; background: linear-gradient(160deg, rgba(255,255,255,.06), rgba(255,255,255,.01)); border: 1px solid var(--line); }
+.row-media .fit { border-radius: 8px; overflow: hidden; height: calc(732px * var(--s, .5)); }
+.row-media .fit > .canvas { height: 732px; }
+.row-media .canvas .win { height: 732px; border-radius: 0; }
+.row-media .canvas .content { top: 6px; }
+.row .num { font: 500 13px/1 var(--mono); color: var(--accent); letter-spacing: .1em; margin-bottom: 18px; }
+.row h3 { font-size: clamp(28px, 3.2vw, 40px); letter-spacing: -.035em; line-height: 1.02; margin-bottom: 16px; font-weight: 700; }
+.row p { color: var(--fg-2); }
+.row .kv { margin-top: 18px; font: 400 12.5px/1.8 var(--mono); color: var(--muted); }
+.row .kv span { color: var(--fg-2); }
+@media (max-width: 860px) {
+  .row, .row:nth-child(even) { grid-template-columns: 1fr; }
+  .row:nth-child(even) .row-media { order: 0; }
+}
+
+/* Foundation specs */
+.specs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--line-2); border-left: 1px solid var(--line); }
+.spec { padding: 26px 24px 30px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); min-width: 0; position: relative; transition: background-color .25s; }
+.spec:hover { background: rgba(255,255,255,.025); }
+.spec .k { font: 500 11px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; }
+.spec .k i { font-style: normal; color: var(--accent); opacity: .8; }
+.spec .v { font: 700 26px/1.05 var(--display); letter-spacing: -.035em; margin: 26px 0 10px; }
+.spec p { font-size: 14.5px; color: var(--fg-2); line-height: 1.5; }
+@media (max-width: 1000px) { .specs { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .specs { grid-template-columns: 1fr; } }
+.foundation-foot { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-top: 22px; font: 400 12.5px/1.5 var(--mono); color: var(--muted); }
+
+/* Mechanism */
+.mech { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+.mech article { padding: 30px 28px 34px; border-right: 1px solid var(--line); min-width: 0; }
+.mech article:last-child { border-right: 0; }
+.mech .ic { width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--line-2); display: grid; place-items: center; color: var(--accent); margin-bottom: 26px; font: 600 15px/1 var(--mono); }
+.mech h3 { margin-bottom: 12px; }
+.mech p { color: var(--fg-2); font-size: 15.5px; }
+@media (max-width: 860px) { .mech { grid-template-columns: 1fr; } .mech article { border-right: 0; border-bottom: 1px solid var(--line); } .mech article:last-child { border-bottom: 0; } }
+.snippet { margin: 28px 0 0; border-radius: 14px; background: #0b0d0f; border: 1px solid var(--line); overflow: hidden; }
+.snippet .bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); font: 500 11px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.snippet .bar .tag { color: var(--note); border: 1px dashed rgba(232,195,122,.45); padding: 4px 7px; border-radius: 5px; }
+.snippet pre { margin: 0; padding: 20px 22px; overflow-x: auto; font: 400 13.5px/1.85 var(--mono); color: var(--fg-2); }
+.snippet .c { color: var(--muted); } .snippet .p { color: var(--accent); } .snippet .f { color: #9ec5ff; } .snippet .o { color: var(--muted); }
+
+/* Loop */
+.loop { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 48px 72px; align-items: center; }
+.loop svg { width: 100%; max-width: 480px; height: auto; display: block; margin-inline: auto; overflow: visible; }
+.loop .ring { fill: none; stroke: var(--line-2); stroke-width: 1.5; }
+.loop .arc { fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: round; stroke-dasharray: 220 1000; transform-origin: 240px 240px; animation: spin 7.2s linear infinite; }
+@keyframes spin { from { transform: rotate(-90deg); } to { transform: rotate(270deg); } }
+.loop .node circle { fill: var(--bg); stroke: var(--line-2); stroke-width: 1.5; transition: fill .3s, stroke .3s; }
+.loop .node text { fill: var(--fg-2); font: 700 22px var(--display); letter-spacing: -.02em; text-anchor: middle; dominant-baseline: central; }
+.loop .node .n { font: 500 11px var(--mono); fill: var(--muted); letter-spacing: .1em; }
+.loop .node.on circle { fill: var(--accent); stroke: var(--accent); }
+.loop .node.on text { fill: var(--accent-ink); }
+.loop .center { fill: var(--muted); font: 500 12px var(--mono); letter-spacing: .12em; text-anchor: middle; text-transform: uppercase; }
+.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.steps li { padding: 22px 0 22px 0; border-top: 1px solid var(--line); display: grid; grid-template-columns: 56px 1fr; gap: 4px 12px; transition: opacity .3s; }
+.steps li:last-child { border-bottom: 1px solid var(--line); }
+.steps .n { font: 500 12px/1.9 var(--mono); color: var(--muted); }
+.steps h3 { font-size: 26px; }
+.steps p { grid-column: 2; color: var(--fg-2); font-size: 15.5px; }
+.steps li.on .n { color: var(--accent); }
+@media (max-width: 860px) { .loop { grid-template-columns: 1fr; } }
+
+/* Agents */
+.agents { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 40px 72px; }
+.caps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr; border-top: 1px solid var(--line); }
+.caps li { display: grid; grid-template-columns: 1fr auto; gap: 16px; padding: 15px 0; border-bottom: 1px solid var(--line); align-items: baseline; }
+.caps li span { font-size: 16.5px; }
+.caps li code { font: 400 12px/1.4 var(--mono); color: var(--muted); text-align: right; }
+.names { margin-top: clamp(56px, 7vw, 90px); border-top: 1px solid var(--line-2); border-bottom: 1px solid var(--line-2); padding: 26px 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 36px; }
+.names .lbl { font: 500 11px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.names b { font: 700 clamp(22px, 3vw, 36px)/1.1 var(--display); letter-spacing: -.035em; color: var(--fg-2); }
+.names b.you { color: var(--accent); }
+.names-note { margin-top: 12px; font: 400 12.5px/1.6 var(--mono); color: var(--muted); }
+@media (max-width: 860px) { .agents { grid-template-columns: 1fr; } .caps li { grid-template-columns: 1fr; gap: 4px; } .caps li code { text-align: left; } }
+
+/* Close */
+.close { text-align: center; padding: clamp(110px, 16vw, 200px) 0; overflow: hidden; }
+.close::before { content: ""; position: absolute; inset: 0; z-index: -1; background: radial-gradient(50% 60% at 50% 60%, rgba(110,240,192,.12), transparent 70%); }
+.close { isolation: isolate; }
+.close h2 { font-size: clamp(46px, 8.6vw, 128px); letter-spacing: -.055em; line-height: .92; font-weight: 800; }
+.close h2 span { display: block; }
+.close h2 .a { color: var(--accent); }
+.close h2 .m { color: var(--muted); }
+.close .lede { margin: 28px auto 0; }
+.close .actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin: 36px 0 12px; }
+
+/* Footer */
+footer { border-top: 1px solid var(--line); padding: 56px 0 40px; font-size: 14px; color: var(--fg-2); }
+.foot { display: grid; grid-template-columns: 1.6fr repeat(3, 1fr); gap: 36px; }
+.foot h4 { margin: 0 0 14px; font: 500 11px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.foot ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; }
+.foot a { text-decoration: none; } .foot a:hover { color: var(--fg); }
+.foot .tag { max-width: 34ch; margin-top: 14px; }
+.foot .soon { font: 400 11px var(--mono); color: var(--muted); }
+.legal { margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font: 400 12px/1.5 var(--mono); color: var(--muted); }
+@media (max-width: 760px) { .foot { grid-template-columns: 1fr 1fr; } .foot > div:first-child { grid-column: 1 / -1; } }
+
+/* Scroll reveal */
+.rv { opacity: 0; transform: translateY(18px); transition: opacity .8s ease, transform .8s cubic-bezier(.2,.8,.2,1); }
+.rv.in { opacity: 1; transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001s !important; animation-iteration-count: 1 !important; transition-duration: .001s !important; transition-delay: 0s !important; }
+  .rv { opacity: 1; transform: none; }
+  .loop .arc { animation: none; transform: rotate(-90deg); }
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="Slate Terminal home"><span class="brand-mark" aria-hidden="true"><span></span></span>Slate Terminal</a>
+    <nav class="nav" aria-label="Primary">
+      <a href="#demo">Demo</a>
+      <a href="#range">Examples</a>
+      <a href="#foundation">Terminal</a>
+      <a href="#mechanism">How it works</a>
+      <a href="#agents">Agents</a>
+    </nav>
+    <a class="btn primary" href="#" aria-describedby="cta-pending">Download for Mac</a>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero" id="top">
+    <div class="wrap hero-grid">
+      <h1>Software you<br>can <span class="soft">shape.</span><span class="caret" aria-hidden="true"></span></h1>
+      <div>
+        <p class="category">Native macOS terminal · Plugins · CLI</p>
+        <p class="lede">A native macOS terminal and a canvas for the tools you and your agents build. Turn an idea into a panel beside your shell, use it on real work, and keep refining it.</p>
+        <div class="actions">
+          <a class="btn primary" href="#" aria-describedby="cta-pending"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M8 2v9M4 7.5 8 11.5l4-4M2.5 14h11"/></svg>Download for Mac</a>
+          <a class="btn" href="#" aria-describedby="cta-pending"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5.5 4 1.5 8l4 4M10.5 4l4 4-4 4"/></svg>View source</a>
+        </div>
+        <p class="pending" id="cta-pending">Download and source links are pending.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- The centerpiece: a scripted placeholder for the product film. -->
+  <section class="stage" id="demo" aria-labelledby="demo-title">
+    <h2 id="demo-title" class="sr">Demo: from one terminal to a workspace you built</h2>
+    <div class="hud" aria-hidden="true">
+      <span class="speed" id="hud-speed"><span class="ff">▶</span> 1× · Real time</span>
+      <span class="clock" id="hud-clock">Session · <b>00:00</b></span>
+    </div>
+    <div class="screen-outer">
+      <div class="fit cam" id="film-fit" role="img" aria-label="Animated demo. A single Slate terminal starts Claude Code, which builds a workspace with a browser preview, deploy log, task board, latency chart and test terminal. The layout is saved and reopened from Spotlight. Then three quick examples: an agent-workflow panel, a visual interface for a shell script, and an experiment workbench.">
+        <div class="canvas" id="film"></div>
+      </div>
+    </div>
+    <div class="controls">
+      <button class="play" id="play" type="button" aria-label="Pause demo" aria-pressed="true">
+        <svg id="ic-pause" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><rect x="2" y="1" width="3.5" height="12" rx="1"/><rect x="8.5" y="1" width="3.5" height="12" rx="1"/></svg>
+        <svg id="ic-play" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true" hidden><path d="M3 1.5v11l9.5-5.5z"/></svg>
+      </button>
+      <ol class="chapters" id="chapters" aria-label="Demo chapters"></ol>
+      <div class="stage-foot">
+        <p>One terminal, one agent, about fifteen minutes of real work, then three other shapes the same canvas can take.</p>
+        <span class="prod-note"><strong>Production note</strong> Placeholder animation — replace with recorded footage of a working build.</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="range" aria-labelledby="range-title">
+    <div class="wrap">
+      <div class="sec-head">
+        <div>
+          <p class="eyebrow"><b>02</b> Range</p>
+          <h2 id="range-title">Three tools, three shapes.</h2>
+        </div>
+        <p class="lede">Some tools sit quietly next to your shell. Some put buttons on a script. Some grow until they’re the main event.</p>
+      </div>
+      <div class="rows">
+        <article class="row rv">
+          <div class="row-media"><div class="fit" data-scene="agents"><div class="canvas"></div></div></div>
+          <div>
+            <p class="num">01 / Beside the terminal</p>
+            <h3>Keep your agents in view.</h3>
+            <p>A panel that lists each agent session, what it’s working on, and what’s waiting for your review. It sits next to the terminals the agents run in, so nothing gets lost in a tab you forgot about.</p>
+            <p class="kv">plugin <span>panel</span> · data <span>pane titles, events</span></p>
+          </div>
+        </article>
+        <article class="row rv">
+          <div class="row-media"><div class="fit" data-scene="script"><div class="canvas"></div></div></div>
+          <div>
+            <p class="num">02 / On top of a script</p>
+            <h3>Give a shell script an interface.</h3>
+            <p>Inputs, a run button, and a results table for a script you already trust. The script stays the source of truth. The panel just makes it easier to use and to share with the next person.</p>
+            <p class="kv">plugin <span>panel + command</span> · runs <span>./resize-assets.sh</span></p>
+          </div>
+        </article>
+        <article class="row rv">
+          <div class="row-media"><div class="fit" data-scene="bench"><div class="canvas"></div></div></div>
+          <div>
+            <p class="num">03 / The whole window</p>
+            <h3>Let the idea take the window.</h3>
+            <p>An experiment workbench that compares runs and charts results. Give it most of the window while it’s the focus. Keep a terminal at the edge for the training job, and change the tool as you learn what you need.</p>
+            <p class="kv">plugin <span>panel + background service</span></p>
+          </div>
+        </article>
+      </div>
+      <p class="prod-note" style="margin-top:56px"><strong>Production note</strong> Proposed demos to build and record. They show what plugins make possible; they don’t ship with Slate.</p>
+    </div>
+  </section>
+
+  <section class="block" id="foundation" aria-labelledby="foundation-title">
+    <div class="wrap">
+      <div class="sec-head">
+        <div>
+          <p class="eyebrow"><b>03</b> Foundation</p>
+          <h2 id="foundation-title">A terminal first.<br>Everything else is optional.</h2>
+        </div>
+        <p class="lede">Before you build anything, Slate is a terminal you’d want to use: Ghostty’s engine in native AppKit windows, with tabs, splits and a command picker that stay out of the way. Extend it when it helps, not because you have to.</p>
+      </div>
+      <div class="specs rv">
+        <div class="spec"><p class="k">Engine <i>01</i></p><p class="v">libghostty</p><p>Real Ghostty terminal surfaces, embedded in native windows.</p></div>
+        <div class="spec"><p class="k">Windows <i>02</i></p><p class="v">AppKit, native</p><p>Native windows and tabs. Your workspace is restored after a restart.</p></div>
+        <div class="spec"><p class="k">Panes <i>03</i></p><p class="v">Split · Zoom</p><p>Nested splits, directional focus, zoom and equalize. Drag a pane by its grip to move it.</p></div>
+        <div class="spec"><p class="k">Commands <i>04</i></p><p class="v">⌘K picker</p><p>Keyboard-first, in Liquid Glass. Fuzzy search across built-in and plugin commands.</p></div>
+        <div class="spec"><p class="k">Browser <i>05</i></p><p class="v">WebKit panes</p><p>Preview localhost beside your shell, with a persistent or a private profile.</p></div>
+        <div class="spec"><p class="k">Settings <i>06</i></p><p class="v">TOML, live</p><p>Typed settings for fonts, themes and shortcuts. Changes reload while you work.</p></div>
+        <div class="spec"><p class="k">Layouts <i>07</i></p><p class="v">Saved layouts</p><p>Save an arrangement and open your workspace from a Spotlight launcher.</p></div>
+        <div class="spec"><p class="k">Automation <i>08</i></p><p class="v">slate-term</p><p>A bundled CLI over a private, same-user control socket.</p></div>
+      </div>
+      <div class="foundation-foot">
+        <span>macOS · Apple Silicon · in active development</span>
+        <span class="prod-note"><strong>Production note</strong> Confirm supported macOS versions before launch.</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="mechanism" aria-labelledby="mech-title">
+    <div class="wrap">
+      <div class="sec-head">
+        <div>
+          <p class="eyebrow"><b>04</b> Mechanism</p>
+          <h2 id="mech-title">Your agent builds.<br>Slate connects the pieces.</h2>
+        </div>
+        <p class="lede">Plugins provide the interfaces and commands. The CLI lets you, or your agent, arrange the workspace around them. Nothing is hidden behind a chat window.</p>
+      </div>
+      <div class="mech rv">
+        <article>
+          <div class="ic" aria-hidden="true">▣</div>
+          <h3>Plugins</h3>
+          <p>Add panels, commands and background services. Panels are web pages with a bridge to the workspace, and they sit in panes just like a terminal.</p>
+        </article>
+        <article>
+          <div class="ic" aria-hidden="true">›_</div>
+          <h3>CLI</h3>
+          <p><code class="mono">slate-term</code> splits and moves panes, opens panels, drives browser panes, waits on commands and saves layouts, from any shell.</p>
+        </article>
+        <article>
+          <div class="ic" aria-hidden="true">✻</div>
+          <h3>Your agents</h3>
+          <p>Install the Slate Terminal skill and your agent can discover the API, write a plugin, register it and put it where you need it.</p>
+        </article>
+      </div>
+      <figure class="snippet rv" aria-label="Illustrative slate-term session">
+        <div class="bar"><span>zsh — ~/code/launchpad</span><span class="tag">Illustrative</span></div>
+<pre><span class="c"># What an agent might run through its own shell</span>
+<span class="p">❯</span> slate-term skill setup
+<span class="p">❯</span> slate-term plugins register <span class="f">./plugins/deploy-tail</span>
+<span class="o">  registered deploy-tail · panel "Deploys"</span>
+<span class="p">❯</span> slate-term panes split --pane p1 --right --type <span class="f">deploy-tail</span>
+<span class="p">❯</span> slate-term panes set-title --pane p2 --title <span class="f">"Deploys"</span>
+<span class="p">❯</span> slate-term layouts capture --window w1 --name <span class="f">"Launch Day"</span></pre>
+      </figure>
+    </div>
+  </section>
+
+  <section class="block" id="loop" aria-labelledby="loop-title">
+    <div class="wrap loop">
+      <div>
+        <p class="eyebrow"><b>05</b> Iteration</p>
+        <h2 id="loop-title">Use it.<br>Change it.<br>Keep going.</h2>
+        <p class="lede" style="margin-top:26px">Your first version is a starting point. Building, using and refining become one continuous process, in the same window.</p>
+      </div>
+      <div>
+        <svg viewBox="0 0 480 480" aria-hidden="true">
+          <circle class="ring" cx="240" cy="240" r="170"/>
+          <circle class="arc" cx="240" cy="240" r="170"/>
+          <text class="center" x="240" y="236">repeat as</text>
+          <text class="center" x="240" y="256">needs change</text>
+          <g class="node" data-i="0" transform="translate(240 70)"><circle r="54"/><text y="-6">Build</text><text class="n" y="18">01</text></g>
+          <g class="node" data-i="1" transform="translate(387 325)"><circle r="54"/><text y="-6">Use</text><text class="n" y="18">02</text></g>
+          <g class="node" data-i="2" transform="translate(93 325)"><circle r="54"/><text y="-6">Refine</text><text class="n" y="18">03</text></g>
+        </svg>
+        <ol class="steps" id="steps">
+          <li data-i="0"><span class="n">01</span><h3>Build</h3><p>Work with your agent to turn an idea into a working tool.</p></li>
+          <li data-i="1"><span class="n">02</span><h3>Use</h3><p>Bring it into your workspace and try it on the real task.</p></li>
+          <li data-i="2"><span class="n">03</span><h3>Refine</h3><p>Ask for what’s missing. Keep what works. Change it again next week.</p></li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="agents" aria-labelledby="agents-title">
+    <div class="wrap">
+      <div class="agents">
+        <div>
+          <p class="eyebrow"><b>06</b> For your agents</p>
+          <h2 id="agents-title">Bring your own agents.</h2>
+          <p class="lede" style="margin-top:26px">Slate doesn’t include a model or a chat window. It gives the agents you already use a workspace they can see and change, through the same commands you can run yourself.</p>
+        </div>
+        <ul class="caps rv">
+          <li><span>Inspect panes and read what’s on screen</span><code>panes inspect · context inspect</code></li>
+          <li><span>Split, move and rename panes</span><code>panes split · panes move</code></li>
+          <li><span>Register a plugin and open its panel</span><code>plugins register</code></li>
+          <li><span>Navigate and check a browser pane</span><code>browser navigate</code></li>
+          <li><span>Wait for a command to finish</span><code>terminal wait</code></li>
+          <li><span>Tell you when it’s done</span><code>notify</code></li>
+          <li><span>Save the arrangement for later</span><code>layouts capture</code></li>
+        </ul>
+      </div>
+      <div class="names" aria-label="Examples of agents">
+        <span class="lbl">Bring</span>
+        <b>Claude Code</b><b>Codex</b><b>Gemini CLI</b><b>opencode</b><b class="you">your own scripts</b>
+      </div>
+      <p class="names-note">Examples, not tested integrations. If your agent can run a shell command, it can call slate-term.</p>
+    </div>
+  </section>
+
+  <section class="block close" aria-labelledby="close-title">
+    <div class="wrap">
+      <h2 id="close-title"><span>A solid terminal.</span><span class="a">Yours to shape.</span><span class="m">Open source.</span></h2>
+      <p class="lede">Start with the tools you know. Build the ones you’re missing.</p>
+      <div class="actions">
+        <a class="btn primary" href="#" aria-describedby="cta-pending-2">Download for Mac</a>
+        <a class="btn" href="#" aria-describedby="cta-pending-2">View source</a>
+      </div>
+      <p class="pending" id="cta-pending-2">Download and source links are pending.</p>
+      <p class="prod-note" style="margin-top:22px"><strong>Production note</strong> Confirm license, public source URL and release artifact before publishing.</p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot">
+      <div>
+        <a class="brand" href="#top"><span class="brand-mark" aria-hidden="true"><span></span></span>Slate Terminal</a>
+        <p class="tag">Software you can shape. A native macOS terminal with plugins and a CLI for you and your agents.</p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <ul><li><a href="#demo">Demo</a></li><li><a href="#range">Examples</a></li><li><a href="#foundation">Terminal</a></li><li><a href="#loop">Build · Use · Refine</a></li></ul>
+      </div>
+      <div>
+        <h4>Build</h4>
+        <ul><li><a href="#mechanism">Plugins</a></li><li><a href="#mechanism">slate-term CLI</a></li><li><a href="#agents">Agent skill</a></li><li><a href="#foundation">Saved layouts</a></li></ul>
+      </div>
+      <div>
+        <h4>Project</h4>
+        <ul><li><a href="#">Source</a> <span class="soon">pending</span></li><li><a href="#">License</a> <span class="soon">pending</span></li><li><a href="#">Download</a> <span class="soon">pending</span></li></ul>
+      </div>
+    </div>
+    <div class="legal"><span>© 2026 Slate Terminal</span><span>Website design B · “Canvas” · mockup</span></div>
+  </div>
+</footer>
+
+<script>
+(() => {
+"use strict";
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const $ = (s, r = document) => r.querySelector(s);
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const rnd = i => { const x = Math.sin(i * 12.9898 + 78.233) * 43758.5453; return x - Math.floor(x); };
+const esc = s => s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+const h = (html) => { const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstElementChild; };
+
+// ---------- Fit: scale a fixed-size design canvas to its container ----------
+function fit(el, w = 1280) {
+  const set = () => el.style.setProperty("--s", (el.clientWidth / w).toFixed(4));
+  set();
+  if ("ResizeObserver" in window) new ResizeObserver(set).observe(el);
+  else addEventListener("resize", set);
+}
+
+// ---------- Shared pane builder ----------
+function pane(type, title, body, cls = "") {
+  return h(`<div class="pane ${cls}"><div class="pbox">
+    <div class="phd"><span class="grip">⋮⋮</span><span class="ptype">${type}</span><span class="ptitle">${title}</span><span class="x">✕</span></div>
+    <div class="pbody">${body}</div></div></div>`);
+}
+// Keep terminals and logs pinned to their newest line.
+function stick(root) { root.querySelectorAll(".term, .log").forEach(e => { e.scrollTop = e.scrollHeight; }); }
+function place(el, r) {
+  el.style.left = r[0] + "%"; el.style.top = r[1] + "%";
+  el.style.width = r[2] + "%"; el.style.height = r[3] + "%";
+}
+function chartPath(vals, w, hgt, lo, hi) {
+  const n = vals.length - 1;
+  return vals.map((v, i) => `${i ? "L" : "M"}${(i / n * w).toFixed(1)} ${(hgt - (v - lo) / (hi - lo) * hgt).toFixed(1)}`).join("");
+}
+
+// ---------- Cut scenes (also reused statically in the Range section) ----------
+const CUTS = {
+  agents(root) {
+    const sessions = [
+      ["run", "claude", "auth-refactor", "running · 12m"],
+      ["warn", "codex", "flaky-e2e", "needs review"],
+      ["run", "claude", "api-v2-migration", "running · 4m"],
+      ["", "codex", "docs-pass", "done"],
+    ];
+    const side = pane("Agents", "Agent sessions", `<div class="plug">
+      <h5><span>Sessions</span><span>4</span></h5>
+      <div class="sess">${sessions.map(s => `<div><span class="dot ${s[0]}"></span><span><b>${s[2]}</b><br><em>${s[1]}</em></span><span class="st">${s[3]}</span></div>`).join("")}</div>
+      <h5 style="margin-top:8px"><span>Review queue</span><span class="rqn">3</span></h5>
+      <div class="rq">
+        <div><code>auth/session.ts <span class="add">+214</span> <span class="del">−88</span></code><span class="btnm" data-a="0">Review</span></div>
+        <div><code>e2e/checkout.spec.ts <span class="add">+12</span> <span class="del">−30</span></code><span class="btnm" data-a="1">Review</span></div>
+        <div><code>docs/plugins.md <span class="add">+61</span> <span class="del">−9</span></code><span class="btnm" data-a="2">Review</span></div>
+      </div></div>`);
+    place(side, [0, 0, 30, 100]); root.append(side);
+    const feeds = [
+      ["claude — auth-refactor", ["⏺ Read(auth/session.ts)", "⏺ Update(auth/session.ts) +38 −12", "⏺ Bash(pnpm test auth)", "  ⎿ 48 passed", "⏺ Update(auth/refresh.ts) +22", "⏺ Bash(pnpm typecheck)", "  ⎿ ok", "✻ Writing summary…"]],
+      ["codex — flaky-e2e", ["• Ran playwright test checkout --repeat 20", "  └ 3 failed / 20", "• Found race in cart hydration", "• Edited e2e/checkout.spec.ts", "• Ran playwright test --repeat 20", "  └ 20 passed", "▲ Ready for review"]],
+      ["claude — api-v2-migration", ["⏺ Grep(\"/api/v1/\") 34 files", "⏺ Update(server/routes.ts) +19 −19", "⏺ Update(client/fetch.ts) +7 −7", "⏺ Bash(pnpm test api)", "  ⎿ 112 passed", "⏺ Update(client/orders.ts)", "✻ Thinking…"]],
+      ["zsh — ~/code/launchpad", ["❯ git switch -c review/auth", "Switched to a new branch", "❯ git diff --stat main", " auth/session.ts | 302 ++++---", " auth/refresh.ts |  22 +", " 2 files changed", "❯ "]],
+    ];
+    const rects = [[30, 0, 35, 50], [65, 0, 35, 50], [30, 50, 35, 50], [65, 50, 35, 50]];
+    const terms = feeds.map((f, i) => { const p = pane("Terminal", f[0], `<div class="term"></div>`); place(p, rects[i]); root.append(p); return [p.querySelector(".term"), f[1]]; });
+    const btns = [...side.querySelectorAll(".btnm")];
+    return p => {
+      terms.forEach(([el, lines], i) => {
+        const n = clamp(Math.floor(p * (lines.length + 2) + i * .7), 1, lines.length);
+        el.innerHTML = lines.slice(0, n).map(l => `<div class="${/⎿|└|passed|ok$/.test(l) ? "ok" : /^[⏺•❯]/.test(l) ? "" : "d"}">${esc(l)}</div>`).join("");
+      });
+      btns.forEach((b, i) => { const done = p > .45 + i * .2; b.textContent = done ? "✓ Approved" : "Review"; b.classList.toggle("ok", done); });
+      $(".rqn", side).textContent = btns.filter(b => b.classList.contains("ok")).length + "/3";
+    };
+  },
+
+  script(root) {
+    const t = pane("Terminal", "zsh — design-assets", `<div class="term">
+<div><span class="d">❯</span> cat scripts/resize-assets.sh</div>
+<div class="d">#!/usr/bin/env bash</div>
+<div class="d">set -euo pipefail</div>
+<div class="d">src="\${1:?source dir}"; fmt="\${2:-webp}"</div>
+<div class="d">for f in "$src"/*.png; do</div>
+<div class="d">  for s in 1 2 3; do</div>
+<div class="d">    vips thumbnail "$f" ...</div>
+<div class="d">  done</div>
+<div class="d">done</div>
+<div><span class="d">❯</span> slate-term panes split --right \\</div>
+<div>    --type asset-resizer</div>
+<div><span class="d">❯</span> <span class="cur"></span></div></div>`);
+    place(t, [0, 0, 34, 100]); root.append(t);
+    const files = [["hero@3x.png", "4.8 MB", "612 KB"], ["pricing-card.png", "1.9 MB", "214 KB"], ["og-image.png", "2.4 MB", "188 KB"], ["team-photo.png", "6.1 MB", "804 KB"], ["icon-set.png", "820 KB", "96 KB"], ["dashboard.png", "3.3 MB", "402 KB"], ["mobile-nav.png", "1.2 MB", "131 KB"]];
+    const pnl = pane("Asset Resizer", "Asset Resizer", `<div class="plug" style="gap:16px;padding:18px 22px">
+      <h5><span>scripts/resize-assets.sh</span><span>panel v3</span></h5>
+      <div class="form">
+        <div class="field"><label>Source folder</label><div class="inp">~/design/exports</div></div>
+        <div class="field"><label>Output</label><div class="inp">./public/img</div></div>
+        <div class="field"><label>Format</label><div class="seg"><span class="on">WebP</span><span>AVIF</span><span>PNG</span></div></div>
+        <div class="field"><label>Scales</label><div class="seg"><span class="on">1×</span><span class="on">2×</span><span class="on">3×</span></div></div>
+        <div class="field" style="grid-column:1/-1"><label>Quality</label><div class="slider"><div class="track"><i></i><b></b></div><span>82</span></div></div>
+      </div>
+      <div class="runrow"><span class="runbtn">Run</span><div class="meter"><i></i></div><span class="pct mono">0%</span></div>
+      <table class="out"><thead><tr><th>File</th><th>Before</th><th>After</th><th>Saved</th></tr></thead>
+      <tbody>${files.map(f => `<tr class="hide"><td>${f[0]}</td><td>${f[1]}</td><td>${f[2]}</td><td class="s">${Math.round((1 - parseFloat(f[2]) / (parseFloat(f[1]) * (f[1].includes("MB") ? 1000 : 1))) * 100)}%</td></tr>`).join("")}</tbody></table>
+    </div>`);
+    place(pnl, [34, 0, 66, 100]); root.append(pnl);
+    const btn = $(".runbtn", pnl), bar = $(".runrow .meter i", pnl), pct = $(".pct", pnl), rows = [...pnl.querySelectorAll("tbody tr")];
+    return p => {
+      btn.classList.toggle("press", p > .12 && p < .2);
+      const g = clamp((p - .18) / .55);
+      bar.style.width = (g * 100).toFixed(1) + "%";
+      pct.textContent = g >= 1 ? "Done" : Math.round(g * 100) + "%";
+      rows.forEach((r, i) => r.classList.toggle("hide", g < (i + 1) / rows.length - .001));
+    };
+  },
+
+  bench(root) {
+    const runs = [["#6ef0c0", "lr-3e-4", "0.412"], ["#8ab4f8", "lr-1e-3", "0.447"], ["#e7b35a", "warmup-2k", "0.398"], ["#f07178", "no-dropout", "0.503"]];
+    const curve = (k) => Array.from({ length: 48 }, (_, i) => { const x = i / 47; return .38 + (k * .03) + (1.6 - k * .12) * Math.exp(-x * (3.2 + k * .6)) + (rnd(i + k * 50) - .5) * .05 + (k === 3 ? x * x * .14 : 0); });
+    const W = 600, H = 220;
+    const paths = runs.map((r, k) => `<path d="${chartPath(curve(k), W, H, .3, 2.1)}" stroke="${r[0]}" stroke-width="2.2" fill="none" pathLength="1" stroke-dasharray="1" stroke-dashoffset="1"/>`).join("");
+    const pnl = pane("Workbench", "Experiment Workbench", `<div class="bench">
+      <aside><h5 class="mono" style="margin:0 0 8px;font-size:10.5px;letter-spacing:.1em;color:var(--p-dim)">RUNS · sweep-14</h5>
+        ${runs.map((r, i) => `<div class="run ${i < 3 ? "sel" : ""}"><span class="sw" style="background:${r[0]}"></span>${r[1]}<small class="vl">—</small></div>`).join("")}
+        <div style="margin-top:auto;font:500 10.5px/1.6 var(--mono);color:var(--p-dim)">dataset · tickets-v7<br>model · base-410m</div>
+      </aside>
+      <main>
+        <div class="top"><h4>Validation loss, sweep-14</h4><span>step <b class="stp">0</b> / 12,000</span></div>
+        <div class="charts">
+          <div class="chartbox"><h6>val/loss</h6><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><g class="grid">${[0, 1, 2, 3].map(i => `<line x1="0" x2="${W}" y1="${i * H / 3}" y2="${i * H / 3}"/>`).join("")}</g>${paths}</svg></div>
+          <div class="chartbox"><h6>eval accuracy</h6><div class="bars">${runs.map(r => `<div><i style="background:${r[0]};height:0"></i>${r[1]}</div>`).join("")}</div></div>
+        </div>
+        <table class="out"><thead><tr><th>Run</th><th>Best step</th><th>Tokens/s</th><th>Δ vs base</th></tr></thead><tbody>
+          <tr><td>warmup-2k</td><td>11,400</td><td>18.2k</td><td class="s">−6.1%</td></tr>
+          <tr><td>lr-3e-4</td><td>10,800</td><td>18.4k</td><td class="s">−3.9%</td></tr>
+          <tr><td>lr-1e-3</td><td>7,200</td><td>18.3k</td><td class="s">−1.2%</td></tr>
+        </tbody></table>
+      </main></div>`);
+    place(pnl, [0, 0, 76, 100]); root.append(pnl);
+    const t = pane("Terminal", "train — warmup-2k", `<div class="term"></div>`);
+    place(t, [76, 0, 24, 100]); root.append(t);
+    const pathEls = [...pnl.querySelectorAll("svg path")], bars = [...pnl.querySelectorAll(".bars i")], vls = [...pnl.querySelectorAll(".vl")], stp = $(".stp", pnl), term = $(".term", t);
+    const acc = [.81, .78, .84, .71];
+    return p => {
+      const g = clamp(p * 1.25);
+      pathEls.forEach(e => e.setAttribute("stroke-dashoffset", (1 - g).toFixed(3)));
+      bars.forEach((b, i) => b.style.height = (acc[i] * 100 * clamp(p * 1.6 - .2)).toFixed(1) + "%");
+      vls.forEach((v, i) => v.textContent = g > .3 ? (parseFloat(runs[i][2]) + (1 - g) * .9).toFixed(3) : "—");
+      stp.textContent = Math.round(g * 12000).toLocaleString("en-US");
+      const step = Math.round(g * 12000);
+      const lines = ["❯ python train.py \\", "   --run warmup-2k", "loading tickets-v7 …", "model base-410m"];
+      for (let s = 1000; s <= step; s += 1000) lines.push(`step ${String(s).padStart(5)} loss ${(0.4 + 1.5 * Math.exp(-s / 2600)).toFixed(3)}`);
+      const fill = Math.round(g * 14);
+      lines.push(`[${"█".repeat(fill)}${"·".repeat(14 - fill)}] ${Math.round(g * 100)}%`);
+      term.innerHTML = lines.map((l, i) => `<div class="${i < 4 ? "d" : l.startsWith("[") ? "ok" : ""}">${esc(l)}</div>`).join("");
+    };
+  },
+};
+
+// ---------- Range section: static frames of each example ----------
+function frameShell(theme) {
+  return h(`<div class="win" data-theme="${theme}"><div class="content"><div class="scene on"></div></div></div>`);
+}
+document.querySelectorAll(".row-media .fit").forEach(f => {
+  const w = frameShell("tide");
+  f.querySelector(".canvas").append(w);
+  CUTS[f.dataset.scene]($(".scene", w))(1);
+  stick(w);
+  fit(f);
+});
+
+// ---------- The film ----------
+const film = $("#film");
+const win = h(`<div class="win">
+  <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="tabs"><span class="on tabname">launchpad</span><span>notes</span></div></div>
+  <div class="content">
+    <div class="scene" data-s="build"></div>
+    <div class="scene" data-s="agents"></div>
+    <div class="scene" data-s="script"></div>
+    <div class="scene" data-s="bench"></div>
+    <div class="ov palette" id="pal"><div class="q"></div><ul></ul></div>
+    <div class="ov toast" id="toast"><span class="dot"></span><span>Layout saved · <b>Launch Day</b></span></div>
+    <div class="ov dim-ov" id="dim"></div>
+    <div class="ov spot" id="spot"><div class="q"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg><span class="sq"></span></div>
+      <div class="res"><span class="appicon">›_</span><span><b>Launch Day</b><small>Application · opens your Slate layout</small></span></div></div>
+    <div class="ov done-tag" id="done">Workspace ready · saved as Launch Day</div>
+    <div class="ov caption" id="cap"><div class="k"></div><div class="h"></div></div>
+  </div></div>`);
+film.append(win);
+fit($("#film-fit"));
+
+const sc = Object.fromEntries([...win.querySelectorAll(".scene")].map(s => [s.dataset.s, s]));
+const cutUpd = { agents: CUTS.agents(sc.agents), script: CUTS.script(sc.script), bench: CUTS.bench(sc.bench) };
+
+// Build-scene panes.
+const P = {
+  term: pane("Terminal", "zsh — launchpad", `<div class="term" id="t-main"></div>`),
+  browser: pane("Browser", "localhost:5173", `<div class="urlbar"><span>‹ ›</span><span class="u">http://localhost:5173</span><span>↻</span></div>
+    <div class="site"><nav><span>◐ Launchpad</span><span><span>Product</span><span>Docs</span><span>Pricing</span></span></nav>
+    <h4>Ship on<br>Thursday.</h4><p>Release notes, rollouts and status for the launch, in one place.</p><span class="cta">Read the changelog</span>
+    <div class="cards"><i></i><i></i><i></i></div><span class="badge" id="hmr">HMR ✓ updated</span></div>`),
+  deploy: pane("Deploys", "Deploys", `<div class="plug"><div class="deploy-head"><span class="dot run"></span><b>web@4f2a91c</b><span class="pill">canary 25%</span><div class="meter"><i id="dmeter"></i></div></div><div class="log" id="dlog"></div></div>`),
+  board: pane("Agent Board", "Agent Board", `<div class="plug"><h5><span>Launch tasks</span><span>you + 2 agents</span></h5><div class="board">
+    <div class="col"><h6><span>Running</span><span>2</span></h6>
+      <div class="card">Retry deploy webhook on 502<small><span class="dot run"></span>claude</small><div class="prog"><i id="bp1"></i></div></div>
+      <div class="card">Fix flaky checkout test<small><span class="dot run"></span>codex</small><div class="prog"><i id="bp2"></i></div></div></div>
+    <div class="col"><h6><span>Review</span><span>1</span></h6><div class="card">Bump image pipeline<small><span class="dot warn"></span>codex · +48 −12</small></div></div>
+    <div class="col"><h6><span>Queued</span><span>3</span></h6><div class="card">Hero copy pass<small><span class="dot idle"></span>you</small></div><div class="card">Audit env vars<small><span class="dot idle"></span>claude</small></div><div class="card">Status page link<small><span class="dot idle"></span>unassigned</small></div></div>
+  </div></div>`),
+  metrics: pane("Latency", "p95 latency", `<div class="plug"><h5><span>p95 · /api</span><span>live</span></h5><div class="metric-big"><span id="mval">142</span><small>ms</small></div><div class="metric-sub" id="msub">▼ 8% vs last deploy</div>
+    <svg class="chart" viewBox="0 0 200 90" preserveAspectRatio="none"><path id="m1" stroke="var(--p-ac)"/><path id="m2" stroke="var(--p-dim)" stroke-dasharray="3 3"/></svg></div>`),
+  shell: pane("Terminal", "zsh", `<div class="term" id="t-shell"></div>`),
+};
+for (const p of Object.values(P)) sc.build.append(p);
+sc.build.addEventListener("transitionend", () => stick(sc.build));
+
+// Layout keyframes: [start time, {pane: [x, y, w, h] in %}].
+const L = [
+  [0, { term: [0, 0, 100, 100] }],
+  [7.6, { term: [0, 0, 48, 100], browser: [48, 0, 52, 100] }],
+  [9.6, { term: [0, 0, 42, 100], browser: [42, 0, 58, 60], deploy: [42, 60, 58, 40] }],
+  [11.4, { board: [0, 0, 21, 100], term: [21, 0, 33, 100], browser: [54, 0, 46, 58], deploy: [54, 58, 46, 42] }],
+  [13.7, { board: [0, 0, 21, 100], term: [21, 0, 33, 100], browser: [54, 0, 46, 54], metrics: [54, 54, 21, 46], deploy: [75, 54, 25, 46] }],
+  [15.0, { board: [0, 0, 21, 100], term: [21, 0, 33, 63], shell: [21, 63, 33, 37], browser: [54, 0, 46, 54], metrics: [54, 54, 21, 46], deploy: [75, 54, 25, 46] }],
+];
+const appear = {}, home = {};
+for (const [t0, lay] of L) for (const k in lay) if (!(k in appear)) { appear[k] = t0; home[k] = lay[k]; }
+const titles = {
+  term: [[0, "zsh — launchpad"], [1.5, "claude — launchpad"], [17.6, "agent"]],
+  browser: [[0, "localhost:5173"], [17.9, "Preview"]],
+  board: [[0, "Agent Board"], [18.2, "Tasks"]],
+  shell: [[0, "zsh"], [18.4, "tests"]],
+  deploy: [[0, "Deploys"]], metrics: [[0, "p95 latency"]],
+};
+
+// Agent transcript. Each entry: [time, html]. Typed lines use {type:[t0,t1,text]}.
+const PROMPT = "Build me a launch-day workspace in Slate: preview the site, tail deploys, track agent tasks and chart p95 latency. Save it so I can reopen it.";
+const T = [
+  [0, `<div class="d">Last login: Fri Oct 16 09:12:04 on ttys003</div>`],
+  [1.6, `<div class="box"><span class="a">✻</span> <span class="u">Claude Code</span>\n<span class="d">  cwd: ~/code/launchpad</span></div>`],
+  [6.0, `<div class="tool">Read slate-term skill · building-plugins.md</div>`],
+  [6.5, `<div class="tool">Bash(slate-term api describe)</div><div class="sub">⎿ 214 methods · socket ok</div>`],
+  [7.1, `<div class="tool">Bash(slate-term panes split --pane p1 --right --type browser)</div>`],
+  [7.5, `<div class="sub">⎿ pane p2 · http://localhost:5173</div>`],
+  [8.3, `<div class="tool">Write(plugins/deploy-tail/index.html) <span class="ok">+142</span></div>`],
+  [8.9, `<div class="tool">Bash(slate-term plugins register ./plugins/deploy-tail)</div>`],
+  [9.3, `<div class="sub">⎿ registered deploy-tail · panel "Deploys"</div>`],
+  [10.2, `<div class="tool">Write(plugins/agent-board/index.html) <span class="ok">+210</span></div>`],
+  [10.9, `<div class="tool">Bash(slate-term panes split --pane p1 --left --type agent-board)</div>`],
+  [12.0, `<div class="tool">Write(plugins/latency/index.html) <span class="ok">+96</span></div>`],
+  [12.4, `<div class="sub">⎿ registered latency · panel "p95 latency"</div>`],
+  [14.4, `<div class="tool">Bash(slate-term panes split --pane p1 --down --type terminal)</div>`],
+  [15.4, `<div class="tool">Update(~/.config/slate-term/config.toml)</div><div class="sub"><span class="e">- theme = "default"</span>\n<span class="ok">+ theme = "tide"</span></div>`],
+  [16.3, `<div class="sub">⎿ slate-term config reload <span class="ok">✓</span></div>`],
+  [17.2, `<div class="tool">Bash(slate-term panes set-title --pane p1 --title agent)</div>`],
+  [19.4, `<div><span class="d">&gt;</span> <span class="u">make a Spotlight launcher for it</span></div>`],
+  [19.8, `<div class="tool">Bash(slate-term layouts launcher --id 7f3c… --path ~/Applications/Launch\\ Day.app)</div>`],
+  [20.2, `<div class="sub">⎿ launcher created <span class="ok">✓</span></div>`],
+  [20.6, `<div><span class="ok">✓</span> Done. Open “Launch Day” from Spotlight any time.</div>`],
+];
+
+// Chapters.
+const CH = [
+  { id: "blank", label: "Blank slate", a: 0, b: 6 },
+  { id: "build", label: "Build · 16×", a: 6, b: 24.6 },
+  { id: "agents", label: "Agent workflow", a: 24.6, b: 30.2 },
+  { id: "script", label: "Script interface", a: 30.2, b: 35.8 },
+  { id: "bench", label: "Workbench", a: 35.8, b: 41.6 },
+];
+const TOTAL = CH[CH.length - 1].b;
+const CAPS = {
+  agents: ["Example 01 / 03", "An agent-workflow panel beside your terminals."],
+  script: ["Example 02 / 03", "A visual interface for a shell script."],
+  bench: ["Example 03 / 03", "A plugin app that takes over the window."],
+};
+const chapEl = $("#chapters");
+CH.forEach((c, i) => {
+  const li = document.createElement("li");
+  li.style.flex = String(c.b - c.a);
+  li.innerHTML = `<button class="chap" type="button"><span class="bar"><i></i></span><span class="lab"><b>0${i + 1}</b><span>${c.label}</span></span></button>`;
+  const btn = li.firstElementChild;
+  btn.setAttribute("aria-label", `Jump to chapter ${i + 1}: ${c.label}`);
+  btn.addEventListener("click", () => { seek(c.a + .01); });
+  chapEl.append(li);
+});
+const chapBtns = [...chapEl.querySelectorAll(".chap")];
+
+const tMain = $("#t-main"), tShell = $("#t-shell"), dlog = $("#dlog"), dmeter = $("#dmeter");
+const pal = $("#pal"), toast = $("#toast"), dim = $("#dim"), spot = $("#spot"), done = $("#done"), cap = $("#cap");
+const hudSpeed = $("#hud-speed"), hudClock = $("#hud-clock"), fitEl = $("#film-fit");
+const on = (el, v) => el.classList.toggle("on", !!v);
+const typed = (s, t, t0, t1) => s.slice(0, Math.floor(s.length * clamp((t - t0) / (t1 - t0))));
+let cache = {};
+const setHTML = (el, key, html) => { if (cache[key] !== html) { el.innerHTML = html; cache[key] = html; } };
+
+const LOGMSG = ["GET /api/release 200 41ms", "build web@4f2a91c step 3/7", "canary: health ok", "GET /api/status 200 18ms", "POST /hooks/deploy 502", "retry 1/3 /hooks/deploy", "POST /hooks/deploy 200", "rollout 25% → 50%", "GET /changelog 200 64ms", "cache warm: 412 keys", "rollout 50% → 100%", "GET /api/release 200 37ms"];
+
+function render(t) {
+  const ch = CH.find(c => t >= c.a && t < c.b) || CH[0];
+  chapBtns.forEach((b, i) => {
+    const c = CH[i];
+    b.querySelector("i").style.width = (clamp((t - c.a) / (c.b - c.a)) * 100).toFixed(1) + "%";
+    b.classList.toggle("active", c === ch);
+  });
+
+  // HUD: compression marker and racing real-time clock.
+  const fast = t >= 6 && t < 22.6;
+  hudSpeed.classList.toggle("fast", fast);
+  const real = Math.round(clamp((t - 6) / 16.6) * 872);
+  const mmss = s => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+  if (ch.id === "blank") { setHTML(hudSpeed, "hs", `<span class="ff">▶</span> 1× · Real time`); setHTML(hudClock, "hc", `Session · <b>${mmss(Math.floor(t))}</b>`); }
+  else if (ch.id === "build") {
+    setHTML(hudSpeed, "hs", fast ? `<span class="ff">▶▶</span> 16× · Time-compressed` : `<span class="ff">▶</span> 1× · Real time`);
+    setHTML(hudClock, "hc", `Real time · 00:00 → <b>${mmss(real)}</b>`);
+  } else {
+    setHTML(hudSpeed, "hs", `<span class="ff">✂</span> Quick cut · ${CAPS[ch.id][0]}`);
+    setHTML(hudClock, "hc", `Separate example · <b>illustrative</b>`);
+  }
+
+  // Scenes.
+  const sceneId = ch.id === "blank" ? "build" : ch.id;
+  for (const k in sc) on(sc[k], k === sceneId);
+  const tabName = { build: "launchpad", agents: "agents", script: "design-assets", bench: "sweep-14" }[sceneId];
+  setHTML($(".tabname", win), "tab", tabName);
+
+  // Camera: slight push-in at the start, pull back to admire the result.
+  let cam = "none";
+  if (t < 6) cam = "scale(1.035)";
+  else if (t >= 22.6 && t < 24.6) cam = "scale(.9) rotateX(4deg)";
+  fitEl.style.transform = cam;
+
+  win.dataset.theme = (sceneId !== "build" || t >= 16.3) ? "tide" : "default";
+
+  if (sceneId === "build") renderBuild(t);
+  else {
+    const c = ch, p = clamp((t - c.a) / (c.b - c.a - .6));
+    cutUpd[sceneId](p);
+    setHTML($(".k", cap), "ck", CAPS[sceneId][0]);
+    setHTML($(".h", cap), "ch", CAPS[sceneId][1]);
+  }
+  on(cap, sceneId !== "build" && t - ch.a > .35);
+  stick(sc[sceneId]);
+  if (sceneId !== "build") { [pal, toast, dim, spot, done].forEach(e => on(e, false)); }
+}
+
+function renderBuild(t) {
+  // Layout.
+  let lay = L[0][1];
+  for (const [t0, l] of L) if (t >= t0) lay = l;
+  for (const k in P) {
+    const el = P[k], r = lay[k];
+    el.classList.toggle("off", !r);
+    place(el, r || home[k]);
+    el.classList.toggle("fresh", !!r && t - appear[k] < .9 && t >= appear[k]);
+    el.classList.toggle("dim", !!r && k !== "term" && k !== "shell" && false);
+    const tl = titles[k]; let title = tl[0][1], rt = -1;
+    for (const [t0, s] of tl) if (t >= t0) { title = s; rt = t0; }
+    const tt = el.querySelector(".ptitle");
+    if (tt.textContent !== title) tt.textContent = title;
+    tt.classList.toggle("renamed", rt > 17 && t - rt < .8);
+  }
+
+  // Main terminal transcript.
+  let html = "";
+  for (const [t0, line] of T) if (t >= t0) {
+    html += line;
+    if (t0 === 0) {
+      const cmd = typed("claude", t, .7, 1.3);
+      html += `<div><span class="a">~/code/launchpad</span> <span class="ok">❯</span> ${cmd}${t < 1.6 ? '<span class="cur"></span>' : ""}</div>`;
+    }
+    if (t0 === 1.6 && t >= 2.2) {
+      html += `<div><span class="d">&gt;</span> <span class="u">${esc(typed(PROMPT, t, 2.2, 5.4))}</span>${t < 5.8 ? '<span class="cur"></span>' : ""}</div>`;
+    }
+  }
+  if (t >= 5.8 && t < 20.6) html += `<div class="a">✻ ${["Building", "Wiring panels", "Arranging panes", "Polishing"][Math.floor(t / 4) % 4]}… <span class="d">(esc to interrupt)</span></div>`;
+  if (t >= 20.6) html += `<div><span class="d">&gt;</span> <span class="cur"></span></div>`;
+  setHTML(tMain, "tm", html);
+
+  // Test shell.
+  if (t >= 15) {
+    const n = Math.floor((t - 15.3) * 3);
+    const tests = ["release.spec.ts", "changelog.spec.ts", "status.spec.ts", "hooks.spec.ts", "checkout.spec.ts", "nav.spec.ts", "og.spec.ts"];
+    let s = `<div><span class="ok">❯</span> pnpm test --watch</div>`;
+    tests.slice(0, clamp(n, 0, tests.length)).forEach(x => s += `<div><span class="ok">✓</span> <span class="d">${x}</span></div>`);
+    if (n >= tests.length) s += `<div class="ok">Tests 64 passed (7 files)</div>`;
+    setHTML(tShell, "ts", s);
+  }
+
+  // Deploy log stream.
+  if (t >= 9.6) {
+    const n = Math.floor((t - 9.6) * 4.2) + 3;
+    const from = Math.max(0, n - 14);
+    let s = "";
+    for (let i = from; i < n; i++) {
+      const m = LOGMSG[i % LOGMSG.length], sec = 12 + i * 7;
+      const cls = /502/.test(m) ? "e" : /retry/.test(m) ? "w" : /200|ok|100%/.test(m) ? "ok" : "";
+      s += `<div><span class="t">09:${String(14 + Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}</span> <span class="${cls}">${m}</span></div>`;
+    }
+    setHTML(dlog, "dl", s);
+    dmeter.style.width = (clamp((t - 9.6) / 11) * 100).toFixed(1) + "%";
+  }
+  $("#bp1").style.width = (clamp((t - 11.4) / 9) * 92 + 8).toFixed(1) + "%";
+  $("#bp2").style.width = (clamp((t - 11.4) / 12) * 70 + 20).toFixed(1) + "%";
+  $("#hmr").classList.toggle("on", t > 14.2 && t < 15.6);
+
+  // Live latency chart.
+  if (t >= 13.7) {
+    const base = t * 6, vals1 = [], vals2 = [];
+    for (let i = 0; i < 40; i++) {
+      const k = Math.floor(base) + i;
+      vals1.push(140 + 22 * Math.sin(k * .31) + 16 * rnd(k));
+      vals2.push(155 + 10 * Math.sin(k * .17 + 1) + 8 * rnd(k + 99));
+    }
+    $("#m1").setAttribute("d", chartPath(vals1, 200, 90, 100, 200));
+    $("#m2").setAttribute("d", chartPath(vals2, 200, 90, 100, 200));
+    const v = Math.round(vals1[39]);
+    $("#mval").textContent = v;
+  }
+
+  // ⌘K palette: once to place the latency panel, once to save the layout.
+  const k1 = t >= 12.7 && t < 13.65, k2 = t >= 18.6 && t < 19.3;
+  on(pal, k1 || k2);
+  if (k1 || k2) {
+    const q = k1 ? typed("split lat", t, 12.8, 13.25) : typed("save lay", t, 18.65, 19.0);
+    const items = k1 ? [["Split Right: Latency Panel", "plugin"], ["Split Down: Terminal", "⌘⇧D"], ["Split Right: Browser", ""], ["Rename Pane…", ""]]
+                     : [["Save Layout…", "⌘⌥S"], ["Saved Layouts…", ""], ["Rename Pane…", ""], ["Equalize Panes", "⌘⌃="]];
+    setHTML($(".q", pal), "pq", q ? esc(q) + '<span style="opacity:.6">|</span>' : '<span class="ph">Type a command…</span>');
+    setHTML($("ul", pal), "pu" + k1, items.map((it, i) => `<li class="${i ? "" : "sel"}"><span>${it[0]}</span><kbd>${it[1]}</kbd></li>`).join(""));
+  }
+  on(toast, t >= 19.3 && t < 20.6);
+  const sp = t >= 20.9 && t < 22.5;
+  on(spot, sp); on(dim, sp);
+  if (sp) setHTML($(".sq", spot), "sq", esc(typed("launch d", t, 21.0, 21.5)) || '<span style="opacity:.4">Spotlight Search</span>');
+  on(done, t >= 22.7 && t < 24.6);
+}
+
+// ---------- Playback ----------
+let t = reduce ? 23.0 : 0, playing = !reduce, last = null, visible = true;
+const playBtn = $("#play");
+function setPlaying(v) {
+  playing = v;
+  playBtn.setAttribute("aria-pressed", String(v));
+  playBtn.setAttribute("aria-label", v ? "Pause demo" : "Play demo");
+  $("#ic-pause").hidden = !v; $("#ic-play").hidden = v;
+  last = null;
+}
+function seek(nt) { t = nt; cache = {}; render(t); }
+playBtn.addEventListener("click", () => setPlaying(!playing));
+function frame(now) {
+  if (playing && visible && !document.hidden) {
+    if (last != null) t = (t + Math.min(.1, (now - last) / 1000)) % TOTAL;
+    last = now;
+    render(t);
+  } else last = null;
+  requestAnimationFrame(frame);
+}
+if ("IntersectionObserver" in window) new IntersectionObserver(es => { visible = es[0].isIntersecting; }).observe(fitEl);
+setPlaying(playing);
+render(t);
+requestAnimationFrame(frame);
+
+// ---------- Loop diagram ----------
+const nodes = [...document.querySelectorAll(".loop .node")], steps = [...document.querySelectorAll("#steps li")];
+let li = 0;
+const tickLoop = () => { nodes.forEach((n, i) => n.classList.toggle("on", i === li)); steps.forEach((s, i) => s.classList.toggle("on", i === li)); li = (li + 1) % 3; };
+tickLoop();
+if (!reduce) setInterval(tickLoop, 2400);
+
+// ---------- Reveal on scroll ----------
+const rvs = document.querySelectorAll(".rv");
+if (reduce || !("IntersectionObserver" in window)) rvs.forEach(e => e.classList.add("in"));
+else { const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } }), { rootMargin: "0px 0px -10% 0px" }); rvs.forEach(e => io.observe(e)); }
+
+// Debug hook for screenshots: ?t=SECONDS freezes the film at that time.
+const qt = new URLSearchParams(location.search).get("t");
+if (qt !== null) { setPlaying(false); seek(parseFloat(qt)); }
+})();
+</script>
+</body>
+</html>

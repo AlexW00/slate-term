@@ -49,12 +49,14 @@ class AppFixture:
 if (( ${+functions[_slate_context_precmd]} )); then
     _slate_fixture_body=${functions[_slate_context_precmd]}
     _slate_fixture_old='> /dev/null 2>&1'
-    _slate_fixture_new='>> TRACE_PATH 2>&1'
-    functions[_slate_context_precmd]=${_slate_fixture_body//$_slate_fixture_old/$_slate_fixture_new}
+    _slate_fixture_new='>> TRACE_PATH 2>&1; print -r -- "end $EPOCHREALTIME" >> TRACE_PATH'
+    _slate_fixture_body=${_slate_fixture_body//$_slate_fixture_old/$_slate_fixture_new}
+    _slate_fixture_body=${_slate_fixture_body//'"$SLATE_TERM_CLI" shell update'/'print -r -- "start $EPOCHREALTIME" >> TRACE_PATH; "$SLATE_TERM_CLI" shell update'}
+    functions[_slate_context_precmd]=$_slate_fixture_body
     unset _slate_fixture_body _slate_fixture_old _slate_fixture_new
 fi
 '''.replace('TRACE_PATH', trace)
-        (startup / '.zshrc').write_text('HISTSIZE=0; SAVEHIST=0; PS1="API_TEST> "; RPS1=""; RPROMPT=""\n' + recording)
+        (startup / '.zshrc').write_text('zmodload zsh/datetime; HISTSIZE=0; SAVEHIST=0; PS1="API_TEST> "; RPS1=""; RPROMPT=""\n' + recording)
         self.ready = self.root / 'ready'
         self.env = {k: v for k, v in os.environ.items() if not k.startswith('SLATE_TERM_')}
         self.env.update(SLATE_TERM_INTEGRATION='1', SLATE_TERM_TEST_REAL_SHELL='1',

@@ -1,0 +1,1227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Slate Terminal</title>
+<meta name="description" content="Design mockup A (Native): a light, Apple-like marketing page for Slate Terminal.">
+<style>
+:root{
+  --bg:#fbfbfd; --bg-2:#f5f5f7; --surface:#ffffff; --surface-2:#f0f0f3;
+  --text:#1d1d1f; --text-2:#55555b; --text-3:#86868b;
+  --line:rgba(0,0,0,.09); --line-2:rgba(0,0,0,.05);
+  --accent:#0071e3; --accent-hover:#0077ed; --accent-ink:#fff; --accent-soft:rgba(0,113,227,.09);
+  --note:#8a6d1f; --note-bg:rgba(198,155,40,.08); --note-line:rgba(160,120,20,.35);
+  --shadow-window:0 1px 1px rgba(0,0,0,.04),0 6px 12px -2px rgba(0,0,0,.06),0 30px 60px -12px rgba(0,0,0,.18),0 60px 120px -30px rgba(0,0,0,.18);
+  --shadow-card:0 1px 2px rgba(0,0,0,.04),0 8px 24px -8px rgba(0,0,0,.10);
+  --glass:rgba(255,255,255,.72);
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue",Helvetica,Arial,sans-serif;
+  --font-display:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue",Helvetica,Arial,sans-serif;
+  --mono:"SF Mono",ui-monospace,Menlo,Monaco,"Cascadia Mono",Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#000000; --bg-2:#0d0d0f; --surface:#161618; --surface-2:#1d1d20;
+    --text:#f5f5f7; --text-2:#a1a1a6; --text-3:#6e6e73;
+    --line:rgba(255,255,255,.12); --line-2:rgba(255,255,255,.06);
+    --accent:#2997ff; --accent-hover:#47a6ff; --accent-ink:#fff; --accent-soft:rgba(41,151,255,.14);
+    --note:#d9b85c; --note-bg:rgba(217,184,92,.07); --note-line:rgba(217,184,92,.35);
+    --shadow-window:0 0 0 1px rgba(255,255,255,.08),0 30px 80px -10px rgba(0,0,0,.8),0 0 120px -20px rgba(41,151,255,.12);
+    --shadow-card:0 0 0 1px rgba(255,255,255,.06),0 10px 30px -10px rgba(0,0,0,.6);
+    --glass:rgba(22,22,24,.7);
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#000000; --bg-2:#0d0d0f; --surface:#161618; --surface-2:#1d1d20;
+  --text:#f5f5f7; --text-2:#a1a1a6; --text-3:#6e6e73;
+  --line:rgba(255,255,255,.12); --line-2:rgba(255,255,255,.06);
+  --accent:#2997ff; --accent-hover:#47a6ff; --accent-ink:#fff; --accent-soft:rgba(41,151,255,.14);
+  --note:#d9b85c; --note-bg:rgba(217,184,92,.07); --note-line:rgba(217,184,92,.35);
+  --shadow-window:0 0 0 1px rgba(255,255,255,.08),0 30px 80px -10px rgba(0,0,0,.8),0 0 120px -20px rgba(41,151,255,.12);
+  --shadow-card:0 0 0 1px rgba(255,255,255,.06),0 10px 30px -10px rgba(0,0,0,.6);
+  --glass:rgba(22,22,24,.7);
+  color-scheme:dark;
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);font-size:17px;line-height:1.5;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+:focus-visible{outline:3px solid color-mix(in srgb,var(--accent) 55%,transparent);outline-offset:3px;border-radius:8px}
+.wrap{max-width:1180px;margin:0 auto;padding:0 24px}
+@media (max-width:600px){.wrap{padding:0 16px}}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+
+/* ---------- Nav ---------- */
+.nav{position:sticky;top:0;z-index:50;background:color-mix(in srgb,var(--bg) 78%,transparent);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);border-bottom:1px solid var(--line-2)}
+.nav .wrap{display:flex;align-items:center;gap:28px;height:56px}
+.brand{display:flex;align-items:center;gap:10px;color:var(--text);font-weight:600;font-size:16px;letter-spacing:-.01em}
+.brand:hover{text-decoration:none}
+.logo{width:26px;height:26px;border-radius:7px;background:linear-gradient(145deg,#3a3f4b,#16181d);display:grid;place-items:center;box-shadow:inset 0 0 0 1px rgba(255,255,255,.12),0 1px 2px rgba(0,0,0,.2)}
+.logo svg{width:14px;height:14px}
+.nav-links{display:flex;gap:24px;margin-left:auto;font-size:13.5px}
+.nav-links a{color:var(--text-2)}
+.nav-links a:hover{color:var(--text);text-decoration:none}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:999px;font:inherit;font-weight:500;cursor:pointer;border:0;text-decoration:none;white-space:nowrap;transition:background-color .2s,transform .15s,box-shadow .2s}
+.btn:hover{text-decoration:none}
+.btn:active{transform:scale(.97)}
+.btn-primary{background:var(--accent);color:var(--accent-ink);padding:12px 22px;font-size:16px}
+.btn-primary:hover{background:var(--accent-hover)}
+.btn-secondary{background:transparent;color:var(--accent);padding:12px 18px;font-size:16px;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 45%,transparent)}
+.btn-secondary:hover{background:var(--accent-soft)}
+.btn-sm{padding:6px 14px;font-size:13px}
+.btn svg{width:16px;height:16px;flex:none}
+@media (max-width:760px){.nav-links{display:none}.nav .btn{margin-left:auto}}
+
+/* ---------- Hero ---------- */
+.hero{padding:88px 0 40px;text-align:center}
+.kicker{display:inline-block;font-size:14px;color:var(--text-2);padding:6px 14px;border-radius:999px;background:var(--surface);box-shadow:inset 0 0 0 1px var(--line)}
+.kicker b{color:var(--text);font-weight:600}
+.kicker .dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);vertical-align:2px;margin-right:6px}
+@media (max-width:600px){.kicker{font-size:12.5px}}
+h1{font-family:var(--font-display);font-size:clamp(44px,8.4vw,96px);line-height:1.02;letter-spacing:-.035em;font-weight:700;margin:26px auto 0;max-width:12ch}
+h1 em{font-style:italic;font-weight:700;color:var(--accent);padding-right:.06em}
+.lede{font-size:clamp(19px,2.2vw,23px);line-height:1.42;color:var(--text-2);max-width:34em;margin:24px auto 0;letter-spacing:-.01em}
+.lede strong{color:var(--text);font-weight:600}
+.cta-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:34px}
+.pending{font-size:12px;color:var(--text-3);margin-top:12px}
+
+/* ---------- Demo / video ---------- */
+.demo{padding:28px 0 40px}
+.demo-wrap{max-width:1240px;margin:0 auto;padding:0 24px}
+@media (max-width:600px){.demo-wrap{padding:0 12px}}
+.mac{position:relative;border-radius:14px;box-shadow:var(--shadow-window);background:#1e1f22;isolation:isolate}
+.viewport{position:relative;width:100%;aspect-ratio:1280/790;overflow:hidden;border-radius:14px;container-type:inline-size}
+.stage{position:absolute;left:0;top:0;width:1280px;height:790px;transform-origin:0 0;transform:scale(var(--s,1));font-family:var(--font);color:var(--p-fg);background:var(--w-bg);transition:background-color .6s}
+.vid-overlay{position:absolute;inset:0;pointer-events:none;z-index:5}
+.tc-badge{position:absolute;right:clamp(8px,1.6cqw,20px);top:1.64cqw;margin-top:calc(-1 * clamp(11px,1.25cqw,14px));display:flex;align-items:center;gap:8px;padding:6px 12px 6px 10px;border-radius:999px;background:rgba(10,10,12,.72);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);color:#fff;font:600 clamp(10px,1.05cqw,13px)/1 var(--font);letter-spacing:.02em;box-shadow:0 0 0 1px rgba(255,255,255,.14),0 6px 20px rgba(0,0,0,.3);opacity:0;transform:translateY(-4px);transition:opacity .3s,transform .3s}
+.tc-badge.on{opacity:1;transform:none}
+@container (max-width:520px){.tc-badge{padding:3px 7px;gap:5px;margin-top:-8px}.tc-badge .clk{padding-left:5px}}
+.tc-badge .ff{color:#ffb44a;letter-spacing:-.12em;margin-right:2px}
+.tc-badge .clk{font-family:var(--mono);font-weight:500;color:rgba(255,255,255,.75);font-variant-numeric:tabular-nums;padding-left:8px;border-left:1px solid rgba(255,255,255,.2)}
+.caption{position:absolute;left:clamp(8px,1.6cqw,20px);bottom:clamp(8px,1.6cqw,20px);max-width:min(560px,80%);padding:10px 14px;border-radius:12px;background:rgba(10,10,12,.74);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);color:#fff;box-shadow:0 0 0 1px rgba(255,255,255,.12),0 10px 30px rgba(0,0,0,.3);transition:opacity .35s,transform .35s}
+.caption.swap{opacity:0;transform:translateY(6px)}
+.caption .cap-k{display:block;font:600 11px/1.2 var(--font);text-transform:uppercase;letter-spacing:.08em;color:#9fc8ff;margin-bottom:3px}
+.caption .cap-t{font:500 clamp(12px,1.35cqw,16px)/1.35 var(--font)}
+@container (max-width:520px){.caption{padding:6px 9px;border-radius:9px}.caption .cap-k{font-size:9px;margin-bottom:1px}}
+.cut-flash{position:absolute;inset:0;background:#000;opacity:0;pointer-events:none;z-index:6}
+.cut-flash.go{animation:flash .45s ease-out}
+@keyframes flash{0%{opacity:.85}100%{opacity:0}}
+
+.controls{display:flex;align-items:center;gap:14px;margin-top:22px}
+.play{flex:none;width:40px;height:40px;border-radius:50%;border:0;background:var(--surface);box-shadow:inset 0 0 0 1px var(--line),var(--shadow-card);color:var(--text);display:grid;place-items:center;cursor:pointer}
+.play:hover{background:var(--surface-2)}
+.play svg{width:16px;height:16px}
+.scrub{position:relative;flex:1;height:22px;display:flex;align-items:center;gap:3px;cursor:pointer;touch-action:none}
+.seg{position:relative;height:5px;border-radius:3px;background:var(--line);overflow:hidden;flex:var(--w)}
+.seg.cut{background:color-mix(in srgb,var(--line) 100%,transparent)}
+.seg i{position:absolute;inset:0;background:var(--text);transform-origin:0 50%;transform:scaleX(0)}
+.seg.cutseg i{background:var(--accent)}
+.time{flex:none;font:500 12px/1 var(--mono);color:var(--text-3);font-variant-numeric:tabular-nums;min-width:74px;text-align:right}
+.chapters{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px;padding:0;list-style:none}
+.chapters button{font:500 13px/1 var(--font);color:var(--text-2);background:transparent;border:0;border-radius:999px;padding:8px 12px;cursor:pointer;box-shadow:inset 0 0 0 1px var(--line);transition:background-color .2s,color .2s}
+.chapters button:hover{background:var(--surface-2);color:var(--text)}
+.chapters button[aria-current="true"]{background:var(--text);color:var(--bg);box-shadow:none}
+.chapters .grp{font:600 11px/1 var(--font);text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);align-self:center;padding:0 4px 0 10px}
+.chapters .grp:first-child{padding-left:0}
+.prod-note{display:flex;gap:10px;align-items:flex-start;margin-top:18px;padding:10px 14px;border-radius:10px;border:1px dashed var(--note-line);background:var(--note-bg);color:var(--note);font:12.5px/1.45 var(--mono)}
+.prod-note b{font-weight:600}
+@media (max-width:600px){.controls{gap:10px}.time{min-width:0;font-size:11px}.chapters button{font-size:12px;padding:7px 10px}}
+
+/* ---------- In-video app (Slate window) ---------- */
+.theme-graphite{--w-bg:#1e1f22;--w-tb:#2b2c30;--w-tb-fg:#e3e3e6;--w-tb-dim:#8b8d94;--tab-on:#3a3b40;--p-bg:#17181b;--p-head:#202125;--p-line:rgba(255,255,255,.08);--p-fg:#d9dbe0;--p-dim:#7e828c;--p-acc:#7cc4ff;--p-green:#7fd49a;--p-red:#ff8b80;--p-yellow:#f0c674;--p-purple:#c5a8ff;--card:#1f2024;--card-line:rgba(255,255,255,.07);--chip:#2a2b31;--sel:rgba(124,196,255,.16);--dimmer:rgba(0,0,0,.18);--glassbg:rgba(44,45,50,.62)}
+.theme-dusk{--w-bg:#121829;--w-tb:#1a2136;--w-tb-fg:#e6e9f5;--w-tb-dim:#8790ad;--tab-on:#27304c;--p-bg:#0e1322;--p-head:#161d31;--p-line:rgba(160,180,255,.10);--p-fg:#dfe4f4;--p-dim:#7e88a8;--p-acc:#ffb86b;--p-green:#8be3b4;--p-red:#ff8fa3;--p-yellow:#ffd479;--p-purple:#b9a6ff;--card:#151c30;--card-line:rgba(160,180,255,.09);--chip:#202944;--sel:rgba(255,184,107,.16);--dimmer:rgba(4,8,20,.22);--glassbg:rgba(30,38,62,.62)}
+.theme-paper{--w-bg:#e7e7eb;--w-tb:#f2f2f5;--w-tb-fg:#26272b;--w-tb-dim:#8a8c94;--tab-on:#ffffff;--p-bg:#ffffff;--p-head:#f5f5f7;--p-line:rgba(0,0,0,.09);--p-fg:#25272c;--p-dim:#8a8d96;--p-acc:#0a6cff;--p-green:#1c9c56;--p-red:#d63a3a;--p-yellow:#b7791f;--p-purple:#7c4dff;--card:#f7f7f9;--card-line:rgba(0,0,0,.07);--chip:#eeeef2;--sel:rgba(10,108,255,.10);--dimmer:rgba(255,255,255,.28);--glassbg:rgba(255,255,255,.66)}
+
+.tb{position:absolute;left:0;right:0;top:0;height:42px;display:flex;align-items:center;gap:14px;padding:0 14px;background:var(--w-tb);border-bottom:1px solid var(--p-line);color:var(--w-tb-fg);transition:background-color .6s,color .6s}
+.lights{display:flex;gap:8px;padding-right:8px}
+.lights i{width:12px;height:12px;border-radius:50%;display:block;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.2)}
+.lights i:nth-child(1){background:#ff5f57}.lights i:nth-child(2){background:#febc2e}.lights i:nth-child(3){background:#28c840}
+.tabs{display:flex;gap:6px;flex:1;min-width:0}
+.tab{height:28px;display:flex;align-items:center;gap:8px;padding:0 14px;border-radius:7px;font-size:12.5px;font-weight:500;color:var(--w-tb-dim);max-width:220px;white-space:nowrap}
+.tab.on{background:var(--tab-on);color:var(--w-tb-fg);box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.tab .tdot{width:6px;height:6px;border-radius:50%;background:var(--p-acc)}
+.tb-r{display:flex;gap:12px;color:var(--w-tb-dim);font-size:12px}
+
+.scene{position:absolute;left:0;right:0;top:42px;bottom:0;display:none}
+.scene.cur{display:block}
+.ws{position:absolute;inset:6px}
+.pane{position:absolute;display:flex;flex-direction:column;background:var(--p-bg);border:1px solid var(--p-line);border-radius:8px;overflow:hidden;transition:left .6s cubic-bezier(.2,.8,.2,1),top .6s cubic-bezier(.2,.8,.2,1),width .6s cubic-bezier(.2,.8,.2,1),height .6s cubic-bezier(.2,.8,.2,1),opacity .4s,transform .5s cubic-bezier(.2,.8,.2,1),background-color .6s,border-color .6s}
+.pane.off{opacity:0;transform:scale(.965)}
+.pane::after{content:"";position:absolute;inset:26px 0 0;background:var(--dimmer);pointer-events:none;opacity:1;transition:opacity .35s}
+.pane.focus::after{opacity:0}
+.pane.focus{border-color:color-mix(in srgb,var(--p-acc) 45%,var(--p-line))}
+.ph{flex:none;height:26px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:0 8px;background:var(--p-head);border-bottom:1px solid var(--p-line);font-size:11px;color:var(--p-dim);transition:background-color .6s}
+.ph .ty{display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden}
+.grip{display:grid;grid-template-columns:repeat(2,2.5px);gap:2px;opacity:.7}
+.grip i{width:2.5px;height:2.5px;border-radius:50%;background:currentColor;display:block}
+.ph .ty b{font-weight:500;color:var(--p-dim)}
+.ph .ty .chev{font-size:8px;opacity:.7}
+.ph .ti{font-weight:600;color:var(--p-fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;text-align:center}
+.ph .x{justify-self:end;display:flex;gap:9px;align-items:center;opacity:.8}
+.ph .x i{font-style:normal}
+.pb{position:relative;flex:1;min-height:0;overflow:hidden}
+
+/* terminal */
+.term{position:absolute;inset:0;padding:8px 11px;display:flex;flex-direction:column;justify-content:flex-end;font:12px/1.55 var(--mono);color:var(--p-fg);white-space:pre-wrap;word-break:break-word}
+.term.top{justify-content:flex-start}
+.ln{display:none}
+.ln.on{display:block;animation:lnIn .18s ease-out}
+@keyframes lnIn{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+.c-acc{color:var(--p-acc)}.c-dim{color:var(--p-dim)}.c-g{color:var(--p-green)}.c-r{color:var(--p-red)}.c-y{color:var(--p-yellow)}.c-p{color:var(--p-purple)}
+.typing::after,.cur-caret::after{content:"";display:inline-block;width:7px;height:13px;margin-left:1px;vertical-align:-2px;background:var(--p-fg);animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.abox{display:none;margin:4px 0 6px;padding:6px 10px;border:1px solid color-mix(in srgb,var(--p-acc) 55%,transparent);border-radius:6px;width:max-content;max-width:100%}
+.abox.on{display:block;animation:lnIn .25s ease-out}
+.ind{padding-left:16px;color:var(--p-dim)}
+
+/* reveal helpers */
+.rv{opacity:0;transform:translateY(5px);transition:opacity .35s ease-out,transform .45s cubic-bezier(.2,.8,.2,1)}
+.rv.on{opacity:1;transform:none}
+.sw:not(.on),.swb:not(.on){display:none!important}
+.sw.on{display:inline-flex}.swb.on{display:block}
+
+/* plugin UI kit-ish */
+.pl{position:absolute;inset:0;padding:12px;font-size:12px;color:var(--p-fg);display:flex;flex-direction:column;gap:10px}
+.pl h4{margin:0;font-size:13px;font-weight:650;letter-spacing:-.01em;display:flex;align-items:center;gap:8px}
+.pl h4 small{font-weight:500;color:var(--p-dim);font-size:11px}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:999px;background:var(--chip);font-size:10.5px;color:var(--p-dim);font-weight:500}
+.chip.on-s{background:var(--sel);color:var(--p-acc)}
+.card{background:var(--card);border:1px solid var(--card-line);border-radius:8px;padding:8px 10px;transition:background-color .6s,border-color .6s,box-shadow .4s}
+.pr{display:grid;grid-template-columns:auto 1fr auto;gap:2px 8px;align-items:center}
+.pr .num{color:var(--p-dim);font:500 11px var(--mono)}
+.pr .t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pr .meta{grid-column:2/4;color:var(--p-dim);font-size:10.5px;display:flex;gap:8px;align-items:center}
+.status{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600}
+.dotc{width:7px;height:7px;border-radius:50%;background:currentColor;display:inline-block}
+.pulse{animation:pulse 1.1s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.35}}
+.av{display:inline-flex}
+.av i{width:15px;height:15px;border-radius:50%;margin-left:-4px;border:1.5px solid var(--card);font:600 7.5px/12px var(--font);color:#fff;text-align:center;font-style:normal;display:inline-block}
+.bars{display:flex;align-items:flex-end;gap:3px;height:28px}
+.bars i{flex:1;border-radius:2px;display:block}
+.sec-t{font-size:10px;font-weight:650;text-transform:uppercase;letter-spacing:.08em;color:var(--p-dim);display:flex;align-items:center;gap:8px}
+.new{font-size:9px;padding:1px 6px;border-radius:999px;background:var(--p-acc);color:var(--p-bg);letter-spacing:.04em}
+.flaky.on .card{box-shadow:0 0 0 1.5px var(--p-acc)}
+.flaky.on.settle .card{box-shadow:none}
+.row{display:flex;align-items:center;gap:8px}
+.grow{flex:1;min-width:0}
+.mono{font-family:var(--mono)}
+.big{font-size:26px;font-weight:700;letter-spacing:-.03em;line-height:1}
+.draw path,.draw polyline{stroke-dasharray:1;stroke-dashoffset:1;transition:stroke-dashoffset 1.4s cubic-bezier(.4,0,.2,1)}
+.draw.on path,.draw.on polyline{stroke-dashoffset:0}
+.check{width:13px;height:13px;border-radius:4px;border:1.5px solid var(--p-dim);display:inline-grid;place-items:center;flex:none;transition:background-color .25s,border-color .25s}
+.check.done,.check.st.on{background:var(--p-green);border-color:var(--p-green)}
+.check.done::after,.check.st.on::after{content:"";width:6px;height:3px;border-left:1.6px solid var(--p-bg);border-bottom:1.6px solid var(--p-bg);transform:rotate(-45deg) translate(1px,-1px)}
+.strike{transition:color .3s}
+.st.on + .strike,.done + .strike{color:var(--p-dim);text-decoration:line-through}
+
+/* browser pane */
+.bbar{display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid var(--p-line);color:var(--p-dim);font-size:11px}
+.url{flex:1;height:20px;border-radius:6px;background:var(--chip);display:flex;align-items:center;padding:0 8px;gap:6px;color:var(--p-fg);font-size:10.5px}
+.loadbar{position:absolute;left:0;top:0;height:2px;background:var(--p-acc);width:0;transition:width .9s ease-out,opacity .3s .9s}
+.loadbar.on{width:100%;opacity:0}
+.site{position:absolute;inset:33px 0 0;background:#fbfaf7;color:#1b1b1f;padding:12px 14px;font-size:10px}
+.site .sn{display:flex;align-items:center;gap:10px;font-weight:700;font-size:11px}
+.site .sn span{font-weight:500;color:#777;font-size:9.5px}
+.site .hero-b{margin-top:12px;border-radius:8px;padding:14px;background:linear-gradient(135deg,#ffe3c2,#ffd0d8 60%,#d9d4ff);font-weight:700;font-size:15px;letter-spacing:-.02em;line-height:1.15}
+.site .hero-b small{display:block;font-weight:500;font-size:9.5px;color:#55505a;margin-top:5px;letter-spacing:0}
+.site .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:9px}
+.site .cards i{height:38px;border-radius:6px;background:#efede8;display:block}
+
+/* overlays in stage */
+.ovl{position:absolute;z-index:4;opacity:0;pointer-events:none;transition:opacity .22s,transform .3s cubic-bezier(.2,.8,.2,1);transform:translateY(-6px) scale(.985)}
+.ovl.on{opacity:1;transform:none}
+.cmdk{left:50%;top:70px;width:560px;margin-left:-280px;border-radius:16px;background:var(--glassbg);backdrop-filter:blur(24px) saturate(180%);-webkit-backdrop-filter:blur(24px) saturate(180%);box-shadow:inset 0 0 0 1px rgba(255,255,255,.16),inset 0 1px 0 rgba(255,255,255,.22),0 24px 60px rgba(0,0,0,.45);color:var(--p-fg);overflow:hidden}
+.cmdk .q{display:flex;align-items:center;gap:10px;padding:14px 16px;font-size:16px;border-bottom:1px solid var(--p-line)}
+.cmdk .q .k{font-size:11px;color:var(--p-dim);padding:2px 6px;border-radius:5px;background:var(--chip)}
+.cmdk ul{list-style:none;margin:0;padding:6px}
+.cmdk li{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:9px;font-size:13px}
+.cmdk li span.s{margin-left:auto;font-size:11px;color:var(--p-dim)}
+.cmdk li.hl{background:var(--sel)}
+.cmdk li.st.on{background:var(--p-acc);color:var(--p-bg)}
+.cmdk li.st.on span.s{color:inherit;opacity:.75}
+.ico{width:18px;height:18px;border-radius:5px;background:var(--chip);display:grid;place-items:center;font-size:10px;flex:none}
+.pop{width:280px;border-radius:12px;padding:12px;background:var(--glassbg);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);box-shadow:inset 0 0 0 1px rgba(255,255,255,.14),0 18px 40px rgba(0,0,0,.4);font-size:12px}
+.pop::before{content:"";position:absolute;top:-6px;left:50%;margin-left:-6px;width:12px;height:12px;background:inherit;transform:rotate(45deg);border-radius:2px 0 0 0}
+.pop .lbl{font-weight:600;margin-bottom:8px}
+.pop .fld{height:26px;border-radius:6px;background:var(--p-bg);box-shadow:inset 0 0 0 1.5px var(--p-acc);display:flex;align-items:center;padding:0 8px;font-size:12.5px}
+.pop .btns{display:flex;justify-content:flex-end;gap:6px;margin-top:10px}
+.pop .btns span{padding:4px 10px;border-radius:6px;background:var(--chip);font-size:11.5px}
+.pop .btns span.pri{background:var(--p-acc);color:var(--p-bg);font-weight:600}
+.pop .btns span.pri.st.on{filter:brightness(.85)}
+.toast{right:16px;top:14px;width:320px;border-radius:14px;padding:12px 14px;display:flex;gap:12px;align-items:center;background:var(--glassbg);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);box-shadow:inset 0 0 0 1px rgba(255,255,255,.14),0 18px 40px rgba(0,0,0,.4);font-size:12px}
+.toast b{display:block;font-size:12.5px}
+.toast .c-dim{font-size:11px}
+.okc{width:28px;height:28px;border-radius:50%;background:var(--p-green);color:var(--p-bg);display:grid;place-items:center;font-weight:800;flex:none}
+.spot{left:50%;top:210px;width:620px;margin-left:-310px;border-radius:18px;background:rgba(236,236,240,.72);backdrop-filter:blur(30px) saturate(180%);-webkit-backdrop-filter:blur(30px) saturate(180%);box-shadow:inset 0 0 0 1px rgba(255,255,255,.5),0 30px 80px rgba(0,0,0,.5);color:#1d1d1f;overflow:hidden}
+.spot .q{display:flex;align-items:center;gap:12px;padding:14px 18px;font-size:22px;font-weight:400;letter-spacing:-.01em}
+.spot .q svg{width:20px;height:20px;opacity:.55}
+.spot .res{display:flex;align-items:center;gap:12px;margin:0 8px 8px;padding:9px 10px;border-radius:10px;background:rgba(0,113,227,.9);color:#fff}
+.spot .res .appi{width:34px;height:34px;border-radius:8px;background:linear-gradient(145deg,#3a3f4b,#16181d);display:grid;place-items:center;box-shadow:inset 0 0 0 1px rgba(255,255,255,.15)}
+.spot .res b{font-size:14px;display:block}
+.spot .res small{opacity:.85;font-size:11.5px}
+.spot .res .kbd{margin-left:auto;font-size:11px;opacity:.85}
+.spot .hint{padding:0 18px 12px;font-size:11px;color:#6e6e73}
+
+/* cut A */
+.ag-s{display:grid;grid-template-columns:auto 1fr auto;gap:2px 10px;align-items:center}
+.ag-s .who{width:22px;height:22px;border-radius:6px;display:grid;place-items:center;font:700 10px/1 var(--font);color:#fff}
+.ag-s .sub{grid-column:2/4;color:var(--p-dim);font-size:10.5px}
+.prog{height:4px;border-radius:2px;background:var(--chip);overflow:hidden;grid-column:2/4;margin-top:4px}
+.prog i{display:block;height:100%;background:var(--p-acc);border-radius:2px;width:var(--p0);transition:width 3.5s linear}
+.prog.st.on i{width:var(--p1)}
+.q-item{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:7px;background:var(--card);border:1px solid var(--card-line);font-size:11.5px}
+.q-item .grip{color:var(--p-dim)}
+.q-item .tag{margin-left:auto;font-size:10px;color:var(--p-dim)}
+.lift.st.on{transform:translateY(-41px);box-shadow:0 8px 20px rgba(0,0,0,.14);transition:transform .5s cubic-bezier(.2,.8,.2,1)}
+.drop.st.on{transform:translateY(41px);transition:transform .5s cubic-bezier(.2,.8,.2,1)}
+
+/* cut B */
+.form{display:grid;grid-template-columns:110px 1fr;gap:10px 14px;align-items:center;font-size:12px}
+.form label{color:var(--p-dim);font-size:11.5px}
+.inp{height:28px;border-radius:7px;background:var(--chip);display:flex;align-items:center;padding:0 10px;font-family:var(--mono);font-size:11.5px;border:1px solid var(--card-line)}
+.segc{display:inline-flex;border-radius:7px;background:var(--chip);padding:2px;gap:2px}
+.segc span{padding:4px 12px;border-radius:5px;font-size:11.5px;color:var(--p-dim)}
+.segc span.s{background:var(--p-bg);color:var(--p-fg);box-shadow:0 1px 2px rgba(0,0,0,.25)}
+.slider{position:relative;height:4px;border-radius:2px;background:var(--chip)}
+.slider i{position:absolute;left:0;top:0;bottom:0;width:72%;background:var(--p-acc);border-radius:2px}
+.slider b{position:absolute;left:72%;top:50%;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.4)}
+.runbtn{display:inline-flex;align-items:center;gap:8px;padding:8px 18px;border-radius:8px;background:var(--p-acc);color:var(--p-bg);font-weight:650;font-size:12.5px;transition:transform .15s,filter .15s}
+.runbtn.st.on{transform:scale(.95);filter:brightness(.85)}
+.runbtn.st.on.rel{transform:none;filter:none}
+.pbar{height:6px;border-radius:3px;background:var(--chip);overflow:hidden;flex:1}
+.pbar i{display:block;height:100%;width:0;background:var(--p-green);transition:width 1.6s cubic-bezier(.3,.1,.3,1)}
+.pbar.st.on i{width:100%}
+table.tbl{width:100%;border-collapse:collapse;font-size:11px}
+.tbl th{text-align:left;font-weight:600;color:var(--p-dim);font-size:10px;text-transform:uppercase;letter-spacing:.06em;padding:6px 8px;border-bottom:1px solid var(--p-line)}
+.tbl td{padding:6px 8px;border-bottom:1px solid var(--card-line)}
+.tbl td.m{font-family:var(--mono)}
+.tbl tr.rv{transform:none}
+
+/* cut C */
+.wb{position:absolute;inset:0;display:grid;grid-template-columns:200px 1fr}
+.wb-side{border-right:1px solid var(--p-line);padding:12px 10px;display:flex;flex-direction:column;gap:4px;font-size:11.5px}
+.run{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:7px}
+.run.sel{background:var(--sel)}
+.run .sw2{width:9px;height:9px;border-radius:3px}
+.run small{margin-left:auto;color:var(--p-dim);font-family:var(--mono);font-size:10px}
+.wb-main{padding:14px 16px;display:grid;grid-template-columns:1fr 230px;grid-template-rows:auto 1fr auto;gap:12px}
+.metric{display:flex;flex-direction:column;gap:4px}
+.metric small{color:var(--p-dim);font-size:10.5px}
+.metric b{font-size:22px;letter-spacing:-.02em}
+.metric em{font-style:normal;font-size:10.5px;color:var(--p-green)}
+
+/* ---------- Sections ---------- */
+section{scroll-margin-top:70px}
+.sec{padding:120px 0}
+.sec-alt{background:var(--bg-2)}
+.eyebrow{font-size:14px;font-weight:600;color:var(--accent);letter-spacing:.01em;margin:0 0 12px}
+h2{font-family:var(--font-display);font-size:clamp(34px,5vw,56px);line-height:1.06;letter-spacing:-.03em;font-weight:700;margin:0;max-width:16ch}
+h2 em{font-style:italic;color:var(--text-2)}
+.sec-lede{font-size:clamp(18px,2vw,21px);color:var(--text-2);line-height:1.45;max-width:36em;margin:18px 0 0;letter-spacing:-.01em}
+.center{text-align:center}.center h2,.center .sec-lede{margin-left:auto;margin-right:auto}
+.small-note{font-size:12.5px;color:var(--text-3);margin-top:22px}
+
+.range{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:56px}
+.rcard{background:var(--surface);border-radius:22px;box-shadow:var(--shadow-card);overflow:hidden;display:flex;flex-direction:column}
+.rcard .vis{aspect-ratio:16/10;background:linear-gradient(160deg,var(--surface-2),var(--bg-2));display:grid;place-items:center;padding:18px;border-bottom:1px solid var(--line-2)}
+.rcard .vis svg{width:100%;height:auto;filter:drop-shadow(0 10px 18px rgba(0,0,0,.14))}
+.rcard .txt{padding:22px 24px 26px}
+.rcard .n{font:600 12px/1 var(--mono);color:var(--text-3)}
+.rcard h3{font-size:21px;letter-spacing:-.02em;margin:10px 0 8px;line-height:1.2}
+.rcard p{margin:0;color:var(--text-2);font-size:15.5px}
+@media (max-width:900px){.range{grid-template-columns:1fr;max-width:560px;margin-left:auto;margin-right:auto}}
+
+.found{display:grid;grid-template-columns:5fr 6fr;gap:64px;align-items:center}
+@media (max-width:900px){.found{grid-template-columns:1fr;gap:40px}}
+.feat{list-style:none;padding:0;margin:36px 0 0;display:grid;grid-template-columns:1fr 1fr;gap:22px 28px}
+.feat li{display:flex;gap:12px}
+.feat .fi{flex:none;width:30px;height:30px;border-radius:8px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center}
+.feat .fi svg{width:16px;height:16px}
+.feat b{display:block;font-size:15px;font-weight:600;letter-spacing:-.01em}
+.feat span{display:block;font-size:14px;color:var(--text-2);line-height:1.4;margin-top:2px}
+@media (max-width:520px){.feat{grid-template-columns:1fr}}
+.shot{position:relative;border-radius:14px;box-shadow:var(--shadow-window);overflow:hidden;aspect-ratio:16/11;background:#1e1f22;container-type:inline-size}
+.shot .stb{height:7.5%;display:flex;align-items:center;gap:1.4cqw;padding:0 2.4cqw;background:#2b2c30;border-bottom:1px solid rgba(255,255,255,.08)}
+.shot .stb i{width:1.9cqw;height:1.9cqw;border-radius:50%;display:block}
+.shot .stb .tb2{margin-left:2cqw;display:flex;gap:1cqw}
+.shot .stb .tb2 span{font:500 1.7cqw/1 var(--font);color:#8b8d94;padding:.9cqw 2cqw;border-radius:1cqw}
+.shot .stb .tb2 span.o{background:#3a3b40;color:#e3e3e6}
+.shot .sws{position:absolute;inset:7.5% 0 0;padding:1cqw;display:grid;grid-template-columns:1.25fr 1fr;grid-template-rows:1fr 1fr;gap:1cqw}
+.shot .sp{background:#17181b;border:1px solid rgba(255,255,255,.08);border-radius:1.2cqw;overflow:hidden;font:1.55cqw/1.55 var(--mono);color:#d9dbe0;padding:4.2cqw 1.8cqw 1cqw;position:relative;white-space:pre}
+.shot .sp::before{content:attr(data-h);position:absolute;left:0;right:0;top:0;height:3.4cqw;background:#202125;border-bottom:1px solid rgba(255,255,255,.08);font:600 1.4cqw/3.4cqw var(--font);color:#9a9ca4;text-align:center}
+.shot .sp:first-child{grid-row:1/3}
+.shot .glass{position:absolute;left:50%;top:22%;width:56%;transform:translateX(-50%);border-radius:2.2cqw;background:rgba(60,62,70,.55);backdrop-filter:blur(14px) saturate(180%);-webkit-backdrop-filter:blur(14px) saturate(180%);box-shadow:inset 0 0 0 1px rgba(255,255,255,.18),inset 0 1px 0 rgba(255,255,255,.25),0 3cqw 6cqw rgba(0,0,0,.5);color:#eee;font:1.9cqw/1.3 var(--font);overflow:hidden}
+.shot .glass .gq{padding:2cqw 2.4cqw;border-bottom:1px solid rgba(255,255,255,.12);font-size:2.3cqw}
+.shot .glass .gr{padding:1.3cqw 2.4cqw;display:flex;justify-content:space-between}
+.shot .glass .gr.s{background:rgba(124,196,255,.22);margin:0 .8cqw;border-radius:1.2cqw;padding:1.3cqw 1.6cqw}
+.shot .glass .gr em{font-style:normal;opacity:.55;font-size:1.6cqw}
+.shot-label{position:absolute;right:1.6cqw;bottom:1.6cqw;font:500 max(10px,1.5cqw)/1 var(--mono);color:#d9b85c;background:rgba(0,0,0,.55);border:1px dashed rgba(217,184,92,.5);padding:.9cqw 1.4cqw;border-radius:1cqw}
+
+.mech{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:56px}
+.mcard{background:var(--surface);border-radius:20px;padding:28px;box-shadow:var(--shadow-card)}
+.mcard .mi{width:40px;height:40px;border-radius:11px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;margin-bottom:18px}
+.mcard .mi svg{width:20px;height:20px}
+.mcard h3{margin:0 0 8px;font-size:20px;letter-spacing:-.02em}
+.mcard p{margin:0;color:var(--text-2);font-size:15.5px}
+.mcard code{font-family:var(--mono);font-size:.88em;background:var(--surface-2);padding:1px 5px;border-radius:5px}
+@media (max-width:900px){.mech{grid-template-columns:1fr}}
+.cli{margin-top:20px;border-radius:18px;background:#16171a;color:#d9dbe0;box-shadow:var(--shadow-card);overflow:hidden}
+.cli-h{display:flex;align-items:center;gap:8px;padding:12px 16px;background:#202125;border-bottom:1px solid rgba(255,255,255,.07);font-size:12px;color:#8b8d94}
+.cli-h i{width:11px;height:11px;border-radius:50%;display:block}
+.cli-h span{margin-left:auto;font:500 11px var(--mono);color:#d9b85c}
+.cli pre{margin:0;padding:20px 22px;font:13.5px/1.75 var(--mono);overflow-x:auto;white-space:pre}
+.cli .cm{color:#6f7480}.cli .pp{color:#7fd49a}.cli .ok{color:#7cc4ff}
+
+.loop{display:grid;grid-template-columns:1fr auto 1fr auto 1fr;align-items:stretch;gap:0;margin-top:56px}
+.step{background:var(--surface);border-radius:20px;padding:28px;box-shadow:var(--shadow-card)}
+.step .sn2{font:600 13px/1 var(--mono);color:var(--accent)}
+.step h3{font-size:28px;letter-spacing:-.03em;margin:12px 0 8px}
+.step p{margin:0;color:var(--text-2);font-size:15.5px}
+.arrow{display:grid;place-items:center;padding:0 14px;color:var(--text-3)}
+.arrow svg{width:22px;height:22px}
+.loop-back{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:18px;color:var(--text-3);font-size:14px}
+.loop-back svg{width:18px;height:18px}
+@media (max-width:900px){.loop{grid-template-columns:1fr}.arrow{padding:10px 0}.arrow svg{transform:rotate(90deg)}}
+
+.agents{padding:72px 0;border-top:1px solid var(--line-2);border-bottom:1px solid var(--line-2)}
+.agents .wrap{display:grid;grid-template-columns:1fr 2fr;gap:40px;align-items:center}
+.agents h2{font-size:clamp(26px,3vw,34px)}
+.names{display:flex;flex-wrap:wrap;gap:10px 12px;margin:0;padding:0;list-style:none}
+.names li{font-size:17px;font-weight:600;letter-spacing:-.01em;padding:10px 18px;border-radius:999px;background:var(--surface);box-shadow:inset 0 0 0 1px var(--line)}
+.names li.y{color:var(--text-2);font-weight:500;background:transparent;box-shadow:inset 0 0 0 1px var(--line);border:0;border-style:dashed}
+.agents p{grid-column:2;margin:14px 0 0;font-size:14px;color:var(--text-3)}
+@media (max-width:900px){.agents .wrap{grid-template-columns:1fr;gap:22px}.agents p{grid-column:1;margin:0}}
+
+.close{padding:140px 0;text-align:center}
+.close h2{max-width:none;font-size:clamp(38px,6vw,72px)}
+.close h2 span{display:block}
+.close h2 .c2{color:var(--accent);font-style:italic}
+.close h2 .c3{color:var(--text-3)}
+
+footer{background:var(--bg-2);border-top:1px solid var(--line-2);padding:56px 0 40px;font-size:13px;color:var(--text-2)}
+.fgrid{display:grid;grid-template-columns:2fr repeat(3,1fr);gap:32px}
+.fgrid h4{margin:0 0 12px;font-size:12px;font-weight:600;color:var(--text);letter-spacing:.01em}
+.fgrid ul{list-style:none;margin:0;padding:0;display:grid;gap:9px}
+.fgrid a{color:var(--text-2)}
+.fgrid a:hover{color:var(--text)}
+.fbrand p{max-width:30ch;margin:14px 0 0;color:var(--text-3)}
+.fbot{margin-top:44px;padding-top:20px;border-top:1px solid var(--line-2);display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;color:var(--text-3);font-size:12px}
+@media (max-width:760px){.fgrid{grid-template-columns:1fr 1fr}.fbrand{grid-column:1/3}}
+
+.found>*,.mech>*,.range>*,.loop>*,.agents .wrap>*,.fgrid>*{min-width:0}
+/* reduced motion / jumps */
+.stage.jump *,.stage.jump *::before,.stage.jump *::after{transition:none!important;animation:none!important}
+@media (prefers-reduced-motion:reduce){
+  .stage *,.stage *::before,.stage *::after{transition-duration:.01ms!important;animation:none!important}
+  .caption,.tc-badge{transition:none}
+  .cut-flash{display:none}
+}
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="Slate Terminal home">
+      <span class="logo" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5 6.5 8 3 11.5"/><path d="M8.5 11.5H13"/></svg></span>
+      Slate Terminal
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="#demo">Demo</a>
+      <a href="#examples">Examples</a>
+      <a href="#terminal">Terminal</a>
+      <a href="#how">How it works</a>
+      <a href="#agents">Agents</a>
+    </nav>
+    <a class="btn btn-primary btn-sm" href="#download">Download</a>
+  </div>
+</header>
+
+<main id="top">
+  <!-- Hero -->
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="wrap">
+      <p class="kicker"><span class="dot" aria-hidden="true"></span><b>A native macOS terminal</b> built for you and your AI agents</p>
+      <h1 id="hero-title">Software you can <em>shape</em>.</h1>
+      <p class="lede">A native macOS terminal and a canvas for your ideas. <strong>Build tools with your AI agents</strong>, bring them into your workflow, and refine them as you go.</p>
+      <div class="cta-row" id="download">
+        <a class="btn btn-primary" href="#">
+          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M11.2 8.5c0-1.6 1.3-2.3 1.4-2.4-.8-1.1-1.9-1.3-2.3-1.3-1-.1-1.9.6-2.4.6s-1.3-.6-2.1-.5c-1.1 0-2 .6-2.6 1.6-1.1 1.9-.3 4.7.8 6.2.5.8 1.1 1.6 1.9 1.6.8 0 1-.5 2-.5s1.2.5 2 .5 1.3-.8 1.8-1.5c.6-.8.8-1.6.8-1.7 0 0-1.6-.6-1.3-2.6ZM9.6 3.7c.4-.5.7-1.2.6-1.9-.6 0-1.3.4-1.8.9-.4.4-.7 1.1-.6 1.8.7.1 1.4-.3 1.8-.8Z"/></svg>
+          Download for Mac
+        </a>
+        <a class="btn btn-secondary" href="#">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5.5 4.5-3.5 3.5 3.5 3.5M10.5 4.5l3.5 3.5-3.5 3.5"/></svg>
+          View source
+        </a>
+      </div>
+      <p class="pending">Download &amp; source links pending.</p>
+    </div>
+  </section>
+
+  <!-- Demo -->
+  <section class="demo" id="demo" aria-labelledby="demo-title">
+    <h2 class="sr-only" id="demo-title">Demo: from one terminal to a workspace you built</h2>
+    <p class="sr-only" id="demo-desc">Animated placeholder. Slate opens as a single terminal. The user starts Claude Code and asks for a panel that tracks pull requests and CI runs. In time-compressed footage, the agent writes plugins and uses the slate-term CLI to split in a PR board, a test-trend chart, a second terminal, a browser preview and a notes pane. The user switches theme from the command picker, renames a pane, uses the board, asks for a flaky-tests section, and saves the layout with a Spotlight launcher. Three quick cuts follow: an agent-workflow panel, a visual interface for a script, and an experiment workbench.</p>
+    <div class="demo-wrap">
+      <div class="mac">
+        <div class="viewport" id="viewport" role="img" aria-labelledby="demo-title" aria-describedby="demo-desc">
+          <div class="stage theme-graphite" id="stage" aria-hidden="true">
+            <div class="tb">
+              <div class="lights"><i></i><i></i><i></i></div>
+              <div class="tabs" id="tabs"></div>
+
+            </div>
+
+            <!-- ================= MAIN SCENE ================= -->
+            <div class="scene" data-scene="main" data-focus='[[0,"p1"],[6.2,"p1"],[19.3,"p2"],[20.4,"p1"]]'>
+              <div class="ws">
+                <!-- p1: agent terminal -->
+                <div class="pane off" data-id="p1" data-rects='[[0,0,0,100,100],[6,0,0,60,100],[10.2,0,0,60,58],[14.6,0,0,41,58]]'>
+                  <div class="ph"><span class="ty"><span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span><b>Terminal</b><span class="chev">▾</span></span>
+                    <span class="ti"><span class="sw on" data-at="0" data-until="1.0">zsh — ~/code/atlas</span><span class="sw" data-at="1.0" data-until="18.7">claude — ~/code/atlas</span><span class="sw" data-at="18.7">Agent</span></span>
+                    <span class="x"><i>×</i></span></div>
+                  <div class="pb"><div class="term">
+<div class="ln on" data-at="0"><span class="c-dim">Last login: Fri Oct 16 09:41 on ttys002</span></div>
+<div class="ln on" data-at="0"><span class="c-acc">~/code/atlas</span> <span class="c-dim">on</span> <span class="c-p">main</span></div>
+<div class="ln on" data-at="0"><span class="c-g">❯</span> <span data-at="0.45" data-dur="0.5" data-text="claude"></span></div>
+<div class="abox" data-at="1.15"><span class="c-acc">✻</span> <b>Claude Code</b>   <span class="c-dim">cwd: ~/code/atlas</span></div>
+<div class="ln" data-at="1.45"><span class="c-dim">&gt;</span> <span data-at="1.6" data-dur="2.5" data-text="Build a panel beside this terminal that tracks my open PRs and CI runs. Add a test-trend chart and a notes pane for release day."></span></div>
+<div class="ln" data-at="4.35"> </div>
+<div class="ln" data-at="4.4"><span class="c-g">⏺</span> I'll build these as Slate plugins and arrange them with the slate-term CLI.</div>
+<div class="ln" data-at="4.8"><span class="c-g">⏺</span> <b>Bash</b>(slate-term api describe)</div>
+<div class="ln ind" data-at="5.0">⎿ plugins · panes · layouts · events</div>
+<div class="ln" data-at="5.2"><span class="c-g">⏺</span> <b>Write</b>(~/slate/pr-board/plugin.json)</div>
+<div class="ln" data-at="5.4"><span class="c-g">⏺</span> <b>Write</b>(~/slate/pr-board/panel.html)  <span class="c-dim">186 lines</span></div>
+<div class="ln" data-at="5.65"><span class="c-g">⏺</span> <b>Bash</b>(slate-term plugins register --manifest ~/slate/pr-board/plugin.json)</div>
+<div class="ln ind" data-at="5.85">⎿ <span class="c-g">registered</span> pr-board</div>
+<div class="ln" data-at="5.95"><span class="c-g">⏺</span> <b>Bash</b>(slate-term panes split --pane p1 --right --type pr-board)</div>
+<div class="ln" data-at="7.2"><span class="c-g">⏺</span> <b>Write</b>(~/slate/test-trends/panel.html)  <span class="c-dim">142 lines</span></div>
+<div class="ln" data-at="7.8"><span class="c-g">⏺</span> <b>Bash</b>(slate-term plugins register --manifest ~/slate/test-trends/plugin.json)</div>
+<div class="ln" data-at="8.25"><span class="c-g">⏺</span> <b>Bash</b>(slate-term panes split --pane p2 --down --type test-trends)</div>
+<div class="ln" data-at="9.7"><span class="c-g">⏺</span> <b>Bash</b>(slate-term panes split --pane p1 --down)</div>
+<div class="ln ind" data-at="9.9">⎿ p4 · running pnpm test --watch</div>
+<div class="ln" data-at="11.0"><span class="c-g">⏺</span> The board and chart are live. Want a staging preview too?</div>
+<div class="ln" data-at="11.4"><span class="c-dim">&gt;</span> <span data-at="11.5" data-dur="0.6" data-text="yes, and the notes pane"></span></div>
+<div class="ln" data-at="14.15"><span class="c-g">⏺</span> <b>Bash</b>(slate-term panes split --pane p2 --right --type browser)</div>
+<div class="ln" data-at="15.6"><span class="c-g">⏺</span> <b>Write</b>(~/slate/notes/panel.html)</div>
+<div class="ln" data-at="16.15"><span class="c-g">⏺</span> <b>Bash</b>(slate-term panes split --pane p3 --down --type notes)</div>
+<div class="ln" data-at="16.9"><span class="c-g">⏺</span> Done: three plugins, five panes. Tell me what to change.</div>
+<div class="ln" data-at="20.4"><span class="c-dim">&gt;</span> <span data-at="20.5" data-dur="1.1" data-text="Add a flaky-tests section to the PR board."></span></div>
+<div class="ln" data-at="21.9"><span class="c-g">⏺</span> <b>Update</b>(~/slate/pr-board/panel.html)  <span class="c-dim">+38 lines</span></div>
+<div class="ln" data-at="22.3"><span class="c-g">⏺</span> <b>Bash</b>(slate-term plugins restart pr-board)</div>
+<div class="ln ind" data-at="22.5">⎿ <span class="c-g">reloaded</span></div>
+                  </div></div>
+                </div>
+
+                <!-- p2: PR board plugin -->
+                <div class="pane off" data-id="p2" data-rects='[[6,60,0,40,100],[8.4,60,0,40,58],[14.6,41,0,30,100]]'>
+                  <div class="ph"><span class="ty"><span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span><b>PR Board</b><span class="chev">▾</span></span><span class="ti">Pull requests · atlas</span><span class="x"><i>↻</i><i>×</i></span></div>
+                  <div class="pb"><div class="pl">
+                    <h4>Pull requests <small>4 open</small></h4>
+                    <div class="chips"><span class="chip on-s">Mine 3</span><span class="chip">Review 2</span><span class="chip">CI</span></div>
+                    <div class="card pr rv" data-at="6.4"><span class="num">#482</span><span class="t">Cap retry backoff at 30s</span>
+                      <span class="status c-y sw" data-at="6.4" data-until="19.9"><span class="dotc pulse"></span>running</span><span class="status c-g sw" data-at="19.9"><span class="dotc"></span>passed</span>
+                      <span class="meta">fix/retry-cap <span class="av"><i style="background:#5b8def">A</i><i style="background:#e0864b">K</i></span></span></div>
+                    <div class="card pr rv" data-at="6.55"><span class="num">#479</span><span class="t">Evict stale session cache</span><span class="status c-g"><span class="dotc"></span>passed</span>
+                      <span class="meta">perf/session-evict · approved <span class="av"><i style="background:#3fae7a">M</i></span></span></div>
+                    <div class="card pr rv" data-at="6.7"><span class="num">#476</span><span class="t">Move builds to new runner image</span><span class="status c-r"><span class="dotc"></span>1 failed</span>
+                      <span class="meta">ci/runner-image · lint job</span></div>
+                    <div class="card pr rv" data-at="6.85"><span class="num">#471</span><span class="t">Docs: CLI examples</span><span class="status c-p"><span class="dotc"></span>merged</span>
+                      <span class="meta">docs/cli-examples</span></div>
+                    <div class="rv" data-at="7.0">
+                      <div class="sec-t" style="margin:4px 0 6px">CI runs · today</div>
+                      <div class="bars">
+                        <i style="height:60%;background:var(--p-green)"></i><i style="height:72%;background:var(--p-green)"></i><i style="height:55%;background:var(--p-green)"></i><i style="height:90%;background:var(--p-red)"></i><i style="height:64%;background:var(--p-green)"></i><i style="height:58%;background:var(--p-green)"></i><i style="height:80%;background:var(--p-red)"></i><i style="height:62%;background:var(--p-green)"></i><i style="height:66%;background:var(--p-green)"></i><i style="height:70%;background:var(--p-green)"></i><i style="height:52%;background:var(--p-green)"></i><i class="swb" data-at="7" data-until="19.9" style="height:40%;background:var(--p-yellow)"></i><i class="swb" data-at="19.9" style="height:61%;background:var(--p-green)"></i>
+                      </div>
+                    </div>
+                    <div class="flaky rv" data-at="22.7">
+                      <div class="sec-t" style="margin:2px 0 6px">Flaky tests <span class="new">NEW</span></div>
+                      <div class="card" style="display:grid;gap:5px">
+                        <div class="row"><span class="c-y">◆</span><span class="grow mono" style="font-size:10.5px">retry › backoff caps at 30s</span><span class="c-dim">3 / 20</span></div>
+                        <div class="row"><span class="c-y">◆</span><span class="grow mono" style="font-size:10.5px">sync › reconnect after sleep</span><span class="c-dim">2 / 20</span></div>
+                      </div>
+                    </div>
+                  </div></div>
+                </div>
+
+                <!-- p3: test trends plugin -->
+                <div class="pane off" data-id="p3" data-rects='[[8.4,60,58,40,42],[14.6,71,45,29,55],[16.4,71,45,29,29]]'>
+                  <div class="ph"><span class="ty"><span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span><b>Test Trends</b><span class="chev">▾</span></span><span class="ti">Last 14 days</span><span class="x"><i>×</i></span></div>
+                  <div class="pb"><div class="pl" style="gap:6px">
+                    <div class="row" style="align-items:flex-end;gap:14px">
+                      <div><div class="big"><span class="sw on" data-at="0" data-until="20.1">211</span><span class="sw" data-at="20.1">212</span></div><div class="c-dim" style="font-size:10.5px">passing of 212</div></div>
+                      <div><div class="big c-g" style="font-size:18px">4.1s</div><div class="c-dim" style="font-size:10.5px">median run</div></div>
+                    </div>
+                    <svg class="draw rv" data-at="8.7" viewBox="0 0 300 90" preserveAspectRatio="none" style="width:100%;flex:1;min-height:40px">
+                      <defs><linearGradient id="gA" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--p-acc)" stop-opacity=".35"/><stop offset="1" stop-color="var(--p-acc)" stop-opacity="0"/></linearGradient></defs>
+                      <path d="M0 52 L23 48 L46 50 L69 38 L92 42 L115 30 L138 34 L161 26 L184 40 L207 28 L230 22 L253 26 L276 18 L276 90 L0 90Z" fill="url(#gA)" style="stroke:none"/>
+                      <path pathLength="1" d="M0 52 L23 48 L46 50 L69 38 L92 42 L115 30 L138 34 L161 26 L184 40 L207 28 L230 22 L253 26 L276 18" fill="none" stroke="var(--p-acc)" stroke-width="2" vector-effect="non-scaling-stroke"/>
+                      <g class="rv" data-at="20.1"><line x1="276" y1="18" x2="298" y2="12" stroke="var(--p-green)" stroke-width="2" vector-effect="non-scaling-stroke"/><circle cx="298" cy="12" r="3.5" fill="var(--p-green)"/></g>
+                    </svg>
+                  </div></div>
+                </div>
+
+                <!-- p4: tests terminal -->
+                <div class="pane off" data-id="p4" data-rects='[[10.2,0,58,60,42],[14.6,0,58,41,42]]'>
+                  <div class="ph"><span class="ty"><span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span><b>Terminal</b><span class="chev">▾</span></span><span class="ti">pnpm test — ~/code/atlas</span><span class="x"><i>×</i></span></div>
+                  <div class="pb"><div class="term top">
+<div class="ln on" data-at="0"><span class="c-g">❯</span> <span data-at="10.4" data-dur="0.35" data-text="pnpm test --watch"></span></div>
+<div class="ln" data-at="11.05"> <span class="c-g">✓</span> api/session.test.ts <span class="c-dim">(14)</span></div>
+<div class="ln" data-at="11.15"> <span class="c-g">✓</span> api/sync.test.ts <span class="c-dim">(31)</span></div>
+<div class="ln" data-at="11.25"> <span class="c-g">✓</span> ui/board.test.tsx <span class="c-dim">(22)</span></div>
+<div class="ln" data-at="11.4"> <span class="c-r">✗</span> api/retry.test.ts › backoff caps at 30s</div>
+<div class="ln" data-at="11.6"> Tests  <span class="c-r">1 failed</span> | <span class="c-g">211 passed</span> <span class="c-dim">(212)</span></div>
+<div class="ln" data-at="11.7" data-until="19.6"> <span class="c-dim">Watching for file changes…</span></div>
+<div class="ln" data-at="19.6"> <span class="c-y">RERUN</span> api/retry.test.ts</div>
+<div class="ln" data-at="19.85"> <span class="c-g">✓</span> api/retry.test.ts <span class="c-dim">(9)</span></div>
+<div class="ln" data-at="20.05"> Tests  <span class="c-g">212 passed</span> <span class="c-dim">(212)</span></div>
+                  </div></div>
+                </div>
+
+                <!-- p5: browser -->
+                <div class="pane off" data-id="p5" data-rects='[[14.6,71,0,29,45]]'>
+                  <div class="ph"><span class="ty"><span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span><b>Browser</b><span class="chev">▾</span></span><span class="ti">Atlas — Staging</span><span class="x"><i>×</i></span></div>
+                  <div class="pb">
+                    <div class="bbar"><span>‹ ›</span><span class="url"><span style="opacity:.6">🔒</span>localhost:5173/releases</span><span>↻</span></div>
+                    <div class="loadbar" data-at="14.9" style="top:32px"></div>
+                    <div class="site rv" data-at="15.1">
+                      <div class="sn">◐ Atlas <span>Releases</span><span>Sync</span><span>Settings</span></div>
+                      <div class="hero-b">Release 2.8<small>Retry policy, faster session cache, new runner image.</small></div>
+                      <div class="cards"><i></i><i></i><i></i></div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- p6: notes plugin -->
+                <div class="pane off" data-id="p6" data-rects='[[16.4,71,74,29,26]]'>
+                  <div class="ph"><span class="ty"><span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span><b>Notes</b><span class="chev">▾</span></span><span class="ti">Release day</span><span class="x"><i>×</i></span></div>
+                  <div class="pb"><div class="pl" style="gap:7px;padding:10px 12px">
+                    <div class="row rv" data-at="16.6"><span class="check done"></span><span class="strike">Merge #479 session cache</span></div>
+                    <div class="row rv" data-at="16.7"><span class="check st" data-at="20.2"></span><span class="strike">Fix retry backoff (#482)</span></div>
+                    <div class="row rv" data-at="16.8"><span class="check"></span><span>Check staging preview</span></div>
+                    <div class="row rv" data-at="16.9"><span class="check"></span><span>Tag v2.8.0</span></div>
+                  </div></div>
+                </div>
+              </div>
+
+              <!-- overlays -->
+              <div class="ovl cmdk" data-at="12.4" data-until="13.95">
+                <div class="q"><span class="c-dim">⌕</span><span class="grow" data-at="12.6" data-dur="0.45" data-text="theme"></span><span class="k">esc</span></div>
+                <ul>
+                  <li class="st" data-at="13.25"><span class="ico">◐</span>Theme: Slate Dusk<span class="s">Appearance</span></li>
+                  <li><span class="ico">◐</span>Theme: Graphite<span class="s">Current</span></li>
+                  <li><span class="ico">◐</span>Theme: Paper<span class="s">Appearance</span></li>
+                  <li><span class="ico">⚙</span>Open Settings…<span class="s">⌘,</span></li>
+                </ul>
+              </div>
+              <div class="ovl pop" data-at="17.35" data-until="18.85" style="left:calc(20.5% - 134px);top:40px">
+                <div class="lbl">Rename Pane</div>
+                <div class="fld"><span data-at="17.65" data-dur="0.45" data-text="Agent"></span></div>
+                <div class="btns"><span>Cancel</span><span class="pri st" data-at="18.45">Rename</span></div>
+              </div>
+              <div class="ovl cmdk" data-at="23.4" data-until="24.45">
+                <div class="q"><span class="c-dim">⌕</span><span class="grow" data-at="23.55" data-dur="0.4" data-text="save lay"></span><span class="k">esc</span></div>
+                <ul>
+                  <li class="st" data-at="24.1"><span class="ico">▦</span>Save Layout…<span class="s">Workspace</span></li>
+                  <li><span class="ico">▦</span>Open Saved Layout…<span class="s">Workspace</span></li>
+                  <li><span class="ico">✎</span>Rename Pane…<span class="s">Pane</span></li>
+                </ul>
+              </div>
+              <div class="ovl toast" data-at="24.6" data-until="28.6">
+                <span class="okc">✓</span>
+                <div><b>Saved layout “Release day”</b><span class="c-dim">Spotlight launcher created · Release day.app</span></div>
+              </div>
+              <div class="ovl spot" data-at="25.5" data-until="28.2">
+                <div class="q"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8.5" cy="8.5" r="6"/><path d="m13 13 5 5"/></svg><span data-at="25.7" data-dur="0.5" data-text="Release day"></span></div>
+                <div class="res"><span class="appi"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5 6.5 8 3 11.5"/><path d="M8.5 11.5H13"/></svg></span><div><b>Release day</b><small>Opens this layout in Slate</small></div><span class="kbd">↩ Open</span></div>
+                <div class="hint">Launchers open saved layouts in Slate.</div>
+              </div>
+            </div>
+
+            <!-- ================= CUT A: agent workflow ================= -->
+            <div class="scene" data-scene="a" data-focus='[[0,"a2"]]'>
+              <div class="ws">
+                <div class="pane" data-id="a1" data-rects='[[0,0,0,57,34]]'>
+                  <div class="ph"><span class="ty"><span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span><b>Terminal</b><span class="chev">▾</span></span><span class="ti">claude — auth-refactor</span><span class="x"><i>×</i></span></div>
+                  <div class="pb"><div class="term top">
+<div class="ln on" data-at="0"><span class="c-dim">auth-refactor · started 18 min ago</span></div>
+<div class="ln on" data-at="0"><span class="c-g">⏺</span> <b>Update</b>(src/auth/session.ts)  <span class="c-dim">+24 −61</span></div>
+<div class="ln on" data-at="0"><span class="c-g">⏺</span> <b>Bash</b>(pnpm test auth)</div>
+<div class="ln" data-at="0.6"><span class="ind">⎿ <span class="c-g">48 passed</span></span></div>
+<div class="ln" data-at="1.4"><span class="c-g">⏺</span> Refactor done. Moving to token rotation next.</div>
+<div class="ln" data-at="2.4"><span class="c-g">⏺</span> <b>Read</b>(src/auth/tokens.ts)</div>
+<div class="ln" data-at="3.2"><span class="c-g">⏺</span> <b>Update</b>(src/auth/tokens.ts)  <span class="c-dim">+12 −4</span></div>
+                  </div></div>
+                </div>
+                <div class="pane" data-id="a2" data-rects='[[0,0,34,57,33]]'>
+                  <div class="ph"><span class="ty"><span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span><b>Terminal</b><span class="chev">▾</span></span><span class="ti">codex — flaky-tests</span><span class="x"><i>×</i></span></div>
+                  <div class="pb"><div class="term top">
+<div class="ln on" data-at="0"><span class="c-dim">flaky-tests · codex</span></div>
+<div class="ln on" data-at="0"><span class="c-acc">•</span> Ran retry.test.ts 20× — 3 failures under load</div>
+<div class="ln on" data-at="0"><span class="c-acc">•</span> Root cause: timer mock leaks between cases</div>
+<div class="ln" data-at="1.0"><span class="c-acc">•</span> Proposed patch ready. <span class="c-y">Waiting for review.</span></div>
+<div class="ln" data-at="2.0"><span class="c-dim">▌ Approve? (y/n)</span></div>
+                  </div></div>
+                </div>
+                <div class="pane" data-id="a3" data-rects='[[0,0,67,57,33]]'>
+                  <div class="ph"><span class="ty"><span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span><b>Terminal</b><span class="chev">▾</span></span><span class="ti">claude — docs</span><span class="x"><i>×</i></span></div>
+                  <div class="pb"><div class="term top">
+<div class="ln on" data-at="0"><span class="c-dim">docs · claude</span></div>
+<div class="ln on" data-at="0"><span class="c-g">⏺</span> <b>Write</b>(docs/cli.md)  <span class="c-dim">212 lines</span></div>
+<div class="ln" data-at="0.9"><span class="c-g">⏺</span> <b>Bash</b>(pnpm docs:check)</div>
+<div class="ln" data-at="1.6"><span class="ind">⎿ <span class="c-g">0 broken links</span></span></div>
+<div class="ln" data-at="2.6"><span class="c-g">⏺</span> Docs updated. Idle.</div>
+                  </div></div>
+                </div>
+                <div class="pane" data-id="a4" data-rects='[[0,57,0,43,100]]'>
+                  <div class="ph"><span class="ty"><span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span><b>Agent Board</b><span class="chev">▾</span></span><span class="ti">Sessions &amp; queue</span><span class="x"><i>×</i></span></div>
+                  <div class="pb"><div class="pl">
+                    <div class="sec-t">Sessions <span class="chip">3</span></div>
+                    <div class="card ag-s"><span class="who" style="background:#d97757">C</span><b>auth-refactor</b><span class="status c-acc"><span class="dotc pulse"></span>working</span><span class="sub">claude · pane p1 · 18 min</span><div class="prog st" data-at="0.2" style="--p0:46%;--p1:78%"><i></i></div></div>
+                    <div class="card ag-s"><span class="who" style="background:#3c3c43">X</span><b>flaky-tests</b><span class="status c-y"><span class="sw on" data-at="0" data-until="1.0"><span class="dotc pulse"></span>&nbsp;working</span><span class="sw" data-at="1.0"><span class="dotc"></span>&nbsp;needs you</span></span><span class="sub">codex · pane p2 · patch ready</span></div>
+                    <div class="card ag-s"><span class="who" style="background:#d97757">C</span><b>docs</b><span class="status c-dim"><span class="sw on" data-at="0" data-until="2.6"><span class="dotc pulse"></span>&nbsp;working</span><span class="sw" data-at="2.6"><span class="dotc"></span>&nbsp;idle</span></span><span class="sub">claude · pane p3</span></div>
+                    <div class="sec-t" style="margin-top:6px">Queue <span class="chip">4</span></div>
+                    <div class="q-item drop st" data-at="1.9"><span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span>Token rotation for service keys<span class="tag">next</span></div>
+                    <div class="q-item lift st" data-at="1.9"><span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span>Review codex patch: timer mock<span class="tag c-y">needs you</span></div>
+                    <div class="q-item"><span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span>Release notes for 2.8<span class="tag">docs</span></div>
+                    <div class="q-item"><span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span>Bump runner image in CI<span class="tag">ci</span></div>
+                    <div class="sec-t" style="margin-top:6px">Activity</div>
+                    <div class="card" style="display:grid;gap:6px;font-size:11px">
+                      <div class="row rv on" data-at="0"><span class="c-dim mono" style="font-size:10px">10:12</span><span class="grow">auth-refactor · 48 tests passed</span></div>
+                      <div class="row rv" data-at="1.0"><span class="c-dim mono" style="font-size:10px">10:14</span><span class="grow">flaky-tests · patch ready for review</span></div>
+                      <div class="row rv" data-at="2.6"><span class="c-dim mono" style="font-size:10px">10:15</span><span class="grow">docs · finished, 0 broken links</span></div>
+                    </div>
+                  </div></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ================= CUT B: script interface ================= -->
+            <div class="scene" data-scene="b" data-focus='[[0,"b2"]]'>
+              <div class="ws">
+                <div class="pane" data-id="b1" data-rects='[[0,0,0,35,100]]'>
+                  <div class="ph"><span class="ty"><span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span><b>Terminal</b><span class="chev">▾</span></span><span class="ti">export-assets.sh</span><span class="x"><i>×</i></span></div>
+                  <div class="pb"><div class="term top">
+<div class="ln on" data-at="0"><span class="c-g">❯</span> cat scripts/export-assets.sh | head -4</div>
+<div class="ln on" data-at="0"><span class="c-dim">#!/usr/bin/env bash</span></div>
+<div class="ln on" data-at="0"><span class="c-dim"># usage: export-assets SRC --sizes 1x,2x --format webp -q 82</span></div>
+<div class="ln on" data-at="0"> </div>
+<div class="ln" data-at="1.15"><span class="c-acc">[asset-export]</span> run started</div>
+<div class="ln" data-at="1.35">  icons/  48 files → 1x 2x</div>
+<div class="ln" data-at="1.6">  hero/   6 files  → 1x 2x 3x</div>
+<div class="ln" data-at="1.9">  promo/  12 files → 1x 2x</div>
+<div class="ln" data-at="2.3"><span class="c-g">✓</span> 66 sources · 138 outputs</div>
+<div class="ln" data-at="2.5"><span class="c-g">✓</span> saved 61% vs PNG</div>
+                  </div></div>
+                </div>
+                <div class="pane" data-id="b2" data-rects='[[0,35,0,65,100]]'>
+                  <div class="ph"><span class="ty"><span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span><b>Asset Export</b><span class="chev">▾</span></span><span class="ti">export-assets.sh</span><span class="x"><i>×</i></span></div>
+                  <div class="pb"><div class="pl" style="padding:18px 22px;gap:16px">
+                    <h4 style="font-size:16px">Export assets <small>wraps scripts/export-assets.sh</small></h4>
+                    <div class="form">
+                      <label>Source</label><div class="inp">~/design/exports</div>
+                      <label>Sizes</label><div class="chips"><span class="chip on-s">1x</span><span class="chip on-s">2x</span><span class="chip">3x</span></div>
+                      <label>Format</label><div><span class="segc"><span class="s">WebP</span><span>PNG</span><span>AVIF</span></span></div>
+                      <label>Quality · 82</label><div class="slider"><i></i><b></b></div>
+                    </div>
+                    <div class="row" style="gap:14px">
+                      <span class="runbtn st" data-at="0.9"><span>▶</span>Run</span>
+                      <div class="pbar st" data-at="1.1"><i></i></div>
+                      <span class="c-dim" style="font-size:11px;min-width:80px"><span class="sw on" data-at="0" data-until="1.1">Ready</span><span class="sw" data-at="1.1" data-until="2.7">Running…</span><span class="sw c-g" data-at="2.7">Done · 2.4s</span></span>
+                    </div>
+                    <table class="tbl">
+                      <thead><tr><th>Folder</th><th>Files</th><th>Outputs</th><th>Size</th><th>Saved</th></tr></thead>
+                      <tbody>
+                        <tr class="rv" data-at="1.4"><td class="m">icons/</td><td>48</td><td>96</td><td>1.2 MB</td><td class="c-g">−58%</td></tr>
+                        <tr class="rv" data-at="1.7"><td class="m">hero/</td><td>6</td><td>18</td><td>3.9 MB</td><td class="c-g">−66%</td></tr>
+                        <tr class="rv" data-at="2.0"><td class="m">promo/</td><td>12</td><td>24</td><td>2.1 MB</td><td class="c-g">−60%</td></tr>
+                        <tr class="rv" data-at="2.6"><td><b>Total</b></td><td><b>66</b></td><td><b>138</b></td><td><b>7.2 MB</b></td><td class="c-g"><b>−61%</b></td></tr>
+                      </tbody>
+                    </table>
+                    <div class="sec-t" style="margin-top:4px">Recent runs</div>
+                    <div style="display:grid;gap:6px">
+                      <div class="card row"><span class="c-g">✓</span><span class="grow">Yesterday · icons only · WebP 80</span><span class="c-dim mono" style="font-size:10.5px">1.1s</span></div>
+                      <div class="card row"><span class="c-g">✓</span><span class="grow">Mon · full export · PNG</span><span class="c-dim mono" style="font-size:10.5px">6.8s</span></div>
+                    </div>
+                  </div></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ================= CUT C: workbench ================= -->
+            <div class="scene" data-scene="c" data-focus='[[0,"c1"]]'>
+              <div class="ws">
+                <div class="pane" data-id="c1" data-rects='[[0,0,0,76,100]]'>
+                  <div class="ph"><span class="ty"><span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span><b>Workbench</b><span class="chev">▾</span></span><span class="ti">Experiment workbench — tokenizer-v3</span><span class="x"><i>↻</i><i>×</i></span></div>
+                  <div class="pb"><div class="wb">
+                    <div class="wb-side">
+                      <div class="sec-t" style="padding:2px 8px 6px">Runs</div>
+                      <div class="run sel"><span class="sw2" style="background:var(--p-acc)"></span>run-47 · lr 3e-4<small>live</small></div>
+                      <div class="run sel"><span class="sw2" style="background:var(--p-purple)"></span>run-46 · lr 1e-4<small>done</small></div>
+                      <div class="run sel"><span class="sw2" style="background:var(--p-green)"></span>run-44 · baseline<small>done</small></div>
+                      <div class="run"><span class="sw2" style="background:var(--chip)"></span>run-43 · warmup 0<small>done</small></div>
+                      <div class="run"><span class="sw2" style="background:var(--chip)"></span>run-41 · bs 64<small>fail</small></div>
+                      <div class="sec-t" style="padding:12px 8px 6px">Notes</div>
+                      <div style="padding:0 8px;color:var(--p-dim);font-size:11px;line-height:1.45">47 converges faster. Try cosine decay next.</div>
+                    </div>
+                    <div class="wb-main">
+                      <div class="row" style="grid-column:1/3;gap:28px">
+                        <div class="metric"><small>val accuracy</small><b>0.912</b><em>+1.8 vs baseline</em></div>
+                        <div class="metric"><small>val loss</small><b>0.284</b><em>−0.06</em></div>
+                        <div class="metric"><small>tokens / s</small><b>41.2k</b><em class="c-dim" style="color:var(--p-dim)">steady</em></div>
+                        <div class="metric"><small>step</small><b><span class="sw on" data-at="0" data-until="1.5">8,200</span><span class="sw" data-at="1.5" data-until="3">8,600</span><span class="sw" data-at="3">9,000</span></b><em class="c-dim" style="color:var(--p-dim)">of 12,000</em></div>
+                      </div>
+                      <div class="card" style="padding:12px;display:flex;flex-direction:column">
+                        <div class="row" style="justify-content:space-between"><b style="font-size:12px">Validation loss</b><span class="chips"><span class="chip on-s">loss</span><span class="chip">acc</span><span class="chip">lr</span></span></div>
+                        <svg viewBox="0 0 400 170" preserveAspectRatio="none" style="width:100%;flex:1;margin-top:8px">
+                          <g stroke="var(--p-line)" stroke-width="1"><line x1="0" y1="42" x2="400" y2="42"/><line x1="0" y1="85" x2="400" y2="85"/><line x1="0" y1="128" x2="400" y2="128"/></g>
+                          <g class="draw on"><path pathLength="1" d="M0 20 C60 60 120 95 200 112 S330 128 400 132" fill="none" stroke="var(--p-green)" stroke-width="2" vector-effect="non-scaling-stroke"/></g>
+                          <g class="draw on"><path pathLength="1" d="M0 22 C50 75 110 112 200 126 S330 140 400 143" fill="none" stroke="var(--p-purple)" stroke-width="2" vector-effect="non-scaling-stroke"/></g>
+                          <g class="draw rv" data-at="0.3"><path pathLength="1" d="M0 18 C40 85 90 125 160 138 S230 148 290 151" fill="none" stroke="var(--p-acc)" stroke-width="2.5" vector-effect="non-scaling-stroke"/></g>
+                        </svg>
+                      </div>
+                      <div class="card" style="padding:10px">
+                        <b style="font-size:12px">Compare</b>
+                        <table class="tbl" style="margin-top:6px">
+                          <thead><tr><th>Run</th><th>Loss</th><th>Acc</th></tr></thead>
+                          <tbody>
+                            <tr><td class="m c-acc">47</td><td>0.284</td><td>0.912</td></tr>
+                            <tr><td class="m c-p">46</td><td>0.301</td><td>0.903</td></tr>
+                            <tr><td class="m c-g">44</td><td>0.341</td><td>0.894</td></tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div></div>
+                </div>
+                <div class="pane" data-id="c2" data-rects='[[0,76,0,24,100]]'>
+                  <div class="ph"><span class="ty"><span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span><b>Terminal</b><span class="chev">▾</span></span><span class="ti">train.py — run-47</span><span class="x"><i>×</i></span></div>
+                  <div class="pb"><div class="term top" style="font-size:11px">
+<div class="ln on" data-at="0"><span class="c-g">❯</span> python train.py --run 47</div>
+<div class="ln on" data-at="0"><span class="c-dim">config  lr=3e-4 bs=128</span></div>
+<div class="ln on" data-at="0"><span class="c-dim">step 7400</span> loss 0.302</div>
+<div class="ln on" data-at="0"><span class="c-dim">step 7800</span> loss 0.296</div>
+<div class="ln on" data-at="0"><span class="c-dim">step 8200</span> loss 0.291</div>
+<div class="ln" data-at="1.5"><span class="c-dim">step 8600</span> loss 0.287</div>
+<div class="ln" data-at="3.0"><span class="c-dim">step 9000</span> loss 0.284</div>
+<div class="ln" data-at="3.1"><span class="c-acc">checkpoint saved</span></div>
+                  </div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="vid-overlay" aria-hidden="true">
+            <div class="tc-badge" id="tcBadge"><span class="ff">▶▶</span>Time-compressed<span class="clk" id="tcClock">09:41:00</span></div>
+            <div class="caption" id="caption"><span class="cap-k" id="capK"></span><span class="cap-t" id="capT"></span></div>
+            <div class="cut-flash" id="flash"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <button class="play" id="playBtn" type="button" aria-label="Pause demo">
+          <svg id="icoPause" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="3.5" y="2.5" width="3" height="11" rx="1"/><rect x="9.5" y="2.5" width="3" height="11" rx="1"/></svg>
+          <svg id="icoPlay" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" style="display:none"><path d="M4.5 2.8v10.4a.8.8 0 0 0 1.2.7l8.4-5.2a.8.8 0 0 0 0-1.4L5.7 2.1a.8.8 0 0 0-1.2.7Z"/></svg>
+        </button>
+        <div class="scrub" id="scrub" role="slider" tabindex="0" aria-label="Demo position" aria-valuemin="0" aria-valuemax="44" aria-valuenow="0"></div>
+        <span class="time" id="timeLbl">0:00 / 0:44</span>
+      </div>
+      <ul class="chapters" id="chapters" aria-label="Demo chapters"></ul>
+      <p class="prod-note"><b>Production note</b><span>Placeholder animation drawn in HTML/CSS. Replace with recorded footage of real Slate sessions, keeping the time-compression label. Demo panels are proposed examples, not bundled features.</span></p>
+    </div>
+  </section>
+
+  <!-- Range -->
+  <section class="sec" id="examples" aria-labelledby="range-title">
+    <div class="wrap">
+      <p class="eyebrow">Range</p>
+      <h2 id="range-title">From a side panel <em>to a full app.</em></h2>
+      <p class="sec-lede">Start with a panel next to your shell. Put a face on a script. Let a bigger idea take over the window.</p>
+      <div class="range">
+        <article class="rcard">
+          <div class="vis" aria-hidden="true">
+            <svg viewBox="0 0 320 200">
+              <rect x="0" y="0" width="320" height="200" rx="10" fill="#f2f2f5"/>
+              <rect x="0" y="0" width="320" height="16" rx="10" fill="#e6e6ea"/><circle cx="10" cy="8" r="2.6" fill="#ff5f57"/><circle cx="19" cy="8" r="2.6" fill="#febc2e"/><circle cx="28" cy="8" r="2.6" fill="#28c840"/>
+              <g fill="#fff" stroke="rgba(0,0,0,.08)"><rect x="5" y="21" width="176" height="54" rx="4"/><rect x="5" y="79" width="176" height="56" rx="4"/><rect x="5" y="139" width="176" height="56" rx="4"/><rect x="185" y="21" width="130" height="174" rx="4"/></g>
+              <g fill="#c9ccd4"><rect x="13" y="31" width="110" height="4" rx="2"/><rect x="13" y="41" width="80" height="4" rx="2"/><rect x="13" y="51" width="130" height="4" rx="2"/><rect x="13" y="89" width="96" height="4" rx="2"/><rect x="13" y="99" width="120" height="4" rx="2"/><rect x="13" y="149" width="100" height="4" rx="2"/><rect x="13" y="159" width="70" height="4" rx="2"/></g>
+              <g><rect x="193" y="31" width="114" height="26" rx="4" fill="#f5f6f8"/><circle cx="203" cy="44" r="4" fill="#0a6cff"/><rect x="212" y="41" width="60" height="5" rx="2.5" fill="#9aa0ab"/>
+              <rect x="193" y="62" width="114" height="26" rx="4" fill="#f5f6f8"/><circle cx="203" cy="75" r="4" fill="#e0a23b"/><rect x="212" y="72" width="70" height="5" rx="2.5" fill="#9aa0ab"/>
+              <rect x="193" y="93" width="114" height="26" rx="4" fill="#f5f6f8"/><circle cx="203" cy="106" r="4" fill="#9aa0ab"/><rect x="212" y="103" width="50" height="5" rx="2.5" fill="#9aa0ab"/>
+              <g fill="#e9eaee"><rect x="193" y="130" width="114" height="14" rx="3"/><rect x="193" y="148" width="114" height="14" rx="3"/><rect x="193" y="166" width="114" height="14" rx="3"/></g></g>
+            </svg>
+          </div>
+          <div class="txt"><span class="n">01</span><h3>A panel beside your agents</h3><p>Track sessions, queue the next task, and see which agent needs you, without leaving the terminals they run in.</p></div>
+        </article>
+        <article class="rcard">
+          <div class="vis" aria-hidden="true">
+            <svg viewBox="0 0 320 200">
+              <rect x="0" y="0" width="320" height="200" rx="10" fill="#1e1f22"/>
+              <rect x="0" y="0" width="320" height="16" rx="10" fill="#2b2c30"/><circle cx="10" cy="8" r="2.6" fill="#ff5f57"/><circle cx="19" cy="8" r="2.6" fill="#febc2e"/><circle cx="28" cy="8" r="2.6" fill="#28c840"/>
+              <rect x="5" y="21" width="104" height="174" rx="4" fill="#17181b"/>
+              <g fill="#4a4d55"><rect x="12" y="30" width="70" height="3.5" rx="1.7"/><rect x="12" y="39" width="88" height="3.5" rx="1.7"/><rect x="12" y="48" width="60" height="3.5" rx="1.7"/></g><g fill="#7fd49a"><rect x="12" y="62" width="76" height="3.5" rx="1.7"/><rect x="12" y="71" width="54" height="3.5" rx="1.7"/></g>
+              <rect x="113" y="21" width="202" height="174" rx="4" fill="#17181b"/>
+              <g fill="#2a2b31"><rect x="160" y="32" width="146" height="14" rx="3"/><rect x="160" y="52" width="60" height="14" rx="7"/><rect x="160" y="72" width="146" height="14" rx="3"/></g>
+              <g fill="#5a5d66"><rect x="122" y="37" width="28" height="4" rx="2"/><rect x="122" y="57" width="24" height="4" rx="2"/><rect x="122" y="77" width="30" height="4" rx="2"/></g>
+              <rect x="122" y="96" width="38" height="14" rx="4" fill="#7cc4ff"/><rect x="166" y="101" width="140" height="4" rx="2" fill="#2a2b31"/><rect x="166" y="101" width="104" height="4" rx="2" fill="#7fd49a"/>
+              <g fill="#26272c"><rect x="122" y="120" width="184" height="12" rx="2"/><rect x="122" y="136" width="184" height="12" rx="2"/><rect x="122" y="152" width="184" height="12" rx="2"/><rect x="122" y="168" width="184" height="12" rx="2"/></g>
+            </svg>
+          </div>
+          <div class="txt"><span class="n">02</span><h3>An interface for a script</h3><p>Give a command-line workflow inputs, a Run button, and a results table. The script stays the same; using it gets easier.</p></div>
+        </article>
+        <article class="rcard">
+          <div class="vis" aria-hidden="true">
+            <svg viewBox="0 0 320 200">
+              <rect x="0" y="0" width="320" height="200" rx="10" fill="#121829"/>
+              <rect x="0" y="0" width="320" height="16" rx="10" fill="#1a2136"/><circle cx="10" cy="8" r="2.6" fill="#ff5f57"/><circle cx="19" cy="8" r="2.6" fill="#febc2e"/><circle cx="28" cy="8" r="2.6" fill="#28c840"/>
+              <rect x="5" y="21" width="310" height="134" rx="4" fill="#0e1322"/>
+              <rect x="5" y="21" width="62" height="134" rx="4" fill="#131a2c"/>
+              <g><rect x="12" y="32" width="48" height="9" rx="3" fill="#27304c"/><rect x="12" y="46" width="48" height="9" rx="3" fill="#27304c"/><rect x="12" y="60" width="48" height="9" rx="3" fill="#1a2136"/></g>
+              <g fill="#151c30"><rect x="74" y="30" width="54" height="22" rx="3"/><rect x="134" y="30" width="54" height="22" rx="3"/><rect x="194" y="30" width="54" height="22" rx="3"/></g>
+              <rect x="74" y="58" width="174" height="90" rx="3" fill="#151c30"/>
+              <path d="M80 70 C110 100 140 118 240 126" fill="none" stroke="#8be3b4" stroke-width="1.6"/><path d="M80 72 C105 108 140 128 240 134" fill="none" stroke="#b9a6ff" stroke-width="1.6"/><path d="M80 68 C100 118 130 136 200 141" fill="none" stroke="#ffb86b" stroke-width="2"/>
+              <rect x="254" y="30" width="54" height="118" rx="3" fill="#151c30"/>
+              <rect x="5" y="159" width="310" height="36" rx="4" fill="#0e1322"/><g fill="#3a4466"><rect x="12" y="168" width="140" height="3.5" rx="1.7"/><rect x="12" y="177" width="180" height="3.5" rx="1.7"/></g>
+            </svg>
+          </div>
+          <div class="txt"><span class="n">03</span><h3>An app that takes the stage</h3><p>Build an experiment workbench. Compare runs, inspect results, and keep a terminal close by for when you need it.</p></div>
+        </article>
+      </div>
+      <p class="small-note">Proposed examples to show what’s possible. They don’t ship with Slate.</p>
+    </div>
+  </section>
+
+  <!-- Foundation -->
+  <section class="sec sec-alt" id="terminal" aria-labelledby="found-title">
+    <div class="wrap found">
+      <div>
+        <p class="eyebrow">Foundation</p>
+        <h2 id="found-title">A great terminal first.</h2>
+        <p class="sec-lede">A blank slate, not a blank start. Slate is a native macOS terminal that’s useful before you extend anything.</p>
+        <ul class="feat">
+          <li><span class="fi" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5 6.5 8 3 11.5M8.5 11.5H13"/></svg></span><div><b>Powered by libghostty</b><span>Real Ghostty terminal surfaces in native AppKit windows.</span></div></li>
+          <li><span class="fi" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="3" width="12" height="10" rx="2"/><path d="M8 3v10M8 8h6"/></svg></span><div><b>Tabs, splits, zoom</b><span>Nested panes, directional focus, and zoom for the one that matters.</span></div></li>
+          <li><span class="fi" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg></span><div><b>⌘K command picker</b><span>Fuzzy search across every command, in native Liquid Glass.</span></div></li>
+          <li><span class="fi" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c2 2 2 10 0 12M8 2c-2 2-2 10 0 12"/></svg></span><div><b>Browser panes</b><span>Preview a site or read the docs next to your shell.</span></div></li>
+          <li><span class="fi" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="8" r="6"/><path d="M8 2a6 6 0 0 0 0 12Z" fill="currentColor"/></svg></span><div><b>Themes &amp; TOML settings</b><span>Fonts, themes, and shortcuts reload live as you edit.</span></div></li>
+          <li><span class="fi" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="2" y="2.5" width="12" height="11" rx="2"/><path d="M2 6h12M6 6v7.5"/></svg></span><div><b>Saved layouts</b><span>Save an arrangement and open it again from a Spotlight launcher.</span></div></li>
+        </ul>
+      </div>
+      <figure class="shot" style="margin:0" aria-label="Mock of a Slate window with two terminals and the command picker open">
+        <div class="stb"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i><div class="tb2"><span class="o">atlas</span><span>server</span><span>scratch</span></div></div>
+        <div class="sws">
+          <div class="sp" data-h="zsh — ~/code/atlas"><span style="color:#7cc4ff">~/code/atlas</span> <span style="color:#c5a8ff">main</span>
+<span style="color:#7fd49a">❯</span> git log --oneline -4
+<span style="color:#f0c674">a41c9e2</span> Cap retry backoff at 30s
+<span style="color:#f0c674">9be07d1</span> Evict stale session cache
+<span style="color:#f0c674">3f2a8c0</span> Docs: CLI examples
+<span style="color:#f0c674">e71d4b5</span> Bump runner image
+<span style="color:#7fd49a">❯</span> </div>
+          <div class="sp" data-h="pnpm dev"><span style="color:#7cc4ff">VITE</span> ready in 412 ms
+<span style="color:#7e828c">➜  Local:</span> localhost:5173/</div>
+          <div class="sp" data-h="htop">CPU [<span style="color:#7fd49a">|||||</span>     ] 21%
+MEM [<span style="color:#7cc4ff">||||||</span>    ] 6.1G</div>
+        </div>
+        <div class="glass" aria-hidden="true">
+          <div class="gq">split</div>
+          <div class="gr s"><span>Split Right</span><em>⌘D</em></div>
+          <div class="gr"><span>Split Down</span><em>⇧⌘D</em></div>
+          <div class="gr"><span>Zoom Pane</span><em>⇧⌘↩</em></div>
+        </div>
+        <figcaption class="shot-label">Mock · replace with screenshot</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- Mechanism -->
+  <section class="sec" id="how" aria-labelledby="mech-title">
+    <div class="wrap">
+      <p class="eyebrow">How it works</p>
+      <h2 id="mech-title">Your agents build. <em>Slate connects the pieces.</em></h2>
+      <p class="sec-lede">A plugin system and CLI give you and your agents a direct way to add panels, commands, and interfaces, right where you already work.</p>
+      <div class="mech">
+        <div class="mcard"><span class="mi" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="2.5" y="2.5" width="6.5" height="6.5" rx="1.5"/><rect x="11" y="2.5" width="6.5" height="6.5" rx="1.5"/><rect x="2.5" y="11" width="6.5" height="6.5" rx="1.5"/><path d="M14.25 11v6.5M11 14.25h6.5"/></svg></span><h3>Plugins</h3><p>Panels, commands, header buttons, and background services. Plugins are trusted code you register, with settings and storage of their own.</p></div>
+        <div class="mcard"><span class="mi" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3.5" width="16" height="13" rx="2.5"/><path d="m5.5 8 2.5 2-2.5 2M10 12h4"/></svg></span><h3>The CLI</h3><p><code>slate-term</code> registers plugins, splits and arranges panes, reads the workspace, and saves layouts. Anything that can run a shell command can use it.</p></div>
+        <div class="mcard"><span class="mi" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="10" cy="7" r="3.2"/><path d="M3.5 17c.8-3.2 3.4-5 6.5-5s5.7 1.8 6.5 5"/></svg></span><h3>Your agents</h3><p>Bring Claude Code, Codex, or another command-line agent. Slate doesn’t include a model. A Slate skill teaches your agent the API.</p></div>
+      </div>
+      <div class="cli" role="group" aria-label="Example CLI session">
+        <div class="cli-h"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i>&nbsp; what your agent runs<span>illustrative · flags abbreviated</span></div>
+<pre><span class="cm"># Register the plugin it just wrote, then place its panel</span>
+<span class="pp">$</span> slate-term plugins register --manifest ~/slate/pr-board/plugin.json
+<span class="pp">$</span> slate-term panes split --pane p1 --right --type pr-board
+<span class="pp">$</span> slate-term panes set-title --pane p1 --title 'Agent'
+
+<span class="cm"># Change it, reload it, keep working</span>
+<span class="pp">$</span> slate-term plugins restart pr-board
+
+<span class="cm"># Save the arrangement and open it later from Spotlight</span>
+<span class="pp">$</span> slate-term layouts capture --window W1 --name 'Release day'
+<span class="pp">$</span> slate-term layouts launcher --id ID --path ~/Applications/Release\ day.app
+<span class="ok">✓</span> Release day.app</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- Loop -->
+  <section class="sec sec-alt" aria-labelledby="loop-title">
+    <div class="wrap center">
+      <p class="eyebrow">Iteration</p>
+      <h2 id="loop-title">Build. Use. Refine.</h2>
+      <p class="sec-lede">Your first version is a starting point. Trying an idea, using it, and changing it stays one short loop.</p>
+      <div class="loop" style="text-align:left">
+        <div class="step"><span class="sn2">01</span><h3>Build</h3><p>Describe what’s missing. Your agent writes a plugin and puts it in a pane.</p></div>
+        <div class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+        <div class="step"><span class="sn2">02</span><h3>Use</h3><p>Try it on the real task, beside the terminal you were already using.</p></div>
+        <div class="arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+        <div class="step"><span class="sn2">03</span><h3>Refine</h3><p>Ask for what’s missing. Keep what works. Repeat as your needs change.</p></div>
+      </div>
+      <p class="loop-back"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 10a6 6 0 1 1-2-4.5M16 3.5V7h-3.5"/></svg>And back to the start, whenever you like.</p>
+    </div>
+  </section>
+
+  <!-- Agents -->
+  <section class="agents" id="agents" aria-labelledby="agents-title">
+    <div class="wrap">
+      <h2 id="agents-title">Works with the agents you already use.</h2>
+      <ul class="names">
+        <li>Claude Code</li><li>Codex</li><li>Gemini CLI</li><li>Aider</li><li class="y">your own scripts</li>
+      </ul>
+      <p>Names are examples, not tested integrations. Any agent that can run a shell command can call <code style="font-family:var(--mono)">slate-term</code>.</p>
+    </div>
+  </section>
+
+  <!-- Close -->
+  <section class="close" aria-labelledby="close-title">
+    <div class="wrap">
+      <h2 id="close-title"><span>A solid terminal.</span><span class="c2">Yours to shape.</span><span class="c3">Open source.</span></h2>
+      <p class="sec-lede" style="margin:24px auto 0">Start with the tools you know. Build the ones you’re missing.</p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="#">Download for Mac</a>
+        <a class="btn btn-secondary" href="#">View source</a>
+      </div>
+      <p class="pending">Download &amp; source links pending.</p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="fgrid">
+      <div class="fbrand">
+        <a class="brand" href="#top"><span class="logo" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5 6.5 8 3 11.5"/><path d="M8.5 11.5H13"/></svg></span>Slate Terminal</a>
+        <p>A native macOS terminal with a plugin system and CLI for you and your AI agents.</p>
+      </div>
+      <div><h4>Product</h4><ul><li><a href="#demo">Demo</a></li><li><a href="#examples">Examples</a></li><li><a href="#terminal">Terminal</a></li><li><a href="#download">Download</a></li></ul></div>
+      <div><h4>Build</h4><ul><li><a href="#how">Plugins</a></li><li><a href="#how">CLI</a></li><li><a href="#agents">Agent skill</a></li><li><a href="#terminal">Saved layouts</a></li></ul></div>
+      <div><h4>Project</h4><ul><li><a href="#">Source</a></li><li><a href="#">License</a></li><li><a href="#">Changelog</a></li><li><a href="#">Contact</a></li></ul></div>
+    </div>
+    <div class="fbot"><span>Slate Terminal</span><span>Design mockup A · Native. Links are placeholders.</span></div>
+  </div>
+</footer>
+
+<script>
+(() => {
+  const stage = document.getElementById('stage');
+  const viewport = document.getElementById('viewport');
+  const TOTAL = 44.5;
+  const scenes = [
+    { id: 'main', start: 0, end: 29 },
+    { id: 'a', start: 29, end: 34, theme: 'paper', tabs: [['Agents', 1], ['atlas', 0]] },
+    { id: 'b', start: 34, end: 39, theme: 'graphite', tabs: [['Asset export', 1], ['atlas', 0]] },
+    { id: 'c', start: 39, end: TOTAL, theme: 'dusk', tabs: [['Workbench', 1], ['Agents', 0]] },
+  ];
+  const chapters = [
+    { label: 'Plain terminal', start: 0, group: 'Build a workspace', kicker: 'Start', text: 'Open Slate. It’s a terminal.' },
+    { label: 'Build with your agent', start: 4.6, kicker: 'Build', text: 'Ask your agent for what’s missing. It writes plugins and arranges panes with the CLI.' },
+    { label: 'Use & refine', start: 19.2, kicker: 'Use · Refine', text: 'Use it on the real task. Then ask for a change.' },
+    { label: 'Save the layout', start: 23.4, kicker: 'Keep it', text: 'Save the layout. Open it again from Spotlight.' },
+    { label: 'Agent workflow', start: 29, group: 'Three more', kicker: 'Example 1 of 3 · proposed', text: 'An agent-workflow panel: sessions and a task queue beside your terminals.' },
+    { label: 'Script interface', start: 34, kicker: 'Example 2 of 3 · proposed', text: 'A visual interface for a script: inputs, a Run button, and results.' },
+    { label: 'Plugin app', start: 39, kicker: 'Example 3 of 3 · proposed', text: 'A larger plugin app: an experiment workbench that takes most of the window.' },
+  ];
+  chapters.forEach((c, i) => { c.end = i + 1 < chapters.length ? chapters[i + 1].start : TOTAL; });
+
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+  let t = 0, playing = !reduce.matches, visible = true, last = null, curScene = null, curChapter = -1, lastTheme = '';
+  if (reduce.matches) t = 28.75;
+  const qs = new URLSearchParams(location.search);
+  if (qs.has('t')) { t = Math.min(TOTAL - 0.01, Math.max(0, parseFloat(qs.get('t')) || 0)); playing = false; }
+
+  // Cache per-scene nodes.
+  const sceneEls = {};
+  scenes.forEach(s => {
+    const el = stage.querySelector(`[data-scene="${s.id}"]`);
+    sceneEls[s.id] = {
+      el,
+      timed: [...el.querySelectorAll('[data-at]')].map(n => ({
+        n, at: +n.dataset.at, until: n.dataset.until ? +n.dataset.until : Infinity,
+        text: n.dataset.text, dur: n.dataset.dur ? +n.dataset.dur : 0, shown: -1, on: null,
+      })),
+      panes: [...el.querySelectorAll('.pane[data-rects]')].map(n => ({ n, rects: JSON.parse(n.dataset.rects), key: '', vis: null })),
+      focus: JSON.parse(el.dataset.focus || '[]'),
+    };
+  });
+
+  const tabsEl = document.getElementById('tabs');
+  let tabsKey = '';
+  function setTabs(list) {
+    const key = JSON.stringify(list);
+    if (key === tabsKey) return;
+    tabsKey = key;
+    tabsEl.innerHTML = list.map(([name, on]) => `<span class="tab${on ? ' on' : ''}">${on ? '<span class="tdot"></span>' : ''}${name}</span>`).join('');
+  }
+
+  function jump() {
+    stage.classList.add('jump');
+    requestAnimationFrame(() => requestAnimationFrame(() => stage.classList.remove('jump')));
+  }
+
+  const badge = document.getElementById('tcBadge'), clock = document.getElementById('tcClock');
+  const cap = document.getElementById('caption'), capK = document.getElementById('capK'), capT = document.getElementById('capT');
+  const flash = document.getElementById('flash');
+  const pad = n => String(n).padStart(2, '0');
+
+  function render(time) {
+    const s = scenes.find(x => time >= x.start && time < x.end) || scenes[0];
+    const S = sceneEls[s.id];
+    if (curScene !== s.id) {
+      Object.values(sceneEls).forEach(o => o.el.classList.toggle('cur', o === S));
+      if (curScene !== null && !reduce.matches) { flash.classList.remove('go'); void flash.offsetWidth; flash.classList.add('go'); }
+      curScene = s.id;
+      jump();
+    }
+    const lt = time - s.start;
+
+    for (const it of S.timed) {
+      const on = lt >= it.at && lt < it.until;
+      if (on !== it.on) { it.n.classList.toggle('on', on); it.on = on; }
+      if (it.text != null) {
+        const p = it.dur ? Math.min(1, Math.max(0, (lt - it.at) / it.dur)) : (on ? 1 : 0);
+        const k = lt < it.at ? 0 : Math.round(p * it.text.length);
+        if (k !== it.shown) { it.n.textContent = it.text.slice(0, k); it.shown = k; }
+        it.n.classList.toggle('typing', lt >= it.at && p < 1);
+      }
+    }
+    // Toggle highlight settle on the flaky section after its intro.
+    const fl = S.el.querySelector('.flaky'); if (fl) fl.classList.toggle('settle', lt > 24);
+    // Release the Run button after its press.
+    const rb = S.el.querySelector('.runbtn'); if (rb) rb.classList.toggle('rel', lt > 1.15);
+
+    for (const p of S.panes) {
+      let r = null;
+      for (const x of p.rects) if (lt >= x[0]) r = x;
+      const vis = !!r;
+      if (!vis) { if (p.vis !== false) { p.n.classList.add('off'); p.vis = false; } continue; }
+      const key = r.join(',');
+      if (key !== p.key) {
+        const appearing = p.vis === false || p.vis === null;
+        if (appearing) p.n.style.transition = 'none';
+        p.n.style.left = `calc(${r[1]}% + 3px)`; p.n.style.top = `calc(${r[2]}% + 3px)`;
+        p.n.style.width = `calc(${r[3]}% - 6px)`; p.n.style.height = `calc(${r[4]}% - 6px)`;
+        if (appearing) { void p.n.offsetWidth; p.n.style.transition = ''; }
+        p.key = key;
+      }
+      if (p.vis !== true) { p.n.classList.remove('off'); p.vis = true; }
+    }
+    let f = null; for (const x of S.focus) if (lt >= x[0]) f = x[1];
+    for (const p of S.panes) p.n.classList.toggle('focus', p.n.dataset.id === f);
+
+    // Theme and tabs.
+    const theme = s.id === 'main' ? (lt < 13.5 ? 'graphite' : 'dusk') : s.theme;
+    if (theme !== lastTheme) { stage.classList.remove('theme-graphite', 'theme-dusk', 'theme-paper'); stage.classList.add('theme-' + theme); lastTheme = theme; }
+    if (s.id === 'main') setTabs(lt < 24.6 ? [['atlas — ' + (lt < 1 ? 'zsh' : 'claude'), 1], ['server', 0]] : [['Release day', 1], ['server', 0]]);
+    else setTabs(s.tabs);
+
+    // Time-compression badge with a fast clock (09:41 → about 11:16).
+    const tc = s.id === 'main' && lt >= 4.6 && lt < 23.4;
+    badge.classList.toggle('on', tc);
+    if (tc) {
+      const secs = 9 * 3600 + 41 * 60 + Math.floor((lt - 4.6) * (95 * 60 / 18.8));
+      clock.textContent = `${pad(Math.floor(secs / 3600))}:${pad(Math.floor(secs / 60) % 60)}:${pad(secs % 60)}`;
+    }
+
+    // Chapter, caption, progress.
+    const ci = chapters.findIndex(c => time >= c.start && time < c.end);
+    if (ci !== curChapter) {
+      curChapter = ci;
+      const c = chapters[ci];
+      cap.classList.add('swap');
+      setTimeout(() => { capK.textContent = c.kicker; capT.textContent = c.text; cap.classList.remove('swap'); }, reduce.matches ? 0 : 180);
+      chapBtns.forEach((b, i) => b.setAttribute('aria-current', i === ci ? 'true' : 'false'));
+    }
+    segFills.forEach((el, i) => {
+      const c = chapters[i];
+      el.style.transform = `scaleX(${Math.min(1, Math.max(0, (time - c.start) / (c.end - c.start)))})`;
+    });
+    const fmt = v => `${Math.floor(v / 60)}:${pad(Math.floor(v % 60))}`;
+    timeLbl.textContent = `${fmt(time)} / ${fmt(TOTAL)}`;
+    scrub.setAttribute('aria-valuenow', Math.floor(time));
+    scrub.setAttribute('aria-valuetext', `${fmt(time)}, ${chapters[ci].label}`);
+  }
+
+  // Controls.
+  const scrub = document.getElementById('scrub'), timeLbl = document.getElementById('timeLbl');
+  const chapList = document.getElementById('chapters');
+  const segFills = [], chapBtns = [];
+  chapters.forEach((c, i) => {
+    const seg = document.createElement('div');
+    seg.className = 'seg' + (c.start >= 29 ? ' cutseg' : '');
+    seg.style.setProperty('--w', (c.end - c.start).toFixed(2));
+    const fill = document.createElement('i'); seg.appendChild(fill); scrub.appendChild(seg); segFills.push(fill);
+    if (c.group) { const g = document.createElement('li'); g.className = 'grp'; g.textContent = c.group; g.setAttribute('aria-hidden', 'true'); chapList.appendChild(g); }
+    const li = document.createElement('li'); const b = document.createElement('button');
+    b.type = 'button'; b.textContent = c.label;
+    b.addEventListener('click', () => seek(reduce.matches && !playing ? Math.max(c.start, c.end - 1.6) : c.start));
+    li.appendChild(b); chapList.appendChild(li); chapBtns.push(b);
+  });
+  function seek(v) { t = Math.min(TOTAL - 0.01, Math.max(0, v)); jump(); render(t); }
+  function seekFromPointer(e) { const r = scrub.getBoundingClientRect(); seek(((e.clientX - r.left) / r.width) * TOTAL); }
+  scrub.addEventListener('pointerdown', e => { scrub.setPointerCapture(e.pointerId); seekFromPointer(e); });
+  scrub.addEventListener('pointermove', e => { if (scrub.hasPointerCapture(e.pointerId)) seekFromPointer(e); });
+  scrub.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight') { seek(t + 2); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft') { seek(t - 2); e.preventDefault(); }
+    else if (e.key === 'Home') { seek(0); e.preventDefault(); }
+    else if (e.key === ' ' || e.key === 'Enter') { togglePlay(); e.preventDefault(); }
+  });
+  const playBtn = document.getElementById('playBtn'), icoPlay = document.getElementById('icoPlay'), icoPause = document.getElementById('icoPause');
+  function syncPlay() {
+    icoPlay.style.display = playing ? 'none' : ''; icoPause.style.display = playing ? '' : 'none';
+    playBtn.setAttribute('aria-label', playing ? 'Pause demo' : 'Play demo');
+  }
+  function togglePlay() { playing = !playing; last = null; syncPlay(); }
+  playBtn.addEventListener('click', togglePlay);
+
+  // Scale the fixed-size stage to the viewport width.
+  const fit = () => stage.style.setProperty('--s', viewport.clientWidth / 1280);
+  new ResizeObserver(fit).observe(viewport); fit();
+
+  // Pause while the demo is off screen.
+  new IntersectionObserver(es => { visible = es[0].isIntersecting; last = null; }, { threshold: 0.15 }).observe(viewport);
+
+  function frame(ts) {
+    if (playing && visible) {
+      if (last != null) {
+        t += Math.min(0.1, (ts - last) / 1000);
+        if (t >= TOTAL) { t = 0; jump(); }
+      }
+      last = ts;
+    } else last = null;
+    render(t);
+    requestAnimationFrame(frame);
+  }
+  syncPlay();
+  render(t);
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
