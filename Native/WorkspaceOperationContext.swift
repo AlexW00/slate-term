@@ -22,6 +22,8 @@ struct WorkspaceOperationContext: Sendable {
     }
     let origin: Origin
     let lineage: OperationLineage
+    /// Self-declared agent identity for presence display. Never used for admission or routing.
+    let actor: PresenceActor?
     let validateCaller: @MainActor @Sendable () throws -> Void
 
     /// Ownership comes from the authenticated adapter, not causation, target command or environment.
@@ -29,9 +31,11 @@ struct WorkspaceOperationContext: Sendable {
         if case .service(let identity) = origin { identity } else { nil }
     }
 
-    nonisolated init(origin: Origin, lineage: OperationLineage = OperationLineage(), validateCaller: @escaping @MainActor @Sendable () throws -> Void = {}) {
+    nonisolated init(origin: Origin, lineage: OperationLineage = OperationLineage(), actor: PresenceActor? = nil,
+                     validateCaller: @escaping @MainActor @Sendable () throws -> Void = {}) {
         self.origin = origin
         self.lineage = lineage
+        self.actor = actor
         self.validateCaller = validateCaller
     }
 

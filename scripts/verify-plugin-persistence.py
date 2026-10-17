@@ -157,7 +157,11 @@ with AppFixture('plugin-persistence') as app:
     app.rpc('debug.commandPicker', dismiss=True)
     app.rpc('debug.menuPreview', pane=a, path=str(ROOT / 'artifacts/plugin-persistence-menu.png'))
     old = app.rpc('plugins.panelState.get', pane=a)
-    app.rpc('command.run', id='plugins.panelState.reset', pane=a, expectedPanelId=old['panelId'], expectedStateRevision=old['revision'])
+    presence_cursor = app.rpc('events.head')['cursor']
+    app.rpc('command.run', id='plugins.panelState.reset', pane=a, expectedPanelId=old['panelId'], expectedStateRevision=old['revision'],
+            request_metadata=dict(version=1, actor=dict(name='persistence-test')))
+    presence_events = app.rpc('events.poll', after=presence_cursor, topics=['host.presence.changed'], waitMilliseconds=0)['events']
+    assert any(event.get('pane') == a and event['payload']['phase'] == 'began' for event in presence_events), presence_events
     app.rpc('plugins.panelState.patch', pane=a, expectedPanelId=old['panelId'], expectedStateRevision=old['revision'], operations=[dict(op='set', key='queued', value=True)], error=-32050)
     patch_panel(app, a, 'selected', 'one')
     old = app.rpc('plugins.panelState.get', pane=a)

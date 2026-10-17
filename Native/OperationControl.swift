@@ -46,7 +46,11 @@ final class OperationControl {
             case .service(let owner): mutationOrigin = .plugin(owner.pluginID)
             }
             try admission.admit(mutationOrigin, action: AdmissionAction.forMethod(method), now: time)
-            return WorkspaceOperationContext(origin: origin, lineage: lineage, validateCaller: validateCaller)
+            // Presence is for agents driving the CLI. Plugin pages and services never show it, and
+            // event-caused work never does either, so subscribers cannot loop on presence events.
+            var actor: PresenceActor?
+            if case .administrative = origin, metadata?.cause == nil { actor = metadata?.actor }
+            return WorkspaceOperationContext(origin: origin, lineage: lineage, actor: actor, validateCaller: validateCaller)
         } catch { throw Self.failure(error) }
     }
 

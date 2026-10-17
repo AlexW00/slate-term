@@ -135,6 +135,8 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
     public let keyBindings: [KeyChord: String]
     public var plugins: [String: [String: JSONValue]] = [:]
     public var notifications = NotificationPolicy()
+    /// Shows frames and tags on panes while a self-identified agent acts on them.
+    public var showAgentActivity = true
 
     public static let defaults = AppConfiguration(
         browser: Browser(searchURL: "https://www.google.com/search?q={query}"),
@@ -216,7 +218,8 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
             throw ConfigurationError.invalid("Invalid plugin settings namespace or settings exceed 64 KiB / 64 plugins")
         }
         return AppConfiguration(browser: try Browser.parse(raw.browser?.searchURL ?? defaults.browser.searchURL), theme: raw.appearance?.theme ?? defaults.theme, terminal: terminal,
-                                restoreWorkspace: raw.layout?.restoreWorkspace ?? defaults.restoreWorkspace, keyBindings: bindings, plugins: plugins, notifications: raw.notifications ?? NotificationPolicy())
+                                restoreWorkspace: raw.layout?.restoreWorkspace ?? defaults.restoreWorkspace, keyBindings: bindings, plugins: plugins, notifications: raw.notifications ?? NotificationPolicy(),
+                                showAgentActivity: raw.agents?.showActivity ?? defaults.showAgentActivity)
     }
 
     public static func load(from url: URL) throws -> AppConfiguration {
@@ -247,6 +250,7 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
         if keyBindings != previous.keyBindings { keys.append("keybind") }
         if plugins != previous.plugins { keys.append("plugins") }
         if restoreWorkspace != previous.restoreWorkspace { keys.append("layout.restore_workspace") }
+        if showAgentActivity != previous.showAgentActivity { keys.append("agents.show_activity") }
         if terminal.fontFamily != previous.terminal.fontFamily { keys.append("terminal.font_family") }
         if terminal.fontSize != previous.terminal.fontSize { keys.append("terminal.font_size") }
         if terminal.fontThicken != previous.terminal.fontThicken { keys.append("terminal.font_thicken") }
@@ -269,7 +273,7 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
     }
 
     public func encode(to encoder: any Encoder) throws {
-        enum Keys: String, CodingKey { case appearance, terminal, layout, keybind, browser, plugins, notifications }
+        enum Keys: String, CodingKey { case appearance, terminal, layout, keybind, browser, plugins, notifications, agents }
         var container = encoder.container(keyedBy: Keys.self)
         try container.encode(["theme": theme.rawValue], forKey: .appearance)
         try container.encode(terminal, forKey: .terminal)
@@ -277,6 +281,7 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
         try container.encode(notifications, forKey: .notifications)
         try container.encode(plugins, forKey: .plugins)
         try container.encode(["restore_workspace": restoreWorkspace], forKey: .layout)
+        try container.encode(["show_activity": showAgentActivity], forKey: .agents)
         try container.encode(Dictionary(uniqueKeysWithValues: keyBindings.map { ($0.key.description, $0.value) }), forKey: .keybind)
     }
 
@@ -288,7 +293,8 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
         let keybind: [String: String]?
         let plugins: TOMLTable?
         let notifications: NotificationPolicy?
-        enum Keys: String, CodingKey, CaseIterable { case appearance, terminal, layout, keybind, browser, plugins, notifications }
+        let agents: AgentValues?
+        enum Keys: String, CodingKey, CaseIterable { case appearance, terminal, layout, keybind, browser, plugins, notifications, agents }
         init(from decoder: any Decoder) throws {
             let c = try checkedContainer(decoder, Keys.self)
             browser = try c.decodeIfPresent(BrowserValues.self, forKey: .browser)
@@ -298,6 +304,14 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
             keybind = try c.decodeIfPresent([String: String].self, forKey: .keybind)
             plugins = try c.decodeIfPresent(TOMLTable.self, forKey: .plugins)
             notifications = try c.decodeIfPresent(NotificationPolicy.self, forKey: .notifications)
+            agents = try c.decodeIfPresent(AgentValues.self, forKey: .agents)
+        }
+    }
+    private struct AgentValues: Decodable {
+        let showActivity: Bool?
+        enum Keys: String, CodingKey, CaseIterable { case showActivity = "show_activity" }
+        init(from decoder: any Decoder) throws {
+            showActivity = try checkedContainer(decoder, Keys.self).decodeIfPresent(Bool.self, forKey: .showActivity)
         }
     }
     private struct BrowserValues: Decodable {

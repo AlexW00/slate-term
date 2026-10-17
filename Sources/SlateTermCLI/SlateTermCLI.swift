@@ -7,7 +7,7 @@ import SlateTermSettings
 @main
 struct SlateTermCLI: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "slate-term", abstract: "Control a running Slate Terminal workspace.",
-        subcommands: [WarningsCLI.self, NotifyCLI.self, NotificationsCLI.self, Tabs.self, Panes.self, WindowsCLI.self, TerminalCommand.self, BrowserCommand.self, WebCLI.self, Plugins.self, Events.self, ContextCommand.self, ShellCommand.self, LayoutCommand.self, SavedLayoutsCommand.self, Commands.self, ConfigCommand.self, WorkspaceCLI.self, APICLI.self, AppearanceCLI.self, PaletteCLI.self, SkillCLI.self, WelcomeCLI.self, RPC.self, Version.self, PluginWorker.self])
+        subcommands: [WarningsCLI.self, NotifyCLI.self, NotificationsCLI.self, Tabs.self, Panes.self, WindowsCLI.self, TerminalCommand.self, BrowserCommand.self, WebCLI.self, Plugins.self, Events.self, ContextCommand.self, ShellCommand.self, LayoutCommand.self, SavedLayoutsCommand.self, Commands.self, ConfigCommand.self, WorkspaceCLI.self, APICLI.self, AppearanceCLI.self, AgentActivityCLI.self, PresenceCLI.self, PaletteCLI.self, SkillCLI.self, WelcomeCLI.self, RPC.self, Version.self, PluginWorker.self])
 
     static func main() {
         do {
@@ -34,6 +34,8 @@ struct Connection: ParsableArguments {
     @Flag(help: "Emit JSON results and machine-readable JSON errors.") var json = false
     @Option(help: "Require this app instance; rejects a restarted/replaced host.") var expectedInstanceId: String?
     @Option(help: "Opaque deliveryContext from an event poll for this caller; never inferred from environment.") var cause: String?
+    @Option(help: "Agent name shown on panes this call touches; defaults to SLATE_TERM_ACTOR. Display only.") var actor: String?
+    @Option(help: "Short reason shown next to the agent name, at most 80 characters. Requires an actor.") var note: String?
 
     func call(_ method: String, params: [String: JSONValue] = [:], timeoutSeconds: Int = 30) throws {
         try printJSON(request(method, params: params, timeoutSeconds: timeoutSeconds))
@@ -60,8 +62,10 @@ struct Connection: ParsableArguments {
             guarded["expectedInstanceId"] = .string(inherited)
         }
         if let expectedInstanceId { guarded["expectedInstanceId"] = .string(expectedInstanceId) }
+        // Shell hooks and discovery never show presence and must not pay for capability negotiation.
+        let presence = method.hasPrefix("shell.") || method == "api.describe" ? nil : try presenceActor(environment: environment, service: service)
         let metadata: RPCMetadata?
-        do { metadata = try cause.map { try RPCMetadata(cause: $0) } }
+        do { metadata = cause == nil && presence == nil ? nil : try RPCMetadata(cause: cause, actor: presence) }
         catch { throw ValidationError("--cause must be an opaque delivery reference of 1–64 ASCII letters, digits, hyphens or underscores") }
         let client = UnixClient(path: path, timeoutSeconds: timeoutSeconds, service: service)
         let contributed = method == "command.run" && guarded["id"]?.string?.hasPrefix("plugin.") == true
@@ -78,6 +82,33 @@ struct Connection: ParsableArguments {
             }
             return try session.call(method, params: guarded, metadata: metadata)
         }
+    }
+}
+
+extension Connection {
+    /// Agents identify themselves once with SLATE_TERM_ACTOR; scripts and services never do.
+    func presenceActor(environment: [String: String], service: ServiceIdentity?) throws -> PresenceActor? {
+        guard service == nil else {
+            if actor != nil || note != nil { throw ValidationError("--actor and --note are not available to background services") }
+            return nil
+        }
+        var name = actor
+        if name == nil, let inherited = environment["SLATE_TERM_ACTOR"], !inherited.isEmpty {
+            // Presence is display only, so a bad inherited name must never break the call itself.
+            if PresenceActor.isValidName(inherited) { name = inherited }
+            else if note == nil {
+                FileHandle.standardError.write(Data("slate-term: ignoring invalid SLATE_TERM_ACTOR; use 1–32 ASCII letters, digits, '.', '_', '-' or ':'\n".utf8))
+            }
+        }
+        guard let name else {
+            if note != nil { throw ValidationError("--note requires a valid agent name; set SLATE_TERM_ACTOR or pass --actor") }
+            return nil
+        }
+        // The launching pane only disambiguates labels, so use it only for its own socket.
+        let inherited = socket == nil || socket == environment["SLATE_TERM_SOCKET"]
+        let home = inherited ? environment["SLATE_TERM_PANE_ID"].flatMap { PresenceActor.isValidHome($0) ? $0 : nil } : nil
+        do { return try PresenceActor(name: name, note: note, home: home) }
+        catch { throw ValidationError("Invalid agent identity: \(error)") }
     }
 }
 

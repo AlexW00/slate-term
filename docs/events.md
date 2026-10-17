@@ -107,6 +107,8 @@ Automation admission allows 10 mutations/second with a burst of 20 per plugin ID
 - `host.plugin.panel-state.changed`: pane/tab-scoped state fact with plugin/content IDs, before/after state revisions, reset flag/key summary and standard workspace attribution, followed by the appropriately scoped workspace invalidation. State changes advance workspace, not layout revisions. Equal patches/absent deletes emit nothing; **reset always advances revision and emits**, even when empty. See [plugin persistence](plugin-persistence.md). The former instance-directed storage event is removed.
 - `host.layout.startup.failed`: saved-recipe startup failure, with bounded state, current workspace revision and original operation attribution. Command text and diagnostic messages remain outside the event; use `layouts.startupStatus`.
 
+`host.presence.changed` reports an agent activity beginning or ending on a pane, once per activity rather than per call. The payload is value-free (`activityId`, `phase`, `actionKind`, claimed `actor.name`, `pane`, `count`, `leased`, optional `result`); notes stay out of the journal and are read with `presence.list`. Event-caused calls never create presence. See [agent presence](presence.md).
+
 `host.notifications.changed` is a value-free invalidation with `outstanding`; read `notifications.list/status` rather than reconstructing state from events. It does not include notification titles/bodies or command text, and inherits admitted causation where applicable. [Notification state](notifications.md) is separate from this event journal and is not persistent history.
 
 ## Workspace commit facts
