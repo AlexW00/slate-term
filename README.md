@@ -2,7 +2,7 @@
 
 **Software you can shape.**
 
-[Website](https://alexw00.github.io/slate-term/)
+[Website](https://slate.weichart.de/)
 
 Slate is a native macOS terminal powered by libghostty. Bring terminals, browser panes, and your own tools into one workspace. Its plugin system and CLI let you and your AI agents build panels, automate tasks, and refine your workflow as you go.
 

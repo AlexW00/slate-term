@@ -8,6 +8,8 @@ Detailed change record for agents and maintainers. Public release notes live in 
 
 ### Changed
 
+- Moved website canonical and sharing URLs, and the README website link, to `slate.weichart.de`. Configured the GitHub Pages custom domain and a DNS-only Cloudflare CNAME to `alexw00.github.io`.
+
 ### Fixed
 
 ### Internal
