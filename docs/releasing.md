@@ -2,9 +2,19 @@
 
 Slate's release workflow builds Apple Silicon apps for macOS 27 or later. A successful workflow produces a **draft** GitHub release containing a signed and notarized ZIP, a signed and notarized DMG, matching source, a signed Sparkle appcast, signed release notes, and SHA-256 checksums. Publishing the draft remains a separate maintainer action. Sparkle 2.10.0 uses the latest published stable release’s appcast; preparing a draft does not advertise an update.
 
+## Changelog and release skills
+
+For meaningful implementation work, follow [slate-changelog](../.agents/skills/slate-changelog/SKILL.md) and keep the detailed [change ledger](../CHANGELOG.md) current in the same change. For release work, follow [slate-release](../.agents/skills/slate-release/SKILL.md): reconcile the ledger against the actual changes since the last published stable tag, then curate `docs/releases/vX.Y.Z.md`. Both the GitHub release description and signed in-app notes use that reviewed file. Routine internal details can stay in the ledger; retain user-relevant compatibility, security, breaking changes, and limitations.
+
+Preparation, building a signed draft, and publishing are separate operations. Carry the user's existing authorization forward and honor any release hold. Build includes the reviewed commit and tag pushes when explicitly requested; publication still needs explicit authorization. A draft is marked Pending publication in the ledger until it is actually public. The release skill requires a candidate DMG installation in VMPal, followed by a real previous-version upgrade through Sparkle after authorized publication.
+
 ## Repository checks
 
 Only pushes of version tags matching `v*` (release format `vX.Y.Z`) run CI and release workflows. Pull requests, ordinary branch pushes (including `main`), and manual dispatches do not start them. Tag-triggered CI retains the complete fetched-history secret scan, release-tooling tests, verification-inventory tests, workflow validation, Swift unit tests, and unsigned Release build/package smoke test. The release workflow validates the tag before building, signing, notarizing, and creating a draft. Actions are pinned by commit; Dependabot proposes updates. Signing credentials remain restricted to the release environment. The separate website workflow is unchanged. Native application behavior still requires the [VM gates](vm-testing.md); CI packaging does not certify GUI behavior.
+
+Release notes are validated before allocating the macOS build runner. The environment-bound build job validates the public update key and repository-specific feed before Metal setup, tests, or compilation, then validates the compiled app again. Notes must be nonempty UTF-8 text, without NUL characters, and at most 256 KiB.
+
+CI and Release restore the same pinned engine cache, keyed by runner OS/architecture, Xcode version, and engine script/patch hashes. Both always run the engine build and its source, patch, symbol, and receipt checks, then save a missing cache immediately after success, before app packaging or credentials. Only `.tools/zig-*` and `.build/bootstrap` are cached; release assets and signing material are excluded. [GitHub cache scope](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache) permits the same tag and eligible default-branch caches, not caches from other tags. New-tag CI and Release jobs may both miss; this change does not guarantee a warm build for each release or deduplicate the two builds.
 
 The macOS jobs use the Apple Silicon `xcode-27` runner because the app requires SDK 27. Each job installs Apple's optional Metal Toolchain if the shader compiler is unavailable. The bootstrap pins Ghostty, Zig, downloaded archive hashes, and the local Ghostty patch. It disables Sentry and gettext, and rejects their symbols in the resulting library. The license collector checks pinned dependency notices, including Sparkle and its bundled third-party notices, and installs them into the app. The Swift library and Xcode package pin inventories are checked separately because Sparkle belongs only to the native app.
 
@@ -90,7 +100,7 @@ python3 scripts/release-updates.py prepare --tools .build/sparkle-tools \
   --notes docs/releases/v0.1.0.md --repository OWNER/REPOSITORY
 ```
 
-Use a fresh tools directory or reuse the verified existing distribution; the bootstrap refuses to overwrite one. Regenerate `SHA256SUMS` after adding `appcast.xml` and `*-arm64.md`, as the workflow does. Do not edit signed appcasts, archives, or notes after generation; changes require regenerating and verifying signatures. GitHub’s generated release description is separate from the reviewed, signed in-app release notes.
+Use a fresh tools directory or reuse the verified existing distribution; the bootstrap refuses to overwrite one. Regenerate `SHA256SUMS` after adding `appcast.xml` and `*-arm64.md`, as the workflow does. Do not edit signed appcasts, archives, or notes after generation; changes require regenerating and verifying signatures. The draft job verifies downloaded checksums and requires exactly one notes asset, then uses that same reviewed Markdown for the GitHub release description. It does not generate a separate commit-list description.
 
 ## Publishing an update
 

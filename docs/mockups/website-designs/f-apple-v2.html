@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Slate Terminal — Software you can shape</title>
 <meta name="description" content="A native macOS terminal you and your agents can build on. Bring terminals, browser panes, and your own tools into one workspace.">
+<link rel="icon" type="image/png" href="assets/app-icon.png">
 <link rel="canonical" href="https://alexw00.github.io/slate-term/">
 <meta property="og:title" content="Slate Terminal — Software you can shape">
 <meta property="og:description" content="A native macOS terminal you and your agents can build on. Download for Apple silicon and macOS 27 or later.">
@@ -720,7 +721,7 @@ h2 .g{color:var(--text-3)}
 footer{background:var(--bg-alt);color:var(--text-2);font-size:12px;line-height:1.33;letter-spacing:-.01em;padding:18px 0 22px}
 footer .fnote{padding-bottom:14px;border-bottom:1px solid var(--hair)}
 footer .crumbs{display:flex;align-items:center;gap:8px;padding:14px 0;border-bottom:1px solid var(--hair);color:var(--text)}
-footer .crumbs svg{width:14px;height:14px}
+footer .crumbs img{width:14px;height:14px}
 footer .legal{display:flex;justify-content:space-between;gap:10px 24px;flex-wrap:wrap;padding-top:14px}
 footer nav{display:flex;flex-wrap:wrap}
 footer nav a{color:var(--text-2);padding:0 10px;border-left:1px solid var(--hair)}
@@ -738,13 +739,6 @@ footer a:hover{color:var(--text)}
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <defs>
-    <linearGradient id="icoBg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3c3f46"/><stop offset="1" stop-color="#1b1c20"/></linearGradient>
-    <symbol id="app" viewBox="0 0 100 100">
-      <rect x="4" y="4" width="92" height="92" rx="22" fill="url(#icoBg)"/>
-      <rect x="4.5" y="4.5" width="91" height="91" rx="21.5" fill="none" stroke="#fff" stroke-opacity=".14"/>
-      <path d="M28 36 42 50 28 64" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
-      <path d="M50 64h22" stroke="#9fd0ff" stroke-width="7" stroke-linecap="round"/>
-    </symbol>
     <symbol id="apple" viewBox="0 0 24 24"><path fill="currentColor" d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/></symbol>
     <symbol id="chev" viewBox="0 0 8 12"><path d="M1.5 1.5 6 6l-4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
   </defs>
@@ -766,7 +760,7 @@ footer a:hover{color:var(--text)}
 <main id="top">
   <section class="hero" aria-labelledby="hero-title">
     <div class="wrap">
-      <svg class="appicon" width="96" height="96" aria-hidden="true"><use href="#app"/></svg>
+      <img class="appicon" src="assets/app-icon.png" width="96" height="96" alt="">
       <p class="eyebrow">Slate Terminal</p>
       <h1 id="hero-title">Software you can shape.</h1>
       <p class="lede">A native macOS terminal you and your agents can build on.</p>
@@ -1003,7 +997,7 @@ footer a:hover{color:var(--text)}
   <!-- Close -->
   <section class="close" aria-labelledby="close-title">
     <div class="wrap reveal">
-      <svg class="appicon" width="72" height="72" aria-hidden="true"><use href="#app"/></svg>
+      <img class="appicon" src="assets/app-icon.png" width="72" height="72" alt="">
       <h2 id="close-title"><span>A solid terminal.</span><span>Yours to shape.</span><span class="c3">Open source.</span></h2>
       <div class="ctas">
         <a class="btn" href="https://github.com/AlexW00/slate-term/releases/latest/download/Slate-Terminal-arm64.dmg"><svg class="apple" aria-hidden="true"><use href="#apple"/></svg>Download for Mac</a>
@@ -1017,7 +1011,7 @@ footer a:hover{color:var(--text)}
 <footer>
   <div class="wrap">
     <p class="fnote">Slate is actively in development. The demos illustrate possible workflows; example plugins are not bundled with the app.</p>
-    <div class="crumbs"><svg aria-hidden="true"><use href="#app"/></svg><span>Slate Terminal</span></div>
+    <div class="crumbs"><img src="assets/app-icon.png" width="14" height="14" alt=""><span>Slate Terminal</span></div>
     <div class="legal">
       <span>Slate Terminal · GPL-3.0-or-later</span>
       <nav aria-label="Footer"><a href="https://github.com/AlexW00/slate-term">Source</a><a href="https://github.com/AlexW00/slate-term/blob/main/COPYING.md">License</a><a href="https://github.com/AlexW00/slate-term/releases">Releases</a><a href="https://github.com/AlexW00/slate-term/issues">Feedback</a></nav>
@@ -1297,7 +1291,7 @@ win.style.cssText = "left:36px;top:46px;width:1128px;height:690px";
 desk.append(win);
 desk.append(h(`<div class="dim-ov" id="dim"></div>`));
 desk.append(h(`<div class="ov spot" id="spot"><div class="q"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg><span class="sq"></span></div>
-  <div class="res hid"><svg width="34" height="34" aria-hidden="true"><use href="#app"/></svg><span><b>Launch Day</b><small>Opens your saved Slate layout</small></span><span class="rk">↩</span></div></div>`));
+  <div class="res hid"><img src="assets/app-icon.png" width="34" height="34" alt=""><span><b>Launch Day</b><small>Opens your saved Slate layout</small></span><span class="rk">↩</span></div></div>`));
 desk.append(h(`<svg class="cursor" id="cursor" viewBox="0 0 20 24" aria-hidden="true"><path d="M2 1.5v18.2l4.6-4.4 3 6.9 3.1-1.3-3-6.8h6.5z" fill="#000" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg>`));
 fit(screen, stage, STW);
 

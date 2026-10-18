@@ -2,7 +2,7 @@
 
 ## Development status
 
-- This app is still in development. Its only current use is the Debug build built through Xcode, with a few test plugins installed.
+- This app is in active development and has published releases. Use the release ledger and published artifacts to establish compatibility and upgrade baselines.
 - Data migrations and backward-compatibility machinery for unreleased development formats are not required.
 
 ## Capability parity is part of completion
@@ -44,3 +44,9 @@
 - When building or changing a plugin, an example plugin, or any plugin pane UI in this repository, read `skills/slate-terminal/SKILL.md` first and follow its references: `references/building-plugins.md` for plugin structure and `references/ui/INDEX.md` for the UI design system.
 - Plugin pages use the design system by default: `slate.css` and `slate-theme.js` from `references/ui/`, recipes from its components, and palette tokens instead of hard-coded colors. Explicit user design instructions take precedence.
 - When a plugin needs a component the design system lacks, add it as a recipe in `references/ui/components/` and run `python3 design-system/build.py`, rather than styling it only inside the plugin.
+
+## Changelog and releases
+
+- For meaningful completed changes, read `.agents/skills/slate-changelog/SKILL.md` and update `CHANGELOG.md` in the same task-owned commit. If committing is not authorized, leave the entry with the implementation changes for review. Preserve unrelated entries from other worktrees; record actual outcomes and distinguish verified behavior from checks still needed.
+- For release preparation, signed draft builds, or publication, read `.agents/skills/slate-release/SKILL.md` and `docs/releasing.md`. Curate `docs/releases/vX.Y.Z.md` from the ledger and actual release diff. Preparing notes does not authorize a tag, push, or publication; carry explicit authorization for those operations forward without asking again.
+- Keep these maintenance skills repository-local. `skills/slate-terminal` remains the app-consumer and plugin skill; do not install the maintenance skills globally or add release instructions to that consumer skill.

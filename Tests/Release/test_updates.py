@@ -33,6 +33,40 @@ class UpdateReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "repository"):
             updates.validate_configuration(self.info(), "different/project")
 
+    def test_reviewed_notes_reject_missing_empty_binary_and_oversized_input(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            notes = Path(temporary) / "notes.md"
+            with self.assertRaisesRegex(ValueError, "regular reviewed"):
+                updates.validate_notes(notes)
+            for content in (b"", b" \n\t", b"\xff", b"hello\x00world", b"x" * (256 * 1024 + 1)):
+                notes.write_bytes(content)
+                with self.subTest(content_size=len(content)), self.assertRaises(ValueError):
+                    updates.validate_notes(notes)
+            notes.write_bytes("# Changes\n\n日本語の修正\n".encode("utf-8"))
+            updates.validate_notes(notes)
+            notes.write_bytes(b"x" * (256 * 1024))
+            updates.validate_notes(notes)
+            link = Path(temporary) / "linked.md"
+            link.symlink_to(notes)
+            with self.assertRaisesRegex(ValueError, "regular reviewed"):
+                updates.validate_notes(link)
+
+    def test_public_configuration_cli_fails_before_build_inputs_exist(self):
+        environment = {k: v for k, v in os.environ.items() if not k.startswith(("SLATE_", "SPARKLE_"))}
+        command = [updates.sys.executable, str(ROOT / "scripts/release-updates.py"),
+                   "validate-public-config", "--repository", "example/slate"]
+        with tempfile.TemporaryDirectory() as temporary:
+            missing = subprocess.run(command, cwd=temporary, env=environment, capture_output=True)
+            self.assertNotEqual(missing.returncode, 0)
+            environment.update(SPARKLE_PUBLIC_ED_KEY=self.info()["SUPublicEDKey"],
+                               SPARKLE_FEED_URL=self.info()["SUFeedURL"])
+            valid = subprocess.run(command, cwd=temporary, env=environment, capture_output=True)
+            self.assertEqual(valid.returncode, 0, valid.stderr)
+            environment["SPARKLE_FEED_URL"] = "https://github.com/other/project/releases/latest/download/appcast.xml"
+            mismatch = subprocess.run(command, cwd=temporary, env=environment, capture_output=True)
+            self.assertNotEqual(mismatch.returncode, 0)
+            self.assertIn(b"repository", mismatch.stderr)
+
     def test_key_errors_never_echo_secret(self):
         for value in ("private-secret-not-base64", "YWJj"):
             with self.assertRaises(ValueError) as error:

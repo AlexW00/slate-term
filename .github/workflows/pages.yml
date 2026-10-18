@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - docs/mockups/website-designs/f-apple-v2.html
+      - docs/mockups/website-designs/assets/**
       - .github/workflows/pages.yml
   workflow_dispatch:
 
@@ -29,6 +30,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/slate-pages"
           cp docs/mockups/website-designs/f-apple-v2.html "$RUNNER_TEMP/slate-pages/index.html"
+          cp -R docs/mockups/website-designs/assets "$RUNNER_TEMP/slate-pages/assets"
           python3 - <<'PY'
           from html.parser import HTMLParser
           import os
@@ -40,7 +42,11 @@ jobs:
                   super().__init__()
                   self.scripts = []
                   self.in_script = False
+                  self.assets = []
               def handle_starttag(self, tag, attrs):
+                  attributes = dict(attrs)
+                  if tag == "img" or (tag == "link" and attributes.get("rel") == "icon"):
+                      self.assets.append(attributes.get("src") or attributes.get("href"))
                   if tag == "script":
                       assert "src" not in dict(attrs), "The page must contain its scripts."
                       self.in_script = True
@@ -55,6 +61,9 @@ jobs:
           page = Path(os.environ["RUNNER_TEMP"]) / "slate-pages" / "index.html"
           parser = Scripts()
           parser.feed(page.read_text())
+          for asset in parser.assets:
+              assert asset and asset.startswith("assets/"), "Expected a bundled page asset."
+              assert (page.parent / asset).is_file(), f"Missing page asset: {asset}"
           assert parser.scripts, "Expected the landing page's interactive scripts."
           for script in parser.scripts:
               subprocess.run(["node", "--check"], input=script, text=True, check=True)

@@ -32,6 +32,10 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: python3 scripts/release-metadata.py --tag "$RELEASE_TAG" --default-branch "$DEFAULT_BRANCH"
+      - name: Validate reviewed release notes
+        env:
+          RELEASE_TAG: ${{ steps.metadata.outputs.tag }}
+        run: python3 scripts/release-updates.py validate-notes --notes "docs/releases/$RELEASE_TAG.md"
       - name: Scan source and all fetched history
         run: python3 scripts/security-scan.py
       - name: Check release tooling
@@ -54,12 +58,41 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.12'
+      - name: Validate public update configuration before building
+        env:
+          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
+          SPARKLE_FEED_URL: ${{ vars.SPARKLE_FEED_URL }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+        run: python3 scripts/release-updates.py validate-public-config --repository "$RELEASE_REPOSITORY"
       - name: Ensure Metal compiler is available
         run: bash scripts/setup-metal-ci.sh
+      - name: Toolchain
+        id: toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+          xcrun --sdk macosx --show-sdk-version
+          echo "build=$(xcodebuild -version | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - name: Restore pinned engine inputs
+        id: engine-cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            .tools/zig-*
+            .build/bootstrap
+          key: ghostty-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.build }}-${{ hashFiles('scripts/build-ghostty.sh', 'patches/**') }}
       - name: Test packages
         run: swift test --jobs 4 --only-use-versions-from-resolved-file
       - name: Build pinned engine
         run: bash scripts/build-ghostty.sh
+      - name: Save validated engine inputs
+        if: steps.engine-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            .tools/zig-*
+            .build/bootstrap
+          key: ${{ steps.engine-cache.outputs.cache-primary-key }}
       - name: Build unsigned app
         env:
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
@@ -67,12 +100,8 @@ jobs:
           SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
           SPARKLE_FEED_URL: ${{ vars.SPARKLE_FEED_URL }}
         run: bash scripts/release-build.sh --version "$RELEASE_VERSION" --build-number "$BUILD_NUMBER"
-      - name: Check release update configuration and notes
-        env:
-          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
-        run: |
-          python3 scripts/release-updates.py validate-config --app 'artifacts/release/Slate Terminal.app'
-          test -s "docs/releases/$RELEASE_TAG.md"
+      - name: Check built app update configuration
+        run: python3 scripts/release-updates.py validate-config --app 'artifacts/release/Slate Terminal.app'
       - name: Package corresponding source before loading credentials
         env:
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
@@ -152,5 +181,7 @@ jobs:
         run: |
           actual_commit="$(gh api "repos/$GH_REPO/commits/$RELEASE_TAG" --jq .sha)"
           test "$actual_commit" = "$EXPECTED_COMMIT" || { echo "Release tag moved during the build." >&2; exit 1; }
+          notes=(assets/*-arm64.md)
+          test "${#notes[@]}" -eq 1 && test -s "${notes[0]}" || { echo "Expected one reviewed release notes asset." >&2; exit 1; }
           gh release create "$RELEASE_TAG" assets/*.zip assets/*.dmg assets/*-source.tar.gz assets/SHA256SUMS assets/appcast.xml assets/*-arm64.md \
-            --draft --verify-tag --title "Slate Terminal $RELEASE_VERSION" --generate-notes
+            --draft --verify-tag --title "Slate Terminal $RELEASE_VERSION" --notes-file "${notes[0]}"

@@ -42,18 +42,30 @@ def decode_key(value, lengths):
     return data
 
 
-def validate_configuration(info, repository=None):
-    decode_key(info.get("SUPublicEDKey", ""), (32,))
-    feed = info.get("SUFeedURL", "")
+def validate_public_configuration(public_key, feed, repository=None):
+    decode_key(public_key, (32,))
     require(re.fullmatch(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/releases/latest/download/appcast\.xml", feed),
             "Update feed must be the stable GitHub latest-release appcast URL")
     if repository:
         require(feed == f"https://github.com/{repository}/releases/latest/download/appcast.xml",
                 "Update feed does not match the release repository")
+
+def validate_configuration(info, repository=None):
+    validate_public_configuration(info.get("SUPublicEDKey", ""), info.get("SUFeedURL", ""), repository)
     require(info.get("SURequireSignedFeed") is True, "Signed update feeds must be required")
     require(info.get("SUVerifyUpdateBeforeExtraction") is True, "Updates must be verified before extraction")
     require(type(info.get("SUSignedFeedFailureExpirationInterval")) in (int, float) and
             info["SUSignedFeedFailureExpirationInterval"] == 0, "Feed signature validation must not expire")
+
+
+def validate_notes(path):
+    require(path.is_file() and not path.is_symlink(), "Provide a regular reviewed release notes file")
+    require(0 < path.stat().st_size <= 256 * 1_024, "Release notes exceed native update size limit")
+    try:
+        content = path.read_bytes().decode("utf-8")
+    except UnicodeDecodeError:
+        raise UpdateError("Release notes must be UTF-8 text") from None
+    require(content.strip() and "\x00" not in content, "Provide nonempty reviewed release notes text")
 
 
 def bootstrap_tools(destination):
@@ -141,7 +153,7 @@ def prepare(args):
     name = f"Slate-Terminal-{version}-{build}-arm64"
     archive = args.assets / (name + ".zip")
     require(archive.is_file() and not archive.is_symlink(), "Missing signed update archive")
-    require(args.notes.is_file() and args.notes.read_text().strip(), "Provide nonempty reviewed release notes")
+    validate_notes(args.notes)
     require(not (args.assets / "appcast.xml").exists() and not (args.assets / (name + ".md")).exists(), "Update assets already exist")
     verify_tools(args.tools)
     secret = os.environ.get("SLATE_SPARKLE_PRIVATE_KEY", "").strip()
@@ -151,7 +163,7 @@ def prepare(args):
         temporary = Path(temporary)
         shutil.copyfile(archive, temporary / archive.name)
         notes = temporary / (name + ".md")
-        notes.write_text(args.notes.read_text())
+        shutil.copyfile(args.notes, notes)
         prefix = f"https://github.com/{args.repository}/releases/download/v{version}/"
         run_tool(args.tools, "generate_appcast", ["--download-url-prefix", prefix, "--release-notes-url-prefix", prefix,
                  "--maximum-deltas", "0", "--maximum-versions", "1", "-o", str(temporary / "appcast.xml"), str(temporary)], secret, temporary)
@@ -173,6 +185,10 @@ def main():
     bootstrap.add_argument("--output", type=Path, required=True)
     validate = commands.add_parser("validate-config")
     validate.add_argument("--app", type=Path, required=True)
+    public = commands.add_parser("validate-public-config")
+    public.add_argument("--repository", required=True)
+    notes = commands.add_parser("validate-notes")
+    notes.add_argument("--notes", type=Path, required=True)
     prepare_parser = commands.add_parser("prepare")
     prepare_parser.add_argument("--tools", type=Path, required=True)
     prepare_parser.add_argument("--app", type=Path, required=True)
@@ -182,6 +198,11 @@ def main():
     args = parser.parse_args()
     if args.command == "bootstrap-tools":
         bootstrap_tools(args.output.resolve())
+    elif args.command == "validate-public-config":
+        validate_public_configuration(os.environ.get("SPARKLE_PUBLIC_ED_KEY", ""),
+                                      os.environ.get("SPARKLE_FEED_URL", ""), args.repository)
+    elif args.command == "validate-notes":
+        validate_notes(args.notes)
     elif args.command == "validate-config":
         with (args.app / "Contents/Info.plist").open("rb") as stream:
             validate_configuration(plistlib.load(stream))
