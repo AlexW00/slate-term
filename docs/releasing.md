@@ -61,6 +61,8 @@ Signing uses an explicit keychain for each nested executable and app, preserves 
 3. Set the public `SPARKLE_PUBLIC_ED_KEY` and `SPARKLE_FEED_URL` environment variables described below, and commit reviewed release notes at `docs/releases/vX.Y.Z.md`. After local checks and relevant VM/manual QA pass, create a `vX.Y.Z` tag on the reviewed default-branch commit and push it (`git tag v0.1.0` then `git push origin v0.1.0`, for example). The tag push starts CI and the release pipeline; there is no manual-dispatch trigger. Metadata validation rejects tags outside default-branch history or invalid version syntax.
 4. Inspect the draft, download/check its assets, install and exercise the notarized app on a clean Mac/VM, and confirm source availability. Then publish the draft as the latest stable release when authorized. Follow the update publication checks below. Re-running an already-created draft fails rather than replacing published assets silently; inspect the prior run before retrying.
 
+The workflow also includes `Slate-Terminal-arm64.dmg`, a byte-identical copy of the versioned, notarized DMG. The website and README use `https://github.com/AlexW00/slate-term/releases/latest/download/Slate-Terminal-arm64.dmg` so their direct download follows the latest stable release. The updater continues to use immutable, version-specific archive URLs. Include both DMGs in `SHA256SUMS`.
+
 The build number is the workflow run number. Source packaging happens before credentials are loaded. Uploads retain only distributable ZIP/DMG/source/appcast/release-note/checksum files for seven days; temporary keychains, source caches, and raw credential inputs are not uploaded.
 
 ## In-app update configuration and signing
@@ -96,7 +98,7 @@ GitHub’s [latest release asset route](https://docs.github.com/en/repositories/
 
 When separately authorized to publish:
 
-1. Verify the draft’s source, ZIP, DMG, appcast, notes, and checksums. Check that the appcast’s tag-specific archive and notes URLs match assets on that same draft.
+1. Verify the draft’s source, ZIP, both DMGs, appcast, notes, and checksums. Confirm `Slate-Terminal-arm64.dmg` is byte-identical to the versioned DMG. Check that the appcast’s tag-specific archive and notes URLs match assets on that same draft.
 2. Verify version and build numbers both advance beyond the current stable release. The workflow run number supplies the build number; do not promote an older tag or rerun as latest. Sparkle refuses downgrades, but an older latest feed could hide an available newer release.
 3. Publish the draft as a stable release and explicitly select **Set as the latest release**. Keep prereleases on a separate future channel; this pipeline supports stable versions only.
 4. Without GitHub authentication, fetch the stable feed URL and each referenced archive/notes URL. Compare downloaded bytes with `SHA256SUMS`, and confirm the stable feed resolves to the newly published tag. A private repository, missing appcast on the latest release, deletion, or an incorrectly selected latest release will break the stable endpoint.

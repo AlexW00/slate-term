@@ -1,5 +1,3 @@
-> **Actively in development and nearing its first release.**
-
 # Slate Terminal
 
 **Software you can shape.**
@@ -12,7 +10,9 @@ Slate is a native macOS terminal powered by libghostty. Bring terminals, browser
 - Plugins for custom panels, commands, and background services.
 - A shared automation API for the CLI, plugins, and agents.
 
-Requires **Apple Silicon and macOS 27 or later**.
+[**Download for Mac**](https://github.com/AlexW00/slate-term/releases/latest/download/Slate-Terminal-arm64.dmg) · [Release notes](https://github.com/AlexW00/slate-term/releases/latest)
+
+Requires **Apple Silicon and macOS 27 or later**. Open the DMG and drag Slate Terminal into Applications. Use **Check for Updates…** in the app menu for future releases.
 
 ## Documentation
 

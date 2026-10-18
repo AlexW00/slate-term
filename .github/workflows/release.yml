@@ -101,6 +101,12 @@ jobs:
           python3 scripts/release-updates.py prepare --tools .build/sparkle-tools \
             --app 'artifacts/release/Slate Terminal.app' --assets artifacts/release/assets \
             --notes "docs/releases/$RELEASE_TAG.md" --repository "$RELEASE_REPOSITORY"
+      - name: Provide stable installer download
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        working-directory: artifacts/release/assets
+        run: cp "Slate-Terminal-$RELEASE_VERSION-$BUILD_NUMBER-arm64.dmg" Slate-Terminal-arm64.dmg
       - name: Checksum every distributable
         working-directory: artifacts/release/assets
         run: |
