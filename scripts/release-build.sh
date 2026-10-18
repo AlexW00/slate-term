@@ -56,6 +56,7 @@ xcodebuild -project slate-term.xcodeproj -scheme SlateTermApp -configuration Rel
   -clonedSourcePackagesDirPath "$root/.build/xcode-packages" \
   -onlyUsePackageVersionsFromResolvedFile \
   ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
+  SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-}" SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-}" \
   ENABLE_HARDENED_RUNTIME=YES MARKETING_VERSION="$version" CURRENT_PROJECT_VERSION="$build_number" \
   build > "$output/build.log" 2>&1 || {
     echo "Release build failed; inspect $output/build.log" >&2; exit 1;

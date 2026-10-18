@@ -128,6 +128,7 @@ extension WorkspaceHost {
             "apiVersion": .integer(1), "appInstanceId": .string(instanceID), "identityGuards": .bool(true),
             "workspaceRevisions": .bool(true), "surface": .string("trusted"),
             "pluginPersistence": Self.pluginPersistenceDescriptor,
+            "updates": Self.updatesDescriptor,
             "webAutomation": .object([
                 "version": .integer(1), "paneKinds": .array([.string("browser"), .string("private-browser"), .string("registeredPlugin")]),
                 "identity": .array([.string("viewId"), .string("documentId")]),

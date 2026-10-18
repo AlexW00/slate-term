@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Slate Terminal · Update flow</title>
+<style>
+:root {
+  color-scheme: light;
+  --canvas: #e8e9ed;
+  --window: rgba(247,247,249,.97);
+  --notes: rgba(255,255,255,.86);
+  --text: #222226;
+  --secondary: #63636c;
+  --muted: #74747d;
+  --line: rgba(32,32,40,.12);
+  --strong-line: rgba(32,32,40,.2);
+  --button: #fff;
+  --button-hover: #f1f1f4;
+  --accent: #2269e8;
+  --accent-hover: #175bd1;
+  --notice: #f4f5f8;
+  --error: #ae302b;
+  --error-bg: #fff0ef;
+  --success: #207348;
+  --shadow: 0 30px 90px -24px rgba(0,0,0,.32), 0 1px 3px rgba(0,0,0,.1);
+  --font: -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  --mono: ui-monospace,"SF Mono",Menlo,monospace;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #1b1c20;
+  --window: rgba(40,40,44,.98);
+  --notes: rgba(28,28,31,.94);
+  --text: #f0f0f3;
+  --secondary: #babac2;
+  --muted: #aaaab4;
+  --line: rgba(255,255,255,.12);
+  --strong-line: rgba(255,255,255,.22);
+  --button: #424247;
+  --button-hover: #505057;
+  --accent: #3478f6;
+  --accent-hover: #4787ff;
+  --notice: #333338;
+  --error: #ff9e98;
+  --error-bg: #492e30;
+  --success: #91ddb3;
+  --shadow: 0 30px 90px -24px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.05);
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; min-width: 320px; background: var(--canvas); color: var(--text); font: 13px/1.5 var(--font); -webkit-font-smoothing: antialiased; }
+button,select { font: inherit; }
+button,a,select { -webkit-tap-highlight-color: transparent; }
+button { cursor: pointer; }
+button:disabled { cursor: default; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+a { color: var(--accent); text-underline-offset: 3px; }
+.preview-bar { position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 18px; flex-wrap: wrap; padding: 18px 30px; border-bottom: 1px solid var(--line); background: var(--window); }
+.preview-brand { display: flex; gap: 10px; align-items: baseline; }
+.preview-brand strong { font-size: 13px; font-weight: 650; }
+.preview-brand span { color: var(--secondary); font-size: 12px; }
+.preview-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.preview-controls label { color: var(--secondary); font-size: 12px; }
+select { min-height: 32px; padding: 4px 28px 4px 10px; border: 1px solid var(--strong-line); border-radius: 7px; color: var(--text); background-color: var(--button); }
+.preview-controls .plain { min-height: 32px; padding: 4px 11px; }
+.stage { position: relative; display: grid; place-items: center; min-height: calc(100svh - 118px); padding: 48px 24px; isolation: isolate; }
+.workspace { position: absolute; inset: 36px max(28px,calc((100vw - 1080px)/2)); z-index: -1; overflow: hidden; border-radius: 15px; background: #15171a; box-shadow: 0 0 0 1px rgba(0,0,0,.1), 0 20px 60px -30px rgba(0,0,0,.3); color: #b5b7c1; opacity: .72; }
+.workspace-head { height: 42px; display: flex; align-items: center; padding: 0 16px; border-bottom: 1px solid rgba(255,255,255,.07); background: #25262b; }
+.workspace-head span { margin: auto; font-size: 11px; color: #b8b9c1; }
+.workspace-head i { width: 9px; height: 9px; border-radius: 50%; background: #70717a; margin-right: 6px; }
+.workspace-panes { display: grid; grid-template-columns: 1fr 1fr; height: calc(100% - 42px); }
+.workspace-pane { min-width: 0; border-right: 1px solid rgba(255,255,255,.08); }
+.workspace-pane header { padding: 8px 13px; border-bottom: 1px solid rgba(255,255,255,.06); font-size: 10px; color: #9b9da7; }
+.workspace-pane pre { margin: 22px 18px; white-space: pre-wrap; font: 11px/1.85 var(--mono); color: #9598a4; }
+.workspace-pane pre b { color: #b5c5b8; font-weight: 400; }
+.update-window { width: min(624px,100%); overflow: hidden; border: 1px solid var(--strong-line); border-radius: 16px; background: var(--window); box-shadow: var(--shadow); backdrop-filter: blur(28px) saturate(150%); -webkit-backdrop-filter: blur(28px) saturate(150%); }
+.titlebar { position: relative; display: flex; align-items: center; justify-content: center; height: 42px; font-size: 12px; color: var(--secondary); font-weight: 550; }
+.traffic { position: absolute; left: 16px; top: 15px; display: flex; gap: 8px; align-items: center; }
+.close-dot { border: 0; padding: 0; width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; color: #7a120b; font: 11px/11px var(--font); }
+.close-dot span { opacity: 0; }
+.close-dot:hover span,.close-dot:focus-visible span { opacity: 1; }
+.traffic i { width: 12px; height: 12px; border: 1px solid var(--line); border-radius: 50%; background: var(--line); }
+.update-heading { display: flex; align-items: center; gap: 16px; padding: 13px 28px 25px; }
+.app-icon { width: 60px; height: 60px; flex: none; }
+.heading-copy { min-width: 0; }
+h1 { margin: 0 0 5px; font-size: 22px; line-height: 1.2; letter-spacing: -.025em; font-weight: 650; }
+.version { margin: 0; color: var(--secondary); font-size: 12px; }
+.version strong { color: var(--text); font-weight: 550; }
+.version .arrow { color: var(--muted); padding: 0 5px; }
+.notes-shell { margin: 0 24px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--notes); }
+.notes-heading { display: flex; justify-content: space-between; align-items: center; padding: 13px 18px; border-bottom: 1px solid var(--line); }
+.notes-heading h2 { font-size: 12px; font-weight: 650; margin: 0; }
+.release-version { color: var(--secondary); font: 11px/1.4 var(--mono); }
+.release-notes { max-height: 304px; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 20px 18px 22px; }
+.notes-continuation { display: block; width: 100%; min-height: 30px; padding: 6px 15px; border: 0; border-top: 1px solid var(--line); background: var(--notice); color: var(--secondary); font-size: 11px; text-align: center; }
+.notes-continuation:hover { background: var(--button-hover); color: var(--text); }
+.notes-continuation:focus-visible { outline-offset: -3px; }
+.release-notes h3 { margin: 0 0 9px; font-size: 17px; line-height: 1.3; letter-spacing: -.02em; font-weight: 600; }
+.release-notes p { margin: 0; color: var(--secondary); font-size: 12px; line-height: 1.6; }
+.release-notes h4 { margin: 19px 0 7px; font-size: 12px; font-weight: 650; }
+.release-notes ul { padding-left: 17px; margin: 0; font-size: 12px; line-height: 1.65; }
+.release-notes li { padding-left: 2px; margin: 5px 0; }
+.release-notes li::marker { color: var(--muted); }
+.release-notes .release-link { display: inline-block; margin-top: 18px; font-size: 11px; }
+.status-area { padding: 18px 28px 17px; min-height: 110px; display: flex; flex-direction: column; justify-content: center; }
+.status-line { display: flex; align-items: flex-start; gap: 9px; }
+.status-icon { display: flex; flex: none; align-items: center; justify-content: center; width: 16px; height: 18px; margin-top: 1px; color: var(--secondary); }
+.status-icon svg { width: 16px; height: 16px; }
+.status-label { margin: 0; font-weight: 550; font-size: 12px; }
+.status-detail { margin: 2px 0 0; font-size: 11px; line-height: 1.5; color: var(--secondary); }
+.progress-wrap { margin: 10px 0 0 25px; }
+progress { display: block; width: 100%; height: 5px; border: 0; border-radius: 5px; appearance: none; -webkit-appearance: none; background: var(--line); overflow: hidden; accent-color: var(--accent); }
+progress::-webkit-progress-bar { background: var(--line); border-radius: 5px; }
+progress::-webkit-progress-value { background: var(--accent); border-radius: 5px; }
+progress::-moz-progress-bar { background: var(--accent); border-radius: 5px; }
+.progress-text { display: flex; justify-content: space-between; margin-top: 5px; font-size: 10px; color: var(--secondary); font-variant-numeric: tabular-nums; }
+.status-area[data-tone="error"] { margin: 15px 24px; padding: 12px 14px; min-height: 80px; border: 1px solid color-mix(in srgb,var(--error) 25%,transparent); border-radius: 9px; background: var(--error-bg); }
+.status-area[data-tone="error"] .status-label,.status-area[data-tone="error"] .status-icon { color: var(--error); }
+.status-area[data-tone="success"] .status-icon { color: var(--success); }
+.actions { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 15px 24px 19px; border-top: 1px solid var(--line); }
+.actions-note { color: var(--secondary); font-size: 10px; max-width: 220px; line-height: 1.45; }
+.button-group { display: flex; align-items: center; gap: 8px; flex: none; }
+.plain,.primary { border: 1px solid var(--strong-line); border-radius: 7px; min-height: 30px; padding: 5px 13px; font-size: 12px; line-height: 1.4; font-weight: 500; color: var(--text); background: var(--button); box-shadow: 0 1px 1px rgba(0,0,0,.04); white-space: nowrap; }
+.plain:hover { background: var(--button-hover); }
+.primary { background: var(--accent); border-color: transparent; color: #fff; min-width: 135px; }
+.primary:hover:not(:disabled) { background: var(--accent-hover); }
+.primary:disabled { background: color-mix(in srgb,var(--accent) 18%,var(--button)); color: var(--secondary); box-shadow: none; border-color: var(--line); }
+.plain:active:not(:disabled),.primary:active:not(:disabled) { transform: scale(.98); }
+.spinner { width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid var(--line); border-top-color: var(--secondary); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.empty-notes { margin: 0 24px; display: grid; place-items: center; min-height: 220px; padding: 30px; border: 1px solid var(--line); border-radius: 10px; background: var(--notes); text-align: center; }
+.empty-notes svg { width: 30px; height: 30px; color: var(--secondary); margin-bottom: 13px; }
+.empty-notes p { margin: 0; max-width: 270px; font-size: 12px; color: var(--secondary); }
+.closed-card { width: min(420px,100%); border: 1px solid var(--line); background: var(--window); border-radius: 14px; padding: 28px; box-shadow: var(--shadow); text-align: center; }
+.closed-card h2 { margin: 0 0 8px; font-size: 19px; }
+.closed-card p { margin: 0 0 18px; color: var(--secondary); }
+.preview-foot { position: relative; z-index: 2; margin: 0; padding: 0 24px 20px; text-align: center; color: var(--secondary); font-size: 11px; }
+.preview-message { display: block; min-height: 20px; margin-bottom: 5px; color: var(--text); }
+@media (max-width: 650px) {
+  .preview-bar { padding: 14px 16px; gap: 12px; }
+  .preview-brand { width: 100%; }
+  .preview-controls { width: 100%; gap: 8px; }
+  .preview-controls label { display: none; }
+  .preview-controls { display: grid; grid-template-columns: minmax(0,1fr) auto; }
+  select { min-width: 0; width: 100%; }
+  #state-picker { grid-column: 1 / -1; }
+  .stage { padding: 24px 12px; min-height: calc(100svh - 172px); }
+  .workspace { inset: 12px 5px; }
+  .update-heading { padding: 10px 20px 22px; gap: 12px; }
+  .app-icon { width: 48px; height: 48px; }
+  h1 { font-size: 19px; }
+  .notes-shell,.empty-notes { margin-inline: 16px; }
+  .release-notes { padding: 17px 15px 20px; max-height: 280px; }
+  .notes-heading { padding: 12px 15px; }
+  .status-area { padding: 16px 20px; }
+  .status-area[data-tone="error"] { margin: 14px 16px; }
+  .actions { padding: 14px 16px 17px; flex-wrap: wrap; gap: 12px; }
+  .actions-note { max-width: none; }
+  .button-group { margin-left: auto; }
+  .plain,.primary { padding-inline: 11px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 2.4s; }
+  .plain:active:not(:disabled),.primary:active:not(:disabled) { transform: none; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .update-window { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--canvas); }
+}
+@media (prefers-contrast: more) {
+  :root { --line: rgba(0,0,0,.35); --strong-line: rgba(0,0,0,.5); }
+  :root[data-theme="dark"] { --line: rgba(255,255,255,.35); --strong-line: rgba(255,255,255,.5); }
+}
+</style>
+</head>
+<body>
+<header class="preview-bar">
+  <div class="preview-brand"><strong>Slate Terminal</strong><span>Update flow · Local prototype</span></div>
+  <div class="preview-controls">
+    <label for="state-picker">State</label>
+    <select id="state-picker" aria-label="Preview update state">
+      <option value="available">Update available</option>
+      <option value="downloading">Downloading</option>
+      <option value="verifying">Verifying</option>
+      <option value="ready">Ready to install</option>
+      <option value="download-error">Download error</option>
+      <option value="verification-error">Verification blocked</option>
+      <option value="checking">Checking for updates</option>
+      <option value="current">Up to date</option>
+    </select>
+    <label for="theme-picker">Theme</label>
+    <select id="theme-picker" aria-label="Preview color theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select>
+    <button class="plain" id="reset" type="button">Reset</button>
+  </div>
+</header>
+<main class="stage">
+  <div class="workspace" aria-hidden="true">
+    <div class="workspace-head"><i></i><i></i><i></i><span>Slate Terminal</span></div>
+    <div class="workspace-panes">
+      <div class="workspace-pane"><header>Terminal · agent</header><pre><b>~/workspace</b> ❯ claude
+
+  Working on your next idea.
+
+  Read the workspace
+  Open the test panel
+  Review the changes
+
+❯ </pre></div>
+      <div class="workspace-pane"><header>Terminal · tests</header><pre>❯ swift test
+
+  Build complete.
+  Running tests…
+
+  <b>All checks passed.</b>
+
+❯ </pre></div>
+    </div>
+  </div>
+  <section class="update-window" id="update-window" role="dialog" aria-modal="false" aria-labelledby="update-title" aria-describedby="update-version">
+    <div class="titlebar"><div class="traffic"><button class="close-dot" id="close" type="button" aria-label="Close update window"><span aria-hidden="true">×</span></button><i></i><i></i></div>Software Update</div>
+    <header class="update-heading">
+      <img class="app-icon" src="update-assets/app-icon.png" width="60" height="60" alt="">
+      <div class="heading-copy"><h1 id="update-title">An update is available.</h1><p class="version" id="update-version"><strong>Slate Terminal 0.2.0</strong><span class="arrow">←</span>You have 0.1.0</p></div>
+    </header>
+    <section class="notes-shell" id="notes-shell" aria-labelledby="notes-title">
+      <header class="notes-heading"><h2 id="notes-title">What’s new</h2><span class="release-version">Version 0.2.0</span></header>
+      <article class="release-notes" id="release-notes" tabindex="0" aria-label="Release notes for version 0.2.0">
+        <h3>A clearer view of your agents.</h3>
+        <p>See who is working in a pane, and get back to their terminal with a click.</p>
+        <h4>Agent activity</h4>
+        <ul>
+          <li>Detached Liquid Glass pills keep agent activity in the bottom-right corner of each pane.</li>
+          <li>Click an indicator to bring the agent’s window and terminal into focus.</li>
+          <li>Live operations show elapsed time, then a clear completion or failure state.</li>
+        </ul>
+        <h4>Fixes & refinements</h4>
+        <ul>
+          <li>Old activity can no longer focus a replacement terminal.</li>
+          <li>Browser indicators stay clear of the status bar.</li>
+          <li>Improved keyboard focus when returning from the command picker.</li>
+        </ul>
+        <a class="release-link" href="https://github.com/AlexW00/slate-term/releases" target="_blank" rel="noopener noreferrer">View releases on GitHub ↗</a>
+      </article>
+      <button class="notes-continuation" id="notes-continuation" type="button" aria-controls="release-notes" hidden>More release notes ↓</button>
+    </section>
+    <div class="empty-notes" id="empty-notes" hidden><div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M20 7 10 17l-5-5" stroke-linecap="round" stroke-linejoin="round"/></svg><p id="empty-message">You’re running the latest version of Slate Terminal.</p></div></div>
+    <div class="status-area" id="status-area" data-tone="neutral">
+      <div class="status-line"><span class="status-icon" id="status-icon" aria-hidden="true"></span><div><p class="status-label" id="status-label"></p><p class="status-detail" id="status-detail"></p></div></div>
+      <div class="progress-wrap" id="progress-wrap" hidden><progress id="progress" value="43" max="100" aria-label="Update download progress"></progress><div class="progress-text"><span id="download-amount">10.6 of 24.6 MB</span><span id="download-percent">43%</span></div></div>
+    </div>
+    <footer class="actions"><span class="actions-note" id="actions-note">Read what’s new. Install when you’re ready.</span><div class="button-group"><button class="plain" id="secondary" type="button">Not Now</button><button class="primary" id="primary" type="button">Download Update</button></div></footer>
+  </section>
+  <section class="closed-card" id="closed-card" hidden><h2>Update window closed.</h2><p id="closed-message">In the app, you can check again from Slate Terminal → Check for Updates…</p><button class="primary" id="reopen" type="button">Reopen Update</button></section>
+</main>
+<p class="preview-foot"><span class="preview-message" id="preview-message" role="status" aria-live="polite"></span>Sample versions and release notes. This prototype never downloads, installs, or restarts software.</p>
+<div id="announcer" role="status" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)"></div>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const qs = new URLSearchParams(location.search);
+  const systemTheme = matchMedia('(prefers-color-scheme: dark)');
+  const icons = {
+    download: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 3v9m-3-3 3 3 3-3M4 13v3h12v-3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    check: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m5 10 3.5 3.5L15 7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    warning: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M10 3 18 17H2L10 3Z" stroke-linejoin="round"/><path d="M10 7v4m0 3h.01" stroke-linecap="round"/></svg>',
+    spinner: '<span class="spinner"></span>'
+  };
+  const states = {
+    available: { title: 'An update is available.', label: 'Ready to download', detail: '24.6 MB · macOS 27 or later', icon: 'download', primary: 'Download Update', secondary: 'Not Now', note: 'Read what’s new. Install when you’re ready.' },
+    downloading: { title: 'Downloading the update.', label: 'Downloading Slate Terminal 0.2.0…', detail: 'You can keep working while it downloads.', icon: 'spinner', primary: 'Downloading…', secondary: 'Cancel Download', note: 'Installation will wait for your confirmation.', progress: true, disabled: true },
+    verifying: { title: 'Checking the download.', label: 'Verifying the update…', detail: 'Checking authenticity before anything is installed.', icon: 'spinner', primary: 'Verifying…', secondary: 'Cancel', note: 'Nothing has changed in your installed app.', progress: true, disabled: true },
+    ready: { title: 'Ready when you are.', label: 'Ready to install', detail: 'Slate will quit and reopen to finish installing.', icon: 'check', primary: 'Install and Relaunch', secondary: 'Later', note: 'Finish any running commands before relaunching.', tone: 'success' },
+    'download-error': { title: 'The download didn’t finish.', label: 'Couldn’t download the update', detail: 'Check your connection and try again. Your current version hasn’t changed.', icon: 'warning', primary: 'Try Again', secondary: 'Not Now', note: 'Your current app is still available.', tone: 'error' },
+    'verification-error': { title: 'This update can’t be installed.', label: 'The update couldn’t be verified', detail: 'The downloaded file was rejected. Check again for a trusted update.', icon: 'warning', primary: 'Check Again', secondary: 'Close', note: 'No changes were made to your installed app.', tone: 'error' },
+    checking: { title: 'Checking for updates…', label: 'Looking for a newer version', detail: 'Your installed version is 0.1.0.', icon: 'spinner', primary: 'Checking…', secondary: 'Cancel', note: 'You can keep using Slate Terminal.', disabled: true, noNotes: true },
+    current: { title: 'You’re up to date.', label: 'Slate Terminal 0.1.0 is current', detail: 'You can check again from the app menu at any time.', icon: 'check', primary: 'Done', note: 'No update is needed.', noNotes: true, tone: 'success' }
+  };
+  let state = 'available';
+  let progress = 43;
+  let timer = null;
+  const notes = $('release-notes');
+  const continuation = $('notes-continuation');
+  function updateNotesContinuation() {
+    const overflowing = notes.scrollHeight > notes.clientHeight + 1;
+    const atEnd = notes.scrollTop + notes.clientHeight >= notes.scrollHeight - 1;
+    continuation.hidden = !overflowing;
+    continuation.textContent = atEnd ? 'Back to top ↑' : 'More release notes ↓';
+  }
+  notes.addEventListener('scroll', updateNotesContinuation, { passive: true });
+  new ResizeObserver(updateNotesContinuation).observe(notes);
+  continuation.addEventListener('click', () => {
+    const atEnd = notes.scrollTop + notes.clientHeight >= notes.scrollHeight - 1;
+    notes.scrollTop = atEnd ? 0 : notes.scrollTop + notes.clientHeight * .8;
+    notes.focus({ preventScroll: true });
+    updateNotesContinuation();
+  });
+  function stop() { if (timer !== null) { clearInterval(timer); clearTimeout(timer); timer = null; } }
+  function renderProgress() {
+    const value = state === 'verifying' ? 100 : progress;
+    $('progress').value = value;
+    $('progress').setAttribute('aria-valuetext', value + ' percent downloaded');
+    $('download-amount').textContent = state === 'verifying' ? '24.6 MB downloaded' : (24.6 * value / 100).toFixed(1) + ' of 24.6 MB';
+    $('download-percent').textContent = value + '%';
+  }
+  function show(name, { announce = true } = {}) {
+    stop();
+    if (!states[name]) name = 'available';
+    state = name;
+    const focused = document.activeElement;
+    const s = states[name];
+    $('update-window').hidden = false;
+    $('closed-card').hidden = true;
+    $('state-picker').value = name;
+    $('update-title').textContent = s.title;
+    $('update-version').innerHTML = s.noNotes ? '<strong>Slate Terminal 0.1.0</strong>' : '<strong>Slate Terminal 0.2.0</strong><span class="arrow">←</span>You have 0.1.0';
+    $('notes-shell').hidden = !!s.noNotes;
+    $('empty-notes').hidden = !s.noNotes;
+    $('empty-notes').querySelector('svg').toggleAttribute('hidden', name === 'checking');
+    $('empty-message').textContent = name === 'checking' ? 'Checking for an update. Release notes appear here before you choose to download.' : 'You’re running the latest version of Slate Terminal.';
+    $('status-label').textContent = s.label;
+    $('status-detail').textContent = s.detail;
+    $('status-icon').innerHTML = icons[s.icon];
+    $('status-area').dataset.tone = s.tone || 'neutral';
+    $('progress-wrap').hidden = !s.progress;
+    $('primary').textContent = s.primary;
+    $('primary').disabled = !!s.disabled;
+    $('secondary').textContent = s.secondary || '';
+    $('secondary').hidden = !s.secondary;
+    $('actions-note').textContent = s.note;
+    $('preview-message').textContent = '';
+    renderProgress();
+    updateNotesContinuation();
+    if ($('primary').disabled && focused === $('primary')) $('secondary').focus();
+    if (announce) $('announcer').textContent = s.title + ' ' + s.label;
+  }
+  function close() {
+    stop();
+    $('update-window').hidden = true;
+    $('closed-card').hidden = false;
+    $('announcer').textContent = 'Update window closed. Nothing was installed.';
+    $('reopen').focus();
+  }
+  function download() {
+    progress = 0;
+    show('downloading');
+    timer = setInterval(() => {
+      progress = Math.min(100, progress + 5);
+      renderProgress();
+      if (progress === 100) {
+        show('verifying');
+        timer = setTimeout(() => {
+          const focusAction = [$('primary'),$('secondary')].includes(document.activeElement);
+          show('ready');
+          if (focusAction) $('primary').focus();
+        }, 900);
+      }
+    }, 220);
+  }
+  function checkAgain() {
+    show('checking');
+    timer = setTimeout(() => {
+      const focusAction = [$('primary'),$('secondary')].includes(document.activeElement);
+      show('available');
+      if (focusAction) $('primary').focus();
+    }, 900);
+  }
+  $('primary').addEventListener('click', () => {
+    if (state === 'available' || state === 'download-error') download();
+    else if (state === 'verification-error') checkAgain();
+    else if (state === 'ready') {
+      $('preview-message').textContent = 'Prototype only: this is where Slate would install the verified update and relaunch, after its normal quit checks.';
+      $('announcer').textContent = $('preview-message').textContent;
+    } else if (state === 'current') close();
+  });
+  $('secondary').addEventListener('click', () => {
+    if (state === 'downloading' || state === 'verifying') { show('available'); $('primary').focus(); }
+    else if (state === 'checking') close();
+    else close();
+  });
+  $('close').addEventListener('click', close);
+  $('reopen').addEventListener('click', () => { show(state); $('primary').disabled ? $('secondary').focus() : $('primary').focus(); });
+  $('reset').addEventListener('click', () => { progress = 43; show('available'); });
+  $('state-picker').addEventListener('change', event => { progress = 43; show(event.target.value); });
+  function setTheme(value) {
+    $('theme-picker').value = value;
+    document.documentElement.dataset.theme = value === 'system' ? (systemTheme.matches ? 'dark' : 'light') : value;
+  }
+  $('theme-picker').addEventListener('change', event => setTheme(event.target.value));
+  systemTheme.addEventListener('change', () => { if ($('theme-picker').value === 'system') setTheme('system'); });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !$('update-window').hidden && !event.defaultPrevented && event.target.tagName !== 'SELECT') { event.preventDefault(); close(); }
+  });
+  addEventListener('pagehide', stop);
+  const theme = qs.get('theme');
+  setTheme(['light','dark'].includes(theme) ? theme : 'system');
+  show(qs.get('state') || 'available', { announce: false });
+})();
+</script>
+</body>
+</html>

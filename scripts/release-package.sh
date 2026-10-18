@@ -54,6 +54,7 @@ if re.fullmatch(r'[A-Fa-f0-9]{40}', identity):
     if result.returncode or not re.search(pattern, result.stdout, re.IGNORECASE):
         raise SystemExit('The signing fingerprint is not an available Developer ID Application identity.')
 PY_IDENTITY
+  python3 "$root/scripts/release-updates.py" validate-config --app "$app"
   python3 "$root/scripts/collect-release-licenses.py" --verify-app "$app"
   [[ -n "${SLATE_NOTARY_PROFILE:-}" ]] || { echo 'Set SLATE_NOTARY_PROFILE to an existing notarytool keychain profile.' >&2; exit 1; }
 fi
@@ -79,10 +80,20 @@ ditto "$app" "$bundle"
 python3 - "$bundle" "$unsigned" <<'PY'
 import os
 from pathlib import Path
+import plistlib
 import subprocess
 import sys
 app = Path(sys.argv[1])
 unsigned = sys.argv[2] == '1'
+sparkle = app / 'Contents/Frameworks/Sparkle.framework'
+for relative in ('Versions/B/Autoupdate', 'Versions/B/Updater.app/Contents/MacOS/Updater',
+                 'Versions/B/XPCServices/Installer.xpc/Contents/MacOS/Installer',
+                 'Versions/B/XPCServices/Downloader.xpc/Contents/MacOS/Downloader'):
+    if not os.access(sparkle / relative, os.X_OK):
+        raise SystemExit('Missing executable Sparkle component: ' + relative)
+with (sparkle / 'Resources/Info.plist').open('rb') as stream:
+    if plistlib.load(stream).get('CFBundleShortVersionString') != '2.10.0':
+        raise SystemExit('The embedded Sparkle version does not match the release pin.')
 for tool in ('slate-term', 'slate-layout-launcher'):
     if not os.access(app / 'Contents' / 'Helpers' / tool, os.X_OK):
         raise SystemExit(f'Missing executable helper: {tool}')
@@ -91,7 +102,9 @@ machos = [p for p in files if 'Mach-O' in subprocess.check_output(['file', '-b',
 if not machos:
     raise SystemExit('No executable code in the app.')
 for path in machos:
-    if subprocess.check_output(['lipo', '-archs', str(path)], text=True).strip() != 'arm64':
+    architectures = set(subprocess.check_output(['lipo', '-archs', str(path)], text=True).split())
+    allowed = ({'arm64'}, {'arm64', 'x86_64'}) if path.is_relative_to(sparkle) else ({'arm64'},)
+    if architectures not in allowed:
         raise SystemExit(f'Expected Apple Silicon code: {path.relative_to(app)}')
 if not unsigned:
     command = ['codesign', '--force', '--sign', os.environ['SLATE_SIGNING_IDENTITY'], '--timestamp', '--options', 'runtime']
@@ -99,7 +112,10 @@ if not unsigned:
         command += ['--keychain', os.environ['SLATE_SIGNING_KEYCHAIN']]
     bundles = [p for p in app.rglob('*') if p.is_dir() and not p.is_symlink() and p.suffix in ('.framework', '.app', '.xpc', '.appex')]
     for path in sorted(machos, key=lambda p: len(p.parts), reverse=True) + sorted(bundles, key=lambda p: len(p.parts), reverse=True) + [app]:
-        subprocess.run(command + [str(path)], check=True)
+        # Sparkle requires Downloader's own entitlements to survive manual signing.
+        downloader = sparkle / 'Versions/B/XPCServices/Downloader.xpc'
+        preserve = ['--preserve-metadata=entitlements'] if path == downloader or path.is_relative_to(downloader) else []
+        subprocess.run(command + preserve + [str(path)], check=True)
     subprocess.run(['codesign', '--verify', '--deep', '--strict', '--verbose=2', str(app)], check=True)
 PY
 notarize() {

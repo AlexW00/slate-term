@@ -63,6 +63,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     var leaves: [PaneID: NSViewController] = [:]
     var containers: [PaneID: PaneContainer] = [:]
     lazy var presence = PresenceController(host: self)
+    lazy var updates = makeUpdatesController()
+    var updateEventOperation: WorkspaceOperationContext?
+    var updateImmediateOperation: WorkspaceOperationContext?
     private struct PaneDragContext {
         let pane: PaneID
         let tab: TabID
@@ -293,6 +296,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     func close() {
+        updates.shutdown()
         notificationsRunning = false
         notificationDelivery.close()
         notificationStore = NotificationStore()
@@ -438,6 +442,16 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             catch { settingsModel?.selection = .layouts; return false }
         default: return false
         }
+    }
+
+    func confirmUpdateInstallation() -> Bool { confirmSettingsClose() && confirmTermination() }
+
+    func invokeNativeUpdate(_ action: UpdateAction, updateID: String?) {
+        var params: [String: JSONValue] = ["expectedInstanceId": .string(instanceID)]
+        if [.download, .cancel, .install].contains(action), let updateID { params["updateId"] = .string(updateID) }
+        if action == .install { params["confirm"] = .bool(true) }
+        do { _ = try call(action.method, params: params) }
+        catch { present(error) }
     }
 
     func confirmTermination() -> Bool {
@@ -773,6 +787,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             let pane = try targetPaneID(params)
             return contract == .presenceHold ? try presence.hold(pane: pane, params: payload, actor: operation.actor)
                 : try presence.release(pane: pane, actor: operation.actor)
+        case .updatesGet, .updatesShow, .updatesCheck, .updatesDownload, .updatesCancel, .updatesInstall:
+            return try callUpdates(UpdateAction(rawValue: String(method.dropFirst("updates.".count)))!, params: params, operation: operation)
         case .skillsList: return try listAgentSkills(params)
         case .skillsInstall: return try changeAgentSkills(params, install: true)
         case .skillsUninstall: return try changeAgentSkills(params, install: false)
@@ -852,6 +868,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             }
             if let result = try runSettingsCommand(id, params: params, operation: operation) { return result }
             if id == "config.reload" { return try reloadConfiguration(operation: operation) }
+            if id == "updates.check" || id == "updates.show" {
+                var payload = params; payload.removeValue(forKey: "id")
+                return try callUpdates(id == "updates.check" ? .check : .show, params: payload, operation: operation)
+            }
             if id == "settings.open" { showSettings(); return .object([:]) }
             if id == "notifications.settings" { showSettings(section: .notifications); return .object([:]) }
             if id == "notifications.next" || id == "notifications.open" {
@@ -992,6 +1012,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
 
     private func callDebug(_ method: String, params: [String: JSONValue], operation: WorkspaceOperationContext) throws -> JSONValue {
         switch method {
+        case "debug.updates" where integration: return try debugUpdates(params)
         case "debug.inspect" where integration: return inspect()
         case "debug.presence" where integration: return presence.testingState()
         case "debug.presenceClick" where integration:
@@ -2513,6 +2534,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         let about = appMenu.addItem(withTitle: "About Slate Terminal", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         about.target = NSApp
         appMenu.addItem(.separator())
+        addCommands(["updates.check"], to: appMenu)
+        appMenu.addItem(.separator())
         addCommands(["settings.open"], to: appMenu)
         for item in appMenu.items where item.representedObject as? String == "settings.open" { item.title = "Settings…" }
         appMenu.addItem(.separator())
@@ -2748,6 +2771,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             } else {
                 switch command.id {
                 case let id where id.hasPrefix("layouts."): detail = "Saved Layouts"; symbol = "rectangle.split.2x2"; keywords = "recipe template save launch spotlight"
+                case "updates.check", "updates.show": detail = "Software Update"; symbol = "arrow.down.circle"; keywords = "version release notes changelog download install update"
                 case "settings.open": detail = "Application"; symbol = "gearshape"; keywords = "preferences configuration"
                 case "notifications.next":
                     detail = "Notifications"; symbol = "bell.badge"; keywords = "unread attention jump next"
@@ -3345,6 +3369,74 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }
         defer { responseTimer?.invalidate() }
         return alert.runModal()
+    }
+
+    private func debugUpdates(_ params: [String: JSONValue]) throws -> JSONValue {
+        if let phase = params["phase"]?.string.flatMap(UpdatePhase.init(rawValue:)) { updates.fixtureState(phase) }
+        if let appearance = params["appearance"]?.string {
+            updates.windowForTesting?.appearance = NSAppearance(named: appearance == "dark" ? .darkAqua : .aqua)
+        }
+        var prompts: [JSONValue] = []
+        switch params["operation"]?.string {
+        case "hide": updates.hideWindow()
+        case "close": updates.windowForTesting?.performClose(nil)
+        case "install":
+            testConfirmationHandler = { alert in
+                prompts.append(.object(["message": .string(alert.messageText), "buttons": .array(alert.buttons.map { .string($0.title) })]))
+                if params["replaceWhileConfirming"] == .bool(true) { self.updates.fixtureState(.ready) }
+                alert.buttons[params["confirmQuit"] == .bool(true) ? 1 : 0].performClick(nil)
+            }
+            defer { testConfirmationHandler = nil }
+            _ = try call("updates.install", params: ["updateId": .string(updates.snapshot.updateID ?? ""), "confirm": .bool(true)])
+        case "more":
+            guard let root = updates.windowForTesting?.contentView,
+                  let button = updateSubviews(root).compactMap({ $0 as? NSButton }).first(where: { $0.accessibilityIdentifier() == "updates.more" }) else {
+                throw RPCFailure(code: -32000, message: "The release notes continuation button is unavailable")
+            }
+            button.performClick(nil)
+        case "press":
+            guard let window = updates.windowForTesting, let id = params["control"]?.string,
+                  try pressUpdateControl(window, identifier: id) else {
+                throw RPCFailure(code: -32000, message: "The update control could not be pressed")
+            }
+        case let name?:
+            let count: UInt64
+            if case .integer(let value) = params["receivedBytes"], value >= 0 { count = UInt64(value) } else { count = 0 }
+            updates.fixtureOperation(name, receivedBytes: count, nextPhase: params["nextPhase"]?.string.flatMap(UpdatePhase.init(rawValue:)))
+        default: break
+        }
+        updates.windowForTesting?.contentView?.layoutSubtreeIfNeeded()
+        if let path = params["screenshot"]?.string, let window = updates.windowForTesting {
+            try Self.captureWindow(window.windowNumber, path: path)
+        }
+        var result = try JSONValue.encoding(updates.snapshot).object ?? [:]
+        result["installReplies"] = .integer(updates.fixtureInstallReplies)
+        result["readyChoices"] = .array(updates.fixtureReadyChoices.map(JSONValue.string))
+        result["quitPrompts"] = .array(prompts)
+        if let root = updates.windowForTesting?.contentView,
+           let notes = updateSubviews(root).compactMap({ $0 as? NSTextView }).first(where: { $0.accessibilityIdentifier() == "updates.notes" }) {
+            result["notesOffset"] = .number(Double(notes.enclosingScrollView?.contentView.bounds.minY ?? 0))
+            result["notesLength"] = .integer(notes.string.count)
+            result["notesFocused"] = .bool(updates.windowForTesting?.firstResponder === notes)
+        }
+        return .object(result)
+    }
+
+    private func updateSubviews(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(updateSubviews) }
+
+    private func pressUpdateControl(_ window: NSWindow, identifier: String) throws -> Bool {
+        guard let root = window.contentView else { return false }
+        root.layoutSubtreeIfNeeded()
+        guard let anchor = updateSubviews(root).first(where: { $0.identifier?.rawValue == identifier }),
+              anchor.bounds.width > 0, anchor.bounds.height > 0 else { return false }
+        let point = anchor.convert(NSPoint(x: anchor.bounds.midX, y: anchor.bounds.midY), to: nil)
+        guard let down = NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                           windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1),
+              let up = NSEvent.mouseEvent(with: .leftMouseUp, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                         windowNumber: window.windowNumber, context: nil, eventNumber: 2, clickCount: 1, pressure: 0) else { return false }
+        NSApp.postEvent(up, atStart: true)
+        NSApp.sendEvent(down)
+        return true
     }
 
     private static func captureWindow(_ number: Int, path: String) throws {

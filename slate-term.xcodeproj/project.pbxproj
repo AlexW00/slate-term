@@ -16,7 +16,10 @@
 		A10000000000000000000011 /* .build/bootstrap/ghostty/zig-out/share/terminfo in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* .build/bootstrap/ghostty/zig-out/share/terminfo */; };
 		A10000000000000000000013 /* SlateTermSettings in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000014 /* SlateTermSettings */; };
 		A10000000000000000000015 /* skills in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000016 /* skills */; };
+		B20000000000000000000001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = B20000000000000000000002 /* Sparkle */; };
 /* End PBXBuildFile section */
+
+
 
 /* Begin PBXFileReference section */
 		000000000000000000000120 /* Slate Terminal.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Slate Terminal.app"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -43,6 +46,7 @@
 		000000000000000130000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				B20000000000000000000001 /* Sparkle in Frameworks */,
 				4B4068BA3080F13F00DB99AD /* slate-layout-launcher in Frameworks */,
 				4B4068B93080F13F00DB99AD /* slate-term in Frameworks */,
 				A10000000000000000000001 /* .build/bootstrap/ghostty/macos/GhosttyKit.xcframework in Frameworks */,
@@ -95,6 +99,7 @@
 			);
 			name = "slate-term";
 			packageProductDependencies = (
+				B20000000000000000000002 /* Sparkle */,
 				A10000000000000000000004 /* SlateTermCore */,
 				A10000000000000000000006 /* SlateTermIPC */,
 				A10000000000000000000014 /* SlateTermSettings */,
@@ -130,6 +135,7 @@
 			mainGroup = 000000000000000000000001;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				B20000000000000000000005 /* XCRemoteSwiftPackageReference "Sparkle" */,
 				A10000000000000000000010 /* XCLocalSwiftPackageReference "." */,
 			);
 			preferredProjectObjectVersion = 90;
@@ -488,7 +494,20 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		B20000000000000000000005 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {kind = exactVersion; version = 2.10.0; };
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
+		B20000000000000000000002 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B20000000000000000000005 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
 		A10000000000000000000004 /* SlateTermCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = SlateTermCore;

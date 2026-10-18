@@ -54,6 +54,15 @@ class LicenseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "missing"):
             licenses.verify_bundle(destination, files)
 
+    def test_xcode_only_sparkle_pin_requires_review(self):
+        path = self.root / "slate-term.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
+        value = json.loads(path.read_text())
+        sparkle = next(pin for pin in value["pins"] if pin["identity"] == "sparkle")
+        sparkle["state"]["revision"] = "0" * 40
+        path.write_text(json.dumps(value))
+        with self.assertRaisesRegex(ValueError, "dependencies changed"):
+            licenses.validate_inventory()
+
     def test_changed_dependency_pin_requires_review(self):
         path = self.root / "Package.resolved"
         value = json.loads(path.read_text())

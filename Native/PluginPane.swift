@@ -386,6 +386,14 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
           }),
           command:(id,params={},options={})=>call('command.run',{...params,id},options),
           settings:()=>call('settings.get'),
+          updates:Object.freeze({
+            get:(options={})=>call('updates.get',{},options),
+            show:(options={})=>call('updates.show',{},options),
+            check:(options={})=>call('updates.check',{},options),
+            download:(updateId,options={})=>call('updates.download',{updateId},options),
+            cancel:(updateId,options={})=>call('updates.cancel',{updateId},options),
+            install:(updateId,confirm,options={})=>call('updates.install',{updateId,confirm},options)
+          }),
           welcome:Object.freeze({
             get:(options={})=>call('welcome.get',{},options),
             read:(options={})=>call('command.run',{id:'welcome.read'},options),

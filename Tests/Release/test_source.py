@@ -53,6 +53,21 @@ class SourceTests(unittest.TestCase):
     def verify(self):
         return source.verify_build(self.root, self.receipt_path, self.app, "1.2.3", "42")
 
+    def test_rebuild_preparation_keeps_xcode_only_sparkle_out_of_cli_package(self):
+        package = self.root / "Package.swift"
+        package.write_text('.package(url: "https://example.invalid/library", exact: "1.0.0")\n')
+        (self.root / "SOURCE-MANIFEST.json").write_text(json.dumps({
+            "files": {}, "swift_packages": [
+                {"identity": "library", "url": "https://example.invalid/library"},
+                {"identity": "sparkle", "url": "https://github.com/sparkle-project/Sparkle"},
+            ]}))
+        script = self.root / "prepare-rebuild.py"
+        script.write_text(source.PREPARE_REBUILD)
+        subprocess.run(["python3", str(script)], check=True, capture_output=True)
+        self.assertIn('.package(path: "vendor/swift/library")', package.read_text())
+        self.assertNotIn("sparkle", package.read_text())
+        self.assertTrue((self.root / ".build/bootstrap/ghostty").is_symlink())
+
     def test_build_receipt_binds_clean_commit_version_and_app(self):
         self.assertEqual(self.verify(), self.receipt)
         (self.app / "Contents/modified").write_text("changed")

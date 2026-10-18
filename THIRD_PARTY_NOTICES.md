@@ -8,6 +8,7 @@ Release builds include the complete texts from `licenses/` in `Contents/Resource
 | --- | --- | --- |
 | Ghostty | `554ea65867ffe34bb3e51e09bd016e154a1f9d7a` | `ghostty/LICENSE` (MIT) |
 | Swift Argument Parser | 1.5.0, `41982a3656a71c768319979febd796c6fd111d5c` | `swift-argument-parser/LICENSE.txt` (Apache 2.0 with Swift exception) |
+| Sparkle | 2.10.0, `eef1a539a373c1f1a320624b1130fc5de7b2e100` | `Sparkle/LICENSE` (MIT and bundled component notices) |
 | TOMLDecoder | 0.4.5, `a2bbd2796fe3064e107de18cb56031052c4fa899` | `TOMLDecoder/LICENSE.md` (MIT) |
 | FreeType | 2.13.2 | `freetype/` (FreeType License option) |
 | libpng, zlib, Oniguruma | Ghostty's pinned source archives | `libpng/`, `zlib/`, `oniguruma/` |

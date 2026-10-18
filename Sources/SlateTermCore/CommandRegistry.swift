@@ -36,6 +36,8 @@ public enum CommandRegistry {
     public static let commands: [WorkspaceCommand] = [
         .init(id: "command.picker", title: "Search Commands…", key: "k", shift: false),
         .init(id: "settings.open", title: "Open Settings", key: ",", shift: false),
+        .init(id: "updates.check", title: "Check for Updates…", key: "", shift: false),
+        .init(id: "updates.show", title: "Show Software Update", key: "", shift: false),
         .init(id: "notifications.next", title: "Jump to Next Notification", key: "", shift: false),
         .init(id: "notifications.open", title: "Open Notification Source", key: "", shift: false),
         .init(id: "notifications.settings", title: "Notification Settings…", key: "", shift: false),

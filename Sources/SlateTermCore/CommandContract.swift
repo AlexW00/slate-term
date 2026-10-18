@@ -13,7 +13,7 @@ public struct CommandContract: Codable, Sendable {
         let global = id.hasPrefix("appearance.") || id.hasPrefix("terminal.font.") || id.hasPrefix("terminal.palette.")
             || id.hasPrefix("warnings.") || id.hasPrefix("skills.") || id.hasPrefix("agents.activity.") || id.hasPrefix("welcome.") || (id.hasPrefix("plugins.") && !["plugins.reload", "plugins.panelState.reset"].contains(id)) || id.hasPrefix("window.frame.")
             || ["window.focus", "window.minimize", "window.restore", "window.fullscreen.set", "tab.detachCurrent"].contains(id)
-        let independent = id.hasPrefix("notifications.") || id.hasPrefix("layouts.") || (global && id != "tab.detachCurrent") || ["window.new", "settings.open", "config.reload", "command.picker", "browser.clearData"].contains(id)
+        let independent = id.hasPrefix("notifications.") || id.hasPrefix("layouts.") || (global && id != "tab.detachCurrent") || ["window.new", "settings.open", "config.reload", "command.picker", "browser.clearData", "updates.check", "updates.show"].contains(id)
         let parameters: [String: String]
         let required: [String]
         switch id {

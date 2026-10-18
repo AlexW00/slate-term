@@ -1,5 +1,7 @@
 # Trusted plugins
 
+[Software updates](updates.md) documents the shared `updates.*` session, CLI/page/service controls, release notes, and explicit installation consent.
+
 A plugin can provide **commands, a panel, a manual background service, or a combination**. Commands do not require an open pane, web view, HTTP server, or background service. [Manual background services](background-services.md) have distinct lifetimes and shared-API start/stop controls; registration never activates them.
 
 Registration grants the loaded code access to terminal content and workspace commands. Register only code and origins you trust. Plugins are not a sandbox for untrusted code; ordinary Browser panes have no plugin bridge.

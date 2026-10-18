@@ -1,5 +1,7 @@
 # Local control protocol
 
+[Software updates](updates.md) documents the shared `updates.*` session, CLI/page/service controls, release notes, and explicit installation consent.
+
 The app exposes a private, per-instance Unix-domain stream socket. Terminals and managed backends receive `SLATE_TERM_SOCKET`; the bundled CLI handles connection and handshake. External tools pass `--socket PATH` or set the environment variable. Discovery is intentionally instance-specific, not a global command targeting an arbitrary running app.
 
 The socket directory is private (0700), and the server verifies the connecting user's credentials with Darwin `LOCAL_PEERCRED`. Same-user access grants workspace/terminal control; this is not a sandbox against other processes running as that user. Never expose or proxy the socket to untrusted clients.

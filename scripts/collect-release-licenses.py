@@ -34,11 +34,11 @@ def validate_inventory():
     manifest_bytes = (LICENSES / "manifest.json").read_bytes()
     manifest = json.loads(manifest_bytes)
     require(manifest["schema"] == 1, "Unsupported license manifest schema")
-    for resolved in (
-        ROOT / "Package.resolved",
-        ROOT / "slate-term.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved",
+    for resolved, pin_key in (
+        (ROOT / "Package.resolved", "swift_pins"),
+        (ROOT / "slate-term.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved", "xcode_swift_pins"),
     ):
-        require(pinned_revisions(resolved) == manifest["swift_pins"],
+        require(pinned_revisions(resolved) == manifest[pin_key],
                 "Swift dependencies changed; review and refresh licenses/manifest.json")
 
     bootstrap = (ROOT / "scripts/build-ghostty.sh").read_text()
@@ -53,7 +53,7 @@ def validate_inventory():
 
     files = {}
     required_components = {"ghostty", "swift-argument-parser", "TOMLDecoder", "z2d",
-                           "freetype", "nerd_fonts_symbols_only", "jetbrains_mono"}
+                           "freetype", "nerd_fonts_symbols_only", "jetbrains_mono", "Sparkle"}
     require(required_components <= set(manifest["components"]), "Missing required license components")
     for component, entries in manifest["components"].items():
         require(bool(entries), "Empty license component: " + component)

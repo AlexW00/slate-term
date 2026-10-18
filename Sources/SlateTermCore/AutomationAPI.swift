@@ -17,6 +17,8 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
     case paletteList = "palette.list", paletteImport = "palette.import", appearanceGet = "appearance.get"
     case skillsList = "skills.list", skillsInstall = "skills.install", skillsUninstall = "skills.uninstall"
     case welcomeGet = "welcome.get"
+    case updatesGet = "updates.get", updatesShow = "updates.show", updatesCheck = "updates.check"
+    case updatesDownload = "updates.download", updatesCancel = "updates.cancel", updatesInstall = "updates.install"
     case presenceList = "presence.list", presenceHold = "presence.hold", presenceRelease = "presence.release", presenceFocus = "presence.focus"
     case pluginsList = "plugins.list", pluginsRegister = "plugins.register", pluginsValidate = "plugins.validate", pluginsUnregister = "plugins.unregister"
     case pluginsEnable = "plugins.enable", pluginsDisable = "plugins.disable"
@@ -48,7 +50,8 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
              .describe, .version, .contextGet, .workspaceGet, .workspaceSnapshot, .layoutGet, .tabsList, .panesList, .paneInspect,
              .commandList, .commandRun, .windowList, .windowGet, .configGet, .configReload, .configValidate, .configPatch,
              .paletteList, .paletteImport, .appearanceGet, .welcomeGet, .skillsList, .skillsInstall, .skillsUninstall, .pluginsList, .pluginsRegister, .pluginsValidate, .pluginsUnregister, .pluginsEnable, .pluginsDisable, .pluginsStatus, .pluginsLogs,
-             .pluginSettingsGet, .pluginSettingsPatch, .panesSend, .panesCapture, .presenceList, .presenceHold, .presenceRelease, .presenceFocus: .synchronous
+             .pluginSettingsGet, .pluginSettingsPatch, .panesSend, .panesCapture, .presenceList, .presenceHold, .presenceRelease, .presenceFocus,
+             .updatesGet, .updatesShow, .updatesCheck, .updatesDownload, .updatesCancel, .updatesInstall: .synchronous
         case .notificationsPost, .notificationsList, .notificationsDismiss, .notificationsStatus: .notifications
         case .layoutConfiguration, .contextInspect, .settingsGet, .paneTitle: .contextual
         case .pluginDataGet, .pluginDataPatch, .pluginDataReset, .panelStateGet, .panelStatePatch, .panelStateReset: .pluginPersistence
@@ -75,13 +78,14 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
              .paletteList, .appearanceGet, .welcomeGet, .skillsList, .pluginsList, .pluginsValidate, .pluginsStatus, .pluginsLogs, .pluginSettingsGet, .settingsGet, .pluginDataGet, .panelStateGet,
              .terminalCapture, .terminalWait, .panesCapture, .eventsHead, .eventsPoll, .webGet, .webSnapshot, .webWait,
              .browserGet, .browserSnapshot, .browserWait, .serviceList, .serviceStatus, .serviceLogs,
-             .notificationsList, .notificationsStatus, .presenceList, .presenceHold, .presenceRelease: .read
+             .notificationsList, .notificationsStatus, .presenceList, .presenceHold, .presenceRelease, .updatesGet: .read
         case .layoutsCreate, .layoutsUpdate, .layoutsCapture, .layoutsOpen, .layoutsLauncher, .commandRun, .configReload, .configPatch, .paletteImport, .skillsInstall, .skillsUninstall, .pluginsRegister, .pluginsUnregister, .pluginsEnable, .pluginsDisable,
              .pluginsRestart, .pluginSettingsPatch, .pluginDataPatch, .pluginDataReset, .panelStatePatch, .panelStateReset, .paneTitle, .terminalSend,
              .terminalKey, .terminalRun, .panesSend, .eventsEmit, .webClick, .webFill, .webSelect, .webScroll,
              .webFocus, .webKey, .webCheck, .webSetValue, .webScreenshot, .browserNavigate, .browserClick, .browserFill, .browserSelect, .browserScroll,
              .browserEval, .browserScreenshot, .browserClearData, .browserClearSiteData, .serviceStart,
-             .notificationsPost, .notificationsDismiss, .presenceFocus: .mutation
+             .notificationsPost, .notificationsDismiss, .presenceFocus,
+             .updatesShow, .updatesCheck, .updatesDownload, .updatesCancel, .updatesInstall: .mutation
         }
     }
 
@@ -124,7 +128,8 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
              .skillsList, .skillsInstall, .skillsUninstall, .pluginsList, .pluginsRegister, .pluginsValidate, .pluginsUnregister, .pluginsEnable, .pluginsDisable, .pluginsStatus, .pluginsRestart, .pluginsLogs,
              .eventsHead, .eventsPoll, .eventsEmit, .serviceStart, .serviceStop, .serviceList, .serviceStatus,
              .serviceLogs, .serviceReady, .shellUpdate, .shellRunInput, .browserClearData,
-             .notificationsList, .notificationsDismiss, .notificationsStatus, .presenceList, .presenceHold, .presenceRelease, .presenceFocus: break
+             .notificationsList, .notificationsDismiss, .notificationsStatus, .presenceList, .presenceHold, .presenceRelease, .presenceFocus,
+             .updatesGet, .updatesShow, .updatesCheck, .updatesDownload, .updatesCancel, .updatesInstall: break
         }
         return params
     }

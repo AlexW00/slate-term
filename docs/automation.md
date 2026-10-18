@@ -1,5 +1,7 @@
 # Automation
 
+[Software updates](updates.md) documents the shared `updates.*` session, CLI/page/service controls, release notes, and explicit installation consent.
+
 All methods use the same local JSON-RPC interface as the bundled CLI. Pass a pane explicitly when targeting a particular surface. See [the control protocol](control.md) and [plugins](plugins.md) for connection and trust boundaries.
 
 ## Inline welcome

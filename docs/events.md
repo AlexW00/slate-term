@@ -15,6 +15,8 @@ Topics use dot-separated lowercase ASCII components beginning with a letter, fol
 
 The [inline welcome](welcome.md) publishes `host.welcome.changed` after a successful persisted acknowledgement/unread/reset change. Its bounded payload is `{operationId,beforeRevision,revision,acknowledged}`, with host source and no pane/tab target. No-op operations publish nothing. Resnapshot with `welcome.get` after expiry; welcome revisions are separate from workspace revisions.
 
+The app-wide `host.updates.changed` event reports update phase, release, and window-visibility transitions. Download chunks do not emit events. Resnapshot with `updates.get`; see [software updates](updates.md) for payload and lifecycle details.
+
 ## Cursors and recovery
 
 A cursor is `<app-epoch UUID>:<sequence>`. Omitting `after` starts at the current head, not the retained beginning. `<epoch>:0` requests replay from the beginning if it is still retained.

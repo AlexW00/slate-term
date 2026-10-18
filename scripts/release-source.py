@@ -276,7 +276,7 @@ text = package.read_text()
 for pin in manifest["swift_packages"]:
     pattern = r'\.package\(url: "' + re.escape(pin["url"]) + r'", exact: "[^"]+"\)'
     text, count = re.subn(pattern, '.package(path: "vendor/swift/' + pin["identity"] + '")', text)
-    assert count == 1, pin["identity"]
+    assert count == (0 if pin["identity"] == "sparkle" else 1), pin["identity"]
 package.write_text(text)
 link = root / ".build/bootstrap/ghostty"
 link.parent.mkdir(parents=True, exist_ok=True)
@@ -306,6 +306,8 @@ cd "$root"
 xcodebuild -project slate-term.xcodeproj -scheme SlateTermApp -configuration Release -destination 'platform=macOS,arch=arm64' -derivedDataPath .derived-rebuild ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO MARKETING_VERSION={receipt['version']} CURRENT_PROJECT_VERSION={receipt['build_number']} build
 ```
 
+Sparkle is pinned as an Xcode binary package. Its complete matching source is included in `vendor/swift/sparkle`, including its third-party notices. To rebuild that framework, run `xcodebuild -project vendor/swift/sparkle/Sparkle.xcodeproj -scheme Sparkle -configuration Release -derivedDataPath .derived-sparkle CODE_SIGNING_ALLOWED=NO build`. The framework is in `.derived-sparkle/Build/Products/Release/Sparkle.framework`. For a fully source-built app, replace the Sparkle package product in the Xcode target with that framework, retain Embed & Sign, and build the app again. The pinned binary package remains the default for the command above. No upstream release/tag script is needed.
+
 The unsigned application is `.derived-rebuild/Build/Products/Release/Slate Terminal.app`. Xcode's build phase includes the two CLI helpers and Ghostty resources. The local Swift references avoid remote package resolution. This route deliberately bypasses the release scripts' Git/clean-build receipts because source archives contain no private Git repository metadata. It reproduces the source inputs and build behavior; signing, timestamps, absolute debug paths, and the explicit Ghostty version label prevent a promise of identical binary bytes.
 
 Before redistributing your build, copy `licenses/`, `THIRD_PARTY_NOTICES.md`, `COPYING.md`, and `LICENSE` into the app's `Contents/Resources/ThirdPartyLicenses/` (name the project license `PROJECT-LICENSE.txt`), retain source access, and sign your own build if desired. Modified builds remain subject to their applicable licenses. See `COPYING.md` and `THIRD_PARTY_NOTICES.md`.
@@ -320,7 +322,7 @@ def create_source(root, output, receipt, swift_sources):
     zig_directory = root / (".tools/zig-aarch64-macos-" + zig_version)
     zig = zig_directory / "zig"
     require(run([str(zig), "version"]).decode().strip() == zig_version, "Unexpected Zig version")
-    pins = json.loads((root / "Package.resolved").read_text())["pins"]
+    pins = json.loads((root / "slate-term.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved").read_text())["pins"]
     for pin in pins:
         verify_git_source(swift_sources / pin["identity"], pin["state"]["revision"])
     output.mkdir(parents=True, exist_ok=True)

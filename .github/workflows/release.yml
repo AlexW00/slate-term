@@ -64,12 +64,26 @@ jobs:
         env:
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
           BUILD_NUMBER: ${{ github.run_number }}
+          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
+          SPARKLE_FEED_URL: ${{ vars.SPARKLE_FEED_URL }}
         run: bash scripts/release-build.sh --version "$RELEASE_VERSION" --build-number "$BUILD_NUMBER"
+      - name: Check release update configuration and notes
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          python3 scripts/release-updates.py validate-config --app 'artifacts/release/Slate Terminal.app'
+          test -s "docs/releases/$RELEASE_TAG.md"
       - name: Package corresponding source before loading credentials
         env:
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
           BUILD_NUMBER: ${{ github.run_number }}
         run: python3 scripts/release-source.py --output artifacts/release/assets --version "$RELEASE_VERSION" --build-number "$BUILD_NUMBER"
+      - name: Fetch checksum-pinned Sparkle release tools
+        run: python3 scripts/release-updates.py bootstrap-tools --output .build/sparkle-tools
+      - name: Verify official Sparkle tools with public test vectors
+        env:
+          SLATE_TEST_SPARKLE_TOOLS: ${{ github.workspace }}/.build/sparkle-tools
+        run: python3 -m unittest discover -s Tests/Release -p test_update_tools.py -v
       - name: Sign and notarize using an isolated temporary keychain
         env:
           SLATE_RELEASE_CERTIFICATE_P12_BASE64: ${{ secrets.SLATE_RELEASE_CERTIFICATE_P12_BASE64 }}
@@ -78,10 +92,19 @@ jobs:
           SLATE_NOTARY_KEY_ID: ${{ secrets.SLATE_NOTARY_KEY_ID }}
           SLATE_NOTARY_ISSUER_ID: ${{ secrets.SLATE_NOTARY_ISSUER_ID }}
         run: python3 scripts/release-with-credentials.py --from-environment -- bash scripts/release-package.sh
+      - name: Prepare signed update assets for the draft
+        env:
+          SLATE_SPARKLE_PRIVATE_KEY: ${{ secrets.SLATE_SPARKLE_PRIVATE_KEY }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 scripts/release-updates.py prepare --tools .build/sparkle-tools \
+            --app 'artifacts/release/Slate Terminal.app' --assets artifacts/release/assets \
+            --notes "docs/releases/$RELEASE_TAG.md" --repository "$RELEASE_REPOSITORY"
       - name: Checksum every distributable
         working-directory: artifacts/release/assets
         run: |
-          shasum -a 256 ./*.zip ./*.dmg ./*-source.tar.gz > SHA256SUMS
+          shasum -a 256 ./*.zip ./*.dmg ./*-source.tar.gz ./appcast.xml ./*-arm64.md > SHA256SUMS
           shasum -a 256 -c SHA256SUMS
       - name: Retain verified distributables
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -92,6 +115,8 @@ jobs:
             artifacts/release/assets/*.dmg
             artifacts/release/assets/*-source.tar.gz
             artifacts/release/assets/SHA256SUMS
+            artifacts/release/assets/appcast.xml
+            artifacts/release/assets/*-arm64.md
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
@@ -121,5 +146,5 @@ jobs:
         run: |
           actual_commit="$(gh api "repos/$GH_REPO/commits/$RELEASE_TAG" --jq .sha)"
           test "$actual_commit" = "$EXPECTED_COMMIT" || { echo "Release tag moved during the build." >&2; exit 1; }
-          gh release create "$RELEASE_TAG" assets/*.zip assets/*.dmg assets/*-source.tar.gz assets/SHA256SUMS \
+          gh release create "$RELEASE_TAG" assets/*.zip assets/*.dmg assets/*-source.tar.gz assets/SHA256SUMS assets/appcast.xml assets/*-arm64.md \
             --draft --verify-tag --title "Slate Terminal $RELEASE_VERSION" --generate-notes

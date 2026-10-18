@@ -1,5 +1,14 @@
 {
   "components": {
+    "Sparkle": [
+      {
+        "file": "Sparkle/LICENSE",
+        "sha256": "389a4e4e9a32f059775b13a06e25a591445ba229d2838d26dd3e7c0c45127cfe",
+        "source": {
+          "url": "https://raw.githubusercontent.com/sparkle-project/Sparkle/eef1a539a373c1f1a320624b1130fc5de7b2e100/LICENSE"
+        }
+      }
+    ],
     "TOMLDecoder": [
       {
         "file": "TOMLDecoder/LICENSE.md",
@@ -596,6 +605,11 @@
   "ghostty_revision": "554ea65867ffe34bb3e51e09bd016e154a1f9d7a",
   "schema": 1,
   "swift_pins": {
+    "swift-argument-parser": "41982a3656a71c768319979febd796c6fd111d5c",
+    "tomldecoder": "a2bbd2796fe3064e107de18cb56031052c4fa899"
+  },
+  "xcode_swift_pins": {
+    "sparkle": "eef1a539a373c1f1a320624b1130fc5de7b2e100",
     "swift-argument-parser": "41982a3656a71c768319979febd796c6fd111d5c",
     "tomldecoder": "a2bbd2796fe3064e107de18cb56031052c4fa899"
   },

@@ -7,7 +7,7 @@ import SlateTermSettings
 @main
 struct SlateTermCLI: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "slate-term", abstract: "Control a running Slate Terminal workspace.",
-        subcommands: [WarningsCLI.self, NotifyCLI.self, NotificationsCLI.self, Tabs.self, Panes.self, WindowsCLI.self, TerminalCommand.self, BrowserCommand.self, WebCLI.self, Plugins.self, Events.self, ContextCommand.self, ShellCommand.self, LayoutCommand.self, SavedLayoutsCommand.self, Commands.self, ConfigCommand.self, WorkspaceCLI.self, APICLI.self, AppearanceCLI.self, AgentActivityCLI.self, PresenceCLI.self, PaletteCLI.self, SkillCLI.self, WelcomeCLI.self, RPC.self, Version.self, PluginWorker.self])
+        subcommands: [WarningsCLI.self, NotifyCLI.self, NotificationsCLI.self, Tabs.self, Panes.self, WindowsCLI.self, TerminalCommand.self, BrowserCommand.self, WebCLI.self, Plugins.self, Events.self, ContextCommand.self, ShellCommand.self, LayoutCommand.self, SavedLayoutsCommand.self, Commands.self, ConfigCommand.self, WorkspaceCLI.self, APICLI.self, AppearanceCLI.self, AgentActivityCLI.self, PresenceCLI.self, PaletteCLI.self, SkillCLI.self, WelcomeCLI.self, UpdatesCLI.self, RPC.self, Version.self, PluginWorker.self])
 
     static func main() {
         do {

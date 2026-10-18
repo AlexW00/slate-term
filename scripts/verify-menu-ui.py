@@ -98,7 +98,7 @@ with tempfile.TemporaryDirectory(prefix='slate-menu-', dir='/tmp') as temporary:
                     if item['children']:
                         check(item['children'])
                     else:
-                        if item.get('command') in {'layouts.edit', 'layouts.openWindow', 'layouts.captureWindow', 'plugins.reload',
+                        if item.get('command') in {'layouts.edit', 'layouts.openWindow', 'layouts.captureWindow', 'plugins.reload', 'plugins.panelState.reset',
                                                    'pane.header.show', 'pane.header.hide', 'pane.header.toggle',
                                                    'pane.rename', 'pane.copyID', 'pane.move.chooseDestination', 'tab.rename', 'tab.title.clear', 'appearance.auto', 'appearance.light', 'appearance.dark',
                                                    'notifications.next', 'notifications.open', 'notifications.settings',

@@ -53,7 +53,7 @@ ORDER = (
     'notifications', 'command-picker', 'window-recovery', 'appearance', 'palettes',
     'menu-ui', 'shell', 'shell-hooks', 'shells', 'web-operations', 'browser-data', 'browser-navigation',
     'browser-profiles', 'browser', 'web', 'context', 'api-context', 'api-settings', 'api-parity', 'presence',
-    'theme-api', 'agent-skills', 'welcome', 'api-negotiation', 'service-session',
+    'theme-api', 'agent-skills', 'welcome', 'updates', 'api-negotiation', 'service-session',
     'service-commands', 'service-generation', 'background-services', 'plugin-settings-api',
     'layout-api', 'semantic-events', 'semantic-editor', 'divider-events',
     'divider-native-commands', 'divider-presentation', 'divider-reentrancy',
