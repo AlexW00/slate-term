@@ -28,7 +28,11 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
     case panelStateGet = "plugins.panelState.get", panelStatePatch = "plugins.panelState.patch", panelStateReset = "plugins.panelState.reset"
     case paneTitle = "pane.title"
     case terminalSend = "terminal.send", terminalKey = "terminal.key", terminalCapture = "terminal.capture"
-    case terminalRun = "terminal.run", terminalWait = "terminal.wait", panesSend = "panes.send", panesCapture = "panes.capture"
+    case terminalHistory = "terminal.history", terminalHistoryExport = "terminal.historyExport", terminalSearch = "terminal.search"
+    case terminalRun = "terminal.run", terminalWait = "terminal.wait", terminalStart = "terminal.start"
+    case terminalOperations = "terminal.operations", terminalOperationStatus = "terminal.operationStatus"
+    case terminalOperationResult = "terminal.operationResult", terminalOperationWait = "terminal.operationWait"
+    case panesSend = "panes.send", panesCapture = "panes.capture"
     case eventsHead = "events.head", eventsPoll = "events.poll", eventsEmit = "events.emit"
     case notificationsPost = "notifications.post", notificationsList = "notifications.list"
     case notificationsDismiss = "notifications.dismiss", notificationsStatus = "notifications.status"
@@ -43,7 +47,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
     case serviceStatus = "plugins.service.status", serviceLogs = "plugins.service.logs", serviceReady = "service.ready"
     case shellUpdate = "shell.update", shellRunInput = "shell.runInput"
 
-    public enum Family: String, Sendable { case synchronous, contextual, notifications, terminal, browser, web, events, pluginRuntime, pluginPersistence, services, integration }
+    public enum Family: String, Sendable { case synchronous, contextual, notifications, terminal, terminalOperations, browser, web, events, pluginRuntime, pluginPersistence, services, integration }
     public var family: Family {
         switch self {
         case .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsCreate, .layoutsUpdate, .layoutsWindows, .layoutsCapture, .layoutsOpen, .layoutsLauncher, .layoutsStartupStatus,
@@ -54,8 +58,9 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
              .updatesGet, .updatesShow, .updatesCheck, .updatesDownload, .updatesCancel, .updatesInstall: .synchronous
         case .notificationsPost, .notificationsList, .notificationsDismiss, .notificationsStatus: .notifications
         case .layoutConfiguration, .contextInspect, .settingsGet, .paneTitle: .contextual
+        case .terminalSend, .terminalKey, .terminalCapture, .terminalRun, .terminalWait, .terminalStart, .terminalHistory, .terminalHistoryExport, .terminalSearch: .terminal
+        case .terminalOperations, .terminalOperationStatus, .terminalOperationResult, .terminalOperationWait: .terminalOperations
         case .pluginDataGet, .pluginDataPatch, .pluginDataReset, .panelStateGet, .panelStatePatch, .panelStateReset: .pluginPersistence
-        case .terminalSend, .terminalKey, .terminalCapture, .terminalRun, .terminalWait: .terminal
         case .browserGet, .browserNavigate, .browserSnapshot, .browserClick, .browserFill, .browserSelect,
              .browserScroll, .browserWait, .browserEval, .browserScreenshot, .browserClearData, .browserClearSiteData: .browser
         case .webGet, .webSnapshot, .webClick, .webFill, .webSelect, .webScroll, .webWait, .webFocus, .webKey, .webCheck, .webSetValue, .webScreenshot: .web
@@ -76,12 +81,13 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
              .describe, .version, .contextGet, .contextInspect, .workspaceGet, .workspaceSnapshot, .layoutGet,
              .tabsList, .panesList, .paneInspect, .commandList, .windowList, .windowGet, .configGet, .configValidate,
              .paletteList, .appearanceGet, .welcomeGet, .skillsList, .pluginsList, .pluginsValidate, .pluginsStatus, .pluginsLogs, .pluginSettingsGet, .settingsGet, .pluginDataGet, .panelStateGet,
-             .terminalCapture, .terminalWait, .panesCapture, .eventsHead, .eventsPoll, .webGet, .webSnapshot, .webWait,
+             .terminalOperations, .terminalOperationStatus, .terminalOperationResult, .terminalOperationWait,
+             .terminalCapture, .terminalWait, .terminalHistory, .panesCapture, .eventsHead, .eventsPoll, .webGet, .webSnapshot, .webWait,
              .browserGet, .browserSnapshot, .browserWait, .serviceList, .serviceStatus, .serviceLogs,
              .notificationsList, .notificationsStatus, .presenceList, .presenceHold, .presenceRelease, .updatesGet: .read
         case .layoutsCreate, .layoutsUpdate, .layoutsCapture, .layoutsOpen, .layoutsLauncher, .commandRun, .configReload, .configPatch, .paletteImport, .skillsInstall, .skillsUninstall, .pluginsRegister, .pluginsUnregister, .pluginsEnable, .pluginsDisable,
              .pluginsRestart, .pluginSettingsPatch, .pluginDataPatch, .pluginDataReset, .panelStatePatch, .panelStateReset, .paneTitle, .terminalSend,
-             .terminalKey, .terminalRun, .panesSend, .eventsEmit, .webClick, .webFill, .webSelect, .webScroll,
+             .terminalKey, .terminalRun, .terminalStart, .terminalHistoryExport, .terminalSearch, .panesSend, .eventsEmit, .webClick, .webFill, .webSelect, .webScroll,
              .webFocus, .webKey, .webCheck, .webSetValue, .webScreenshot, .browserNavigate, .browserClick, .browserFill, .browserSelect, .browserScroll,
              .browserEval, .browserScreenshot, .browserClearData, .browserClearSiteData, .serviceStart,
              .notificationsPost, .notificationsDismiss, .presenceFocus,
@@ -113,7 +119,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
              .browserGet, .browserNavigate, .browserSnapshot, .browserClick, .browserFill, .browserSelect,
              .browserScroll, .browserWait, .browserEval, .browserScreenshot, .browserClearSiteData, .panesSend, .panesCapture:
             inheritPane()
-        case .terminalSend, .terminalKey, .terminalCapture, .terminalRun, .terminalWait:
+        case .terminalSend, .terminalKey, .terminalCapture, .terminalRun, .terminalWait, .terminalStart, .terminalHistory, .terminalHistoryExport, .terminalSearch:
             inheritPane(); inheritScope()
         case .commandRun:
             if let id = input["id"]?.string {
@@ -122,7 +128,8 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
             }
         case .pluginDataGet, .pluginDataPatch, .pluginDataReset, .settingsGet, .pluginSettingsGet, .pluginSettingsPatch:
             if params["id"] == nil, let plugin = defaults.pluginID { params["id"] = .string(plugin) }
-        case .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsCreate, .layoutsUpdate, .layoutsWindows, .layoutsCapture, .layoutsOpen, .layoutsLauncher, .layoutsStartupStatus,
+        case .terminalOperations, .terminalOperationStatus, .terminalOperationResult, .terminalOperationWait,
+             .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsCreate, .layoutsUpdate, .layoutsWindows, .layoutsCapture, .layoutsOpen, .layoutsLauncher, .layoutsStartupStatus,
              .describe, .version, .workspaceGet, .tabsList, .panesList, .commandList, .windowList, .windowGet,
              .configGet, .configReload, .configValidate, .configPatch, .paletteList, .paletteImport, .appearanceGet, .welcomeGet,
              .skillsList, .skillsInstall, .skillsUninstall, .pluginsList, .pluginsRegister, .pluginsValidate, .pluginsUnregister, .pluginsEnable, .pluginsDisable, .pluginsStatus, .pluginsRestart, .pluginsLogs,

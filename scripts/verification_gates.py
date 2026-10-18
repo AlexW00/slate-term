@@ -53,14 +53,14 @@ ORDER = (
     'notifications', 'command-picker', 'window-recovery', 'appearance', 'palettes',
     'menu-ui', 'shell', 'shell-hooks', 'shells', 'web-operations', 'browser-data', 'browser-navigation',
     'browser-profiles', 'browser', 'web', 'context', 'api-context', 'api-settings', 'api-parity', 'presence',
-    'theme-api', 'agent-skills', 'welcome', 'updates', 'api-negotiation', 'service-session',
+    'theme-api', 'agent-skills', 'welcome', 'updates', 'terminal-history', 'api-negotiation', 'service-session',
     'service-commands', 'service-generation', 'background-services', 'plugin-settings-api',
     'layout-api', 'semantic-events', 'semantic-editor', 'divider-events',
     'divider-native-commands', 'divider-presentation', 'divider-reentrancy',
     'divider-ordinary', 'causation', 'storage-causation', 'command-lifecycle',
-    'settings-lifecycle', 'workspace-persistence', 'pane-titles', 'tab-titles',
+    'settings-lifecycle', 'workspace-persistence', 'workspace-restoration', 'pane-titles', 'tab-titles',
     'pane-headers', 'cross-window-pane-movement', 'pane-movement', 'plugins', 'plugin-packages',
-    'plugin-lifecycle', 'plugin-persistence', 'plugin-services', 'plugin-commands', 'plugin-header-buttons',
+    'plugin-lifecycle', 'plugin-persistence', 'plugin-services', 'plugin-commands', 'plugin-compatibility', 'plugin-header-buttons',
     'events', 'extension-interop', 'whitespace',
 )
 ALIASES = {'app': 'app-1'}

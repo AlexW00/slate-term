@@ -59,9 +59,37 @@ import SlateTermCore
         try require(!inserted[0].contains("\n") && !inserted[0].contains("\r"), "Insert must not submit the command")
         try require(pane.welcomeVisible && window.firstResponder === terminal, "Insert must retain welcome and focus terminal")
         let fullWelcome = pane.view.subviews.compactMap { $0 as? WelcomeView }.first!
+        let labels = fullWelcome.documentView!.subviews.compactMap { $0 as? NSTextField }.map(\.stringValue)
+        try require(labels == [
+            WelcomeContent.current.title,
+            "Teach your coding agent how to run commands and manage panes in Slate Terminal with", WelcomeContent.skillCommand,
+            "To stop showing this message, run", WelcomeContent.readCommand
+        ], "Welcome must contain only its heading and one description per command")
         fullWelcome.clickInsertCommandForTesting(WelcomeContent.skillCommand)
         try require(inserted == [WelcomeContent.readCommand, WelcomeContent.skillCommand], "Skill button must insert its command without submitting")
         try require(pane.welcomeVisible && window.firstResponder === terminal, "Skill insertion must retain welcome and terminal focus")
+        // The banner sits beside the text when wide, above it when narrow but tall, and is hidden otherwise.
+        let labelFrames = { fullWelcome.documentView!.subviews.compactMap { $0 as? NSTextField }.map(\.frame) }
+        size(1100, 600)
+        guard let beside = fullWelcome.bannerFrameForTesting else { throw NSError(domain: "Wide welcome must show the banner", code: 1) }
+        try require(beside.minX > labelFrames().map(\.maxX).max()! && labelFrames().allSatisfy { $0.minX == 16 },
+                    "Banner must follow left-aligned text")
+        try require(beside.maxX <= fullWelcome.documentView!.bounds.width && beside.minY >= 0, "Banner must stay inside welcome")
+        // A wide pane keeps spare width after the banner instead of widening the gap to the text.
+        let gap = beside.minX - labelFrames().map(\.maxX).max()!
+        size(1400, 600)
+        try require(fullWelcome.bannerFrameForTesting.map { $0.minX - labelFrames().map(\.maxX).max()! } == gap,
+                    "Gap between text and banner must not grow with pane width")
+        size(1100, 600)
+        try require(terminal.bounds.height >= 287, "Banner must not take more than half of the pane")
+        try capture("banner-beside")
+        size(480, 900)
+        guard let above = fullWelcome.bannerFrameForTesting else { throw NSError(domain: "Tall narrow welcome must stack the banner", code: 1) }
+        try require(above.maxY <= labelFrames().map(\.minY).min()! && above.maxX <= fullWelcome.documentView!.bounds.width,
+                    "Stacked banner must sit above the text")
+        try capture("banner-above")
+        size(480, 420)
+        try require(pane.welcomeVisible && fullWelcome.bannerFrameForTesting == nil, "Short narrow welcome must hide the banner")
         size(320, 420)
         try require(pane.welcomeVisible && terminal.bounds.width == 320, "Narrow welcome pushed pane width")
         try require(terminal.bounds.height >= 196, "Narrow terminal height lost")
@@ -73,8 +101,8 @@ import SlateTermCore
             let command = document.subviews.compactMap { $0 as? NSTextField }.first {
                 $0.stringValue == (button === buttons[0] ? WelcomeContent.skillCommand : WelcomeContent.readCommand)
             }!
-            try require(button.frame.maxX < command.frame.minX && command.frame.maxX <= document.bounds.width,
-                        "Each play button must be left of its command, within narrow content")
+            try require(command.frame.maxX < button.frame.minX && button.frame.maxX <= document.bounds.width,
+                        "Each copy-shaped button must follow its command, within narrow content")
         }
         try capture("narrow")
         // Scrolling is local to native welcome content, independent of terminal input.

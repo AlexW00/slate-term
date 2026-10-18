@@ -11,7 +11,12 @@ if [[ "${SLATE_VM_PREBUILT:-0}" != 1 ]]; then
   xcrun swiftc --version
   shasum -a 256 Native/WorkspaceWindow.swift Tests/TabOverview/TabOverview.swift scripts/verify-tab-overview.sh
 } > "$gate/build-manifest.txt"
+# WorkspaceWindow.swift imports SlateTermCore, so build that module first.
+slate_native_swiftc -swift-version 5 -parse-as-library -g -emit-library -emit-module \
+  -module-name SlateTermCore Sources/SlateTermCore/*.swift \
+  -emit-module-path "$gate/SlateTermCore.swiftmodule" -o "$gate/libSlateTermCore.dylib"
 slate_native_swiftc -swift-version 5 -default-isolation MainActor -parse-as-library -g \
+  -I "$gate" -L "$gate" -lSlateTermCore -Xlinker -rpath -Xlinker "$gate" \
   Native/WorkspaceWindow.swift Tests/TabOverview/TabOverview.swift \
   -o "$gate/tab-overview"
 shasum -a 256 "$gate/tab-overview" >> "$gate/build-manifest.txt"

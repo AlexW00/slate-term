@@ -17,8 +17,11 @@ import Testing
     #expect(AutomationMethod.layoutConfiguration.resolving(["pane": .string("p9")], defaults: defaults) == ["pane": .string("p9")])
     #expect(AutomationMethod.layoutConfiguration.resolving([:], defaults: .init()).isEmpty)
     for command in CommandRegistry.commands where command.id.hasPrefix("layouts.") {
-        #expect(command.contract.workspaceIndependent)
-        #expect(AutomationMethod.commandRun.resolving(["id": .string(command.id)], defaults: defaults) == ["id": .string(command.id)])
+        let capture = command.id == "layouts.captureWindow"
+        #expect(command.contract.workspaceIndependent == !capture)
+        var expected: [String: JSONValue] = ["id": .string(command.id)]
+        if capture { expected["pane"] = .string("p2"); expected["tab"] = .string("t2") }
+        #expect(AutomationMethod.commandRun.resolving(["id": .string(command.id)], defaults: defaults) == expected)
     }
     #expect(APIGuards.names.contains("expectedSavedLayoutRevision"))
     #expect(!APIGuards.legacyNames.contains("expectedSavedLayoutRevision"))

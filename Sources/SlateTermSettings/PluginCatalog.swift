@@ -9,7 +9,7 @@ public struct PluginCatalog: Sendable {
     public private(set) var registrations: [PluginRegistration] = []
     public private(set) var diagnostics: [String: String] = [:]
     public var disabledPlugins: Set<String> { Set(records.filter { !$0.enabled }.map(\.id)) }
-    public var activeRegistrations: [PluginRegistration] { registrations.filter { !disabledPlugins.contains($0.id) } }
+    public var activeRegistrations: [PluginRegistration] { registrations.filter { !disabledPlugins.contains($0.id) && $0.compatibilityReport().compatible } }
     public private(set) var revision = UUID()
 
     public init(directory: URL) throws {
@@ -43,6 +43,7 @@ public struct PluginCatalog: Sendable {
         let record = InstalledPlugin(id: id, installationID: prepared.installationID, enabled: previous?.enabled ?? true, archiveSHA256: prepared.archiveSHA256)
         // Validate resolution before any filesystem publication.
         let registration = try prepared.manifest.registration(root: packages.root(record), validateFiles: false)
+        try registration.requireCompatibility()
         let destination: URL
         do { destination = try packages.publish(prepared) }
         catch { throw RPCFailure(code: APIError.settingsWriteFailed, message: "Could not publish plugin files; previous installation retained: \(error)") }
@@ -71,6 +72,7 @@ public struct PluginCatalog: Sendable {
     public mutating func setEnabled(_ id: String, enabled: Bool) throws -> Bool {
         guard let index = records.firstIndex(where: { $0.id == id }) else { throw ConfigurationError.invalid("Plugin is not installed: \(id)") }
         if enabled, diagnostics[id] != nil { throw RPCFailure(code: -32602, message: "Repair the unavailable plugin before enabling it") }
+        if enabled, let registration = registrations.first(where: { $0.id == id }) { try registration.requireCompatibility() }
         guard records[index].enabled != enabled else { return false }
         var next = records
         next[index].enabled = enabled
@@ -82,6 +84,7 @@ public struct PluginCatalog: Sendable {
         .array(records.map { record in
             let registration = registrations.first { $0.id == record.id }
             var info = registration.flatMap { try? JSONValue.encoding($0).object } ?? [:]
+            info["compatibilityStatus"] = registration.flatMap { try? JSONValue.encoding($0.compatibilityReport()) } ?? .null
             info.merge([
                 "id": .string(record.id), "title": .string(registration?.title ?? record.id),
                 "enabled": .bool(record.enabled), "installationID": .string(record.installationID.uuidString.lowercased()),

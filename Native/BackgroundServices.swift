@@ -90,6 +90,7 @@ final class BackgroundServices {
     func start(_ id: String, operation: WorkspaceOperationContext) throws -> JSONValue {
         try validateOperation(operation)
         let entry = try entry(id)
+        try entry.registration.requireCompatibility()
         if ["starting", "ready"].contains(entry.state) { return .object(info(entry)) }
         guard entry.state != "stopping", !reservations.values.contains(where: { $0.identity.pluginID == id }) else {
             throw RPCFailure(code: APIError.conflict, message: "Service cleanup is pending or unconfirmed")

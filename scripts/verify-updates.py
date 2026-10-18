@@ -13,6 +13,7 @@ from plugin_package_fixture import package_fixture
 
 
 with AppFixture('updates', '[terminal]\nshell="/bin/zsh"\n') as app:
+    app.capture_contracts()
     def debug(**params):
         return app.rpc('debug.updates', **params)
 

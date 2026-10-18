@@ -102,7 +102,9 @@ with AppFixture('notifications', configuration) as app:
     patch(automatic=False)
     app.rpc('terminal.run', pane=source, command='sleep 1.2')
     assert not listing(), 'Disabled completion notified'
-    patch(automatic=True)
+    # Keep automatic completions disabled for the remaining OSC/manual cases.
+    # Engine completion and authenticated shell readiness are independent channels;
+    # re-enabling here could admit the previous command\'s delayed engine callback.
 
     for protocol, command in [
         ('OSC 9', r"printf '\033]9;OSC nine fixture\007'"),

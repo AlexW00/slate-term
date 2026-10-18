@@ -26,9 +26,10 @@ let package = Package(
         .executableTarget(name: "SlateTermCLI", dependencies: [
             "SlateTermCore", "SlateTermIPC", "SlateTermSettings", .product(name: "ArgumentParser", package: "swift-argument-parser"),
         ]),
-        .testTarget(name: "SlateTermCoreTests", dependencies: ["SlateTermCore"]),
+        .target(name: "SlateTermTestSupport", dependencies: ["SlateTermCore"], path: "Tests/SlateTermTestSupport"),
+        .testTarget(name: "SlateTermCoreTests", dependencies: ["SlateTermCore", "SlateTermTestSupport"]),
         .testTarget(name: "SlateTermCLITests", dependencies: ["SlateTermCLI", "SlateTermCore"]),
         .testTarget(name: "SlateTermIPCTests", dependencies: ["SlateTermIPC", "SlateTermCore"]),
-        .testTarget(name: "SlateTermSettingsTests", dependencies: ["SlateTermSettings", "SlateTermCore"]),
+        .testTarget(name: "SlateTermSettingsTests", dependencies: ["SlateTermSettings", "SlateTermCore", "SlateTermTestSupport"]),
     ]
 )

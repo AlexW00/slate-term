@@ -2,6 +2,14 @@ import Testing
 import SlateTermCore
 @testable import SlateTermCLI
 
+@Test func welcomeCopyContainsOnlyHeadingAndShortCommandDescriptions() {
+    #expect(WelcomeContent.current.title == "Welcome to Slate Terminal!")
+    #expect(WelcomeContent.current.paragraphs == [
+        "Teach your coding agent how to run commands and manage panes in Slate Terminal with \(WelcomeContent.skillCommand)",
+        "To stop showing this message, run \(WelcomeContent.readCommand)"
+    ])
+}
+
 @Test func welcomeCLIUsesSharedOperationsWithoutWorkspaceTargets() throws {
     let show = try WelcomeCLI.parse([])
     #expect(show.request.method == "welcome.get")

@@ -4,11 +4,57 @@
 
 All methods use the same local JSON-RPC interface as the bundled CLI. Pass a pane explicitly when targeting a particular surface. See [the control protocol](control.md) and [plugins](plugins.md) for connection and trust boundaries.
 
+## Machine-readable contracts
+
+`api.describe` retains its existing capability fields and adds `contracts` (catalog
+version 1). It contains every public method, all built-in commands, a shared
+`plugin.*` contributed-command template, reusable `$defs`, and the schema dialect,
+custom formats and `x-*` constraint vocabulary. Each descriptor identifies input
+and result schemas, supported guards, errors, availability, routing, admission and
+retry semantics. Private authenticated shell methods are not public capabilities.
+
+`command.list` and `api.describe.commands` retain their existing rows and add
+`contractRef`, a JSON Pointer resolved from `api.describe.contracts`. The older
+row `contract` remains picker/caller-default hints, not complete invocation
+validation. For `command.run`, choose the command's descriptor (or its contributed
+template) for the precise result shape. Plugin arguments are opaque; reserved
+host guards still undergo host validation. A successful contributed command has
+its own stdout/stderr tails, unlike terminal screen observations.
+
+The catalog covers every public method and built-in command (checked by
+package tests). It includes plugin data/panel state, presence, window controls and typed web input;
+the removed `storage.*` methods are not restored. `contracts.requestMetadata`
+separately describes the versioned request metadata object (including display-only
+actor identity), not method parameters. Malformed metadata can return `-32600`
+before dispatch.
+
+Method input schemas apply **after caller defaults, before `contextPane` normalization**.
+References resolve from the catalog, not from an isolated descriptor. For a
+standard JSON Schema validator, bind a fragment as follows:
+
+```js
+const catalog = description.contracts;
+const schema = {
+  $schema: catalog.schemaDialect,
+  $defs: catalog.$defs,
+  allOf: [catalog.methods["terminal.run"].input]
+};
+```
+
+Custom formats and `x-*` constraints require host-specific checks; ordinary JSON
+Schema validation alone is not full admission. Availability can change between
+discovery and execution. Discovery remains unpaginated and subject to the 1 MiB
+transport/queue limits: a sufficiently large active command list can exceed them.
+Correlation IDs are not idempotency keys; never automatically replay mutations.
+See [API extension progress](api-extension-progress.md) for what is verified on current main.
+
 ## Inline welcome
 
 `slate-term welcome` reads current copy without acknowledging it. `welcome --read` persists acknowledgement; `welcome --unread` (alias `--reset`) re-enables the native welcome in future terminal sessions. Shared API, page/service parity, persistence and error details are in [Inline welcome](welcome.md). It is shell-independent native content, not part of `terminal.capture` or terminal scrollback.
 
 ## Terminals
+
+Terminal Find and bounded history reads/exports are documented in [MVP foundations](mvp-foundations.md#terminal-findhistory-slice--implemented-selected-verification-passed). `terminal.capture` reads the active screen; use `terminal.history` for retained output. Native Find and `terminal.search` share the engine's retained-history search.
 
 ```sh
 slate-term terminal send --pane p1 --text $'printf "hello\\n"\r'
@@ -27,7 +73,27 @@ RPC names are `terminal.send`, `.key`, `.capture`, `.run`, `.wait`. Routing para
 - **run:** `command` is a nonempty program in the pane's shell language (zsh, bash or fish), at most 16,384 UTF-8 bytes with no NUL. `pane.inspect` and `context.get` report the pane's `shell` and `runAvailable` once its first prompt is reported. Optional `shell` (`--shell` in the CLI) states the language the command is written in; a pane running another shell refuses with `-32041` and nothing is submitted. Requires authenticated shell integration and an idle prompt. A private line-editor widget checks the actual editing buffer and continuation state before claiming the queued command; an unfinished draft is refused without submitting it. zsh binds a session-specific key in the main/emacs/viins/vicmd maps; bash 4.4+ binds it in the emacs, vi-insert and vi-command keymaps and claims only at an empty primary prompt, never at a continuation prompt, inside `read -e`, or when its prompt marks are missing or `promptvars` is off; fish 3.1+ binds a private-use character in its default, insert and visual modes, checks the whole multi-line buffer and claims only at a command prompt. bash 3.2–4.3, including Apple's `/bin/bash`, report state but refuse runs (`runAvailable: false`). Replacing those bindings or removing the integration can make a run time out rather than guess. Shell reports travel on separate connections and may arrive out of order; a run completes on the prompt numbered directly after its own running report. If a later command's prompt arrives first, the run completes with `exitCode: null` rather than another command's status. Completion requires its unique preexec marker followed by a later prompt report, never a guessed output string or process name. Returns `paneId`, `sessionId`, `commandId`, `exitCode`, `text`, `truncated`. A nonzero command status is a completed RPC result; inspect `exitCode`, not the CLI's transport exit status. Text is the screen when completion is reported, not a promise that all output has rendered or a per-command stream. The eval wrapper can appear in shell history and terminal echo. Commands that replace/exit the interactive shell cannot complete through its next prompt.
 - **wait:** with `contains`, waits for literal current-screen text (1–4096 UTF-8 bytes). This may match existing output: choose a unique marker when freshness matters. Without it, waits for an authenticated prompt; unknown shell state is rejected. Optional `afterSequence` requires a newer prompt and is incompatible with `contains`. Returns `matched`, pane/session IDs, and available report sequence/exit status.
 
-Run/wait deadlines default to 30,000 milliseconds; range 1–295,000. At most one run per pane, 32 runs and 32 waits per app. Targets and session identities are frozen for an operation. Replacing/closing the terminal invalidates outstanding work. Timeout or disconnect **stops waiting, not the user's command**. Explicitly send `ctrl+c` if interruption is intended. Dedicated automation terminals avoid competing human/extension input; raw `send` deliberately makes no prompt-safety guarantee.
+Run/wait deadlines default to 30,000 milliseconds; range 1–295,000. At most one run per pane, 32 active runs plus startup reservations, 32 operation waiters and 32 screen/prompt waiters per app. Targets and session identities are frozen. Timeout or disconnect **stops waiting, not the user's command or operation tracking**. Explicitly send `ctrl+c` if interruption is intended; the process may handle or ignore it. Dedicated automation terminals avoid competing human/extension input; raw `send` deliberately makes no prompt-safety guarantee.
+
+### Reconnectable operation handles
+
+Use `terminal.start` for long-running commands. It has the same command/target safety checks as `run`, including the optional `shell` check and the `runAvailable` refusal, but returns `{commandId,paneId,sessionId}` after adopting the work, without waiting for completion. After adoption the terminal session—not the caller, connection, or plugin document—owns it. A delivery failure after adoption is retained in its status. Do not retry a start after an ambiguous transport error; inspect `terminal.operations` first.
+
+```sh
+slate-term terminal start --pane p1 --command 'make test'
+slate-term terminal operations
+slate-term terminal operationStatus --command-id UUID
+slate-term terminal operationWait --command-id UUID --timeout-milliseconds 295000
+slate-term terminal operationResult --command-id UUID
+```
+
+These spellings map directly to RPC methods. Handle reads accept `commandId`, not a live pane/tab/session or inherited context. Only `operationWait` also accepts `timeoutMilliseconds`; `operations` takes no parameters and lists retained status metadata without command text or output. `expectedInstanceId` is the only supported identity guard for these reads. A closed or replaced pane does not prevent inspecting its retained outcome.
+
+Status includes IDs, `state`, optional `exitCode` and optional `failure`. States are `awaitingInput`, `submitted`, `running`, `capturing`, `completed`, `rejected`, `interrupted`, `trackingLost`, and `sessionLost`. `interrupted` means another shell command displaced tracking, not that this API sent an interrupt. `trackingLost` means delivery failed after the shell had claimed the line; it does not claim whether execution succeeded. Reports pair by sequence exactly as for `run`: a prompt that overtakes its running report is held, and only the prompt numbered running + 1 supplies `exitCode`. Failures are `editingBufferNotEmpty`, `submissionFailed`, `otherCommand` and `sessionLost`. Results and completed waits are repeatable and have the same bounded screen-result shape as `run`; this is not isolated stdout/stderr or tracking of background jobs after the shell returns to its prompt.
+
+At most 128 records are retained in memory. Finished records expire 15 minutes after their final transition, or sooner when capacity pressure evicts the oldest finished record. Unfinished records are never silently evicted. Nothing survives an app restart or enters restoration/transcript files. Unknown/expired/evicted handles return `-32051`; pending or failed results return `-32042` (inspect status); wait timeout returns `-32024`; invalid parameters return `-32602`. A wait cancellation never forgets the operation or sends terminal input. Native input/interrupt controls are unchanged; these handle-based queries have no parameterless menu action.
+
+Discovery is under `api.describe.terminalOperations`. On the branch, selected native/adapter, three-client and integrated VM checks passed; the port onto current main has host checks only until its VM gates run; full-suite and manual release certification are not claimed. See [MVP evidence](mvp-foundations.md).
 
 Plugin equivalents:
 
@@ -35,9 +101,12 @@ Plugin equivalents:
 await workspace.terminal.key('ctrl+c', { pane: 'p1', sessionId });
 const result = await workspace.terminal.run('printf "hello\\n"', {}, { signal });
 await workspace.terminal.wait({ contains: 'READY', timeoutMilliseconds: 5000 }, { signal });
+const handle = await workspace.terminal.start('make test', { pane: 'p1' });
+await workspace.terminal.operationWait({ commandId: handle.commandId }, { signal });
+const retained = await workspace.terminal.operationResult({ commandId: handle.commandId });
 ```
 
-A plugin defaults to its declared context. Explicit terminal IDs override its terminal history. Aborting or replacing the plugin document releases its waits; already accepted input cannot be undone. Tool-specific protocols and enriched context, including tmux integration, belong in extensions.
+A plugin defaults to its declared context. Explicit terminal IDs override its terminal history. Aborting or replacing the plugin document releases its waits; an already adopted operation remains claimable by its authenticated shell and continues to be tracked. Tool-specific protocols and enriched context, including tmux integration, belong in extensions.
 
 ## Shared web panes
 

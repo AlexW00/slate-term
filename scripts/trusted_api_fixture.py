@@ -2,6 +2,7 @@
 import functools
 import http.server
 import json
+import shlex
 import threading
 from api_fixture import eventually
 from plugin_package_fixture import package_fixture
@@ -35,13 +36,28 @@ def verify_trusted_api(app, service_call):
             assert result['code'] == error, result
         return result
 
-    clients = [('cli', cli), ('bridge', bridge), ('service', service_call)]
+    def observed(name, call):
+        def request(method, params=None, error=None):
+            value = call(method, params, error=error)
+            app.contract_capture.record(method, params or {}, value, error=error is not None, client=name)
+            return value
+        return request
+
+    clients = [(name, observed(name, call)) for name, call in [('cli', cli), ('bridge', bridge), ('service', service_call)]]
     eventually('bridge ready', lambda: js('typeof workspace') == 'object')
     for pane in [panel, sibling]:
         eventually('plugin document identity', lambda pane=pane: app.rpc('web.get', pane=pane).get('documentId') is not None)
     expected = app.rpc('api.describe')
+    app.capture_contracts(expected)
+    catalog = expected['contracts']
+    assert set(catalog['methods']) == set(expected['methods'])
+    assert 'plugin.*' in catalog['commands']
+    for row in expected['commands']:
+        assert row['contractRef'].startswith('#/commands/')
+        assert row['contractRef'][len('#/commands/'):] in catalog['commands']
     for name, call in clients:
         assert call('api.describe') == expected, name
+        assert call('command.list') == expected['commands'], name
     assert js('workspace.methods') == expected['methods']
     assert js('Object.keys(workspace.rpc).sort()') == expected['methods']
     assert js("(()=>{try{return typeof document.querySelector('iframe').contentWindow.workspace}catch{return 'blocked'}})()") in ['undefined', 'blocked']
@@ -51,7 +67,14 @@ def verify_trusted_api(app, service_call):
     assert app.rpc('pane.inspect', pane=sibling)['pluginInstanceId'] == instance
     target = app.rpc('web.get', pane=sibling)
     guards = dict(expectedViewId=target['viewId'], expectedDocumentId=target['documentId'])
+    eventually('authenticated terminal for client parity', lambda: app.rpc('context.get', pane='p1', scope='pane')['terminal']['state'] == 'prompt')
     for name, call in clients:
+        handle = call('terminal.start', dict(pane='p1', command="printf 'OPERATION_PARITY\\n'; (exit 7)"))
+        result = call('terminal.operationWait', dict(commandId=handle['commandId'], timeoutMilliseconds=5000))
+        assert result['commandId'] == handle['commandId'] and result['exitCode'] == 7
+        for reader_name, read in clients:
+            assert read('terminal.operationResult', dict(commandId=handle['commandId'])) == result, reader_name
+            assert read('terminal.operationStatus', dict(commandId=handle['commandId']))['state'] == 'completed'
         managed = 'managed-' + name
         package = {'packagePath': package_fixture(dict(id=managed, title=managed,
              commands=[dict(id='test', title='Test', executable='/usr/bin/true')]), app.root)}
@@ -62,6 +85,12 @@ def verify_trusted_api(app, service_call):
         assert call('plugins.disable', {'id': managed})['enabled'] is False
         assert not next(p for p in cli('plugins.list') if p['id'] == managed)['enabled']
         assert call('plugins.enable', {'id': managed})['enabled'] is True
+        contribution = 'plugin.' + managed + '.test'
+        row = next(row for row in call('command.list') if row['id'] == contribution)
+        assert row['contractRef'] == '#/commands/plugin.*'
+        run = call('command.run', {'id': contribution, 'expectedUserSelection': None})
+        assert run['state'] == 'succeeded' and run['exitCode'] == 0
+        call('command.run', {'id': contribution, 'expectedSourceRevision': 'unsupported'}, error=-32602)
         call('plugins.unregister', {'id': managed})
         assert call('config.get')['current']
         assert call('window.list')
@@ -118,6 +147,10 @@ def verify_trusted_api(app, service_call):
                 expectedViewId=web['viewId'], expectedDocumentId=web['documentId']))
             assert app.rpc('browser.eval', pane=browser, script="document.querySelector('#value').value") == name
             call('terminal.capture', {'pane': 'p1'})
+            tail = call('terminal.history', {'pane': 'p1', 'maxBytes': 1024, 'maxLines': 5})
+            assert tail['byteCount'] <= 1024 and tail['lineCount'] <= 5
+            assert call('terminal.search', {'pane': 'p1', 'action': 'get'})['paneId'] == 'p1'
+            call('terminal.history', {'pane': 'p1', 'sessionId': 'stale'}, error=-32022)
         # Existing zoom must still withhold hidden document actions without retiring it.
         before = app.rpc('web.get', pane=panel)
         service_call('command.run', dict(id='pane.zoom', pane='p1'))
@@ -152,10 +185,23 @@ def verify_trusted_api(app, service_call):
                 assert app.rpc('workspace.get') == before
         app.rpc('command.run', id='tab.focus', tab=tab)
 
-        # A new document in a shared logical instance must reject an old automatic title.
-        app.rpc('plugins.restart', id='parity.fixture')
-        eventually('successor document', lambda: app.rpc('web.get', pane=sibling).get('documentId') not in [None, target['documentId']])
-        eventually('successor bridge', lambda: js('typeof workspace') == 'object')
+        # Retiring a plugin document cancels its waiter, not its adopted terminal work.
+        release = app.root / 'release-retired-plugin-operation'
+        command = "for i in {1..1000}; do [[ -e " + shlex.quote(str(release)) + " ]] && break; /bin/sleep 0.05; done; printf 'PLUGIN_OPERATION_DONE\\n'"
+        handle = js('await workspace.terminal.start(' + json.dumps(command) + ',{pane:"p1"})')
+        js('(workspace.terminal.operationWait({commandId:' + json.dumps(handle['commandId']) + ',timeoutMilliseconds:295000}).catch(()=>{}),true)')
+        try:
+            eventually('plugin operation waiter registered', lambda: app.rpc('debug.inspect')['pendingTerminalWaits'] == 1)
+            # A new document in a shared instance must also reject an old title.
+            app.rpc('plugins.restart', id='parity.fixture')
+            eventually('successor document', lambda: app.rpc('web.get', pane=sibling).get('documentId') not in [None, target['documentId']])
+            eventually('successor bridge', lambda: js('typeof workspace') == 'object')
+            eventually('retired document releases only its waiter', lambda: app.rpc('debug.inspect')['pendingTerminalWaits'] == 0)
+            assert app.rpc('debug.inspect')['pendingTerminalRuns'] == 1
+        finally:
+            release.touch()
+        result = service_call('terminal.operationWait', dict(commandId=handle['commandId'], timeoutMilliseconds=5000))
+        assert js('await workspace.terminal.operationResult({commandId:' + json.dumps(handle['commandId']) + '})') == result
         for _, call in clients:
             call('pane.title', dict(pane=sibling, title='stale', **guards), error=-32050)
         assert app.rpc('pane.inspect', pane=sibling)['title'] != 'stale'
@@ -163,4 +209,5 @@ def verify_trusted_api(app, service_call):
         server.shutdown()
         server.server_close()
         thread.join(timeout=3)
-    print('PASS three-client shared discovery/dispatch, namespace writes, storage, document titles, event recipients, browser/terminal control, inactive-tab capture/guards, DOM visibility, ordinary-page/subframe boundary and zoom')
+    print('PASS three-client terminal start/results and plugin-document retirement without lost operation ownership')
+    print('PASS three-client shared discovery/dispatch, namespace writes, plugin data/panel state, document titles, event recipients, browser/terminal control, inactive-tab capture/guards, DOM visibility, ordinary-page/subframe boundary and zoom')

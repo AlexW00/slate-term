@@ -25,6 +25,7 @@ Minimal static panel:
 }
 ```
 
+- Declare `manifestVersion: 1`, your diagnostic release `version`, and `compatibility` with inclusive `minimumAPIVersion`/`maximumAPIVersion` and any `requiredMethods`/`requiredCommands`. Discover the actual host's support first. Missing declarations mean API 1 only. Incompatible plugins are rejected before execution; stored incompatible entries remain inspectable but inactive after launch. This is compatibility checking, not sandboxing.
 - Resource/working-directory paths are package-relative; omitted working directories default to package root. Executables are explicit external absolute paths or `./bin/tool`. Use `{pluginRoot}/scripts/tool.py` for resource arguments, or `SLATE_TERM_PLUGIN_ROOT` in scripts. No dependency installation or shell expansion is performed. Plugin IDs are lowercase; command IDs become `plugin.<plugin-id>.<command-id>`.
 - `source.kind` is `directory` (served under `plugin://<id>/`) or `url`. A `url` source with a `process` is a managed local HTTP server on `127.0.0.1`; use port `0` and the `{port}` argument.
 - `scope` is `pane` (default), `tab` or `global`. It controls runtime/backend, ephemeral WebKit-store lifetime and default event context—not durable data or panel state. Every panel gets its own web view, panel identity and restoration state; durable plugin data is always shared by plugin ID.

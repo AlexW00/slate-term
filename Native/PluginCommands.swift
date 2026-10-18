@@ -72,6 +72,7 @@ final class PluginCommands {
                  tab: TabID?, pane: PaneID?, params: [String: JSONValue], settings: [String: JSONValue],
                  lifecycle: CommandLifecycleContext, validateTarget: @MainActor () throws -> Void = {}) async throws -> JSONValue {
         try Task.checkCancellation()
+        try plugin.requireCompatibility()
         try lifecycle.operation.validateCaller()
         try validateTarget()
         let controlEnvironment = try connection.commandEnvironment(owner: lifecycle.operation.serviceOwner)

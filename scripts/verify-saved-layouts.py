@@ -133,6 +133,39 @@ with fixture_directory() as temporary:
             layout_id = original['id']
             file = captured['file']
             assert original['tabs'][0]['panes'][0]['configuration'].get('command') is None
+            # Normal launch starts at home; capture uses each pane's current shell folder.
+            home = str(pathlib.Path.home())
+            eventually('home folder', lambda: (lambda terminal: terminal['workingDirectory'] == home and terminal['isAtPrompt'])(rpc('context.get', pane='p1', scope='pane')['terminal']))
+            rpc('terminal.run', pane='p1', command=f"cd '{temporary}'")
+            command('split.right', pane='p1')
+            panes = rpc('workspace.get')['panes']
+            sibling = next(p['id'] for p in panes if p['id'] != 'p1')
+            eventually('sibling prompt', lambda: rpc('context.get', pane=sibling, scope='pane')['terminal']['isAtPrompt'])
+            other = base / 'second-folder'; other.mkdir()
+            rpc('terminal.run', pane=sibling, command=f"cd '{other}'")
+            folders = cli('capture', '--window', source, '--name', 'Current Folders')
+            recipes = folders['definition']['tabs'][0]['panes']
+            assert {p['id']: p['configuration']['directory'] for p in recipes} == {'p1': temporary, sibling: str(other)}
+            reopened = cli('open', '--id', folders['definition']['id'])
+            for pane in reopened['paneIds']:
+                rpc('terminal.wait', pane=pane)
+            print('Reopened folders:', [(p, rpc('layout.configuration', pane=p), rpc('context.get', pane=p, scope='pane')['terminal']['workingDirectory']) for p in reopened['paneIds']], flush=True)
+            print('Expected folders:', [temporary, str(other)], flush=True)
+            for pane, expected in zip(reopened['paneIds'], [temporary, str(other)]):
+                eventually('reopened folder', lambda: os.path.realpath(rpc('context.get', pane=pane, scope='pane')['terminal']['workingDirectory'] or '/') == os.path.realpath(expected))
+            # Explicit invoking context wins even when another window has focus.
+            dialog = rpc('debug.layoutDialogs', pane='p1', name='Invoking Window', confirm=True,
+                         screenshot=str(ROOT / 'artifacts/layouts-capture-dialog.png'))
+            assert dialog['sourceSelectors'] == 0 and dialog['labels'] == ['Layout Name']
+            contextual = next(e for e in cli('list') if e['name'] == 'Invoking Window')
+            assert cli('get', '--id', contextual['id'])['definition']['tabs'][0]['panes'] == recipes
+            before_stale = cli('list')
+            rpc('debug.layoutDialogs', fail=True, pane='p999999')
+            assert cli('list') == before_stale
+            rpc('debug.layoutDialogs', launcher=True, name='Development',
+                screenshot=str(ROOT / 'artifacts/layouts-launcher-dialog.png'))
+            command('pane.close', pane=sibling, force=True)
+
             if '--render-only' in sys.argv:
                 rpc('debug.savedLayouts', file=file, split='right')
                 rpc('debug.savedLayouts', type='browser', title='Documentation', configuration={'url': 'https://example.com'})
@@ -405,12 +438,23 @@ while True: time.sleep(1)
             rpc('debug.savedLayouts', launcherPath=str(launcher))
             info = plistlib.loads((launcher / 'Contents/Info.plist').read_bytes())
             assert info['SlateLayoutID'] == layout_id
+            assert info['CFBundleIconFile'] == 'LayoutIcon'
+            assert info['SlateLauncherIcon'] == 'slate'
+            assert (launcher / 'Contents/Resources/LayoutIcon.icns').read_bytes().startswith(b'icns')
+            custom_launcher = base / 'Custom.app'
+            rpc('debug.savedLayouts', launcherPath=str(custom_launcher), launcherName='My Project', launcherIcon='folder')
+            custom_info = plistlib.loads((custom_launcher / 'Contents/Info.plist').read_bytes())
+            assert custom_info['CFBundleDisplayName'] == 'My Project' and custom_info['SlateLauncherIcon'] == 'folder'
+            assert (custom_launcher / 'Contents/Resources/LayoutIcon.icns').read_bytes() != (launcher / 'Contents/Resources/LayoutIcon.icns').read_bytes()
             subprocess.run(['/usr/bin/codesign', '--verify', '--strict', str(launcher)], check=True, capture_output=True)
             rpc('debug.savedLayouts', launcherPath=str(launcher), fail=True)
             assert info == plistlib.loads((launcher / 'Contents/Info.plist').read_bytes())
 
             # Light, narrow, dirty and selected terminal inspector rendering.
             rpc('debug.savedLayouts', file=file, pane=original['tabs'][0]['panes'][0]['id'])
+            rpc('debug.savedLayouts', headerVisible=False)
+            screenshot('bar-hidden-dark')
+            rpc('debug.savedLayouts', headerVisible=True)
             screenshot('final-dark')
             rpc('debug.settings', theme='light', apply=True)
             rpc('debug.savedLayouts', name='Development Draft')
@@ -457,7 +501,16 @@ while True: time.sleep(1)
             eventually('template palette opens window', lambda: len(cli('windows')) == before_open + 1)
             print('Saved layout UI, CLI, bridge, conflict, capture, open, startup and launcher packaging checks passed.')
         finally:
-            os.killpg(app.pid, signal.SIGTERM)
+            # Close fixture tabs through the host so terminal and WebKit children exit.
+            # SIGTERM alone skips the application's resource teardown.
+            if app.poll() is None and ready.exists():
+                try:
+                    for tab in rpc('workspace.get')['tabs']:
+                        command('tab.close', tab=tab['id'], force=True)
+                except Exception as error:
+                    print('Fixture tab cleanup failed:', error, file=sys.stderr)
+            if app.poll() is None:
+                os.killpg(app.pid, signal.SIGTERM)
             try:
                 app.wait(timeout=10)
             except subprocess.TimeoutExpired:

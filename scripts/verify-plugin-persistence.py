@@ -67,6 +67,7 @@ def restart(app, before_launch=None):
 
 
 with AppFixture('plugin-persistence') as app:
+    app.capture_contracts()
     root = assets(app)
     installed = app.rpc('plugins.register', packagePath=package_fixture(dict(id='notes', title='Notes', scope='tab', source=dict(kind='directory', path=str(root)),
         layoutFields=[dict(id='project', label='Project', kind='text', required=True, defaultValue='default-project')]), app.root))
@@ -212,7 +213,7 @@ with AppFixture('plugin-persistence') as app:
     app.rpc('plugins.unregister', id='notes', force=True)
     assert app.rpc('plugins.data.get', id='notes')['values']['retained'] == 'after removal'
     app.rpc('plugins.panelState.get', pane=b, error=-32051)
-    assert not app.rpc('plugins.status')
+    eventually('unregistered package cleanup', lambda: not app.rpc('plugins.status'))
     # Required fields without defaults reject plain opening before changing the old pane.
     app.rpc('plugins.register', packagePath=package_fixture(dict(id='required', title='Required', source=dict(kind='directory', path=str(root)),
         layoutFields=[dict(id='project', label='Project', kind='text', required=True)]), app.root))

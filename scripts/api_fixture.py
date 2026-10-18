@@ -26,10 +26,13 @@ def eventually(label, condition, timeout=15):
 
 
 class AppFixture:
-    def __init__(self, name, configuration='[terminal]\nshell = "/bin/zsh"\n', *, workspace_source=None, environment=None):
+    def __init__(self, name, configuration='[terminal]\nshell = "/bin/zsh"\n', *, workspace_source=None, environment=None, startup_timeout=15):
         self.name, self.configuration = name, configuration
         self.extra_environment = environment or {}
         self.workspace_source = workspace_source
+        self.extra_environment = dict(environment or {})
+        self.startup_timeout = startup_timeout
+        self.contract_capture = None
 
     def __enter__(self):
         self.root = Path(tempfile.mkdtemp(prefix='slate-api-', dir='/tmp'))
@@ -60,6 +63,7 @@ fi
         (startup / '.zshrc').write_text('zmodload zsh/datetime; HISTSIZE=0; SAVEHIST=0; PS1="API_TEST> "; RPS1=""; RPROMPT=""\n' + recording)
         self.ready = self.root / 'ready'
         self.env = {k: v for k, v in os.environ.items() if not k.startswith('SLATE_TERM_')}
+        self.env.update(self.extra_environment)
         self.env.update(SLATE_TERM_INTEGRATION='1', SLATE_TERM_TEST_REAL_SHELL='1',
                         SLATE_TERM_STATE_DIR=str(self.root), SLATE_TERM_CONFIG_FILE=str(self.config),
                         SLATE_TERM_SOCKET_FILE=str(self.ready), ZDOTDIR=str(startup))
@@ -67,7 +71,7 @@ fi
         self.log = (ROOT / f'artifacts/{self.name}-process.log').open('w')
         self.process = subprocess.Popen([str(APP)], env=self.env, stdout=self.log, stderr=self.log, start_new_session=True)
         try:
-            eventually('owned fixture ready', lambda: self.ready.exists() and self.process.poll() is None)
+            eventually('owned fixture ready', lambda: self.ready.exists() and self.process.poll() is None, timeout=self.startup_timeout)
             self.path = self.ready.read_text().strip()
             self.env['SLATE_TERM_SOCKET'] = self.path
             return self
@@ -88,7 +92,7 @@ fi
             if self.process.poll() is None:
                 try:
                     subprocess.run(['/usr/bin/sample', str(self.process.pid), '1', '-file', str(diagnostics / 'app-sample.txt')],
-                                   stdout=self.log, stderr=self.log, timeout=5)
+                                   stdout=self.log, stderr=self.log, timeout=45)
                 except (OSError, subprocess.TimeoutExpired):
                     pass
         if self.process.poll() is None:
@@ -115,6 +119,12 @@ fi
             else:
                 print(f'Preserved fixture ownership metadata: {self.root}', file=sys.stderr)
 
+    def capture_contracts(self, description=None):
+        from contract_capture import ContractCapture
+        assert self.contract_capture is None, 'Contract capture already enabled'
+        self.contract_capture = ContractCapture(ROOT / f'artifacts/{self.name}-contracts.jsonl',
+                                                description if description is not None else self.rpc('api.describe'))
+
     def rpc(self, method, *, error=None, request_metadata=None, **params):
         with socket.socket(socket.AF_UNIX) as client:
             client.settimeout(35)
@@ -130,8 +140,12 @@ fi
                 response = json.loads(stream.readline(2**20))
         if error is not None:
             assert response.get('error', {}).get('code') == error, response
+            if self.contract_capture is not None:
+                self.contract_capture.record(method, params, response['error'], error=True)
             return response['error']
         assert 'error' not in response, response
+        if self.contract_capture is not None:
+            self.contract_capture.record(method, params, response['result'])
         return response['result']
 
     def cli(self, *args, env=None, error=False):

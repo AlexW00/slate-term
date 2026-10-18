@@ -3,6 +3,7 @@
 import concurrent.futures
 import json
 import os
+import shlex
 from pathlib import Path
 import socket
 import subprocess
@@ -110,6 +111,10 @@ while True: time.sleep(1)
     app.rpc('plugins.register', packagePath=package_fixture(dict(id='tools', title='Tools', commands=[
         dict(id='parent', title='Parent', executable=str(CLI), arguments=['rpc','command.run','--params','{"id":"plugin.tools.child"}']),
         dict(id='child', title='Child', executable='/bin/sleep', arguments=['30'])]), app.root))
+    terminal_release = app.root / 'release-service-operation'
+    terminal_command = 'for i in {1..1000}; do [[ -e ' + shlex.quote(str(terminal_release)) + ' ]] && break; /bin/sleep 0.05; done'
+    terminal_operation = service_rpc(context, 'terminal.start', dict(pane='p1', command=terminal_command))
+    eventually('service-adopted terminal operation running', lambda: app.rpc('terminal.operationStatus', commandId=terminal_operation['commandId'])['state'] == 'running')
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         pending = pool.submit(service_rpc, context, 'command.run', {'id': 'plugin.tools.parent'})
         eventually('nested service commands', lambda: len([s for s in app.rpc('plugins.status', id='tools') if s['state'] == 'running']) == 2)
@@ -124,6 +129,10 @@ while True: time.sleep(1)
         assert all(s['state'] == 'cancelled' and not s['cleanupPending'] for s in app.rpc('plugins.status', id='tools'))
         for job in jobs:
             eventually('owned nested process exited', lambda job=job: not alive(job['pid']))
+    assert app.rpc('terminal.operationStatus', commandId=terminal_operation['commandId'])['state'] == 'running', 'Service stop discarded terminal-session ownership'
+    terminal_release.touch()
+    terminal_result = app.rpc('terminal.operationWait', commandId=terminal_operation['commandId'], timeoutMilliseconds=5000)
+    assert terminal_result['commandId'] == terminal_operation['commandId']
     assert status('other')['state'] == 'ready', 'Stop affected unrelated service'
     try:
         service_rpc(context, 'api.describe')

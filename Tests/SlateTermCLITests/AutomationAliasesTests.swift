@@ -33,8 +33,28 @@ import SlateTermCore
     }
     for (namespace, family) in [("terminal", AutomationMethod.Family.terminal), ("browser", .browser), ("web", .web)] {
         let aliases = Set(namespaces.first { $0.0 == namespace }!.1.map { "\(namespace).\($0)" })
-        #expect(aliases == Set(AutomationMethod.publicMethods.filter { $0.family == family }.map(\.rawValue)))
+        #expect(aliases == Set(AutomationMethod.publicMethods.filter {
+            $0.family == family || (namespace == "terminal" && $0.family == .terminalOperations)
+        }.map(\.rawValue)))
     }
+}
+
+@Test func operationCLIRejectsLiveTargetsAndMalformedHandlesBeforeConnecting() throws {
+    let id = UUID().uuidString
+    for arguments in [
+        ["operationStatus"], ["operationResult", "--command-id", "not-a-uuid"],
+        ["operationStatus", "--command-id", id, "--pane", "p1"],
+        ["operationWait", "--command-id", id, "--session-id", "old"],
+        ["operationResult", "--command-id", id, "--text", "wrong"],
+        ["operations", "--command-id", id], ["operations", "--timeout-milliseconds", "10"],
+        ["operationStatus", "--command-id", id, "--timeout-milliseconds", "10"],
+        ["operationWait", "--command-id", id, "--shell", "zsh"]
+    ] {
+        let command = try TerminalCommand.parse(arguments + ["--socket", "/tmp/slate-must-not-connect.sock"])
+        #expect(throws: ValidationError.self) { try command.run() }
+    }
+    let command = try TerminalCommand.parse(["operationWait", "--command-id", id, "--timeout-milliseconds", "295000"])
+    #expect(command.action == .operationWait && command.commandId == id)
 }
 
 @Test func cliLiteralAliasesStayInTheAuthoritativeCatalog() throws {
@@ -56,8 +76,9 @@ import SlateTermCore
 @Test func savedLayoutCLIOnlyOpensNewWindowsAndAcceptsExplicitLaunchers() throws {
     #expect(throws: (any Error).self) { try SavedLayoutsCommand.parse(["open", "--id", "id", "--replace-window", "window"]) }
     #expect(throws: (any Error).self) { try SavedLayoutsCommand.parse(["open", "--id", "id", "--force"]) }
-    let launcher = try SavedLayoutsCommand.parse(["launcher", "--id", "id", "--path", "/tmp/Test.app"])
+    let launcher = try SavedLayoutsCommand.parse(["launcher", "--id", "id", "--path", "/tmp/Test.app", "--name", "My Project", "--icon", "slate"])
     #expect(launcher.action == .launcher && launcher.path == "/tmp/Test.app")
+    #expect(launcher.name == "My Project" && launcher.icon == "slate")
 }
 
 @Test func notificationCLIParsesOnlyBoundedOperations() throws {

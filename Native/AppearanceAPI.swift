@@ -44,10 +44,5 @@ extension WorkspaceHost {
         return snapshot
     }
 
-    static let appearanceDescriptor: JSONValue = .object([
-        "version": .integer(1), "method": .string("appearance.get"), "topic": .string("host.appearance.changed"),
-        "revision": .string("opaqueContentHash"), "pageInjection": .string("registeredPluginMainFrame"),
-        "variables": .array((["--st-bg", "--st-fg", "--st-cursor", "--st-selection-bg", "--st-selection-fg"]
-            + (0..<16).map { "--st-ansi-\($0)" } + ["--st-font-mono", "--st-font-mono-size"]).map(JSONValue.string)),
-    ])
+    static let appearanceDescriptor: JSONValue = AutomationCapabilities.appearance
 }

@@ -42,6 +42,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             pass  # The deliberately superseded navigation closed its connection.
 
 with AppFixture('web-conformance') as app:
+    app.capture_contracts()
     assets = app.root / 'assets'
     assets.mkdir()
     (assets / 'index.html').write_text(HTML)

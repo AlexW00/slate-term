@@ -8,6 +8,7 @@ from api_fixture import AppFixture, eventually
 from plugin_package_fixture import package_fixture
 
 with AppFixture('command-lifecycle') as app:
+    app.capture_contracts()
     missing = app.root / 'removed-working-directory'
     missing.mkdir()
     commands = [

@@ -3,7 +3,10 @@ import AppKit
 @main
 struct SlateTermApplication {
     @MainActor static func main() {
+        let integration = ProcessInfo.processInfo.environment["SLATE_TERM_INTEGRATION"] == "1"
+        if integration { fputs("Integration startup: creating NSApplication\n", stderr) }
         let app = NSApplication.shared
+        if integration { fputs("Integration startup: NSApplication ready\n", stderr) }
         let delegate = ApplicationDelegate()
         app.delegate = delegate
         // Window-free cleanup of a fixture-owned named store, in the same bundle namespace.
@@ -41,9 +44,13 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
             NSWindow.allowsAutomaticWindowTabbing = false
             let resources = Bundle.main.resourceURL!.appendingPathComponent("ghostty").path
             setenv("GHOSTTY_RESOURCES_DIR", resources, 1)
+            let integration = ProcessInfo.processInfo.environment["SLATE_TERM_INTEGRATION"] == "1"
+            if integration { fputs("Integration startup: creating workspace host\n", stderr) }
             let host = try WorkspaceHost()
             self.host = host
+            if integration { fputs("Integration startup: starting workspace host\n", stderr) }
             try host.start()
+            if integration { fputs("Integration startup: workspace ready\n", stderr) }
             for url in pendingLayoutURLs { host.openLayoutURL(url) }
             pendingLayoutURLs.removeAll()
             NSApp.activate(ignoringOtherApps: true)

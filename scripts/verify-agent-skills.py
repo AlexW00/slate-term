@@ -7,6 +7,7 @@ from api_fixture import ROOT, AppFixture, eventually
 from plugin_package_fixture import package_fixture
 
 with AppFixture('agent-skills') as app:
+    app.capture_contracts()
     home = app.root / 'agent-home'
     managed = app.root / 'skills/slate-terminal'
     listing = app.rpc('skills.list')

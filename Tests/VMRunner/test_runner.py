@@ -196,12 +196,17 @@ class VMRunnerTests(unittest.TestCase):
                 self.assertEqual(runner.capture_owned(root), {111: 'orphan', 112: 'child'})
 
     def test_gate_tracks_helper_before_it_is_reparented(self):
-        code = ('import subprocess,sys,time; '
-                'subprocess.Popen([sys.executable,"-c","import time; time.sleep(30)"],start_new_session=True); '
-                'time.sleep(.6)')
+        # Reparent only after the runner has observed the helper. A fixed sleep
+        # tests scheduler luck rather than retention of a captured identity.
+        code = ('import json,pathlib,subprocess,sys,time\n'
+                'child = subprocess.Popen([sys.executable,"-c","import time; time.sleep(30)"],start_new_session=True)\n'
+                'ledger = pathlib.Path(sys.argv[1])\n'
+                'while not ledger.exists() or str(child.pid) not in json.loads(ledger.read_text()):\n'
+                '    time.sleep(.02)\n')
         with tempfile.TemporaryDirectory() as temporary, mock.patch.object(runner, 'ROOT', Path(temporary)):
             log = Path(temporary) / 'gate.log'
-            self.assertEqual(runner.run_gate([sys.executable, '-c', code], log, 5), 1)
+            ledger = Path(temporary) / '.vm-owned.json'
+            self.assertEqual(runner.run_gate([sys.executable, '-c', code, str(ledger)], log, 5), 1)
             self.assertIn('leaked owned processes', log.read_text())
 
     def test_signal_during_finalization_still_writes_failure_receipt(self):

@@ -46,6 +46,7 @@ def http_package(directory):
 
 
 with tempfile.TemporaryDirectory(prefix='slate-downloads-') as temporary, AppFixture('plugin-packages') as app:
+    app.capture_contracts()
     downloads = Path(temporary)
     archive = package(downloads / 'original', 'first')
     assert app.cli('plugins', 'validate', '--package', str(archive))['valid']
@@ -105,5 +106,24 @@ with tempfile.TemporaryDirectory(prefix='slate-downloads-') as temporary, AppFix
     eventually('uninstalled managed HTTP files', lambda: not Path(http_install['packageRoot']).exists())
     assert not json.loads(registry.read_text())['plugins']
     assert app.rpc('plugins.data.get', id='packaged')['values']['retained']
+
+    # Missing installed resources remain repairable/removable, and enabling them
+    # must return an error rather than force-unwrapping a missing registration.
+    unavailable = app.rpc('plugins.register', packagePath=str(package(downloads / 'unavailable', 'third')))
+    app.process.terminate(); app.process.wait(timeout=10)
+    before_registry = registry.read_bytes()
+    (Path(unavailable['packageRoot']) / 'plugin.json').unlink()
+    app.ready.unlink()
+    app.process = subprocess.Popen([str(APP)], env=app.env, stdout=app.log, stderr=app.log, start_new_session=True)
+    eventually('restart with unavailable package', lambda: app.ready.exists() and app.process.poll() is None)
+    app.path = app.ready.read_text().strip(); app.env['SLATE_TERM_SOCKET'] = app.path
+    row = next(p for p in app.rpc('plugins.list') if p['id'] == 'packaged')
+    assert not row['available'] and row['enabled'] and row['diagnostic']
+    assert row['compatibilityStatus'] is None
+    app.rpc('plugins.enable', id='packaged', error=-32602)
+    assert registry.read_bytes() == before_registry and app.process.poll() is None
+    app.rpc('plugins.disable', id='packaged')
+    app.rpc('plugins.unregister', id='packaged')
+    eventually('unavailable package removal', lambda: not Path(unavailable['packageRoot']).exists())
 
 print('PASS managed ZIP source deletion/restart, portable static/HTTP/command/service resources, registry, replacement, disable and uninstall')

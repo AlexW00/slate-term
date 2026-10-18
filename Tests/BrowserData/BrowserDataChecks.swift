@@ -58,6 +58,7 @@ struct BrowserDataChecks {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let directory = URL(fileURLWithPath: CommandLine.arguments[1])
         var failure: Error?
+        var usedProfileID: UUID?
         do {
             try await unusedProfileCleanup(in: directory.appendingPathComponent("cleanup-regressions"))
             do {
@@ -67,6 +68,9 @@ struct BrowserDataChecks {
                 let a = data.store(for: .privateBrowser), b = data.store(for: .privateBrowser)
                 try require(a !== b && !a.isPersistent && data.persistent.isPersistent, "Incorrect browser store ownership")
                 await data.persistent.httpCookieStore.setCookie(cookie("example.com"))
+                usedProfileID = data.persistent.identifier
+                guard let usedProfileID else { throw Failure(message: "Named profile has no identifier") }
+                try require((await WKWebsiteDataStore.allDataStoreIdentifiers).contains(usedProfileID), "Used profile is missing from cleanup enumeration")
                 await data.persistent.httpCookieStore.setCookie(cookie("other.org"))
                 try require((await identifiers()).contains(try identifier(in: directory)), "Populated profile is missing on disk")
                 await a.httpCookieStore.setCookie(cookie("example.com"))

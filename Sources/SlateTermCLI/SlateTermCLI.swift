@@ -137,7 +137,10 @@ struct Target: ParsableArguments {
 
 struct TerminalCommand: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "terminal", abstract: "Generic terminal I/O and authenticated shell run/wait operations.")
-    enum Action: String, CaseIterable, ExpressibleByArgument { case send, key, capture, run, wait }
+    enum Action: String, CaseIterable, ExpressibleByArgument {
+        case send, key, capture, run, wait, start, history, historyExport, search
+        case operations, operationStatus, operationResult, operationWait
+    }
     @Argument var action: Action
     @OptionGroup var connection: Connection
     @OptionGroup var target: Target
@@ -146,13 +149,28 @@ struct TerminalCommand: ParsableCommand {
     @Option var text: String?
     @Option var command: String?
     @Option(help: "Language the run command is written in; refuse if the pane runs another shell.") var shell: ShellKind?
+    @Option(help: "Retained operation UUID returned by terminal start.") var commandId: String?
     @Option(help: "Logical key, e.g. ctrl+c, alt+left, shift+tab; text entry uses send.") var key: String?
     @Option(help: "Wait for this literal screen text instead of a shell prompt.") var contains: String?
     @Option(help: "Require a later authenticated prompt sequence.") var afterSequence: Int?
+    @Option(help: "History tail byte limit, 1...131072.") var maxBytes: Int?
+    @Option(help: "History tail line limit, 1...10000.") var maxLines: Int?
+    @Option(help: "New absolute local file for historyExport; never overwrites.") var path: String?
+    @Option(help: "Search action: get, set, next, previous, end.") var searchAction: String?
+    @Option(help: "Literal search query for search --search-action set.") var query: String?
     @Option(help: "Run/wait deadline in milliseconds, 1...295000; default 30000. Expiry does not stop the process.") var timeoutMilliseconds: Int?
 
     func run() throws {
-        var params = try target.params(connection: connection, scope: scope?.rawValue)
+        let handleLookup = AutomationMethod(rawValue: "terminal.\(action.rawValue)")?.family == .terminalOperations
+        if handleLookup {
+            guard target.pane == nil, target.tab == nil, !target.force, !target.active,
+                  target.expectedWorkspaceRevision == nil, target.expectedLayoutRevision == nil,
+                  scope == nil, sessionId == nil else {
+                throw ValidationError("Operation handles do not accept live-pane targets, scope, or session guards")
+            }
+        }
+        var params = handleLookup ? [:] : try target.params(connection: connection, scope: scope?.rawValue)
+        if let commandId { params["commandId"] = .string(commandId) }
         if let sessionId { params["sessionId"] = .string(sessionId); params.removeValue(forKey: "expectedAnchorSessionId") }
         if let text { params["text"] = .string(text) }
         if let command { params["command"] = .string(command) }
@@ -163,9 +181,20 @@ struct TerminalCommand: ParsableCommand {
         if let key { params["key"] = .string(key) }
         if let contains { params["contains"] = .string(contains) }
         if let afterSequence { params["afterSequence"] = .integer(afterSequence) }
+        if let maxBytes { params["maxBytes"] = .integer(maxBytes) }
+        if let maxLines { params["maxLines"] = .integer(maxLines) }
+        if let path { params["path"] = .string(path) }
+        if let searchAction { params["action"] = .string(searchAction) }
+        if let query { params["query"] = .string(query) }
         let timeout = timeoutMilliseconds ?? 30_000
         guard (1...295_000).contains(timeout) else { throw ValidationError("timeout-milliseconds must be in 1...295000") }
         if let timeoutMilliseconds { params["timeoutMilliseconds"] = .integer(timeoutMilliseconds) }
+        if handleLookup {
+            let allowed: Set<String> = action == .operations ? [] : action == .operationWait ? ["commandId", "timeoutMilliseconds"] : ["commandId"]
+            guard Set(params.keys).isSubset(of: allowed), action == .operations || commandId.flatMap(UUID.init(uuidString:)) != nil else {
+                throw ValidationError("Operation lookup requires --command-id UUID; only operationWait accepts --timeout-milliseconds")
+            }
+        }
         try connection.call("terminal.\(action.rawValue)", params: params, timeoutSeconds: (timeout + 5_999) / 1000)
     }
 }

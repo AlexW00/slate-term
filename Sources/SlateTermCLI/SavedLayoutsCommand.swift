@@ -20,8 +20,9 @@ struct SavedLayoutsCommand: ParsableCommand {
     @Option(help: "Optional workspace revision guard for capture/open.") var expectedWorkspaceRevision: String?
     @Option(help: "Explicit pane for configuration; page callers may default to their own pane.") var pane: String?
     @Option(help: "Opaque window-group ID from layouts windows, not window list; required for capture.") var window: String?
-    @Option(help: "Name for the captured layout.") var name: String?
+    @Option(help: "Name for the captured layout or launcher.") var name: String?
     @Option(help: "New absolute .app destination for launcher creation; never overwritten.") var path: String?
+    @Option(help: "Launcher icon from api.describe savedLayouts.launcherIcons.") var icon: String?
     @Flag(help: "Include previously configured startup commands, not running shell commands.") var includeCommands = false
     @Flag(help: "Omit current terminal directories from capture.") var omitDirectories = false
     @Flag(help: "Omit current browser URLs from capture.") var omitUrls = false
@@ -42,6 +43,7 @@ struct SavedLayoutsCommand: ParsableCommand {
         if let pane { params["pane"] = .string(pane) }
         if let window { params["window"] = .string(window) }
         if let name { params["name"] = .string(name) }
+        if let icon { params["icon"] = .string(icon) }
         if let path { params["path"] = .string(path) }
         if includeCommands { params["includeCommands"] = .bool(true) }
         if omitDirectories { params["includeDirectories"] = .bool(false) }

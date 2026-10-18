@@ -64,6 +64,9 @@ with tempfile.TemporaryDirectory(prefix="slate-events-", dir="/tmp") as temporar
             def rpc(method, **params):
                 return cli("rpc", method, "--params", json.dumps(params))
 
+            # An explicit pane disables the bound-tab fallback for tab scope.
+            cli("rpc", "events.poll", "--params", json.dumps({"scope": "tab", "pane": "p1", "waitMilliseconds": 0}), success=False)
+            assert rpc("events.poll", scope="tab", pane="p1", tab="t1", waitMilliseconds=0)["events"] == []
             head = cli("events", "head")["cursor"]
             assert cli("events", "poll", "--wait-milliseconds", "0")["events"] == []
             cli("panes", "split", "--right", "--pane", "p1")

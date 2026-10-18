@@ -4,28 +4,7 @@ import SlateTermCore
 import SlateTermSettings
 
 extension WorkspaceHost {
-    static let pluginPersistenceDescriptor: JSONValue = .object([
-        "version": .integer(1), "dataScope": .string("stateDirectoryAndPluginId"),
-        "panelScope": .string("pluginContentLifetime"), "runtimeScopeControlsStorage": .bool(false),
-        "legacyInstanceStorage": .bool(false), "resetAdvancesEmptyRevision": .bool(true),
-        "dataMethods": .array(["plugins.data.get", "plugins.data.patch", "plugins.data.reset"].map(JSONValue.string)),
-        "panelMethods": .array(["plugins.panelState.get", "plugins.panelState.patch", "plugins.panelState.reset"].map(JSONValue.string)),
-        "panelResetCommand": .string("plugins.panelState.reset"),
-        "events": .array(["host.plugin.data.changed", "host.plugin.panel-state.changed"].map(JSONValue.string)),
-        "dataWriteGuard": .string("expectedDataRevision"),
-        "panelWriteGuards": .array(["expectedPanelId", "expectedStateRevision"].map(JSONValue.string)),
-        "dataResetRequiresForce": .bool(true), "panelPersistence": .string("workspacePersistence"),
-        "bounds": .object(["dataBytes": .integer(PluginPersistence.dataBytes), "dataKeys": .integer(1024),
-            "stateBytes": .integer(PluginPersistence.stateBytes), "stateKeys": .integer(128),
-            "configurationBytes": .integer(PluginPersistence.configurationBytes), "workspaceBytes": .integer(PluginPersistence.workspaceBytes),
-            "patchBytes": .integer(PluginPersistence.patchBytes), "valueBytes": .integer(PluginPersistence.valueBytes), "operations": .integer(32)]),
-        "readFields": .object(["data": .array(["id", "values", "revision"].map(JSONValue.string)),
-            "panel": .array(["pluginId", "paneId", "panelId", "values", "revision"].map(JSONValue.string))]),
-        "mutationFields": .object(["data": .array(["id", "revision", "changed", "persisted", "operationId"].map(JSONValue.string)),
-            "panel": .array(["pluginId", "paneId", "panelId", "revision", "changed", "operationId", "outcome", "workspaceRevision", "workspacePersistence"].map(JSONValue.string))]),
-        "errors": .object(["invalid": .integer(-32602), "conflict": .integer(APIError.conflict),
-            "unavailable": .integer(APIError.unavailable), "incompatible": .integer(APIError.incompatible), "writeFailed": .integer(APIError.settingsWriteFailed)])
-    ])
+    static let pluginPersistenceDescriptor: JSONValue = AutomationCapabilities.pluginPersistence
 
     func callPluginPersistence(_ method: AutomationMethod, params: [String: JSONValue], operation: WorkspaceOperationContext) throws -> JSONValue {
         try operation.validateCaller()

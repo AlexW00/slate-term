@@ -2,12 +2,12 @@ import AppKit
 import SlateTermCore
 
 extension WorkspaceHost {
-    func windowWillEnterFullScreen(_ notification: Notification) { recordFullscreen(notification.object as? WorkspaceWindow, state: "entering", pending: true) }
-    func windowWillExitFullScreen(_ notification: Notification) { recordFullscreen(notification.object as? WorkspaceWindow, state: "exiting", pending: true) }
-    func windowDidEnterFullScreen(_ notification: Notification) { recordFullscreen(notification.object as? WorkspaceWindow, state: "idle", pending: false) }
-    func windowDidExitFullScreen(_ notification: Notification) { recordFullscreen(notification.object as? WorkspaceWindow, state: "idle", pending: false) }
-    func windowDidFailToEnterFullScreen(_ window: NSWindow) { recordFullscreen(window as? WorkspaceWindow, state: "failed", pending: false) }
-    func windowDidFailToExitFullScreen(_ window: NSWindow) { recordFullscreen(window as? WorkspaceWindow, state: "failed", pending: false) }
+    func windowWillEnterFullScreen(_ notification: Notification) { restorationWindowWillEnterFullScreen(notification); recordFullscreen(notification.object as? WorkspaceWindow, state: "entering", pending: true) }
+    func windowWillExitFullScreen(_ notification: Notification) { restorationWindowWillExitFullScreen(notification); recordFullscreen(notification.object as? WorkspaceWindow, state: "exiting", pending: true) }
+    func windowDidEnterFullScreen(_ notification: Notification) { restorationWindowDidEnterFullScreen(notification); recordFullscreen(notification.object as? WorkspaceWindow, state: "idle", pending: false) }
+    func windowDidExitFullScreen(_ notification: Notification) { restorationWindowDidExitFullScreen(notification); recordFullscreen(notification.object as? WorkspaceWindow, state: "idle", pending: false) }
+    func windowDidFailToEnterFullScreen(_ window: NSWindow) { restorationWindowDidFailToEnterFullScreen(window); recordFullscreen(window as? WorkspaceWindow, state: "failed", pending: false) }
+    func windowDidFailToExitFullScreen(_ window: NSWindow) { restorationWindowDidFailToExitFullScreen(window); recordFullscreen(window as? WorkspaceWindow, state: "failed", pending: false) }
 
     private func recordFullscreen(_ window: WorkspaceWindow?, state: String, pending: Bool) {
         window?.fullscreenTransition = state
@@ -15,8 +15,8 @@ extension WorkspaceHost {
         observeWindowPresentation(window)
     }
 
-    func windowDidMove(_ notification: Notification) { observeWindowPresentation(notification.object as? WorkspaceWindow) }
-    func windowDidResize(_ notification: Notification) { observeWindowPresentation(notification.object as? WorkspaceWindow) }
+    func windowDidMove(_ notification: Notification) { restorationWindowDidMove(notification); observeWindowPresentation(notification.object as? WorkspaceWindow) }
+    func windowDidResize(_ notification: Notification) { restorationWindowDidResize(notification); observeWindowPresentation(notification.object as? WorkspaceWindow) }
     func windowDidMiniaturize(_ notification: Notification) { observeWindowPresentation(notification.object as? WorkspaceWindow) }
     func windowDidDeminiaturize(_ notification: Notification) { observeWindowPresentation(notification.object as? WorkspaceWindow) }
 

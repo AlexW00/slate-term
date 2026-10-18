@@ -3,21 +3,7 @@ import SlateTermCore
 import SlateTermSettings
 
 extension WorkspaceHost {
-    static let notificationDescriptor: JSONValue = .object([
-        "version": .integer(1), "capacity": .integer(NotificationStore.capacity),
-        "titleBytes": .integer(NotificationStore.titleBytes), "bodyBytes": .integer(NotificationStore.bodyBytes),
-        "keyBytes": .integer(NotificationStore.keyBytes), "persistent": .bool(false),
-        "postParameters": .object(["title": .string("required nonempty string"), "body": .string("optional string"),
-            "key": .string("optional replacement key"), "pane": .string("optional pane ID"), "tab": .string("optional tab ID"),
-            "active": .string("true, exclusive with pane/tab"), "expectedAnchorSessionId": .string("optional terminal lifetime guard")]),
-        "postResultFields": .array(["id", "disposition", "reason", "retained"].map(JSONValue.string)),
-        "globalRatePerSecond": .integer(5), "globalBurst": .integer(10), "sourceRatePerSecond": .integer(1), "sourceBurst": .integer(5),
-        "pendingPostLimit": .integer(32), "authorizationQueryLimit": .integer(1),
-        "escapeSequences": .array([.string("OSC 9"), .string("OSC 777")]),
-        "automaticThresholdSeconds": .integer(30), "permissionPromptOnPost": .bool(false),
-        "submissionIsDelivery": .bool(false), "listOrder": .string("oldestFirst"),
-        "navigationCommands": .array([.string("notifications.next"), .string("notifications.open")]),
-        "topic": .string("host.notifications.changed")])
+    static let notificationDescriptor: JSONValue = AutomationCapabilities.notifications
 
     func configureNotificationDelivery() {
         notificationDelivery.onOpen = { [weak self] id in

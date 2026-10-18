@@ -2,17 +2,7 @@ import AppKit
 import SlateTermCore
 
 extension WorkspaceHost {
-    static let updatesDescriptor: JSONValue = .object([
-        "version": .integer(1), "methods": .array(UpdateAction.allCases.map { .string($0.method) }),
-        "commands": .array([.string("updates.check"), .string("updates.show")]),
-        "scope": .string("application"), "eventTopic": .string("host.updates.changed"),
-        "get": .string("Current state, signed release notes, progress, and updateId; no network request"),
-        "actionInput": .string("download/cancel: {updateId}; install: {updateId, confirm: true}; optional expectedInstanceId"),
-        "phaseValues": .array(["idle", "unavailable", "checking", "available", "downloading", "verifying", "ready", "installing", "downloadError", "verificationError", "checkError", "current"].map(JSONValue.string)),
-        "resultFields": .array(["revision", "updateId", "phase", "currentVersion", "release", "receivedBytes", "expectedBytes", "detail", "windowVisible"].map(JSONValue.string)),
-        "automaticInstallation": .bool(false), "installationRequiresConfirmation": .bool(true),
-        "errors": .object(["invalid": .integer(-32602), "conflict": .integer(APIError.conflict), "unavailable": .integer(APIError.unavailable)])
-    ])
+    static let updatesDescriptor = AutomationCapabilities.updates
 
     func makeUpdatesController() -> UpdateController {
         let controller = UpdateController()

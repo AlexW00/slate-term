@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Slate — welcome mockup</title>
+<style>
+  :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #d7dbe2; background: #181a1e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 56px 24px 24px; }
+  main { max-width: 920px; margin: auto; }
+  .window { height: 590px; max-height: calc(100svh - 120px); min-height: 430px; display: flex; flex-direction: column; overflow: hidden; background: #202227; border: 1px solid #3a3d45; border-radius: 9px; }
+  .titlebar { height: 36px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; position: relative; background: #292b31; border-bottom: 1px solid #353840; color: #b6bcc7; font-size: 12px; }
+  .lights { position: absolute; left: 13px; display: flex; gap: 7px; }
+  .lights i { width: 10px; height: 10px; border-radius: 50%; background: #ff6058; }
+  .lights i:nth-child(2) { background: #ffbd2e; }
+  .lights i:nth-child(3) { background: #28c840; }
+  .welcome { padding: 25px 26px 22px; border-bottom: 1px solid #353840; font-size: 13px; line-height: 1.65; flex-shrink: 0; }
+  .welcome[hidden] { display: none; }
+  h1 { font-size: 14px; font-weight: 600; margin: 0 0 10px; color: #edf0f5; }
+  p { margin: 0 0 10px; max-width: 680px; }
+  .welcome p:last-child { margin-bottom: 0; color: #b0b8c6; }
+  strong { font-weight: 500; color: #e2e6ee; }
+  .command { display: inline; font: 12px "SFMono-Regular", Consolas, monospace; color: #bfd1f4; border: 0; background: none; padding: 0; cursor: pointer; text-align: left; }
+  .command:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .command:focus-visible { outline: 2px solid #9fb8e9; outline-offset: 4px; border-radius: 2px; }
+  .terminal { padding: 19px 26px; flex: 1; min-height: 100px; overflow: auto; font: 13px/1.7 "SFMono-Regular", Consolas, monospace; cursor: text; }
+  .history { white-space: pre-wrap; overflow-wrap: anywhere; color: #aeb7c6; }
+  .entered { color: #dce1eb; }
+  .path { color: #b3c3dd; }
+  form { display: flex; gap: 10px; align-items: baseline; }
+  .prompt { color: #b2d5c4; }
+  input { min-width: 0; width: 100%; border: 0; background: none; color: #e2e7f0; caret-color: #c9d5ea; outline: none; padding: 0; font: inherit; }
+  .caption { color: #9ba3af; font-size: 11px; line-height: 1.6; margin: 13px 0 0; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  @media (max-width: 560px) {
+    body { padding: 18px 12px; }
+    .window { height: calc(100svh - 100px); max-height: none; min-height: 500px; }
+    .welcome { padding: 20px 19px; }
+    .terminal { padding: 18px 19px; }
+    .command { margin-top: 3px; display: block; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <section class="window" aria-label="Slate Terminal mockup">
+    <header class="titlebar"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>Slate Terminal</header>
+    <section class="welcome" id="welcome" aria-label="Welcome">
+      <h1>Welcome to Slate Terminal</h1>
+      <p>Start with a terminal. Build your own workspace with apps, widgets, and your coding agent.</p>
+      <p>Install the Slate Terminal skill in <strong>Settings → AI Agents</strong> so your agent knows how to build and work here.</p>
+      <p>To stop showing this message, run <button class="command" id="insert" title="Insert into the simulated terminal">slate-term welcome --read</button></p>
+    </section>
+    <section class="terminal" id="terminal" aria-label="Simulated terminal">
+      <div class="history" id="history" role="log" aria-label="Simulated output"></div>
+      <div class="path">~/Workspace</div>
+      <form id="form">
+        <span class="prompt" aria-hidden="true">❯</span>
+        <label class="sr-only" for="input">Simulated terminal command</label>
+        <input id="input" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="caption">
+      </form>
+    </section>
+  </section>
+  <p class="caption" id="caption">HTML mockup · Click the command, then press Return to preview dismissal. Reload to reset. Nothing is executed.</p>
+  <span class="sr-only" role="status" id="status"></span>
+</main>
+<script>
+(() => {
+  const input = document.getElementById('input');
+  const welcome = document.getElementById('welcome');
+  const history = document.getElementById('history');
+  const terminal = document.getElementById('terminal');
+  function append(text, className = '') {
+    const line = document.createElement('div');
+    line.textContent = text;
+    line.className = className;
+    history.append(line);
+  }
+  document.getElementById('insert').onclick = () => {
+    input.value = 'slate-term welcome --read';
+    input.focus();
+  };
+  document.getElementById('form').onsubmit = event => {
+    event.preventDefault();
+    const command = input.value.trim();
+    if (!command) return;
+    append('❯ ' + command, 'entered');
+    input.value = '';
+    if (command === 'slate-term welcome --read') {
+      welcome.hidden = true;
+      append('Welcome marked as read.\n');
+      document.getElementById('status').textContent = 'Welcome dismissed. The terminal now fills the pane. Simulated only.';
+    } else if (command === 'clear') {
+      history.replaceChildren();
+    } else if (command === 'slate-term welcome') {
+      append(welcome.innerText || welcome.textContent.trim());
+      append('');
+    } else {
+      append('Mockup only. Try slate-term welcome --read or clear.\n');
+    }
+    input.focus();
+    terminal.scrollTop = terminal.scrollHeight;
+  };
+  terminal.onclick = event => {
+    if (!window.getSelection().toString() && event.target !== input) input.focus();
+  };
+})();
+</script>
+</body>
+</html>

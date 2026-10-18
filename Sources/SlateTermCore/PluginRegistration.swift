@@ -74,6 +74,10 @@ public struct PluginRegistration: Equatable, Codable, Sendable {
     public enum Scope: String, Codable, Sendable { case pane, tab, global }
     public let id: String
     public let title: String
+    public let manifestVersion: Int
+    /// Author-supplied release identifier for diagnostics; never used to infer API compatibility.
+    public let version: String
+    public let compatibility: PluginCompatibility
     public let source: PluginSource?
     public let scope: Scope
     public let process: PluginProcessSpec?
@@ -103,12 +107,22 @@ public struct PluginRegistration: Equatable, Codable, Sendable {
         return try JSONDecoder().decode(Self.self, from: data)
     }
 
-    private enum CodingKeys: String, CodingKey { case id, title, source, scope, process, service, commands, headerButtons, layoutFields }
+    private enum CodingKeys: String, CodingKey { case id, title, manifestVersion, version, compatibility, source, scope, process, service, commands, headerButtons, layoutFields }
     public init(from decoder: any Decoder) throws {
-        try requirePluginKeys(decoder, allowed: ["id", "title", "source", "scope", "process", "service", "commands", "headerButtons", "layoutFields"])
+        try requirePluginKeys(decoder, allowed: ["id", "title", "manifestVersion", "version", "compatibility", "source", "scope", "process", "service", "commands", "headerButtons", "layoutFields"])
         let values = try decoder.container(keyedBy: CodingKeys.self)
         id = try values.decode(String.self, forKey: .id)
         title = try values.decode(String.self, forKey: .title)
+        manifestVersion = try values.decodeIfPresent(Int.self, forKey: .manifestVersion) ?? 1
+        version = try values.decodeIfPresent(String.self, forKey: .version) ?? "0.0.0"
+        compatibility = try values.decodeIfPresent(PluginCompatibility.self, forKey: .compatibility) ?? .baseline
+        guard (1...65_535).contains(manifestVersion), !version.isEmpty, version.utf8.count <= 64,
+              version.utf8.allSatisfy({ (33...126).contains($0) }) else {
+            throw invalidPlugin("Invalid plugin manifest version or release identifier")
+        }
+        for key in [CodingKeys.manifestVersion, .version, .compatibility] {
+            if values.contains(key), try values.decodeNil(forKey: key) { throw invalidPlugin("Plugin version and compatibility fields must not be null") }
+        }
         source = try values.decodeIfPresent(PluginSource.self, forKey: .source)
         scope = try values.decodeIfPresent(Scope.self, forKey: .scope) ?? .pane
         process = try values.decodeIfPresent(PluginProcessSpec.self, forKey: .process)

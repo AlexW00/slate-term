@@ -31,8 +31,13 @@ public final class PreparedPluginPackage: Sendable {
     }
     deinit { try? FileManager.default.removeItem(at: directory) }
     public var validation: JSONValue {
-        .object(["valid": .bool(true), "id": .string(manifest.id), "title": .string(manifest.title),
-                 "manifest": manifest.value, "archiveSHA256": .string(archiveSHA256)])
+        get throws {
+            let registration = try manifest.registration(root: directory.appendingPathComponent("contents"), validateFiles: false)
+            try registration.requireCompatibility()
+            return .object(["valid": .bool(true), "id": .string(manifest.id), "title": .string(manifest.title),
+                "manifest": manifest.value, "archiveSHA256": .string(archiveSHA256),
+                "compatibilityStatus": try .encoding(registration.compatibilityReport())])
+        }
     }
 }
 
@@ -69,7 +74,7 @@ public struct PluginPackageStore: Sendable {
         try inspectHeaders(archive)
         try extract(archive, to: contents)
         let manifest = try loadManifest(contents)
-        _ = try manifest.registration(root: contents)
+        try manifest.registration(root: contents).requireCompatibility()
         let prepared = PreparedPluginPackage(manifest: manifest, installationID: UUID(), digest: digest, directory: staging)
         completed = true
         return prepared

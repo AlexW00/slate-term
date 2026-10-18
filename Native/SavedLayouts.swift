@@ -1,4 +1,6 @@
 import AppKit
+import Combine
+import SwiftUI
 import SlateTermCore
 import SlateTermSettings
 
@@ -25,6 +27,7 @@ final class SavedLayouts {
     var showSettings: (() -> Void)?
     var isVisible: () -> Bool = { false }
     private var refreshTimer: Timer?
+    var runDialog: (NSAlert) -> NSApplication.ModalResponse = { $0.runModal() }
 
     init(directory: URL) {
         self.directory = directory
@@ -54,7 +57,7 @@ final class SavedLayouts {
         case "layouts.update": allowed = ["definition", "expectedSavedLayoutRevision"]
         case "layouts.capture": allowed = ["window", "name", "includeDirectories", "includeURLs", "includeCommands"]
         case "layouts.open": allowed = ["id"]
-        case "layouts.launcher": allowed = ["id", "path"]
+        case "layouts.launcher": allowed = ["id", "path", "name", "icon"]
         default: throw RPCFailure(code: -32601, message: "Unknown saved layout operation")
         }
         guard params.keys.allSatisfy(allowed.contains) else { throw RPCFailure(code: -32602, message: "Unknown parameter for \(method)") }
@@ -122,7 +125,9 @@ final class SavedLayouts {
             let path = try string("path")
             guard path.hasPrefix("/"), !path.utf8.contains(0) else { throw RPCFailure(code: -32602, message: "path must be an absolute new .app destination") }
             guard let definition = saved.definition else { throw RPCFailure(code: -32602, message: "Layout is unavailable") }
-            try LayoutLauncher.create(at: URL(fileURLWithPath: path), layoutID: definition.id, name: definition.name)
+            let options = try SavedLayoutLauncherOptions(name: params["name"] == nil ? definition.name : string("name"),
+                                                        icon: params["icon"] == nil ? "slate" : string("icon"))
+            try LayoutLauncher.create(at: URL(fileURLWithPath: path), layoutID: definition.id, name: options.name, icon: options.icon)
             return .object(["id": .string(definition.id.uuidString), "path": .string(path)])
         default: preconditionFailure("Operation checked above")
         }
@@ -176,7 +181,7 @@ final class SavedLayouts {
         return try invoke(method, params, operation)
     }
 
-    func perform(_ command: String, operation: WorkspaceOperationContext) throws {
+    func perform(_ command: String, source: LayoutSourceWindow? = nil, operation: WorkspaceOperationContext) throws {
         try operation.validateCaller()
         if command == "layouts.launcher", !usesDefaultLibrary {
             throw RPCFailure(code: -32602, message: "Spotlight launchers currently require the default ~/.config/slate-term/layouts library. Custom-config instances cannot be routed safely on a cold launch.")
@@ -184,7 +189,7 @@ final class SavedLayouts {
         switch command {
         case "layouts.edit": try showEditor()
         case "layouts.folder": NSWorkspace.shared.open(try store.directory)
-        case "layouts.captureWindow": try captureWindow(operation: operation)
+        case "layouts.captureWindow": try captureWindow(source: source, operation: operation)
         case "layouts.openWindow", "layouts.launcher":
             let entries = try store.list().filter { $0.definition != nil && $0.diagnostic == nil }
             guard !entries.isEmpty else { try showEditor(); return }
@@ -196,25 +201,23 @@ final class SavedLayouts {
         default: throw RPCFailure(code: -32601, message: "Unknown saved layout command")
         }
     }
-    private func captureWindow(operation: WorkspaceOperationContext) throws {
-        let sources = windows()
-        guard !sources.isEmpty else { throw RPCFailure(code: -32602, message: "No workspace windows are open") }
+    private func captureWindow(source: LayoutSourceWindow?, operation: WorkspaceOperationContext) throws {
+        guard let source else { throw RPCFailure(code: -32602, message: "Choose a workspace window before saving a layout") }
         let alert = NSAlert()
-        alert.messageText = "Save a Window as a Layout"
-        alert.informativeText = "Choose the workspace window to capture. Running commands and terminal history are not captured."
+        alert.messageText = "Save Window as Layout"
+        alert.informativeText = "Save this window’s tabs and panes. Running commands and terminal history are not captured."
         alert.addButton(withTitle: "Save Layout"); alert.addButton(withTitle: "Cancel")
-        let chooser = NSPopUpButton(frame: .zero, pullsDown: false)
-        chooser.addItems(withTitles: sources.map { "\($0.title) · \($0.tabs.count) tabs" })
         let name = NSTextField(string: "Untitled Layout")
         name.placeholderString = "Layout Name"
-        let stack = NSStackView(views: [NSTextField(labelWithString: "Source Window"), chooser, NSTextField(labelWithString: "Layout Name"), name])
+        name.setAccessibilityLabel("Layout Name")
+        let stack = NSStackView(views: [NSTextField(labelWithString: "Layout Name"), name])
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 8
-        stack.frame = NSRect(x: 0, y: 0, width: 380, height: 110)
-        chooser.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        stack.frame = NSRect(x: 0, y: 0, width: 380, height: 54)
+        stack.widthAnchor.constraint(equalToConstant: 380).isActive = true
         name.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         alert.accessoryView = stack
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let source = sources[chooser.indexOfSelectedItem]
+        alert.window.initialFirstResponder = name
+        guard runDialog(alert) == .alertFirstButtonReturn else { return }
         let result = try request("layouts.capture", params: ["window": .string(source.id), "name": .string(name.stringValue),
                                 "expectedWorkspaceRevision": .string(source.workspaceRevision)], operation: operation)
         try showEditor()
@@ -231,21 +234,24 @@ final class SavedLayouts {
         guard usesDefaultLibrary else { throw RPCFailure(code: -32602, message: "Spotlight launchers require the default layout library") }
         guard editorModel?.hasDraft(id: id) != true else { throw RPCFailure(code: -32602, message: "Save or revert this layout’s unsaved changes first") }
         let entry = try store.get(id: id)
-        let panel = NSSavePanel()
-        panel.title = "Create Spotlight Launcher"
-        panel.message = "This shortcut opens the latest saved layout in Slate Terminal. Slate must remain installed."
-        panel.nameFieldStringValue = (entry.definition?.name ?? "Layout") + ".app"
-        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications")
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let definition = entry.definition else { throw RPCFailure(code: -32602, message: "Layout is unavailable") }
+        let dialog = LayoutLauncherDialog(name: definition.name)
+        guard runDialog(dialog.alert) == .alertFirstButtonReturn else { return }
+        let options = try SavedLayoutLauncherOptions(name: dialog.name.stringValue, icon: dialog.selection.icon)
+        let folder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications")
         try Task.checkCancellation()
         try operation.validateCaller()
-        _ = try request("layouts.launcher", params: ["id": .string(id.uuidString), "path": .string(url.path)], operation: operation)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = folder.appendingPathComponent(options.name + ".app")
+        _ = try request("layouts.launcher", params: ["id": .string(id.uuidString), "path": .string(url.path),
+                        "name": .string(options.name), "icon": .string(options.icon)], operation: operation)
     }
 }
 
 @MainActor
 enum LayoutLauncher {
-    static func create(at destination: URL, layoutID: UUID, name: String) throws {
+    static func create(at destination: URL, layoutID: UUID, name: String, icon: String = "slate") throws {
+        let options = try SavedLayoutLauncherOptions(name: name, icon: icon)
         guard destination.pathExtension == "app", !FileManager.default.fileExists(atPath: destination.path) else {
             throw RPCFailure(code: -32602, message: "Choose a new .app destination; existing launchers are not overwritten")
         }
@@ -254,7 +260,11 @@ enum LayoutLauncher {
         try manager.createDirectory(at: staging.appendingPathComponent("Contents/MacOS"), withIntermediateDirectories: true)
         defer { try? manager.removeItem(at: staging) }
         try manager.copyItem(at: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/slate-layout-launcher"), to: staging.appendingPathComponent("Contents/MacOS/Launcher"))
-        let info: [String: Any] = ["CFBundleExecutable": "Launcher", "CFBundleName": name, "CFBundleDisplayName": name,
+        let resources = staging.appendingPathComponent("Contents/Resources")
+        try manager.createDirectory(at: resources, withIntermediateDirectories: true)
+        try iconData(symbol: options.icon).write(to: resources.appendingPathComponent("LayoutIcon.icns"))
+        let info: [String: Any] = ["CFBundleExecutable": "Launcher", "CFBundleName": options.name, "CFBundleDisplayName": options.name,
+                                  "CFBundleIconFile": "LayoutIcon", "SlateLauncherIcon": options.icon,
                                   "CFBundleIdentifier": "com.slateterm.layout.\(layoutID.uuidString.lowercased())", "CFBundlePackageType": "APPL",
                                   "CFBundleVersion": "1", "LSUIElement": true, "SlateLayoutID": layoutID.uuidString,
                                   "SlateApplicationPath": Bundle.main.bundlePath, "SlateApplicationID": Bundle.main.bundleIdentifier ?? ""]
@@ -264,5 +274,97 @@ enum LayoutLauncher {
         try process.run(); process.waitUntilExit()
         guard process.terminationStatus == 0 else { throw RPCFailure(code: -32000, message: "Could not sign the local layout launcher") }
         try manager.moveItem(at: staging, to: destination)
+    }
+    private static func iconData(symbol: String) throws -> Data {
+        var chunks = Data()
+        func integer(_ value: Int) -> Data {
+            var value = UInt32(value).bigEndian
+            return withUnsafeBytes(of: &value) { Data($0) }
+        }
+        for (size, kind) in [(128, "ic07"), (256, "ic08"), (512, "ic09"), (1024, "ic10")] {
+            let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { bounds in
+                if symbol == "slate" {
+                    NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath).draw(in: bounds)
+                    return true
+                }
+                let tile = bounds.insetBy(dx: bounds.width * 0.08, dy: bounds.height * 0.08)
+                NSColor(calibratedRed: 0.22, green: 0.28, blue: 0.40, alpha: 1).setFill()
+                NSBezierPath(roundedRect: tile, xRadius: bounds.width * 0.19, yRadius: bounds.height * 0.19).fill()
+                let config = NSImage.SymbolConfiguration(pointSize: bounds.width * 0.44, weight: .medium)
+                    .applying(.init(paletteColors: [.white]))
+                if let glyph = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?.withSymbolConfiguration(config) {
+                    let scale = min(bounds.width * 0.5 / glyph.size.width, bounds.height * 0.5 / glyph.size.height)
+                    let size = NSSize(width: glyph.size.width * scale, height: glyph.size.height * scale)
+                    glyph.draw(in: NSRect(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2,
+                                          width: size.width, height: size.height))
+                }
+                return true
+            }
+            guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
+                  let png = bitmap.representation(using: .png, properties: [:]) else {
+                throw RPCFailure(code: -32000, message: "Could not render the launcher icon")
+            }
+            chunks.append(Data(kind.utf8)); chunks.append(integer(png.count + 8)); chunks.append(png)
+        }
+        return Data("icns".utf8) + integer(chunks.count + 8) + chunks
+    }
+
+}
+
+@MainActor
+final class LayoutLauncherIconSelection: ObservableObject {
+    @Published var icon = "slate"
+}
+
+@MainActor
+final class LayoutLauncherDialog {
+    let alert = NSAlert()
+    let name: NSTextField
+    let selection = LayoutLauncherIconSelection()
+
+    init(name: String) {
+        self.name = NSTextField(string: name)
+        self.name.placeholderString = "Launcher Name"
+        self.name.setAccessibilityLabel("Launcher Name")
+        alert.messageText = "Create Spotlight Launcher"
+        alert.informativeText = "Open this layout from Spotlight. The launcher will be saved in ~/Applications."
+        alert.addButton(withTitle: "Create"); alert.addButton(withTitle: "Cancel")
+        let icons = NSHostingView(rootView: LayoutLauncherIconPicker(selection: selection))
+        let stack = NSStackView(views: [NSTextField(labelWithString: "Name"), self.name,
+                                      NSTextField(labelWithString: "Icon"), icons])
+        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 10
+        stack.frame = NSRect(x: 0, y: 0, width: 360, height: 244)
+        stack.widthAnchor.constraint(equalToConstant: 360).isActive = true
+        self.name.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        icons.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        icons.heightAnchor.constraint(equalToConstant: 168).isActive = true
+        alert.accessoryView = stack
+        alert.window.initialFirstResponder = self.name
+    }
+}
+
+private struct LayoutLauncherIconPicker: View {
+    @ObservedObject var selection: LayoutLauncherIconSelection
+    var body: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+            ForEach(Array(SavedLayoutLauncherOptions.icons.enumerated()), id: \.element) { index, icon in
+                Button { selection.icon = icon } label: {
+                    Group {
+                        if icon == "slate" {
+                            Image(nsImage: NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath))
+                                .resizable().interpolation(.high).frame(width: 34, height: 34)
+                        } else {
+                            Image(systemName: icon).font(.system(size: 22, weight: .medium))
+                        }
+                    }.frame(maxWidth: .infinity).frame(height: 48)
+                        .foregroundStyle(selection.icon == icon ? Color.accentColor : .secondary)
+                        .background(selection.icon == icon ? Color.accentColor.opacity(0.12) : Color(nsColor: .quaternarySystemFill),
+                                    in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(selection.icon == icon ? Color.accentColor : .clear, lineWidth: 2))
+                }.buttonStyle(.plain).accessibilityLabel(SavedLayoutLauncherOptions.iconNames[index])
+                    .accessibilityAddTraits(selection.icon == icon ? .isSelected : [])
+                    .help(SavedLayoutLauncherOptions.iconNames[index])
+            }
+        }.padding(2)
     }
 }

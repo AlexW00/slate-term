@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <title>Agent Presence</title>
-<meta name="description" content="Mockup v2: per-pane frame and tag presence for AI agents acting on Slate panes through the CLI.">
+<meta name="description" content="Mockup v3: detached bottom-right agent pills with pane and element highlights for Slate.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -163,19 +163,15 @@ header.top { padding: clamp(40px, 7vh, 80px) 0 28px; }
 .eframe.on { opacity: 1; animation: ein .35s cubic-bezier(.2,.8,.2,1); }
 @keyframes ein { from { transform: scale(1.08); } }
 
-/* Tag group */
-.pgroup { position: absolute; z-index: 4; display: flex; flex-direction: row-reverse; gap: 4px; pointer-events: none; }
-/* Pane tags hang from the bottom edge of the pane header, like a tab. */
-.pane > .pgroup { top: 31px; right: 14px; }
-.eframe > .pgroup { left: -1.5px; bottom: calc(100% + 5px); flex-direction: row; }
+/* Detached pills stay at the pane's bottom right, even for element actions. */
+.pgroup { position: absolute; z-index: 11; display: flex; flex-direction: row-reverse; gap: 4px; max-width: calc(100% - 28px); pointer-events: none; }
+.pane > .pgroup { bottom: 14px; right: 14px; }
 
-.ptag { display: inline-flex; align-items: center; height: 20px; padding: 0 8px 0 7px; border-radius: 999px; background: color-mix(in srgb, var(--ag) 20%, #15171a); border: 1px solid color-mix(in srgb, var(--ag) 45%, transparent); color: var(--p-fg); font: 500 10.5px/1 var(--mono); white-space: nowrap; box-shadow: 0 4px 14px rgba(0,0,0,.35); animation: tagin .22s cubic-bezier(.2,.8,.2,1); transition: opacity .5s ease, transform .5s ease; }
-.ptag.out { opacity: 0; transform: translateY(-2px); }
-@keyframes tagin { from { opacity: 0; transform: translateY(-4px); } }
-.pane > .pgroup .ptag { border-radius: 0 0 8px 8px; border-top: 0; height: 21px; padding-top: 1px; }
-.pane > .pgroup .ptag.out { transform: translateY(-4px); }
+.ptag { display: inline-flex; align-items: center; min-width: 0; height: 20px; padding: 0 8px 0 7px; border-radius: 999px; background: color-mix(in srgb, var(--ag) 20%, #15171a); border: 1px solid color-mix(in srgb, var(--ag) 45%, transparent); color: var(--p-fg); font: 500 10.5px/1 var(--mono); white-space: nowrap; box-shadow: 0 4px 14px rgba(0,0,0,.35); animation: tagin .22s ease; transition: opacity .5s ease; }
+.ptag.out { opacity: 0; }
+@keyframes tagin { from { opacity: 0; } }
 .ptag b { font-weight: 600; color: var(--ag); }
-.ptag em { font-style: normal; color: var(--p-fg); margin-left: 6px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; transition: max-width .4s cubic-bezier(.2,.8,.2,1), margin-left .4s, opacity .3s; }
+.ptag em { font-style: normal; color: var(--p-fg); margin-left: 6px; min-width: 0; max-width: 240px; overflow: hidden; text-overflow: ellipsis; transition: max-width .4s cubic-bezier(.2,.8,.2,1), margin-left .4s, opacity .3s; }
 .ptag em.swap { animation: swap .35s ease; }
 @keyframes swap { from { opacity: 0; } }
 .ptag small { font: 500 10px/1 var(--mono); color: var(--p-dim); margin-left: 7px; font-variant-numeric: tabular-nums; }
@@ -247,7 +243,7 @@ footer { padding: 40px 0 60px; color: var(--muted); font-size: 13px; }
 <header class="top wrap">
   <p class="eyebrow"><b>Mockup v2</b> agent presence</p>
   <h1>Frame and tag, nothing else.</h1>
-  <p class="lede">When an agent touches a pane, Slate highlights the smallest target it knows about: the exact element if possible, otherwise the whole pane. A tag says who is acting and why. Tags show for a minimum time, stay while the work is actually running, and fade once the agent is done. The demo below walks through six cases. Click a chapter to jump to it.</p>
+  <p class="lede">When an agent touches a pane, Slate highlights the smallest target it knows about: the exact element if possible, otherwise the whole pane. A detached, fully rounded pill at the pane's bottom right says who is acting and why, even when the highlight follows an element. Pills show for a minimum time, stay while the work is actually running, and fade once the agent is done. The demo below walks through six cases. Click a chapter to jump to it.</p>
 </header>
 
 <div class="bar" role="toolbar" aria-label="Demo controls">
@@ -393,12 +389,12 @@ footer { padding: 40px 0 60px; color: var(--muted); font-size: 13px; }
 <section class="block">
   <div class="wrap">
     <p class="eyebrow"><b>02</b> where the tag goes</p>
-    <h2>Anchored to the header, or to the element.</h2>
-    <p class="lede">A pane tag hangs from the bottom edge of the pane header at the top right, like a tab attached to the frame. An element tag sits on the element's own frame, top left. Both are overlays: anything that takes a row of layout space would change a terminal's size.</p>
+    <h2>Bottom right. Always a pill.</h2>
+    <p class="lede">Every indicator uses the same fully rounded pill, inset from the pane's bottom and right edges. Nothing hangs from the header or attaches to a frame. When an agent checks a specific element, only the highlight moves to that element; its pill stays in the pane's bottom-right group. Pills fade in and out without sliding.</p>
     <div class="cols3">
-      <div class="opt rec"><span class="badge">Chosen</span><h3>Header bottom edge</h3><p>Reads as part of the frame. It covers a small corner of content that is usually empty in terminals, and the header itself stays untouched. The same tag style is used on element frames.</p></div>
-      <div class="opt"><span class="badge">Rejected</span><h3>Inside the header</h3><p>Competes with the pane title, the type menu and plugin header controls. Narrow panes have no room, and two or three agents push into the title.</p></div>
-      <div class="opt"><span class="badge">Rejected</span><h3>Bottom overlay / own line</h3><p>As an overlay it sits on the prompt, where the user and the agent type. As a separate line it resizes the terminal each time an agent shows up, so full-screen programs like vim or Claude Code would reflow.</p></div>
+      <div class="opt rec"><span class="badge">Chosen</span><h3>Detached bottom-right pill</h3><p>A consistent place to see who is acting and why. The pill floats clear of the edges, with rounded corners all the way around. It overlays content without reserving a row or resizing the terminal.</p></div>
+      <div class="opt"><span class="badge">Rejected</span><h3>Attached to the header</h3><p>Reads as a slide-out tab instead of a floating indicator. Inside the header, it also competes with the pane title, the type menu and plugin controls.</p></div>
+      <div class="opt"><span class="badge">Rejected</span><h3>Following the element</h3><p>The highlight identifies the precise target. Keeping its pill in the pane corner avoids moving labels around the content or covering the element being checked.</p></div>
     </div>
   </div>
 </section>
@@ -412,13 +408,13 @@ footer { padding: 40px 0 60px; color: var(--muted); font-size: 13px; }
       <table class="map">
         <thead><tr><th>Call</th><th>Frame drawn on</th><th>Tag sits on</th><th>Source of the rectangle</th></tr></thead>
         <tbody>
-          <tr><td><code>terminal capture / send</code></td><td>Pane</td><td>Pane corner</td><td>Pane ID. Capture is the whole screen</td></tr>
-          <tr><td><code>terminal run / wait</code></td><td>Pane, live until it settles</td><td>Pane corner</td><td>Pane ID. A later step could frame the matched line</td></tr>
-          <tr><td><code>web snapshot / screenshot</code></td><td>Pane</td><td>Pane corner</td><td>Whole document</td></tr>
-          <tr><td><code>web click / fill / select / wait --selector</code></td><td>Element</td><td>Element, top left</td><td>Ref or selector → element rect. Browser and plugin pages</td></tr>
-          <tr><td><code>browser eval</code></td><td>Pane</td><td>Pane corner</td><td>None. Arbitrary script has no single target</td></tr>
-          <tr><td><code>command run</code> (plugin command)</td><td>Element if the plugin reports one, else pane</td><td>Element or pane</td><td>Plugin calls <code>workspace.presence.target(el)</code> while handling the invocation</td></tr>
-          <tr><td><code>layout split / pane new</code></td><td>New pane, with the website's entrance glow</td><td>Pane corner</td><td>Workspace commit</td></tr>
+          <tr><td><code>terminal capture / send</code></td><td>Pane</td><td>Pane, bottom right</td><td>Pane ID. Capture is the whole screen</td></tr>
+          <tr><td><code>terminal run / wait</code></td><td>Pane, live until it settles</td><td>Pane, bottom right</td><td>Pane ID. A later step could frame the matched line</td></tr>
+          <tr><td><code>web snapshot / screenshot</code></td><td>Pane</td><td>Pane, bottom right</td><td>Whole document</td></tr>
+          <tr><td><code>web click / fill / select / wait --selector</code></td><td>Element</td><td>Pane, bottom right</td><td>Ref or selector → element rect. Browser and plugin pages</td></tr>
+          <tr><td><code>browser eval</code></td><td>Pane</td><td>Pane, bottom right</td><td>None. Arbitrary script has no single target</td></tr>
+          <tr><td><code>command run</code> (plugin command)</td><td>Element if the plugin reports one, else pane</td><td>Pane, bottom right</td><td>Plugin calls <code>workspace.presence.target(el)</code> while handling the invocation</td></tr>
+          <tr><td><code>layout split / pane new</code></td><td>New pane, with the website's entrance glow</td><td>Pane, bottom right</td><td>Workspace commit</td></tr>
         </tbody>
       </table>
     </div>
@@ -432,7 +428,7 @@ footer { padding: 40px 0 60px; color: var(--muted); font-size: 13px; }
     <div class="cols">
       <ul class="pts">
         <li><b>One frame, shared.</b> With one agent the ring is its color. With several, the ring becomes a gradient through their colors in arrival order. No second ring and no flicker between colors.</li>
-        <li><b>Stable order.</b> The first tag sits in the corner and later ones line up to its left. Tags never reshuffle. Each leaves on its own timer.</li>
+        <li><b>Stable order.</b> The first pill sits at the pane's bottom right and later ones line up to its left. Tags never reshuffle. Each leaves on its own timer.</li>
       </ul>
       <ul class="pts">
         <li><b>Color per agent type.</b> Known agents keep one color, so orange always means Claude. Unknown names get a stable hashed color from a palette that avoids the known colors and the red/green used for results.</li>
@@ -683,12 +679,21 @@ slate-term presence list --tab t1 --json
       if (!byTarget.has(r.target)) byTarget.set(r.target, []);
       byTarget.get(r.target).push(r);
     }
+    // Group every pill by its owning pane; only the rings follow specific targets.
+    const byPane = new Map();
+    for (const [target, recs] of byTarget) {
+      const id = target.startsWith('el:')
+        ? document.getElementById(target.slice(3))?.closest('.pane')?.id
+        : target;
+      if (!id) continue;
+      if (!byPane.has(id)) byPane.set(id, []);
+      byPane.get(id).push(...recs);
+    }
     for (const id of PANES) {
       const p = document.getElementById(id);
       if (!p) continue;
-      const recs = byTarget.get(id) || [];
-      drawFrame(p.querySelector('.pframe'), recs);
-      drawGroup(p.querySelector('.pgroup'), recs);
+      drawFrame(p.querySelector('.pframe'), byTarget.get(id) || []);
+      drawGroup(p.querySelector('.pgroup'), (byPane.get(id) || []).sort((a, b) => a.id - b.id));
     }
     // Element frames live in an overlay layer and follow their element.
     for (const ef of [...layer.children]) {
@@ -706,13 +711,11 @@ slate-term presence list --tab t1 --json
         ef = document.createElement('div');
         ef.className = 'eframe';
         ef.dataset.target = target;
-        ef.innerHTML = '<div class="pgroup"></div>';
         layer.append(ef);
       }
       const r = rectIn(node);
       Object.assign(ef.style, { left: r.x - 4 + 'px', top: r.y - 4 + 'px', width: r.w + 8 + 'px', height: r.h + 8 + 'px' });
       drawFrame(ef, recs);
-      drawGroup(ef.querySelector('.pgroup'), recs);
     }
   }
 

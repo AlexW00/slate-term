@@ -16,14 +16,7 @@ final class OperationControl {
         admission = try MutationAdmission()
     }
 
-    static let descriptor: JSONValue = .object([
-        "version": .integer(1), "metadata": .string("metadata: {version: 1, cause?: deliveryContext}"),
-        "maximumDepth": .integer(CausationReferences.maximumDepth), "referenceTTLMilliseconds": .integer(300_000),
-        "maximumReferences": .integer(4096), "maximumReferencesPerAudience": .integer(256),
-        "pluginMutationsPerSecond": .integer(10), "pluginBurst": .integer(20),
-        "globalMutationsPerSecond": .integer(100), "globalBurst": .integer(100),
-        "recovery": .string("Inspect authoritative state; references may expire or be evicted; never automatically replay mutations")
-    ])
+    static let descriptor: JSONValue = AutomationCapabilities.causation
 
     func admit(_ method: String, metadata: RPCMetadata?, origin: WorkspaceOperationContext.Origin,
                audience: CausationAudience, validateCaller: @escaping @MainActor @Sendable () throws -> Void = {}) throws -> WorkspaceOperationContext {

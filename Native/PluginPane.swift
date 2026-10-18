@@ -351,7 +351,7 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
           const abort=()=>cancel(new DOMException('Workspace request aborted','AbortError'));
           const nativeTimeout=Number.isInteger(params.timeoutMilliseconds)&&params.timeoutMilliseconds>=1&&params.timeoutMilliseconds<=295000?params.timeoutMilliseconds:30000;
           const timeout=method==='command.run'&&typeof params.id==='string'&&params.id.startsWith('plugin.')?300000:
-            ['terminal.run','terminal.wait'].includes(method)?nativeTimeout+5000:30000;
+            ['terminal.run','terminal.wait','terminal.operationWait'].includes(method)?nativeTimeout+5000:30000;
           const timer=setTimeout(()=>cancel(new Error('Workspace request timed out')),timeout);
           pending.set(id,{resolve,reject,cleanup,cancel,documentId});
           signal?.addEventListener('abort',abort,{once:true});
@@ -432,12 +432,17 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
             windows:(params={},options={})=>call('layouts.windows',params,options),
             capture:(params,options={})=>call('layouts.capture',params,options),
             open:(id,params={},options={})=>call('layouts.open',{...params,id},options),
-            launcher:(id,path,options={})=>call('layouts.launcher',{id,path},options),
+            launcher:(id,path,params={},options={})=>call('layouts.launcher',{...params,id,path},options),
             startupStatus:(params={},options={})=>call('layouts.startupStatus',params,options)
           }),
           terminal:Object.freeze({
+            ...methodsFor('terminal.'),
+            start:(command,params={},options={})=>call('terminal.start',{...params,command},options),
             send:(text,params={},options={})=>call('terminal.send',{...params,text},options),
             capture:(params={})=>call('terminal.capture',params),
+            history:(params={},options={})=>call('terminal.history',params,options),
+            historyExport:(params={},options={})=>call('terminal.historyExport',params,options),
+            search:(params={},options={})=>call('terminal.search',params,options),
             key:(key,params={},options={})=>call('terminal.key',{...params,key},options),
             run:(command,params={},options={})=>call('terminal.run',{...params,command},options),
             wait:(params={},options={})=>call('terminal.wait',params,options)

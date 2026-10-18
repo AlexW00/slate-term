@@ -85,6 +85,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     var rendered: [TabID: Layout] = [:]
     var renderedZoom: [TabID: PaneID] = [:]
     private var reconciling = false
+    private var restorationSaveScheduled = false
+    var windowedRestorationFrames: [String: WorkspaceRestoration.Frame] = [:]
+    var fullScreenTransitions = Set<ObjectIdentifier>()
     var dividerGesture: NativeDividerGesture?
     var nativeLayoutPending: [TabID: NativeLayoutObservation] = [:]
     var nativeLayoutInvalid: [TabID: UUID] = [:]
@@ -201,6 +204,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         _ = revisions // Seed before the first mutation, including native/legacy paths.
         savedLayouts.types = { [weak self] in SavedLayoutPaneType.available(plugins: self?.pluginCatalog.activeRegistrations ?? []) }
         savedLayouts.windows = { [weak self] in self?.layoutSourceWindows ?? [] }
+        savedLayouts.runDialog = { [weak self] alert in self?.runConfirmationAlert(alert) ?? .alertSecondButtonReturn }
         savedLayouts.capture = { [weak self] source, directories, urls, commands in
             guard let self else { throw SocketError.disconnected }
             return try self.captureLayout(source: source, directories: directories, urls: urls, commands: commands)
@@ -264,13 +268,16 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             return try await self.callAsync(method, params: params, metadata: metadata)
         }
         pluginInstances.connect(socketPath: server!.path, appInstanceID: instanceID)
+        if integration { fputs("Integration startup: control listener ready\n", stderr) }
         buildMenus()
         applyAppearance()
+        if integration { fputs("Integration startup: reconciling initial workspace\n", stderr) }
         var initial = workspace
         // Closing the last window saves a valid empty workspace. A fresh launch
         // still needs a terminal, while retaining the saved identity counters.
         if initial.tabs.isEmpty { try initial.newTab() }
-        try reconcile(initial)
+        try reconcile(initial, restoration: settings.restoredState)
+        if integration { fputs("Integration startup: initial workspace reconciled\n", stderr) }
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now(), repeating: .milliseconds(500), leeway: .milliseconds(100))
         timer.setEventHandler { [weak self] in MainActor.assumeIsolated { self?.refreshTerminalTitles() } }
@@ -405,10 +412,40 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     func persistWorkspace() -> WorkspacePersistence {
         // Persistence observes an already committed model; it must never discover/attribute
         // earlier native mutations to whichever request happens to save next.
-        let persistence = settings.save(workspace)
+        let persistence = settings.save(workspace, restoration: captureRestoration())
         updateStatusMenu()
         refreshCommandPicker()
         return persistence
+    }
+
+    private func scheduleRestorationSave() {
+        guard notificationsRunning, !reconciling, !restorationSaveScheduled else { return }
+        restorationSaveScheduled = true
+        // Bound writes during live resizing or rapid shell/browser location changes.
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(250)) { [weak self] in
+            guard let self else { return }
+            self.restorationSaveScheduled = false
+            guard self.notificationsRunning, !self.reconciling else { return }
+            self.persistWorkspace()
+        }
+    }
+
+    func restorationWindowDidMove(_ notification: Notification) { scheduleRestorationSave() }
+    func restorationWindowDidResize(_ notification: Notification) { scheduleRestorationSave() }
+    func restorationWindowWillEnterFullScreen(_ notification: Notification) {
+        _ = captureRestoration()
+        if let window = notification.object as? NSWindow { fullScreenTransitions.insert(ObjectIdentifier(window)) }
+    }
+    func restorationWindowWillExitFullScreen(_ notification: Notification) {
+        if let window = notification.object as? NSWindow { fullScreenTransitions.insert(ObjectIdentifier(window)) }
+    }
+    func restorationWindowDidEnterFullScreen(_ notification: Notification) { finishFullScreenTransition(notification.object as? NSWindow) }
+    func restorationWindowDidExitFullScreen(_ notification: Notification) { finishFullScreenTransition(notification.object as? NSWindow) }
+    func restorationWindowDidFailToEnterFullScreen(_ window: NSWindow) { finishFullScreenTransition(window) }
+    func restorationWindowDidFailToExitFullScreen(_ window: NSWindow) { finishFullScreenTransition(window) }
+    private func finishFullScreenTransition(_ window: NSWindow?) {
+        if let window { fullScreenTransitions.remove(ObjectIdentifier(window)) }
+        scheduleRestorationSave()
     }
 
     func updateStatusMenu() {
@@ -552,6 +589,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }
         try Task.checkCancellation()
         try suppliedOperation?.validateCaller()
+        if contract?.family == .terminalOperations,
+           !Set(params.keys).intersection(APIGuards.names).isSubset(of: ["expectedInstanceId"]) {
+            throw RPCFailure(code: -32602, message: "Operation handles accept only the expectedInstanceId guard, not live-pane guards")
+        }
         try validateAPIGuards(params, method: method)
         let client = caller ?? AutomationCaller(origin: .administrative, audience: operations.administrativeAudience)
         let operation = try suppliedOperation ?? client.admit(method, metadata: metadata, through: operations)
@@ -622,6 +663,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             var payload = params
             if method == "command.run" { payload.removeValue(forKey: "id") }
             return try await prepareBrowserDataClear(id, params: payload, operation: operation)()
+        }
+        if contract?.family == .terminalOperations {
+            return try await terminalControl.callOperation(String(method.dropFirst("terminal.".count)),
+                params: withoutAPIGuards(params), validateCaller: operation.validateCaller)
         }
         if contract?.family == .terminal {
             let pane = try terminalPane(params)
@@ -848,10 +893,11 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             processTitles.bind(pane: pane, pid: pid_t(report.pid))
             refreshTerminalTitles()
             publishTerminalContext(pane, reason: "shell")
+            scheduleRestorationSave()
             return .object(["sequence": .integer(report.sequence)])
         case .workspaceGet: return try workspace.publicJSON()
         case .layoutGet: return try .encoding(targetTab(params).layout)
-        case .commandList: return try .encoding(availableCommands)
+        case .commandList: return .array(try availableCommands.map(AutomationCatalog.describeCommand))
         case .configGet:
             var status = try settings.status().object!
             status["unavailableCommands"] = .array(unavailableCommands.map(JSONValue.string))
@@ -884,7 +930,16 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             }
             if id == "skills.settings" { showSettings(section: .agents); return .object([:]) }
             if id == "skills.reveal" { return try revealAgentSkill() }
-            if id.hasPrefix("layouts.") { try savedLayouts.perform(id, operation: operation); return .object([:]) }
+            if id.hasPrefix("layouts.") {
+                let source: LayoutSourceWindow?
+                if id == "layouts.captureWindow" {
+                    let tab = try targetTab(params)
+                    source = layoutSourceWindows.first { $0.tabs.contains(tab.id.description) }
+                    guard source != nil else { throw RPCFailure(code: APIError.unavailable, message: "The source window is unavailable") }
+                } else { source = nil }
+                try savedLayouts.perform(id, source: source, operation: operation)
+                return .object([:])
+            }
             if id == "plugins.reload" {
                 let allowed = Set(["id", "pane", "tab"])
                 guard Set(withoutAPIGuards(params).keys).isSubset(of: allowed) else { throw RPCFailure(code: -32602, message: "Unknown parameter for plugins.reload") }
@@ -911,6 +966,26 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                     throw RPCFailure(code: APIError.unavailable, message: "Move chooser requires a visible unzoomed pane bar and another pane")
                 }
                 container.showMoveMenu()
+                return .object(["paneId": .string(pane.description)])
+            }
+            if id == "terminal.find" || id.hasPrefix("terminal.find.") {
+                guard Set(withoutAPIGuards(params).keys).isSubset(of: ["id", "pane", "tab"]) else {
+                    throw RPCFailure(code: -32602, message: "Unknown terminal Find parameter")
+                }
+                let pane = try targetPaneID(params)
+                guard let terminal = terminals[pane] else {
+                    throw RPCFailure(code: APIError.unavailable, message: "Find requires a terminal pane")
+                }
+                if id == "terminal.find" {
+                    guard let window = terminal.window, window.isVisible, !window.isMiniaturized,
+                          !terminal.isHiddenOrHasHiddenAncestor else {
+                        throw RPCFailure(code: APIError.unavailable, message: "Find controls require a visible terminal")
+                    }
+                    terminal.showFind()
+                } else if id == "terminal.find.end" { terminal.endSearch() }
+                else if id == "terminal.find.next" { terminal.navigateSearch(previous: false) }
+                else if id == "terminal.find.previous" { terminal.navigateSearch(previous: true) }
+                else { throw RPCFailure(code: -32601, message: "Unknown terminal Find command") }
                 return .object(["paneId": .string(pane.description)])
             }
             if id == "pane.rename" {
@@ -1000,7 +1075,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         case .notificationsPost, .notificationsList, .notificationsDismiss, .notificationsStatus,
              .layoutConfiguration, .contextInspect, .settingsGet, .pluginDataGet, .pluginDataPatch, .pluginDataReset,
              .panelStateGet, .panelStatePatch, .panelStateReset, .paneTitle,
-             .terminalSend, .terminalKey, .terminalCapture, .terminalRun, .terminalWait,
+             .terminalSend, .terminalKey, .terminalCapture, .terminalRun, .terminalWait, .terminalStart, .terminalHistory, .terminalHistoryExport, .terminalSearch,
+             .terminalOperations, .terminalOperationStatus, .terminalOperationResult, .terminalOperationWait,
              .eventsHead, .eventsPoll, .eventsEmit, .pluginsRestart,
              .webGet, .webSnapshot, .webClick, .webFill, .webSelect, .webScroll, .webWait, .webFocus, .webKey, .webCheck, .webSetValue, .webScreenshot,
              .browserGet, .browserNavigate, .browserSnapshot, .browserClick, .browserFill, .browserSelect,
@@ -1313,6 +1389,16 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 nativeLayoutProbeResult = .null
             }
             return nativeLayoutProbeResult
+        case "debug.terminalFindFocus" where integration:
+            guard let controller = leaves[try targetPaneID(params)] as? TerminalPaneController,
+                  controller.findVisible else { throw RPCFailure(code: APIError.unavailable, message: "Find is unavailable") }
+            if params["input"] == .bool(true) { controller.view.window?.makeFirstResponder(controller.terminal) }
+            else { controller.focusSearchField() }
+            return .object([:])
+        case "debug.windowFullscreen" where integration:
+            guard let window = windows[try targetTab(params).id] else { throw RPCFailure(code: APIError.unavailable, message: "Window unavailable") }
+            window.toggleFullScreen(nil)
+            return .object([:])
         case "debug.windowGeometry" where integration:
             guard case .integer(let width) = params["width"], case .integer(let height) = params["height"],
                   (100...1600).contains(width), (100...1000).contains(height),
@@ -1338,11 +1424,36 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             guard mode != "externalEdit" || (replacement != nil && replacement!.utf8.count <= 65536) else { throw RPCFailure(code: -32602, message: "A bounded replacement source is required") }
             configurationApplyFault = .init(replacement: mode == "externalEdit" ? replacement : nil)
             return .object(["armed": .bool(true)])
+        case "debug.layoutDialogs" where integration:
+            var details: JSONValue = .null
+            testConfirmationHandler = { alert in
+                let stack = alert.accessoryView as? NSStackView
+                let fields = stack?.arrangedSubviews.compactMap { $0 as? NSTextField } ?? []
+                if let name = params["name"]?.string { fields.first(where: \.isEditable)?.stringValue = name }
+                details = .object(["message": .string(alert.messageText),
+                                   "labels": .array(fields.filter { !$0.isEditable }.map { .string($0.stringValue) }),
+                                   "sourceSelectors": .integer(stack?.arrangedSubviews.filter { $0 is NSPopUpButton }.count ?? 0)])
+                if let pane = params["focusPane"] { _ = try? self.call("command.run", params: ["id": .string("pane.focus"), "pane": pane]) }
+                if let path = params["screenshot"]?.string { try? Self.captureWindow(alert.window.windowNumber, path: path) }
+                alert.buttons[params["confirm"] == .bool(true) ? 0 : 1].performClick(nil)
+            }
+            defer { testConfirmationHandler = nil }
+            if params["launcher"] == .bool(true) {
+                let dialog = LayoutLauncherDialog(name: params["name"]?.string ?? "Development")
+                if let icon = params["icon"]?.string { dialog.selection.icon = icon }
+                _ = runConfirmationAlert(dialog.alert)
+            } else {
+                var target: [String: JSONValue] = ["id": .string("layouts.captureWindow")]
+                if let pane = params["pane"] { target["pane"] = pane }
+                _ = try call("command.run", params: target)
+            }
+            return details
         case "debug.savedLayouts" where integration:
             try savedLayouts.showEditor()
             let model = savedLayouts.editorModel!
             if let path = params["launcherPath"]?.string, let definition = model.definition {
-                try LayoutLauncher.create(at: URL(fileURLWithPath: path), layoutID: definition.id, name: definition.name)
+                try LayoutLauncher.create(at: URL(fileURLWithPath: path), layoutID: definition.id, name: params["launcherName"]?.string ?? definition.name,
+                                          icon: params["launcherIcon"]?.string ?? "slate")
             }
             if let file = params["file"]?.string { model.select(file) }
             if let name = params["name"]?.string { model.change { $0.name = name } }
@@ -1785,7 +1896,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
 
     /// Prepare new surfaces before committing the value model; failures leave the old tree intact.
     @discardableResult
-    private func reconcile(_ next: Workspace, recipes: [PaneID: SavedLayoutPane] = [:], transition suppliedTransition: WorkspaceTransition? = nil,
+    private func reconcile(_ next: Workspace, recipes: [PaneID: SavedLayoutPane] = [:], restoration: WorkspaceRestoration? = nil, transition suppliedTransition: WorkspaceTransition? = nil,
                            operation suppliedOperation: WorkspaceOperationContext? = nil,
                            observation: WorkspaceTransition.Observation = .startup,
                            additionalPublications: [EventPublication] = [], beforeCommit: () throws -> Void = {}) throws -> WorkspacePersistence {
@@ -1794,6 +1905,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         let transition = try suppliedTransition ?? WorkspaceTransition(observing: next, from: workspace, revisions: revisions, action: observation)
         guard transition.workspace == next else { throw RPCFailure(code: APIError.conflict, message: "Prepared workspace does not match reconciliation") }
         leaves.values.compactMap { $0 as? BrowserPane }.forEach { $0.rememberFocus() }
+        leaves.values.compactMap { $0 as? TerminalPaneController }.forEach { $0.rememberFocus() }
         for pane in next.panes {
             if case .registered(let type) = pane.type, !pluginCatalog.activeRegistrations.contains(where: { $0.id == type && $0.hasPanel }) { throw RPCFailure(code: -32602, message: "Pane type is not registered: \(type)") }
         }
@@ -1837,8 +1949,13 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                     }
                 }
                 let directory = recipes[pane.id]?.configuration["directory"]?.string.flatMap { $0.isEmpty ? nil : ($0 as NSString).expandingTildeInPath }
+                    ?? restorationDirectory(restoration?.directories[pane.id.description])
+                if integration { fputs("Integration startup: creating terminal surface\n", stderr) }
                 created[pane.id] = try TerminalView(runtime: runtime, environment: environment, directory: directory)
-                if integration { terminalPreparationCount += 1 }
+                if integration {
+                    terminalPreparationCount += 1
+                    fputs("Integration startup: terminal surface created\n", stderr)
+                }
                 sessions[pane.id] = session
             }
             for pane in next.panes where leaves[pane.id] == nil || replacements.contains(pane.id) || pluginRebindings.contains(pane.id) {
@@ -1941,10 +2058,11 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 if change == .workingDirectory, self.shellSessions[id]?.report != nil { return }
                 self.updatePaneTitle(id)
                 self.publishTerminalContext(id, reason: "engine")
+                if change == .workingDirectory { self.scheduleRestorationSave() }
             }
             shellSessions[id] = sessions[id]
-            let controller = NSViewController()
-            controller.view = terminal
+            let controller = TerminalPaneController(terminal: terminal)
+            controller.onAvailabilityChanged = { [weak self] in self?.refreshCommandPicker() }
             leaves[id] = controller
         }
         for (id, controller) in createdPlugins {
@@ -1956,8 +2074,12 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             browser.browserConfiguration = settings.current.browser
             browser.onFocus = { [weak self] in self?.focused(pane.id) }
             browser.onTitleChange = { [weak self] in self?.updatePaneTitle(pane.id) }
+            browser.onLocationChange = { [weak self, weak browser] in
+                guard let self, let browser, self.leaves[pane.id] === browser, pane.type == .browser else { return }
+                self.scheduleRestorationSave()
+            }
             leaves[pane.id] = browser
-            if let url = recipes[pane.id]?.configuration["url"]?.string, !url.isEmpty {
+            if let url = recipes[pane.id]?.configuration["url"]?.string ?? restoration?.browserURLs[pane.id.description], !url.isEmpty {
                 browser.loadStartingURL(url)
             }
         }
@@ -2064,7 +2186,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         refreshHeaderActions()
         let retainedTabs = Set(next.tabs.map(\.id))
         for id in Array(windows.keys) where !retainedTabs.contains(id) {
-            windows.removeValue(forKey: id)?.close()
+            if let retired = windows.removeValue(forKey: id) {
+                fullScreenTransitions.remove(ObjectIdentifier(retired))
+                retired.close()
+            }
             rendered.removeValue(forKey: id)
             renderedZoom.removeValue(forKey: id)
         }
@@ -2104,6 +2229,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                     return true
                 }
                 windows[tab.id] = window
+                if let group = next.groups.first(where: { $0.tabs.contains(tab.id) }),
+                   let frame = restoration?.windowFrames[group.id.description] {
+                    window.setFrame(restorationFrame(frame), display: false)
+                }
             }
             window.title = tab.title
             if rendered[tab.id] != tab.layout {
@@ -2390,9 +2519,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     private func focusResponder(_ pane: PaneID, in window: NSWindow) {
-        if let browser = leaves[pane] as? BrowserPane { browser.focus() }
+        if let terminal = leaves[pane] as? TerminalPaneController { terminal.focus() }
+        else if let browser = leaves[pane] as? BrowserPane { browser.focus() }
         else if let plugin = leaves[pane] as? PluginPane { plugin.focus() }
-        else { window.makeFirstResponder(leaves[pane]?.view) }
+        else { window.makeFirstResponder(terminals[pane] ?? leaves[pane]?.view) }
     }
 
     private func synchronizeTerminalFocus(_ pane: PaneID?) {
@@ -2408,6 +2538,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     func windowDidResignKey(_ notification: Notification) {
         guard !reconciling, let window = notification.object as? NSWindow else { return }
         for browser in leaves.values.compactMap({ $0 as? BrowserPane }) where browser.view.window === window { browser.rememberFocus() }
+        for terminal in leaves.values.compactMap({ $0 as? TerminalPaneController }) where terminal.view.window === window { terminal.rememberFocus() }
         for terminal in terminals.values where terminal.window === window { terminal.setFocused(false) }
     }
 
@@ -2622,6 +2753,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         for (title, action, key) in [("Copy", #selector(NSText.copy(_:)), "c"), ("Paste", #selector(NSText.paste(_:)), "v"), ("Select All", #selector(NSText.selectAll(_:)), "a")] {
             editMenu.addItem(withTitle: title, action: action, keyEquivalent: key)
         }
+        editMenu.addItem(.separator())
+        addCommands(["terminal.find", "terminal.find.next", "terminal.find.previous", "terminal.find.end"], to: editMenu)
         let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
         editItem.submenu = editMenu
         menu.insertItem(editItem, at: 1)
@@ -2819,6 +2952,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 if !command.contract.workspaceIndependent {
                     if missingTarget { unavailable = "The original workspace target was closed" }
                     else if tab == nil && command.id != "tab.new" { unavailable = "Open a workspace to use this command" }
+                    else if command.id.hasPrefix("terminal.find"), pane?.type != .terminal { unavailable = "Focus a terminal pane to search" }
+                    else if command.id.hasPrefix("terminal.find."), pane.flatMap({ terminals[$0.id] })?.findState.active != true { unavailable = "Start a terminal search first" }
                     else if command.id == "plugins.panelState.reset", pane?.pluginPanel == nil { unavailable = "Focus a plugin panel to reset its view" }
                     else if command.id == "plugins.reload", pane.flatMap({ leaves[$0.id] as? PluginPane }) == nil { unavailable = "Focus a plugin pane to reload it" }
                     else if command.id.hasPrefix("browser."), pane?.type.isBrowser != true { unavailable = "Focus a browser pane to use this command" }
@@ -2867,10 +3002,14 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         let removedPackage = pluginCatalog.records.first { $0.id == id }
         let removing = method == .pluginsUnregister
         let enabling = method == .pluginsEnable
-        let action: WorkspaceTransition.Observation = removing ? .pluginRemoval : (enabling ? .pluginEnable : .pluginDisable)
-        if enabling, pluginCatalog.diagnostics[id] != nil {
-            throw RPCFailure(code: -32602, message: "Repair the unavailable plugin before enabling it")
+        if enabling {
+            guard pluginCatalog.diagnostics[id] == nil,
+                  let registration = pluginCatalog.registrations.first(where: { $0.id == id }) else {
+                throw RPCFailure(code: -32602, message: "Repair the unavailable plugin before enabling it")
+            }
+            try registration.requireCompatibility()
         }
+        let action: WorkspaceTransition.Observation = removing ? .pluginRemoval : (enabling ? .pluginEnable : .pluginDisable)
         let changed = removing || pluginCatalog.disabledPlugins.contains(id) == enabling
         let using = enabling ? [] : workspace.panes.filter { $0.type == .registered(id) }.map(\.id)
         guard using.isEmpty || payload["force"] == .bool(true) else {
@@ -3021,8 +3160,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             let lastCommand = runs.last?.object?["state"]?.string
             let states = instances.map { $0.error ?? $0.state }
                 + (lastCommand.map { ["Last command: \($0)"] } ?? [])
-            let details = states + (serviceState.map { ["Service: \($0)"] } ?? [])
-            let failed = instances.contains { $0.error != nil || $0.state == "failed" }
+            let incompatibility = registration.compatibilityReport().reasons
+            let details = incompatibility + states + (serviceState.map { ["Service: \($0)"] } ?? [])
+            let failed = !incompatibility.isEmpty || instances.contains { $0.error != nil || $0.state == "failed" }
                 || lastCommand == "failed" || lastCommand == "timedOut" || serviceState == "failed"
             let busy = instances.contains { ["starting", "restarting"].contains($0.state) }
                 || runs.contains { $0.object?["state"] == .string("running") } || serviceState == "starting" || serviceState == "stopping"
@@ -3098,7 +3238,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         try Task.checkCancellation()
         try operation.validateCaller()
         try validateAPIGuards(params, method: validateOnly ? "plugins.validate" : "plugins.register")
-        if validateOnly { return prepared.validation }
+        if validateOnly { return try prepared.validation }
         return try commitPackage(prepared, replace: payload["replace"] == .bool(true), revision: revision, operation: operation)
     }
 
@@ -3215,6 +3355,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             return TabRenameController.unavailableReason(window: editor.owner, editor: editor) == nil
         }
         guard NSApp.keyWindow is WorkspaceWindow else { return false }
+        if let id, id.hasPrefix("terminal.find") {
+            guard let pane = try? targetPaneID([:]), let terminal = terminals[pane] else { return false }
+            return id == "terminal.find" || terminal.findState.active
+        }
         if id == "plugins.panelState.reset" { return (try? targetPaneID([:])).flatMap { id in workspace.panes.first { $0.id == id }?.pluginPanel } != nil }
         if id == "plugins.reload" { return (try? targetPaneID([:])).flatMap { leaves[$0] as? PluginPane } != nil }
         if id == "browser.clearSiteData" { return focusedBrowser?.currentURL.flatMap { try? BrowserDataRequest.siteHost($0) } != nil }
@@ -3472,7 +3616,11 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             info["x"] = .number(frame.minX); info["y"] = .number(frame.minY)
             info["attached"] = .bool(view.window != nil)
             info["terminalFocus"] = .bool(terminal?.hasTerminalFocus ?? false)
-            info["firstResponder"] = .bool(view.window?.firstResponder === view)
+            info["firstResponder"] = .bool(view.window?.firstResponder === (terminal ?? view))
+            if let terminalPane = leaves[pane.id] as? TerminalPaneController {
+                info["findVisible"] = .bool(terminalPane.findVisible)
+                info["findFocused"] = .bool(terminalPane.findFocused)
+            }
             info["browser"] = (leaves[pane.id] as? BrowserPane)?.focusInfo ?? .null
             info["plugin"] = (leaves[pane.id] as? PluginPane)?.info ?? .null
             info["header"] = containers[pane.id]?.info ?? .null

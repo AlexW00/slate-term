@@ -13,30 +13,7 @@ final class PresenceController {
         let reportsElement: Bool
     }
 
-    static let descriptor: JSONValue = .object([
-        "version": .integer(1),
-        "metadata": .string("metadata: {version: 1, actor?: {name, note?, home?, origin?: {instanceId, sessionId}}}"),
-        "originVersion": .integer(1),
-        "focus": .object(["method": .string("presence.focus"), "input": .string("{activityId: string}"),
-                          "result": .string("{focused: boolean, paneId?: string, tabId?: string, windowId?: string}"),
-                          "invalidOrigin": .string("no-op"), "invalidParameters": .integer(-32602)]),
-        // Presence is for agents: plugin pages and services cannot claim an actor or hold.
-        "actorOrigins": .array([.string("administrative")]),
-        "ignoredWhenCaused": .bool(true),
-        "maximumNameLength": .integer(PresenceActor.maximumNameLength),
-        "maximumNoteCharacters": .integer(PresenceActor.maximumNoteCharacters),
-        "maximumNoteBytes": .integer(PresenceActor.maximumNoteBytes),
-        "maximumActivities": .integer(PresenceTracker.maximumRecords),
-        "minimumHoldMilliseconds": .integer(Int(PresenceTracker.minimumHold * 1000)),
-        "defaultLeaseSeconds": .integer(Int(PresenceTracker.defaultLeaseSeconds)),
-        "maximumLeaseSeconds": .integer(Int(PresenceTracker.maximumLeaseSeconds)),
-        "topic": .string("host.presence.changed"),
-        "methods": .array(["presence.list", "presence.hold", "presence.release", "presence.focus"].map(JSONValue.string)),
-        "setting": .string("agents.show_activity"),
-        "displayOnly": .bool(false),
-        "actorAuthorization": .string("selfDeclaredNoAuthorization"),
-        "explicitFocusOnly": .bool(true),
-    ])
+    static let descriptor: JSONValue = AutomationCapabilities.presence
 
     private weak var host: WorkspaceHost?
     private var tracker = PresenceTracker()

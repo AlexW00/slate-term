@@ -3,15 +3,7 @@ import SlateTermCore
 import SlateTermSettings
 
 extension WorkspaceHost {
-    static let welcomeDescriptor: JSONValue = .object([
-        "version": .integer(1), "getMethod": .string("welcome.get"),
-        "readCommand": .string("welcome.read"), "unreadCommand": .string("welcome.unread"), "resetCommand": .string("welcome.reset"),
-        "scope": .string("appStateDirectory"), "presentation": .string("nativeInline"),
-        "shellIntegrationRequired": .bool(false), "resetAffects": .string("futureTerminalSessions"),
-        "eventTopic": .string("host.welcome.changed"), "guard": .string("expectedInstanceId"),
-        "resultFields": .array(["content", "acknowledged", "automaticDisplayEnabled", "revision", "error"].map(JSONValue.string)),
-        "errors": .object(["invalid": .integer(-32602), "writeFailed": .integer(APIError.settingsWriteFailed)])
-    ])
+    static let welcomeDescriptor: JSONValue = AutomationCapabilities.welcome
 
     func welcomeInfo(_ params: [String: JSONValue]) throws -> JSONValue {
         try validateWelcomeParameters(params)

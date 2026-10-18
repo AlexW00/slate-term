@@ -3,6 +3,26 @@ import Testing
 @testable import SlateTermCore
 
 struct SavedLayoutEditingTests {
+    @Test func terminalFolderDefaultsToHomeWithoutReplacingExplicitFolders() throws {
+        let terminal = SavedLayoutPaneType.available(plugins: []).first { $0.id == "terminal" }!
+        #expect(terminal.defaults["directory"] == .string("~/"))
+        var layout = SavedLayoutDefinition.blank()
+        layout.tabs[0].panes[0].configuration = ["directory": .string("/tmp")]
+        let opened = try layout.opening(in: Workspace())
+        #expect(opened.panes.values.first?.configuration["directory"] == .string("/tmp"))
+    }
+
+    @Test func launcherNamesAndIconsAreValidated() throws {
+        #expect(try SavedLayoutLauncherOptions(name: "  Project  ", icon: "folder").name == "Project")
+        for name in ["", " ", ".", "..", "../Other", "a/b", "a:b", "a\u{0}b", String(repeating: "x", count: 101)] {
+            #expect(throws: RPCFailure.self) { try SavedLayoutLauncherOptions(name: name) }
+        }
+        #expect(throws: RPCFailure.self) { try SavedLayoutLauncherOptions(name: "Project", icon: "missing") }
+        for icon in SavedLayoutLauncherOptions.icons {
+            #expect(try SavedLayoutLauncherOptions(name: "Project", icon: icon).icon == icon)
+        }
+    }
+
     @Test func removeNestedPaneCollapsesOnlyItsParentAndPreservesRecipes() throws {
         var layout = SavedLayoutDefinition.blank(name: "Development")
         let browser = try layout.splitPane(PaneID(1), axis: .horizontal)

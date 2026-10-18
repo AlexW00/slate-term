@@ -39,6 +39,7 @@ HTML = '''<!doctype html><title>Parity fixture</title>
 <button id="reject-focus" type="button" onfocus="this.blur()">Reject focus</button>'''
 
 with AppFixture('api-parity') as app:
+    app.capture_contracts()
     describe = app.rpc('api.describe')
     assert {'web.focus', 'web.key', 'web.check', 'web.setValue'} <= set(describe['methods'])
     window = app.rpc('window.list')['windows'][0]

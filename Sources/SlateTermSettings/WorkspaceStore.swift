@@ -35,15 +35,31 @@ public struct WorkspaceStore: Sendable {
         owned = true
     }
 
-    public func load() throws -> Workspace? {
+    public func load() throws -> Workspace? { try loadSnapshot()?.workspace }
+
+    public func loadSnapshot() throws -> (workspace: Workspace, restoration: WorkspaceRestoration)? {
         defer { withExtendedLifetime(lease) {} }
-        do { return try Workspace.restore(Data(contentsOf: url)) }
+        do {
+            let data = try Data(contentsOf: url)
+            let workspace = try Workspace.restore(data)
+            let root = try JSONDecoder().decode(JSONValue.self, from: data).object!
+            let restoration = try root["restoration"].map {
+                try JSONDecoder().decode(WorkspaceRestoration.self, from: JSONEncoder().encode($0))
+            }.map { $0.retained(for: workspace) } ?? WorkspaceRestoration()
+            try restoration.validate(for: workspace)
+            return (workspace, restoration)
+        }
         catch let error as CocoaError where error.code == .fileReadNoSuchFile { return nil }
     }
 
-    public func save(_ workspace: Workspace) throws {
+    public func save(_ workspace: Workspace, restoration: WorkspaceRestoration = .init()) throws {
         defer { withExtendedLifetime(lease) {} }
-        let data = try workspace.encoded()
+        try restoration.validate(for: workspace)
+        var root = try JSONDecoder().decode(JSONValue.self, from: workspace.encoded()).object!
+        root["restoration"] = try .encoding(restoration)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(JSONValue.object(root))
         let temporary = directory.appendingPathComponent("\(UUID().uuidString).tmp")
         defer { try? FileManager.default.removeItem(at: temporary) }
         try data.write(to: temporary, options: .withoutOverwriting)

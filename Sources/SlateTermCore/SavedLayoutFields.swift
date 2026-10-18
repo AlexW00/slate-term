@@ -63,7 +63,7 @@ public struct SavedLayoutPaneType: Codable, Sendable, Identifiable {
     }
     public static func available(plugins: [PluginRegistration]) -> [Self] {
         [Self(id: "terminal", title: "Terminal", fields: [
-            .init(id: "directory", label: "Starting Folder", kind: .directory),
+            .init(id: "directory", label: "Starting Folder", kind: .directory, defaultValue: .string("~/")),
             .init(id: "command", label: "Startup Command", kind: .multiline)
         ]), Self(id: "browser", title: "Browser", fields: [.init(id: "url", label: "Starting URL", kind: .url)]),
             Self(id: "private-browser", title: "Private Browser", fields: [.init(id: "url", label: "Starting URL", kind: .url)])]

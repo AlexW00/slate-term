@@ -146,6 +146,53 @@ One invocation per command may run at a time (duplicates fail rather than queue)
 
 See the [command picker](command-picker.md) and [follow-up status and capability audits](plugin-followups.md) for UI/CLI parity and hooks/API boundaries.
 
+## Version and compatibility declarations
+
+Manifests may declare:
+
+```json
+{
+  "manifestVersion": 1,
+  "version": "1.2.0",
+  "compatibility": {
+    "minimumAPIVersion": 1,
+    "maximumAPIVersion": 1,
+    "requiredMethods": ["terminal.history"],
+    "requiredCommands": ["terminal.find"]
+  }
+}
+```
+
+These fields accompany the ordinary identity and panel/command/service fields.
+`manifestVersion` describes the manifest format; only version 1 is supported.
+`version` is an author-supplied release identifier (1–64 printable non-space ASCII
+bytes), for diagnostics, not an ordered compatibility constraint. API versions are
+breaking-contract generations. Within a generation, declare needed additive
+capabilities by their public method or built-in command IDs. Requirements are
+checked against the same catalogs as discovery; integration/debug internals and
+other plugins' contributed commands cannot satisfy them. At most 256 unique IDs
+of at most 128 ASCII bytes are accepted in each requirement list. API bounds are
+inclusive integers in 1...65535. Unknown fields and explicit null declarations fail.
+
+Omitted declarations mean **manifest 1, plugin release 0.0.0, API 1 only, no extra
+requirements**—not an automatic opt-in to future breaking API generations.
+Explicit declarations are recommended for distributed plugins.
+
+ZIP validation, registration, enabling and execution reject incompatibility with `-32053` and a
+structured report. Replacement rejection leaves the previous registration alive.
+On launch, well-formed stored registrations are rechecked before becoming active:
+incompatible entries remain in `plugins.list` with `compatibilityStatus` and can
+be removed/replaced, but contribute no runnable commands, panels or services.
+Settings displays the reason. The user's enabled preference is not silently
+rewritten; enabled does not imply compatible. A workspace referencing an unavailable
+plugin follows existing restoration failure/recovery rules, preserving its snapshot.
+Malformed/corrupt catalogs still follow existing catalog-error handling.
+
+`plugins validate` checks against the CLI build's contracts offline; registration
+checks the actual running host. `api.describe.pluginCompatibility` advertises the
+policy. This is not a permission system, sandbox, package signature check, update
+mechanism, or a guarantee that a required pane/session is currently available.
+
 ## Panel manifest
 
 A static panel:

@@ -19,6 +19,7 @@ name = "original" # array comment
 private = "other namespace"
 '''
 with AppFixture('plugin-settings-api', source) as app:
+    app.capture_contracts()
     namespace = app.cli('plugins', 'settings', 'get', 'acme.tools')
     assert namespace['values'] == namespace['appliedValues']
     session = app.rpc('pane.inspect', pane='p1')['sessionId']

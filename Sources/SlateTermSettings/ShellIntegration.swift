@@ -95,6 +95,8 @@ public enum ShellIntegration {
         # Apple's bash 3.2 gets no Ghostty injection; its script still adds prompt marks
         # and bash-preexec without re-running startup files. It is not written for set -u.
         if ! builtin declare -F __ghostty_precmd >/dev/null && [[ -r ${GHOSTTY_RESOURCES_DIR-}/shell-integration/bash/ghostty.bash ]]; then
+            # Ghostty's later prompt hooks read these even on Bash 3.2.
+            builtin : "${GHOSTTY_SHELL_FEATURES=}" "${PS0=}" "${BASHPID=$$}"
             _slate_nounset=${-//[!u]/}
             builtin set +u
             builtin source "$GHOSTTY_RESOURCES_DIR/shell-integration/bash/ghostty.bash"
@@ -128,7 +130,11 @@ public enum ShellIntegration {
                     command=${command#  }
                 fi
             fi
-            "$SLATE_TERM_CLI" shell update --shell bash --run-input "$_slate_run_input" --state running --pid "$$" --sequence "$(( 2 * _slate_n + 1 ))" --cwd="$PWD" --command="${command:0:4096}" >/dev/null 2>&1
+            # Empty attached option values are rejected by the CLI parser.
+            builtin local -a command_args
+            command_args=("--command=${command:0:4096}")
+            if [[ -z $command ]]; then command_args=(--command ""); fi
+            "$SLATE_TERM_CLI" shell update --shell bash --run-input "$_slate_run_input" --state running --pid "$$" --sequence "$(( 2 * _slate_n + 1 ))" --cwd="$PWD" "${command_args[@]}" >/dev/null 2>&1
             # bash-preexec with extdebug skips the user's command when a hook fails.
             return 0
         }

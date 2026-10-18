@@ -6,9 +6,11 @@ with focused VM verification. See [contracts](api-parity-first-pass.md) and
 [executed checks and limitations](api-extension-progress.md#first-pass-api-parity-featureapi-parity-first-pass).
 Workflow-dependent next additions remain pending; this is not a full-suite certification.
 
-Terminal mouse/selection/scrollback/clipboard API additions were declined and are
-not part of this backlog. Keep terminal clipboard consent and macOS notification
-authorization boundaries unchanged.
+Terminal mouse/selection/clipboard API additions were declined and are not part
+of this backlog. Bounded scrollback retrieval/export was subsequently approved in
+the separate [MVP foundations scope](mvp-foundations.md); it does not authorize
+mouse/selection/clipboard expansion. Keep terminal clipboard consent and macOS
+notification authorization boundaries unchanged.
 
 ## 1. Native window controls
 

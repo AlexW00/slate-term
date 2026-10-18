@@ -19,6 +19,18 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
     }
     private(set) var context = Context()
     enum ContextChange { case title, workingDirectory, commandFinished }
+
+    struct FindState {
+        var active = false
+        var query = ""
+        var total: Int?
+        var selected: Int?
+    }
+    private(set) var findState = FindState()
+    private var submittedFindQuery: String?
+    var onFindChanged: ((_ focusSearch: Bool) -> Void)?
+    private var findNotificationPending = false
+    private var focusFindPending = false
     var onContextChange: ((Context, ContextChange) -> Void)?
     var onDesktopNotification: ((String, String) -> Void)?
     struct ClipboardConfirmation {
@@ -40,6 +52,7 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
     private var isClosed = false
     var hasSelection: Bool { surface.map { ghostty_surface_has_selection($0) } ?? false }
     private let runtime: GhosttyRuntime
+    let startingDirectory: String?
     private var surface: ghostty_surface_t?
     private var colorScheme: ghostty_color_scheme_e?
     // The pinned engine creates surfaces focused; track every forwarded focus update.
@@ -53,11 +66,13 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
     var cellHeight: Int { surface.map { Int(ghostty_surface_size($0).cell_height_px) } ?? 0 }
     override var acceptsFirstResponder: Bool { true }
     var onFocus: (() -> Void)?
+    var onInputFocus: (() -> Void)?
     var onCloseRequest: ((Bool) -> Void)?
     var needsConfirmClose: Bool { surface.map { ghostty_surface_needs_confirm_quit($0) } ?? false }
 
     init(runtime: GhosttyRuntime, environment: [String: String] = [:], directory: String? = nil) throws {
         self.runtime = runtime
+        self.startingDirectory = directory
         super.init(frame: NSRect(x: 0, y: 0, width: 900, height: 560))
         autoresizingMask = [.width, .height]
         setAccessibilityElement(true)
@@ -69,7 +84,9 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
         configuration.platform.macos.nsview = Unmanaged.passUnretained(self).toOpaque()
         configuration.userdata = Unmanaged.passUnretained(self).toOpaque()
         configuration.scale_factor = Double(NSScreen.main?.backingScaleFactor ?? 1)
-        let workingDirectory = directory.flatMap { strdup($0) }
+        let startingDirectory = directory ?? FileManager.default.homeDirectoryForCurrentUser.path
+        context.workingDirectory = startingDirectory
+        let workingDirectory = strdup(startingDirectory)
         defer { if let workingDirectory { free(workingDirectory) } }
         configuration.working_directory = workingDirectory.map { UnsafePointer($0) }
         let strings = environment.sorted { $0.key < $1.key }.map { (strdup($0.key)!, strdup($0.value)!) }
@@ -109,6 +126,8 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
         onCloseRequest = nil
         onContextChange = nil
         onDesktopNotification = nil
+        onFindChanged = nil
+        onInputFocus = nil
         onClipboardConfirmation = nil
         if let pending = pendingConfirmation { finishConfirmation(pending.id, approved: false) }
         if let keyUpMonitor { NSEvent.removeMonitor(keyUpMonitor); self.keyUpMonitor = nil }
@@ -164,6 +183,7 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
     override func becomeFirstResponder() -> Bool {
         guard surface != nil else { return false }
         setFocused(true)
+        onInputFocus?()
         onFocus?()
         return true
     }
@@ -459,7 +479,7 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
     @objc func copy(_ sender: Any?) { _ = bindingAction("copy_to_clipboard") }
     @objc func paste(_ sender: Any?) { _ = bindingAction("paste_from_clipboard") }
     @objc override func selectAll(_ sender: Any?) { _ = bindingAction("select_all") }
-    private func bindingAction(_ action: String) -> Bool {
+    func bindingAction(_ action: String) -> Bool {
         guard let surface else { return false }
         return action.withCString { ghostty_surface_binding_action(surface, $0, UInt(action.utf8.count)) }
     }
@@ -490,6 +510,26 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
         let previous = context
         let change: ContextChange
         switch action.tag {
+        case GHOSTTY_ACTION_START_SEARCH:
+            findState.active = true
+            if let needle = action.action.start_search.needle, needle.pointee != 0 { findState.query = String(cString: needle) }
+            notifyFind(focus: true)
+            return true
+        case GHOSTTY_ACTION_END_SEARCH:
+            submittedFindQuery = nil
+            findState.active = false
+            findState.total = nil
+            findState.selected = nil
+            notifyFind()
+            return true
+        case GHOSTTY_ACTION_SEARCH_TOTAL:
+            findState.total = action.action.search_total.total < 0 ? nil : Int(action.action.search_total.total)
+            notifyFind()
+            return true
+        case GHOSTTY_ACTION_SEARCH_SELECTED:
+            findState.selected = action.action.search_selected.selected < 0 ? nil : Int(action.action.search_selected.selected)
+            notifyFind()
+            return true
         case GHOSTTY_ACTION_SET_TITLE:
             change = .title
             context.title = action.action.set_title.title.map { String(cString: $0) }
@@ -674,16 +714,79 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
 
     override func accessibilityValue() -> Any? { capture() }
 
-    func capture() -> String {
-        guard let surface else { return "" }
+    func showFind() { _ = bindingAction("start_search") }
+
+    func search(_ query: String) throws {
+        guard query.utf8.count <= 4_096, !query.utf8.contains(0), surface != nil else { throw TerminalError.inputRejected }
+        // The pinned search thread ignores ASCII-case-equivalent needles and
+        // emits no new counts. Preserve settled results when merely refocusing
+        // or resubmitting the same search instead of showing a permanent spinner.
+        func folded(_ value: String) -> [UInt8] { value.utf8.map { (65...90).contains($0) ? $0 + 32 : $0 } }
+        let changed = submittedFindQuery.map { folded($0) != folded(query) } ?? true
+        let accepted = bindingAction("search:" + query)
+        guard accepted || query.isEmpty else { throw TerminalError.inputRejected }
+        submittedFindQuery = query.isEmpty ? nil : query
+        findState.active = true
+        findState.query = query
+        if changed {
+            findState.total = nil
+            findState.selected = nil
+        }
+        notifyFind()
+    }
+
+    func navigateSearch(previous: Bool) {
+        guard findState.active, !findState.query.isEmpty else { return }
+        _ = bindingAction(previous ? "navigate_search:previous" : "navigate_search:next")
+    }
+
+    func endSearch() {
+        submittedFindQuery = nil
+        _ = bindingAction("end_search")
+        findState.active = false
+        findState.total = nil
+        findState.selected = nil
+        notifyFind()
+    }
+
+    private func notifyFind(focus: Bool = false) {
+        focusFindPending = focusFindPending || focus
+        guard !findNotificationPending else { return }
+        findNotificationPending = true
+        // Engine callbacks borrow their surface. Layout/focus changes wait until
+        // the callback unwinds; the UI reads the newest coalesced search state.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.findNotificationPending = false
+            let focus = self.focusFindPending
+            self.focusFindPending = false
+            guard !self.isClosed else { return }
+            self.onFindChanged?(focus)
+        }
+    }
+
+    func capture() -> String { readText(history: false, maximumBytes: Int.max).text }
+
+    func retainedText(maximumBytes: Int) -> (text: String, truncated: Bool) {
+        readText(history: true, maximumBytes: maximumBytes)
+    }
+
+    private func readText(history: Bool, maximumBytes: Int) -> (text: String, truncated: Bool) {
+        guard let surface else { return ("", false) }
         var text = ghostty_text_s()
+        // In the pinned engine SCREEN means all retained rows; ACTIVE means the
+        // live screen independently of the user's current scroll position.
+        let tag = history ? GHOSTTY_POINT_SCREEN : GHOSTTY_POINT_ACTIVE
         let selection = ghostty_selection_s(
-            top_left: ghostty_point_s(tag: GHOSTTY_POINT_SCREEN, coord: GHOSTTY_POINT_COORD_TOP_LEFT, x: 0, y: 0),
-            bottom_right: ghostty_point_s(tag: GHOSTTY_POINT_SCREEN, coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT, x: 0, y: 0),
+            top_left: ghostty_point_s(tag: tag, coord: GHOSTTY_POINT_COORD_TOP_LEFT, x: 0, y: 0),
+            bottom_right: ghostty_point_s(tag: tag, coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT, x: 0, y: 0),
             rectangle: false)
-        guard ghostty_surface_read_text(surface, selection, &text) else { return "" }
+        guard ghostty_surface_read_text(surface, selection, &text) else { return ("", false) }
         defer { ghostty_surface_free_text(surface, &text) }
-        guard let bytes = text.text else { return "" }
-        return String(decoding: UnsafeRawBufferPointer(start: bytes, count: Int(text.text_len)), as: UTF8.self)
+        guard let bytes = text.text else { return ("", false) }
+        let buffer = UnsafeRawBufferPointer(start: bytes, count: Int(text.text_len))
+        var start = max(0, buffer.count - max(0, maximumBytes))
+        while start < buffer.count, buffer[start] & 0xC0 == 0x80 { start += 1 }
+        return (String(decoding: buffer[start...], as: UTF8.self), start > 0)
     }
 }

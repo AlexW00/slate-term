@@ -81,7 +81,10 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
             status.topAnchor.constraint(equalTo: web.bottomAnchor, constant: 3), status.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8), status.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8), status.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -4),
         ])
         observations = [web.observe(\.title) { [weak self] _, _ in MainActor.assumeIsolated { self?.onTitleChange?() } },
-                        web.observe(\.url) { [weak self] _, _ in MainActor.assumeIsolated { self?.updateControls() } },
+                        web.observe(\.url) { [weak self] _, _ in MainActor.assumeIsolated {
+                            self?.updateControls()
+                            if self?.web.isLoading == false { self?.rememberLocation() }
+                        } },
                         web.observe(\.isLoading) { [weak self] _, _ in MainActor.assumeIsolated { self?.updateControls() } }]
         updateControls()
         startNavigation {
@@ -90,11 +93,23 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
     }
 
     var currentURL: String? { web.url?.absoluteString }
+    private(set) var restorationURL: String?
+    var onLocationChange: (() -> Void)?
+
+    private func rememberLocation() {
+        guard let url = currentURL, url != restorationURL else { return }
+        restorationURL = url
+        onLocationChange?()
+    }
 
     /// The recipe boundary has already checked this URL; do not interpret it as a search.
     func loadStartingURL(_ url: String) {
         loadViewIfNeeded()
-        do { let location = try Self.checkedLocation(BrowserURL.parse(url)); startNavigation { load(location) } }
+        do {
+            let location = try Self.checkedLocation(BrowserURL.parse(url))
+            restorationURL = location.absoluteString
+            startNavigation { load(location) }
+        }
         catch let error as RPCFailure { status.stringValue = error.message }
         catch { status.stringValue = String(describing: error) }
     }
@@ -110,6 +125,7 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
         web.uiDelegate = nil
         onFocus = nil
         onTitleChange = nil
+        onLocationChange = nil
     }
 
     func rememberFocus() {
@@ -219,6 +235,7 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         guard let navigation, navigation === currentNavigation else { return }
         automation.invalidate(except: trackedNavigations[ObjectIdentifier(navigation)]?.operation)
+        rememberLocation()
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         guard let navigation else { return }
@@ -228,6 +245,7 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
             return
         }
         automation.documentFinished()
+        rememberLocation()
         if let id = tracked?.operation {
             guard navigationOperation == id else { automation.complete(id, .failure(CancellationError())); return }
             // Retain the submission slot through this metadata callback, even if

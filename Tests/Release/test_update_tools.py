@@ -63,6 +63,7 @@ class SparkleToolIntegrationTests(unittest.TestCase):
             updates.prepare(self.arguments)
         feed = self.assets / "appcast.xml"
         notes = self.assets / "Slate-Terminal-1.2.3-42-arm64.md"
+        self.assertEqual(notes.read_bytes(), self.notes.read_bytes())
         signatures = updates.inspect_appcast(feed, self.archive, notes, "example/slate", "1.2.3", "42")
         for path, signature in ((feed, None), (self.archive, signatures[0]), (notes, signatures[1])):
             original = path.read_bytes()

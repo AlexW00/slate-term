@@ -11,7 +11,7 @@ final class LiteralTextField: NSTextField {
 }
 
 @MainActor
-final class LiteralSearchField: NSSearchField {
+class LiteralSearchField: NSSearchField {
     override class var cellClass: AnyClass? {
         get { LiteralSearchFieldCell.self }
         set { }

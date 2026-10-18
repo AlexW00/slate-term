@@ -31,6 +31,7 @@ final class PluginInstance {
     var onEvent: ((String, JSONValue, OperationLineage?) -> Void)?
 
     init(registration: PluginRegistration, scopeKey: String, tab: TabID?, connection: PluginControlConnection) throws {
+        try registration.requireCompatibility()
         self.registration = registration; self.scopeKey = scopeKey; self.tab = tab
         self.connection = connection
         guard let entryURL = registration.entryURL else { throw RPCFailure(code: -32602, message: "Plugin does not provide a panel") }

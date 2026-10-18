@@ -5,6 +5,7 @@ Run only through verify-vm.py."""
 import json
 import os
 import pty
+import re
 import select
 import shutil
 import signal
@@ -129,6 +130,7 @@ class Terminal:
             os.chdir(cwd)
             os.execve(argv[0], argv, env)
         self.output = b''
+        self.answered_device_queries = 0
         self.lock = threading.Lock()
         threading.Thread(target=self.pump, daemon=True).start()
 
@@ -142,6 +144,12 @@ class Terminal:
                         return
                     with self.lock:
                         self.output += data
+                        # Fish waits for this reply before its first prompt.
+                        queries = self.output.count(b'\x1b[0c')
+                        replies = queries - self.answered_device_queries
+                        self.answered_device_queries = queries
+                    if replies:
+                        self.write(b'\x1b[?1;2c' * replies)
             except OSError:
                 return
 
@@ -194,6 +202,7 @@ class Session:
             'LANG': 'en_US.UTF-8', 'SLATE_TERM_SOCKET': self.host.path, 'SLATE_TERM_PANE_ID': self.pane,
             'SLATE_TERM_CONTEXT_TOKEN': self.token, 'SLATE_TERM_CLI': str(CLI), 'SLATE_TERM_SHELL_PID': '',
             'SLATE_TERM_RUN_KEY': '\x1b[slate-run-%s~' % self.session_id, 'GHOSTTY_RESOURCES_DIR': str(GHOSTTY),
+            'GHOSTTY_SHELL_FEATURES': 'cursor:blink,path,ssh-env,ssh-terminfo,sudo,title',
         }
         hooks = subprocess.check_output([str(CLI), 'shell', 'integration', '--shell', kind], text=True)
         if kind == 'zsh':
@@ -291,7 +300,8 @@ def check_run(s, after, prefix=''):
 
 def check_draft_refusal(s, after):
     s.terminal.write('echo DRAFT-KEPT')
-    eventually(s.name + ' draft echoed', lambda: 'echo DRAFT-KEPT' in s.terminal.text())
+    # Fish inserts syntax-color escapes between the command and its argument.
+    eventually(s.name + ' draft echoed', lambda: 'DRAFT-KEPT' in s.terminal.text())
     claims = len(s.host.claims)
     s.host.pending = run_line(s.kind, 'echo MUST-NOT-RUN')[1]
     s.terminal.write(run_key(s.kind, s))
@@ -316,6 +326,10 @@ def check_continuation_refusal(s, after):
     assert s.host.claims[-1].get('emptyBuffer') is not True, 'Run claimed at a continuation prompt'
     never(s.name + ' continuation submitted something', lambda: [r for r in s.reports() if r['sequence'] > after])
     s.terminal.write('\x03')
+    if s.kind == 'fish':
+        # Fish clears the existing prompt without emitting another fish_prompt.
+        # A successful run proves the editor accepted cancellation and is empty.
+        return check_run(s, after)
     return s.wait_prompt(after, 'after cancelling continuation')['sequence']
 
 
@@ -348,8 +362,9 @@ def check_nested(s, executable, after):
     pids = {r['pid'] for r in s.reports()}
     s.type_line(executable + (' -i' if s.kind != 'fish' else ''))
     time.sleep(1.5)
-    s.type_line('echo NESTED-$$')
-    eventually(s.name + ' nested shell', lambda: 'NESTED-' in s.terminal.text().split('echo NESTED-')[-1])
+    pid = '$fish_pid' if s.kind == 'fish' else '$$'
+    s.type_line("printf 'NESTED-%s\\n' " + pid)
+    eventually(s.name + ' nested shell', lambda: re.search(r'NESTED-[0-9]+', s.terminal.text()))
     s.type_line('exit')
     prompt = s.wait_prompt(after, 'after nested shell')
     assert {r['pid'] for r in s.reports()} == pids, 'A nested shell reported for the pane'
@@ -401,12 +416,16 @@ for name, kind, executable, runs in shells():
             # A command missing from history must not report the previous entry's text.
             s.type_line('set +o history')
             after = s.wait_prompt(after)['sequence']
+            before_nohist = after
             s.type_line('echo NOHIST')
             after = s.wait_prompt(after)['sequence']
-            texts = [r['command'] for r in s.reports() if r['state'] == 'running']
-            assert texts[-1] in ('', 'echo NOHIST') and texts[-1] != 'set +o history', texts
+            texts = [r['command'] for r in s.reports()
+                     if r['state'] == 'running' and before_nohist < r['sequence'] < after]
+            assert texts and texts[-1] in ('', 'echo NOHIST'), texts
             if runs:
                 after = check_run(s, after)
+            s.type_line('set -o history')
+            after = s.wait_prompt(after)['sequence']
         after = check_dash(s, after)
         if runs and kind != 'zsh':
             after = check_read_refusal(s, after)
@@ -452,12 +471,27 @@ for name, kind, executable, runs in shells():
                 after = check_continuation_refusal(s, after)
                 after = check_read_refusal(s, after)
                 after = check_run(s, after)
+            s.type_line("if [[ $- == *u* ]]; then printf 'STRICT_%s\\n' ON; fi")
+            after = s.wait_prompt(after)['sequence']
+            eventually('nounset preserved', lambda: 'STRICT_ON' in s.terminal.text())
             assert 'unbound variable' not in s.terminal.text(), s.terminal.text()[-2000:]
             print('PASS %s set -u, extdebug and a prompt framework' % name, flush=True)
         except BaseException:
             print(s.terminal.text()[-4000:], file=sys.stderr)
             print(json.dumps(s.reports(), indent=1)[-3000:], file=sys.stderr)
             raise
+        finally:
+            s.close()
+
+        s = Session(name + ' strict without features', kind, executable, strict,
+                    setup=lambda env: env.pop('GHOSTTY_SHELL_FEATURES', None))
+        try:
+            after = s.wait_prompt(label='first prompt')['sequence']
+            s.type_line("if [[ $- == *u* ]]; then printf 'STRICT_%s\\n' ON; fi")
+            s.wait_prompt(after)
+            eventually('nounset without feature flags', lambda: 'STRICT_ON' in s.terminal.text())
+            assert 'unbound variable' not in s.terminal.text(), s.terminal.text()[-2000:]
+            print('PASS %s strict without optional features' % name, flush=True)
         finally:
             s.close()
 

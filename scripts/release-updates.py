@@ -165,8 +165,9 @@ def prepare(args):
         notes = temporary / (name + ".md")
         shutil.copyfile(args.notes, notes)
         prefix = f"https://github.com/{args.repository}/releases/download/v{version}/"
-        run_tool(args.tools, "generate_appcast", ["--download-url-prefix", prefix, "--release-notes-url-prefix", prefix,
+        run_tool(args.tools, "generate_appcast", ["--disable-signing-warning", "--download-url-prefix", prefix, "--release-notes-url-prefix", prefix,
                  "--maximum-deltas", "0", "--maximum-versions", "1", "-o", str(temporary / "appcast.xml"), str(temporary)], secret, temporary)
+        require(notes.read_bytes() == args.notes.read_bytes(), "Signed release notes differ from reviewed notes")
         feed = temporary / "appcast.xml"
         signatures = inspect_appcast(feed, archive, notes, args.repository, version, build)
         run_tool(args.tools, "sign_update", ["--verify", str(feed)], secret, temporary)

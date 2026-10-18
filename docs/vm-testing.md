@@ -10,7 +10,7 @@ bash scripts/verify-all.sh                          # Complete suite
 # Equivalent: python3 scripts/verify-vm.py --all
 ```
 
-No selection only lists tests; it does not build or launch anything. `scripts/verification_gates.py` is the shared inventory for selection, full execution and completeness checks: **87 invocations**, including seven host checks, all 19 native recipes and three separate app iterations. `app` aliases `app-1`; `--all` includes `app-1`, `app-2` and `app-3`. Unregistered verification scripts fail inventory validation rather than being silently omitted.
+No selection only lists tests; it does not build or launch anything. `scripts/verification_gates.py` is the shared inventory for selection, full execution and completeness checks: **90 invocations**, including seven host checks, all 19 native recipes and three separate app iterations. `app` aliases `app-1`; `--all` includes `app-1`, `app-2` and `app-3`. Unregistered verification scripts fail inventory validation rather than being silently omitted.
 
 **Build on the host; execute native/UI tests sequentially only in the VM.** The seven host-classified gates are engine build, package tests, runner tests, release-tooling tests, mutation checks, app build and whitespace. There is no guest compilation or host GUI fallback. Direct native shell scripts normally compile and execute on the same machine; use the VM runner instead.
 
@@ -49,5 +49,27 @@ VM execution holds `/tmp/slate-ui-tests.lock`. Cleanup tracks owned process iden
 ```sh
 python3 -m unittest discover -s Tests/VMRunner -v
 ```
+
+### Auditing captured API responses
+
+Selected owned fixtures opt into `*-contracts.jsonl` evidence containing the native
+catalog followed by public response values/error codes. It is bounded to 32 MiB and
+4,000 records per fixture; exceeding a limit fails rather than silently dropping
+samples. Private/debug calls, request arguments and error messages are excluded.
+Command IDs are retained to choose the exact built-in or contributed result schema.
+This is fixture evidence, not application logging or saved terminal transcripts.
+
+After a run finishes and artifacts are retrieved, audit its gate copies on the host:
+
+```sh
+SLATE_TEST_CONTRACT_OBSERVATIONS="$PWD/artifacts/vm/<run-id>/gates" \
+  swift test --jobs 4 --filter capturedNativeResponsesConformToTheCurrentSharedCatalog
+```
+
+This package test never launches native UI. It checks the captured catalog against
+current source and validates observed results/errors with the test schema evaluator.
+Without the environment variable it is explicitly skipped. Report its printed
+method/command/client coverage, not a claim that every handler/state was exercised.
+Run it separately from the VM runner; a VM receipt alone does not certify this audit.
 
 Historical focused evidence includes successful terminal/text-checking/browser execution (`20261016T031205Z-55d6457a`), actual timeout/cancellation receipts (`20261016T031250Z-02ce1790`, `20261016T031305Z-f737e0a2`), and browser-navigation/command-picker (`20261016T040246Z-61937331`). These establish those particular runs, not a fresh full-suite pass. Use the current full certificate and its linked run receipt for current-source verification.

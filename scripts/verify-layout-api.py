@@ -8,6 +8,7 @@ from api_fixture import AppFixture, CLI, ROOT, eventually
 from plugin_package_fixture import package_fixture
 
 with AppFixture('layout-api') as app:
+    app.capture_contracts()
     def pane(pane_id='p1'):
         return app.rpc('pane.inspect', pane=pane_id)
 

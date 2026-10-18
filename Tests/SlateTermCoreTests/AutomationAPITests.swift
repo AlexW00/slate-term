@@ -68,6 +68,12 @@ import Testing
     #expect(AutomationMethod.webSnapshot.resolving(["tab": .string("t9")], defaults: defaults)["pane"] == nil)
     #expect(AutomationMethod.serviceStart.resolving(["id": .string("worker")], defaults: defaults) == ["id": .string("worker")])
     #expect(AutomationMethod.configGet.resolving([:], defaults: defaults).isEmpty)
+    for method in [AutomationMethod.terminalOperations, .terminalOperationStatus, .terminalOperationResult, .terminalOperationWait] {
+        #expect(method.family == .terminalOperations && method.admission == .read)
+        let handle: [String: JSONValue] = method == .terminalOperations ? [:] : ["commandId": .string(UUID().uuidString)]
+        #expect(method.resolving(handle, defaults: defaults) == handle)
+    }
+    #expect(AutomationMethod.terminalStart.resolving(["command": .string("echo test")], defaults: defaults)["pane"] == .string("p2"))
     #expect(AutomationMethod.pluginSettingsGet.resolving([:], defaults: defaults)["id"] == .string("notes"))
     #expect(AutomationMethod.pluginSettingsGet.resolving(["id": .string("other")], defaults: defaults)["id"] == .string("other"))
     #expect(AutomationMethod.pluginDataGet.resolving([:], defaults: defaults) == ["id": .string("notes")])

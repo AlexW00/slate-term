@@ -14,6 +14,7 @@ HTML = '''<!doctype html><title>Presence fixture</title><style>body{padding:40px
 <input id="email"><button id="go" onclick="document.title='clicked'">Go</button>'''
 
 with AppFixture('presence') as app:
+    app.capture_contracts()
     assert app.rpc('api.describe')['presence']['version'] == 1
     app.cli('appearance', 'dark')
 
@@ -60,12 +61,14 @@ with AppFixture('presence') as app:
 
     # A second session of the same agent gets a disambiguated label. Holds pin both
     # records, so the check does not race the minimum hold on a slow VM.
-    app.cli('presence', 'hold', '--pane', target, env=agent)
-    app.cli('presence', 'hold', '--pane', target, env=other)
+    for environment in [agent, other]:
+        held = app.cli('presence', 'hold', '--pane', target, env=environment)
+        app.contract_capture.record('presence.hold', {'pane': target}, held, client='cli')
     labels = sorted(t['label'] for t in shown(target))
     assert labels == ['claude · p1', 'claude · p9'], labels
-    app.cli('presence', 'release', '--pane', target, env=agent)
-    app.cli('presence', 'release', '--pane', target, env=other)
+    for environment in [agent, other]:
+        released = app.cli('presence', 'release', '--pane', target, env=environment)
+        app.contract_capture.record('presence.release', {'pane': target}, released, client='cli')
 
     # Tags fade after the minimum hold; events report transitions, never notes.
     eventually('presence ends', lambda: activities() == [], timeout=6)

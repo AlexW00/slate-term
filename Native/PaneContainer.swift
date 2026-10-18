@@ -392,7 +392,9 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
             let available = max(0, view.bounds.height - headerHeight.constant)
             // Never impose a pane minimum. Give the live terminal at least 80pt where
             // available and at least half of larger panes; longer copy can scroll.
-            let height = welcomeEnabled ? min(welcomeView.preferredHeight(for: view.bounds.width), available / 2, max(0, available - 80)) : 0
+            let limit = min(available / 2, max(0, available - 80))
+            welcomeView.heightLimit = limit
+            let height = welcomeEnabled ? min(welcomeView.preferredHeight(for: view.bounds.width), limit) : 0
             if abs(welcomeHeight.constant - height) > 0.5 { welcomeHeight.constant = height }
             welcomeView.isHidden = height == 0
         }

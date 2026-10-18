@@ -9,7 +9,7 @@ slate_native_swiftc -swift-version 5 -parse-as-library -g -emit-library -emit-mo
   -emit-module-path "$gate/SlateTermCore.swiftmodule" -o "$gate/libSlateTermCore.dylib"
 slate_native_swiftc -swift-version 5 -default-isolation MainActor -parse-as-library -g \
   -I "$gate" -L "$gate" -lSlateTermCore -Xlinker -rpath -Xlinker "$gate" \
-  Native/LiteralTextCells.swift Native/PaneDragging.swift Native/WelcomeView.swift Native/PaneContainer.swift Tests/Welcome/Welcome.swift \
+  Native/LiteralTextCells.swift Native/PaneDragging.swift Native/WelcomeView.swift Native/PresenceOverlay.swift Native/PaneContainer.swift Tests/Welcome/Welcome.swift \
   -o "$gate/welcome"
 fi
 slate_native_ready "$gate/welcome"

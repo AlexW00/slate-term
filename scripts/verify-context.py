@@ -39,7 +39,19 @@ with tempfile.TemporaryDirectory(prefix="slate-context-", dir="/tmp") as tempora
     with (ROOT / "artifacts/context-process.log").open("w") as log:
         app = subprocess.Popen([str(APP)], env=environment, stdout=log, stderr=log, start_new_session=True)
         try:
-            eventually("context app readiness", lambda: ready.exists() and app.poll() is None)
+            def app_ready():
+                assert app.poll() is None, f"Context app exited during startup: {app.returncode}"
+                return ready.exists()
+            try:
+                eventually("context app readiness", app_ready, timeout=60)
+            except AssertionError:
+                if app.poll() is None:
+                    try:
+                        sample = subprocess.run(["/usr/bin/sample", str(app.pid), "3", "1"], capture_output=True, text=True, timeout=45)
+                        (ROOT / "artifacts/context-startup-sample.txt").write_text(sample.stdout + sample.stderr)
+                    except subprocess.TimeoutExpired:
+                        print("Context startup sampler timed out", flush=True)
+                raise
             environment["SLATE_TERM_SOCKET"] = ready.read_text().strip()
 
             def cli(*args, success=True):
@@ -103,7 +115,7 @@ with tempfile.TemporaryDirectory(prefix="slate-context-", dir="/tmp") as tempora
             draft_file = directory / "unsubmitted-draft"
             cli("terminal", "send", "--pane", "p1", "--text", "printf DRAFT > " + shlex.quote(str(draft_file)) + "; ")
             error = cli("terminal", "run", "--pane", "p1", "--command", ":", success=False)
-            assert "editing buffer" in error.lower(), error
+            assert json.loads(error)["error"]["code"] == -32042, error
             assert not draft_file.exists(), "Automation executed an unfinished user draft"
             draft_sequence = context()["terminal"]["sequence"]
             cli("terminal", "key", "--pane", "p1", "--key", "ctrl+c")
@@ -112,7 +124,7 @@ with tempfile.TemporaryDirectory(prefix="slate-context-", dir="/tmp") as tempora
             cli("terminal", "send", "--pane", "p1", "--text", "printf DRAFT > " + shlex.quote(str(continuation_file)) + "; " + "\\" + "\r")
             eventually("actual continuation prompt", lambda: "SLATE_CONT> " in cli("panes", "capture", "--pane", "p1")["text"])
             error = cli("terminal", "run", "--pane", "p1", "--command", ":", success=False)
-            assert "editing buffer" in error.lower(), error
+            assert json.loads(error)["error"]["code"] == -32042, error
             assert not continuation_file.exists(), "Automation completed and executed a multiline user draft"
             continuation_sequence = context()["terminal"]["sequence"]
             cli("terminal", "key", "--pane", "p1", "--key", "ctrl+c")
@@ -124,10 +136,18 @@ with tempfile.TemporaryDirectory(prefix="slate-context-", dir="/tmp") as tempora
             assert run_file.read_text() == "日本語 ' quoted\\nsecond line"
             eventually("run command reached actual terminal output", lambda: "RUN_NATIVE" in cli("panes", "capture", "--pane", "p1")["text"])
             assert cli("terminal", "wait", "--pane", "p1", "--contains", "RUN_NATIVE")["matched"]
-            error = cli("terminal", "run", "--pane", "p1", "--command", "/bin/sleep 1", "--timeout-milliseconds", "100", success=False)
-            assert "not stopped" in error, error
-            assert context()["terminal"]["state"] == "running", "Run timeout killed the user's process"
+            timeout_release = directory / "release-timed-out-run"
+            timeout_finished = directory / "timed-out-run-finished"
+            timeout_command = "for i in {1..1000}; do [[ -e " + shlex.quote(str(timeout_release)) + " ]] && break; /bin/sleep 0.05; done; printf done > " + shlex.quote(str(timeout_finished))
+            try:
+                error = cli("terminal", "run", "--pane", "p1", "--command", timeout_command, "--timeout-milliseconds", "100", success=False)
+                assert "not stopped" in error, error
+                eventually("timed-out operation running before release", lambda: context()["terminal"]["state"] == "running")
+                assert not timeout_finished.exists(), "Command bypassed the release barrier"
+            finally:
+                timeout_release.touch()
             assert cli("terminal", "wait", "--pane", "p1", "--timeout-milliseconds", "5000")["matched"]
+            assert timeout_finished.read_text() == "done", "Timed-out command did not finish after release"
             cli("terminal", "wait", "--pane", "p1", "--contains", "NEVER_PRINTED_SENTINEL", "--timeout-milliseconds", "100", success=False)
             runner = subprocess.Popen([str(CLI), "terminal", "run", "--pane", "p1", "--command", "/bin/sleep 30"], env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             try:
@@ -135,10 +155,16 @@ with tempfile.TemporaryDirectory(prefix="slate-context-", dir="/tmp") as tempora
                 cli("terminal", "run", "--pane", "p1", "--command", "printf unwanted", success=False)
                 runner.terminate()
                 runner.communicate(timeout=5)
-                eventually("disconnect releases the run", lambda: rpc("debug.inspect")["pendingTerminalRuns"] == 0)
+                eventually("disconnect releases only the waiter", lambda: rpc("debug.inspect")["pendingTerminalWaits"] == 0)
+                assert rpc("debug.inspect")["pendingTerminalRuns"] == 1, "Disconnect discarded operation tracking"
                 assert context()["terminal"]["state"] == "running", "Disconnect killed the user's command"
+                retained = [item for item in cli("terminal", "operations") if item["paneId"] == "p1" and item["state"] == "running"]
+                assert len(retained) == 1, retained
+                retained_id = retained[0]["commandId"]
                 cli("terminal", "key", "--pane", "p1", "--key", "ctrl+c")
-                cli("terminal", "wait", "--pane", "p1", "--timeout-milliseconds", "5000")
+                interrupted_result = cli("terminal", "operationWait", "--command-id", retained_id, "--timeout-milliseconds", "5000")
+                assert interrupted_result["commandId"] == retained_id
+                assert cli("terminal", "operationResult", "--command-id", retained_id) == interrupted_result
             finally:
                 if runner.poll() is None:
                     runner.kill()
@@ -153,6 +179,24 @@ with tempfile.TemporaryDirectory(prefix="slate-context-", dir="/tmp") as tempora
                 if waiter.poll() is None:
                     waiter.kill()
                     waiter.communicate(timeout=5)
+            release = directory / "release-operation"
+            operation = cli("terminal", "start", "--pane", "p1", "--command",
+                "for i in {1..1000}; do [[ -e " + shlex.quote(str(release)) + " ]] && break; /bin/sleep 0.05; done; printf 'HANDLE_DONE\\n'; (exit 23)")
+            operation_id = operation["commandId"]
+            eventually("handle starts without waiting for completion", lambda: cli("terminal", "operationStatus", "--command-id", operation_id)["state"] == "running")
+            error = cli("terminal", "operationWait", "--command-id", operation_id, "--timeout-milliseconds", "100", success=False)
+            assert "not stopped" in error, error
+            assert cli("terminal", "operationStatus", "--command-id", operation_id)["state"] == "running"
+            release.touch()
+            completed = cli("terminal", "operationWait", "--command-id", operation_id, "--timeout-milliseconds", "5000")
+            assert completed["exitCode"] == 23
+            environment.update(SLATE_TERM_PANE_ID="p999999", SLATE_TERM_SESSION_ID="obsolete-session")
+            try:
+                assert cli("terminal", "operationResult", "--command-id", operation_id) == completed
+                assert cli("terminal", "operationWait", "--command-id", operation_id) == completed
+            finally:
+                environment.pop("SLATE_TERM_PANE_ID", None)
+                environment.pop("SLATE_TERM_SESSION_ID", None)
             sibling = cli("panes", "split", "--right", "--pane", "p1")["paneId"]
             eventually("second shell context", lambda: context(sibling)["terminal"]["state"] == "prompt")
             assert context(scope="tab")["activeTerminalPaneId"] == sibling
@@ -170,7 +214,12 @@ with tempfile.TemporaryDirectory(prefix="slate-context-", dir="/tmp") as tempora
             finally:
                 environment.pop("SLATE_TERM_PANE_ID", None)
                 environment.pop("SLATE_TERM_TAB_ID", None)
+            lost = cli("terminal", "start", "--pane", sibling, "--command", "/bin/sleep 30")
+            eventually("operation active before replacement", lambda: cli("terminal", "operationStatus", "--command-id", lost["commandId"])["state"] == "running")
             cli("panes", "type", "--pane", sibling, "--type", "browser", "--force")
+            assert cli("terminal", "operationStatus", "--command-id", lost["commandId"])["state"] == "sessionLost"
+            error = cli("terminal", "operationResult", "--command-id", lost["commandId"], success=False)
+            assert "removed or replaced" in error, error
             web_context = context(sibling, scope="tab")
             assert web_context["focusedPaneId"] == sibling and web_context["activeTerminalPaneId"] == "p1"
             assert web_context["terminal"]["pid"] == initial["pid"]
@@ -212,6 +261,7 @@ with tempfile.TemporaryDirectory(prefix="slate-context-", dir="/tmp") as tempora
             assert after["surface"] == surface and after["terminalFocus"], "Header close stole focus or recreated a sibling terminal"
             print("PASS pane headers: type/title, foreground command and prompt updates, browser document title, copy-ID command across tabs and type replacement without focus/layout changes, close control and sibling preservation")
             print("PASS generic terminal run/wait: actual zsh, multiline quoting, nonzero status, timeout without process termination, output conditions and unknown-prompt refusal")
+            print("PASS terminal operation handles: start, reconnect after caller disconnect, wait-only timeout, repeated results, stale inherited target isolation and retained session loss")
             print("PASS context: real zsh prompt/running/cwd/status, original startup files, monotonic session reports, token rejection, web-independent active terminal, replacement and integration-off unknown state")
         finally:
             if app.poll() is None:

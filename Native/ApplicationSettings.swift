@@ -2,11 +2,6 @@ import AppKit
 import SlateTermCore
 import SlateTermSettings
 
-/// Workspace snapshot status only; not a transaction result for shells, WebKit or other files.
-enum WorkspacePersistence: String, CaseIterable {
-    case saved, disabled, suspended, failed, notRequired
-}
-
 @MainActor
 final class ApplicationSettings {
     let base: URL
@@ -36,6 +31,7 @@ final class ApplicationSettings {
     private(set) var error: String?
     private(set) var workspaceError: String?
     private(set) var savingSuspended = false
+    private(set) var restoredState = WorkspaceRestoration()
 
     init(environment: [String: String], integration: Bool) throws {
         useIsolatedShell = integration && environment["SLATE_TERM_TEST_REAL_SHELL"] != "1"
@@ -88,12 +84,14 @@ final class ApplicationSettings {
     func restore(or initial: Workspace, registeredTypes: Set<String> = []) -> Workspace {
         guard current.restoreWorkspace else { return initial }
         do {
-            guard let restored = try store.load() else { return initial }
+            guard let snapshot = try store.loadSnapshot() else { return initial }
+            let restored = snapshot.workspace
             for pane in restored.panes {
                 if case .registered(let type) = pane.type, !registeredTypes.contains(type) {
                     throw WorkspaceError.invalidSnapshot("Pane type is not registered: \(type)")
                 }
             }
+            restoredState = snapshot.restoration
             return restored
         }
         catch {
@@ -106,10 +104,10 @@ final class ApplicationSettings {
     /// Autosave is best effort; failures are visible in the app menu and config.get.
     /// A bad startup snapshot is never silently replaced by the recovery workspace.
     @discardableResult
-    func save(_ workspace: Workspace) -> WorkspacePersistence {
+    func save(_ workspace: Workspace, restoration: WorkspaceRestoration) -> WorkspacePersistence {
         guard current.restoreWorkspace else { return .disabled }
         guard !savingSuspended else { return .suspended }
-        do { try store.save(workspace); workspaceError = nil; return .saved }
+        do { try store.save(workspace, restoration: restoration); workspaceError = nil; return .saved }
         catch { workspaceError = "Could not save \(store.url.path): \(error)"; return .failed }
     }
 

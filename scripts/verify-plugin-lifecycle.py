@@ -8,6 +8,7 @@ from api_fixture import AppFixture, APP, CLI, ROOT, eventually
 from plugin_package_fixture import package_fixture
 
 with AppFixture('plugin-lifecycle') as app:
+    app.capture_contracts()
     app.rpc('debug.activate')
     assets = app.root / 'panel'
     assets.mkdir()

@@ -8,6 +8,7 @@ from plugin_package_fixture import package_fixture
 TOPICS = ['host.pane.*', 'host.tab.*', 'host.tabs.*', 'host.layout.*', 'host.focus.*', 'host.workspace.*']
 
 with AppFixture('semantic-events') as app:
+    app.capture_contracts()
     def head():
         return app.rpc('events.head')['cursor']
 
@@ -115,7 +116,7 @@ with AppFixture('semantic-events') as app:
     workspace_revision = app.rpc('workspace.snapshot')['workspaceRevision']
     state_directory.chmod(0o500)
     try:
-        app.rpc('plugins.unregister', id='fixture', force=True, error=-32602)
+        app.rpc('plugins.unregister', id='fixture', force=True, error=-32054)
         assert catalog_file.read_bytes() == source
         assert app.rpc('workspace.get') == before and app.rpc('plugins.list') == catalog
         assert app.rpc('workspace.snapshot')['workspaceRevision'] == workspace_revision

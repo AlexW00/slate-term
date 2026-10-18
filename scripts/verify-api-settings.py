@@ -6,6 +6,7 @@ from plugin_package_fixture import package_fixture
 
 source = '# preserved comment\n[appearance]\ntheme = "auto" # follow OS\n[terminal]\nshell = "/bin/zsh"\n[plugins.\"acme.tools\".custom]\ncount = 7\n'
 with AppFixture('api-settings', source) as app:
+    app.capture_contracts()
     initial = app.rpc('config.get')
     assert initial['sourceRevision'] and initial['appliedRevision'] and initial['appliedMatchesSource']
     session = app.rpc('context.get', pane='p1', scope='pane')['terminal']['sessionId']

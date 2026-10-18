@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Real-app settings reload and abrupt-restart recovery, using only the bundled CLI."""
 import json
+import uuid
 import os
 import pathlib
 import re
@@ -186,11 +187,15 @@ with tempfile.TemporaryDirectory(prefix="slate-settings-", dir="/tmp") as tempor
             rpc("debug.screenshot", path=str(ROOT / "artifacts/app-restored-browser.png"))
             stop()
             snapshot["panes"][1]["type"] = {"registered": {"_0": "missing.plugin"}}
+            # A well-formed plugin pane needs its panel identity; only the registration is missing.
+            snapshot["panes"][1]["pluginPanel"] = {"panelId": str(uuid.uuid4()).upper(), "configuration": {},
+                                                   "state": {}, "stateRevision": str(uuid.uuid4()).upper()}
             unavailable = json.dumps(snapshot).encode()
             state.write_bytes(unavailable)
             start()
             assert rpc("config.get")["workspace"]["savingSuspended"] is True
-            assert "not registered" in rpc("config.get")["workspace"]["error"]
+            workspace_status = rpc("config.get")["workspace"]
+            assert "not registered" in (workspace_status.get("error") or ""), workspace_status
             assert [p["id"] for p in cli("panes", "list")] == ["p1"]
             assert state.read_bytes() == unavailable, "Unavailable registration silently destroyed the saved workspace"
             print("PASS settings: atomic/in-place reload, live font/theme/keys, last-valid retention, restart flags, abrupt restart, IDs/groups, disabled restore, corrupt-state preservation, live browser restoration, unavailable-type recovery without placeholders")

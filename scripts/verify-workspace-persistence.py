@@ -4,6 +4,7 @@ import json
 from api_fixture import AppFixture
 
 with AppFixture('workspace-persistence') as app:
+    app.capture_contracts()
     contract = app.rpc('api.describe')['workspaceCommit']
     assert contract['version'] == 1 and 'workspacePersistence' in contract['resultFields']
     assert set(contract['workspacePersistence']) == {'saved', 'failed', 'disabled', 'suspended', 'notRequired'}
@@ -34,11 +35,13 @@ with AppFixture('workspace-persistence') as app:
     assert not app.rpc('events.poll', after=start, topics=['host.pane.title.changed', 'host.workspace.changed'], waitMilliseconds=0)['events']
 
 with AppFixture('workspace-persistence-disabled', configuration='[layout]\nrestore_workspace = false\n', workspace_source='preserved disabled snapshot') as app:
+    app.capture_contracts()
     result = app.cli('panes', 'set-title', '--pane', 'p1', '--title', 'Not persisted')
     assert result['outcome'] == 'committed' and result['workspacePersistence'] == 'disabled'
     assert (app.root / 'state/workspace.json').read_text() == 'preserved disabled snapshot'
 
 with AppFixture('workspace-persistence-suspended', workspace_source='preserved invalid snapshot') as app:
+    app.capture_contracts()
     result = app.cli('panes', 'set-title', '--pane', 'p1', '--title', 'Recovery workspace')
     assert result['outcome'] == 'committed' and result['workspacePersistence'] == 'suspended'
     assert (app.root / 'state/workspace.json').read_text() == 'preserved invalid snapshot'

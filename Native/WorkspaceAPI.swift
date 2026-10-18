@@ -124,122 +124,7 @@ extension WorkspaceHost {
     func apiMethods() -> [String] { AutomationMethod.publicMethods.map(\.rawValue) }
 
     func describeAPI() throws -> JSONValue {
-        return .object([
-            "apiVersion": .integer(1), "appInstanceId": .string(instanceID), "identityGuards": .bool(true),
-            "workspaceRevisions": .bool(true), "surface": .string("trusted"),
-            "pluginPersistence": Self.pluginPersistenceDescriptor,
-            "updates": Self.updatesDescriptor,
-            "webAutomation": .object([
-                "version": .integer(1), "paneKinds": .array([.string("browser"), .string("private-browser"), .string("registeredPlugin")]),
-                "identity": .array([.string("viewId"), .string("documentId")]),
-                "selectorMutationGuardsRequired": .bool(true), "mainDocumentOnly": .bool(true),
-                "pendingActionsPerView": .integer(32), "pendingWebKitOperationsPerView": .integer(32), "resultByteLimit": .integer(900_000),
-                "actions": .array(["focus", "key", "check", "setValue"].map(JSONValue.string)),
-                "keyEvents": .string("syntheticWithLimitedDefaults"), "typedInputs": .array(["number", "date", "time", "datetime-local", "range"].map(JSONValue.string)),
-                "screenshot": .bool(true), "screenshotInactiveTabs": .bool(true),
-                "screenshotRequiresAttachedLayout": .bool(true), "screenshotViewportOnly": .bool(true),
-                "domRequiresVisiblePane": .bool(true), "pluginEvaluation": .bool(false)
-            ]),
-            "windowControls": .object([
-                "version": .integer(1), "commands": .array(NativeWindowAction.commands.sorted().map(JSONValue.string)),
-                "target": .string("selectedNativeWindowId"), "framePolicy": .string("containedInOneVisibleScreen"),
-                "fullscreenCompletion": .string("asynchronousPollWindowGet"), "implicitActivation": .bool(false)
-            ]),
-            "warningSuppression": .object([
-                "commands": .array(["warnings.close.set", "warnings.type.set"].map(JSONValue.string)),
-                "parameter": .string("suppressed"), "type": .string("boolean"), "changesDestructiveConsent": .bool(false)
-            ]),
-            "browserData": .object([
-                "version": .integer(1), "persistentProfile": .string("appWide"), "privateProfile": .string("perPaneEphemeral"),
-                "clearAllMethod": .string("browser.clearData"), "clearSiteMethod": .string("browser.clearSiteData"),
-                "siteRequired": .array([.string("pane"), .string("url")]), "siteGranularity": .string("webkitDomainGroupIncludingSubdomains"),
-                "apiConfirmation": .bool(false), "nativeConfirmation": .bool(true),
-                "resultFields": .array(["cleared", "scope", "storage", "host"].map(JSONValue.string))
-            ]),
-            "browserNavigation": .object([
-                "schemes": .array(["http", "https", "about", "file"].map(JSONValue.string)),
-                "aboutBlankOnly": .bool(true), "localFiles": .bool(true), "absolutePaths": .bool(true),
-                "fileReadAccess": .string("containingDirectory"), "pluginBridge": .bool(false)
-            ]),
-            "causation": OperationControl.descriptor,
-            "presence": PresenceController.descriptor,
-            "backgroundServices": Self.serviceDescriptor,
-            "pluginManagement": .object([
-                "version": .integer(2), "enableMethod": .string("plugins.enable"), "disableMethod": .string("plugins.disable"),
-                "installMethod": .string("plugins.register"), "validateMethod": .string("plugins.validate"),
-                "installRequired": .array([.string("packagePath")]), "installOptional": .array([.string("replace")]),
-                "format": .string("zip"), "manifest": .string("plugin.json"), "managedFiles": .bool(true),
-                "registry": .string("plugins/registry.json"), "packageRootEnvironment": .string("SLATE_TERM_PLUGIN_ROOT"),
-                "limits": .object(["archiveBytes": .integer(134_217_728), "extractedBytes": .integer(536_870_912),
-                    "fileBytes": .integer(67_108_864), "entries": .integer(10_000), "manifestBytes": .integer(262_144)]),
-                "errors": .object(["invalid": .integer(-32602), "conflict": .integer(APIError.conflict),
-                    "inUse": .integer(-32010), "writeFailed": .integer(APIError.settingsWriteFailed)]),
-                "removeMethod": .string("plugins.unregister"), "required": .array([.string("id")]),
-                "forceClosesPanes": .bool(true), "persisted": .bool(true), "retainsSavedData": .bool(true),
-                "listEnabledField": .string("enabled"), "enableStartsProcesses": .bool(false)
-            ]),
-            "appearance": Self.appearanceDescriptor,
-            "notifications": Self.notificationDescriptor,
-            "welcome": Self.welcomeDescriptor,
-            "settingsLifecycle": .object([
-                "version": .integer(1), "scope": .string("configurationSourceAndApplied"),
-                "topics": .array(["host.settings.source.changed", "host.settings.changed", "host.plugin.settings.changed", "host.settings.failed"].map(JSONValue.string)),
-                "globalProjection": .string("opaqueCorrelationAndRevisions"),
-                "changedPathKind": .string("topLevel"), "maximumChangedPaths": .integer(32), "maximumPathBytes": .integer(4096)
-            ]),
-            "commandLifecycle": .object([
-                "version": .integer(1), "scope": .string("registeredCommands"),
-                "topics": .array([.string("host.command.started"), .string("host.command.finished")]),
-                "revisionSampling": .string("publicationTime"), "includesOutput": .bool(false)
-            ]),
-            "workspaceCommit": .object([
-                "version": .integer(1), "scope": .string("workspace-model mutations"),
-                "additionalMethods": .array([.string("plugins.unregister"), .string("plugins.enable"), .string("plugins.disable"), .string("layouts.open")]),
-                "resultFields": .array(["operationId", "outcome", "workspaceRevision", "workspacePersistence"].map(JSONValue.string)),
-                "outcomes": .array(["committed", "unchanged"].map(JSONValue.string)),
-                "workspacePersistence": .array(WorkspacePersistence.allCases.map { .string($0.rawValue) }),
-                "nativeDividerCoalescing": .bool(false)
-            ]),
-            "pluginReload": .object([
-                "command": .string("plugins.reload"), "target": .string("pane"),
-                "resultFields": .array([.string("paneId"), .string("reloading")]), "completion": .string("acceptedNotDocumentReady")
-            ]),
-            "tabTitle": .object([
-                "version": .integer(1), "defaultTitle": .string(TabTitle.defaultTitle),
-                "commands": .array(["tab.title.set", "tab.title.clear", "tab.rename"].map(JSONValue.string)),
-                "stateFields": .array(["manualTitle", "title"].map(JSONValue.string)),
-                "maximumCharacters": .integer(TabTitle.maximumCharacters), "maximumUTF8Bytes": .integer(TabTitle.maximumBytes),
-                "trimmed": .bool(true), "emptyClears": .bool(true), "controlCharacters": .bool(false),
-                "eventTopic": .string("host.tab.title.changed"), "persisted": .bool(true),
-                "savedLayoutOption": .bool(true), "changesLayoutRevision": .bool(false)
-            ]),
-            "paneMovement": .object([
-                "command": .string("pane.move"), "chooserCommand": .string("pane.move.chooseDestination"),
-                "sameAppCrossWindow": .bool(true), "sourceGuard": .string("expectedLayoutRevision"),
-                "crossTabGuard": .string("expectedWorkspaceRevision"), "placement": .string("besideDestinationPane"),
-                "tabScopedPluginContent": .string("recreatedInDestinationScope"), "closesEmptySourceTab": .bool(true),
-                "resultFields": .array(["paneId", "tabId", "layoutRevision", "path", "sourceTabId", "sourceTabClosed", "sourceLayoutRevision", "contentRecreated"].map(JSONValue.string)),
-                "errors": .object(["invalid": .integer(-32602), "conflict": .integer(APIError.conflict), "unavailable": .integer(APIError.unavailable)])
-            ]),
-            "paneHeader": .object([
-                "version": .integer(1), "stateField": .string("headerVisible"),
-                "commands": .array(["pane.header.show", "pane.header.hide", "pane.header.toggle"].map(JSONValue.string)),
-                "eventTopic": .string("host.pane.header.changed"), "defaultVisible": .bool(true),
-                "persisted": .bool(true), "savedLayoutOption": .bool(true), "changesLayoutRevision": .bool(false)
-            ]),
-            "savedLayouts": .object([
-                "version": .integer(1), "targetKind": .string("windowGroup"),
-                "targetDiscovery": .string("layouts.windows"), "openMode": .string("newWindow"),
-                "replacementSupported": .bool(false), "launcherMethod": .string("layouts.launcher"),
-                "writeGuard": .string("expectedSavedLayoutRevision"), "configurationTarget": .string("pane"),
-                "startupLifetime": .string("committedTerminalSession"), "mergeSupported": .bool(false)
-            ]),
-            "guards": .array(Self.apiGuardKeys.sorted().map(JSONValue.string)),
-            "methods": .array(apiMethods().map(JSONValue.string)),
-            "commands": try .encoding(availableCommands),
-            "limits": .object(["inspectionPageSize": .integer(64), "inspectionBytes": .integer(262144), "eventWaitMilliseconds": .integer(25000)]),
-            "retryPolicy": .string("Mutations are not automatically retried; correlation IDs are not idempotency keys")
-        ])
+        try AutomationCatalog.describe(instanceID: instanceID, commands: availableCommands)
     }
 
     func workspaceSnapshot(_ params: [String: JSONValue]) throws -> JSONValue {
@@ -367,7 +252,7 @@ extension WorkspaceHost {
             // Known only after the shell's first authenticated report.
             result["shell"] = session.report.map { .string($0.shellKind.rawValue) } ?? .null
             result["runAvailable"] = session.report.map { .bool($0.acceptsRunInput) } ?? .null
-            result["contentOperations"] = .array(["terminal.capture", "terminal.send", "terminal.key", "terminal.run", "terminal.wait"].map(JSONValue.string))
+            result["contentOperations"] = .array(["terminal.capture", "terminal.send", "terminal.key", "terminal.run", "terminal.start", "terminal.wait", "terminal.history", "terminal.historyExport", "terminal.search"].map(JSONValue.string))
         } else if let plugin = leaves[id] as? PluginPane {
             result["pluginInstanceId"] = .string(plugin.instance.id)
             result["viewId"] = .string(plugin.viewID)

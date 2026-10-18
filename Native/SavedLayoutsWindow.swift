@@ -407,17 +407,30 @@ private struct SavedLayoutMap: View {
             let type = types.first { $0.id == pane?.type }
             let active = id == selected
             return AnyView(Button { select(id) } label: {
-                VStack(spacing: 8) {
-                    Image(systemName: pane?.type == "terminal" ? "terminal" : ["browser", "private-browser"].contains(pane?.type ?? "") ? "globe" : "puzzlepiece.extension")
-                        .font(.system(size: 20, weight: .regular)).foregroundStyle(active ? Color.accentColor : .secondary)
-                    Text(pane?.title.isEmpty == false ? pane!.title : type?.title ?? pane?.type ?? "Pane")
-                        .font(.system(size: 12, weight: .medium)).lineLimit(2).multilineTextAlignment(.center)
-                    if pane?.headerVisible == false {
-                        Text("Bar hidden").font(.caption2).foregroundStyle(.secondary)
+                VStack(spacing: 0) {
+                    if pane?.headerVisible != false {
+                        HStack(spacing: 5) {
+                            Image(systemName: "rectangle.split.2x1").font(.system(size: 9))
+                            Text(pane?.title.isEmpty == false ? pane!.title : type?.title ?? pane?.type ?? "Pane")
+                                .font(.system(size: 10, weight: .medium)).lineLimit(1)
+                            Spacer(minLength: 0)
+                            Image(systemName: "ellipsis").font(.system(size: 10, weight: .medium))
+                        }.foregroundStyle(.secondary).padding(.horizontal, 8).frame(height: 25)
+                            .background(active ? Color.accentColor.opacity(0.08) : Color.primary.opacity(0.04))
+                        Divider()
                     }
-                    if type == nil { Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange).accessibilityLabel("Plugin unavailable") }
-                }.padding(8).frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(active ? Color.accentColor.opacity(0.09) : Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                    VStack(spacing: 8) {
+                        Image(systemName: pane?.type == "terminal" ? "terminal" : ["browser", "private-browser"].contains(pane?.type ?? "") ? "globe" : "puzzlepiece.extension")
+                            .font(.system(size: 20, weight: .regular)).foregroundStyle(active ? Color.accentColor : .secondary)
+                        if pane?.headerVisible == false {
+                            Text(pane?.title.isEmpty == false ? pane!.title : type?.title ?? pane?.type ?? "Pane")
+                                .font(.system(size: 12, weight: .medium)).lineLimit(2).multilineTextAlignment(.center)
+                        }
+                        if type == nil { Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange).accessibilityLabel("Plugin unavailable") }
+                    }.padding(8).frame(maxWidth: .infinity, maxHeight: .infinity)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(active ? Color.accentColor.opacity(0.09) : Color(nsColor: .controlBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(active ? Color.accentColor : Color(nsColor: .separatorColor), lineWidth: active ? 2 : 1))
                     .contentShape(Rectangle())
             }.buttonStyle(.plain).clipped().accessibilityAddTraits(active ? .isSelected : [])

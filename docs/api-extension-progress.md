@@ -1,5 +1,41 @@
 # API extension implementation progress
 
+## Next public release integration — local verification passed
+
+The public release branch combines product changes from local main `11861a7`
+with the released updater and release tooling at `f07f93b`. Product changes are
+ported from the source delta since `c60dcb1`; private repository history is not
+imported. Public signing, source distribution, tag-only CI, the stable installer
+link, and the new changelog/release workflow are retained.
+
+Acceptance covers updater contract completeness, package and release checks,
+new terminal history and restoration behavior, plugin compatibility, retained
+shell/run behavior, saved layouts, onboarding, and real native contract responses.
+A signed candidate must pass DMG installation before publication; the actual
+0.1.0-to-candidate update is verified through Sparkle after publication is authorized.
+Earlier branch receipts below remain evidence only for their recorded sources.
+
+2026-10-18: the integrated source passed 463 package tests, 75 release-tooling tests
+(including the pinned Sparkle signing tools), 38 VM-runner tests, workflow validation,
+and the full public-history scan. A separate native contract audit passed for 840
+responses across 67 methods, 31 command IDs, and CLI, bridge, service, and socket clients.
+
+Twenty selected native gates have passing evidence across the initial run
+`artifacts/vm/20261018T063413Z-dce17c1d` and corrective runs
+`20261018T064247Z-4bf84364`, `20261018T065102Z-fbf5a9dd`, and
+`20261018T065918Z-4f744fe1`. These cover updates, terminal history/runs, workspace
+restoration/persistence, plugin compatibility/packages/lifecycle, context, all five
+supported shells, background services, saved layouts, API parity/settings, web,
+welcome, menus, and the command picker. This is selected-gate evidence, not a full
+90-invocation certificate. Corrective runs fixed empty Bash reports and strict-mode
+startup, retired the history fixture's terminal before teardown, and corrected
+stale or incomplete shell/context fixture assumptions without removing behavioral checks.
+
+Independent native screenshot review found no substantiated major or minor issues.
+The website staging and JavaScript checks passed; rendered browser review remains
+unavailable because the browser integration returns Transport closed. Signed
+candidate DMG installation and the production Sparkle upgrade remain release-stage checks.
+
 ## In-app updates — implemented; focused VM verification passed
 
 Worktree `feature/in-app-updates`. Task 3 is approved by the user. Task 4 (native updater/release integration) is implemented. Task 5 has passing updater, menu, and command-picker VM evidence plus provisioning documentation. The [HTML prototype](mockups/update-flow.html) uses the supplied icon and illustrative versions/notes. It covers available, downloading, verifying, ready, download-error, verification-error, checking, and current states. Release notes stay visible before installation. Download/verification are simulated; Install and Relaunch only acknowledges the prototype.
@@ -19,6 +55,100 @@ The registered `updates` VM gate passed on final behavior in `artifacts/vm/20261
 The final adjacent regression run passed both `menu-ui` and `command-picker` after the user unlocked VMPal: `artifacts/vm/20261018T023017Z-27bfd747/receipt.json` (completed, exit 0, both guest statuses 0). It rebuilt the app on the host and exercised native keyboard dispatch, menu groups, quit consent, picker search/activation, context availability, plugin commands, themes, shortcut remapping, and windowless use. Earlier activation failures (`20261018T021617Z-aff93748` and `20261018T021819Z-d0dad21f`) were traced to the locked guest and are superseded by this successful rerun. No credentials were retrieved. These are focused checks, not full-suite certification. Only this documentation status update follows the final run.
 
 Public-key/private-key/feed provisioning and a real signed upgrade/relaunch remain unverified and outside current authorization. No commit, push, release/tag publication, deployment, or credential provisioning occurred.
+
+## MVP foundations ported onto main b1bf8ca — host checks pass, VM gates not yet run
+
+Branch `mvp-port` carries the unmerged `feature/mvp-foundations` work (head
+`08243a1`) onto main `b1bf8ca` as new commits, not a merge of the branch history.
+Main's bash/fish shell support and run semantics are kept. The branch's own shell
+work is dropped. The sections below this one describe the branch before the port;
+their VM evidence does not cover this source.
+
+**Ported as on the branch:**
+
+- Terminal Find and history: native Find field, `terminal.find*` commands,
+  `terminal.history`, `terminal.historyExport`, `terminal.search`. `terminal.capture`
+  now reads the active screen instead of all retained rows.
+- Plugin compatibility: manifest API range and required methods/commands, checked
+  at register, enable and launch.
+- Workspace restoration of working directories, window frames and browser URLs.
+- Machine-readable contracts: `api.describe.contracts`, `contractRef` rows, the
+  schema test support, `scripts/contract_capture.py` and its runner test.
+
+**Adapted:**
+
+- Durable operations (`terminal.start`, `terminal.operations`,
+  `terminal.operationStatus`, `terminal.operationResult`, `terminal.operationWait`)
+  now use main's run state machine. `TerminalOperationStore` pairs reports exactly
+  like main's `TerminalRuns`: the baseline sequence, prompts held until their
+  running report, exit status only from prompt running + 1, and the claimed-line
+  rules for late or overtaking reports. Run lines come from `ShellKind`, frozen from
+  the pane's authenticated report. `terminal.start` takes main's optional `shell`
+  check and refuses panes whose report has `runAvailable: false`.
+- The branch's `missingRunningReport` failure is gone: main holds an early prompt
+  instead of declaring tracking lost. `trackingLost` now only follows a delivery
+  failure after the shell claimed the line.
+- A report from a different session than the operation's marks it `sessionLost`
+  (main's "replaced" outcome). `TerminalControl` no longer retires a pane's run when
+  an obsolete session's report arrives; that call could end a successor's run.
+- Contracts and discovery gained main's fields: `shell`/`runAvailable` in pane and
+  context results, `shell` input for `terminal.run`/`terminal.start`, launcher
+  `name`/`icon` and the `savedLayouts` launcher fields. The branch's
+  `shellIntegration` descriptor now states main's support (bash runs from 4.4,
+  older bash reports state only, fish 3.1+).
+- `Tests/TerminalRuns` keeps main's adapter checks (quoting, reordering, shell run
+  lines, reservations, races) and adds the branch's reconnect checks.
+
+**Behavior changes from main's `terminal.run`** (all from the durable design):
+
+- Timeout and caller disconnect end only the wait. The operation stays tracked, so
+  the pane stays busy for runs until its prompt returns.
+- The caller is validated before the operation is adopted, not again when the shell
+  claims the line. Main rechecked at the claim.
+- A send failure is retained as `submissionFailed` instead of being thrown as the
+  raw error. Closing the tracker reports waiting runs as replaced, not closed.
+- Removal during a reentrant capture is session loss, not the captured result.
+
+**Dropped:** the branch's `BashIntegration`, `FishIntegration`,
+`ShellCommandSyntax`, atomic probes, `verify-local-shells.py`,
+`prepare-shell-tests.py`, the `local-shells` gate, its ENV/`--init-command` hook
+loading, `SLATE_TERM_TEST_SHELL_HOME`, the CLI's 5-second first-prompt timeout and
+its saved-layouts teardown change (main closes fixture tabs through the host).
+
+**Host checks on this source:** 441 package tests pass (one capture-audit test
+skipped without captured evidence), 48 runner tests, app build, the native
+terminal-runs adapter check and `git diff --check`.
+
+**Unverified:** no VM gate has run on this source. New gates `terminal-history`,
+`workspace-restoration` and `plugin-compatibility` (inventory now 88). Changed
+behavior needs at least `terminal-runs`, `context`, `shell-hooks`, `shells`,
+`background-services`, `saved-layouts`, `workspace-persistence`, `api-parity`,
+`plugin-packages`, `plugin-lifecycle` and `web`. The native response audit has not
+been rerun, so the new `shell`/`runAvailable`/launcher schemas are not checked
+against real responses.
+
+## Combined MVP/package integration (branch history) — verification in progress
+
+The isolated MVP worktree has reconciled main's packaging snapshot `ae1cb704`
+with verified integration `ab690f0`, without altering main's checkout/index or
+the unrelated website mockup. Shared contracts cover 111 methods, 95 built-ins
+and 225 definitions, including ZIP validation, portable inputs, managed
+installations/diagnostics and preserved compatibility admission/launch checks.
+Host checks passed 425 package tests, 37 runner tests, 639 standard schemas and
+app/CLI/helper build. Review corrections and combined VM/native-response checks
+remain to be verified before promotion. Older feature evidence below is retained
+as history, not evidence for this combined source. See [MVP evidence](mvp-foundations.md).
+
+
+## MVP foundations (feature/mvp-foundations)
+
+Based on updated main `1706a08`, with the prior carried-over baseline archived and
+original checkout unchanged. The approved Find/history, restoration, local Bash/fish,
+reconnectable-operation, plugin-compatibility and complete-discovery implementation
+is complete. Final selected VM run `20261016T180811Z-0b4f9e9a` passed all 17 gates;
+its response audit passed 709 observations across all trusted caller paths. Manual
+release QA remains user-owned; no full-suite/release certificate is claimed. See
+[MVP scope and slice evidence](mvp-foundations.md). All native testing uses VMPal.
 
 ## Agent pill navigation — focused verification passed
 
@@ -532,6 +662,14 @@ Appearance reads reuse their computed snapshot and cache immutable bundled color
 
 Final checks: 268 package tests, event-hub lifecycle, window-free native/Node efficiency, decorated service event delivery/owned commands, app/CLI build, and diff whitespace checks passed (`artifacts/event-efficiency-reviewed-{native,unit,hub,delivery,build}.log`). The built app's theme helper hash matches source. Native checks exercise actual private storage, engine reload/rollback, custom-palette reload, bundled-cache slot reuse and an unattached libghostty surface with private clipboards—no windows or activation. Initial regressions reproduced broad tab delivery, overlapping/stale theme reads and missed reconnect snapshots. Two independent initial reviewers identified the stale-result gap; follow-up findings on reconnect/listener failures were addressed with regressions, and final scoped review reported no actionable findings. Host callback wiring and WebKit cached-document restoration were inspected but not GUI-tested; no live-TUI profiling or full desktop suite is claimed.
 
+### MVP foundations — complete catalog and selected integrated pass
+
+The isolated `feature/mvp-foundations` worktree exposes shared contracts for all **100 public methods**, **85 built-in commands** and contributed commands. Existing capability/command-row fields remain intact; `api.describe.contracts` and row `contractRef` are additive. Catalog references, guards, legacy parsing distinctions, plugin compatibility and JavaScript-safe metadata have regression coverage. The representative description is 468,108 bytes; large unpaginated command lists retain existing transport limits.
+
+Final run `20261016T180811Z-0b4f9e9a` passed **17/17 selected VM gates**, including three-client discovery/contributed-command parity, Bash/fish, reconnectable operations, restoration, Find/history, compatibility and used/unused profile cleanup. **374 package tests**, **37 runner tests**, native builds and static checks passed. Independent standard validation passed **561 schemas**; the final native audit passed **709 responses / 59 methods / 31 command IDs** across socket, CLI, bridge and service callers. The native audit was explicitly run after being skipped in the ordinary package suite.
+
+Earlier failures exposed JavaScript rounding of Int.max metadata, an Escape-probe timing assumption and cleanup creating unused WebKit stores; all were corrected and covered by the final selected run. Source and host-product hashes matched its receipt before final documentation edits. No full 83-invocation suite, exhaustive handler/state coverage or manual release certification is claimed. See [MVP evidence, limitations and manual QA](mvp-foundations.md).
+
 ### Plugin persistence — reviewed plan, not implemented
 
 The [implementation plan](plugin-persistence-plan.md) separates durable shared plugin data from panel restoration state and persists plugin starting configuration in the authoritative workspace model. It specifies breaking API/schema changes, close/quit/reset/move/template semantics, guarded writes, native/shared-client parity, failure handling, test coverage, and shipped skill/documentation updates. Runtime scope remains separate; saved layouts/Spotlight launchers stay fresh-window templates, not resumable app identities.
@@ -545,3 +683,27 @@ Agents that name themselves with `SLATE_TERM_ACTOR`/`--actor` (optional `--note`
 Three independent read-only reviews (core/host hook, overlay, contracts/parity) found an invalid inherited actor breaking every CLI call and shell hooks, overlay creation dirtying layout during web calls, tag fade/slide animations disabled, overlapping calls losing a run's result, lease TTL refresh, eval results read as rectangles, overflow/stacking/clipping/accessibility issues, a polling timer and gate timing races. All were fixed with regression tests or gate changes. Plugin pages and services intentionally cannot claim an actor or hold (advertised as `presence.actorOrigins`).
 
 Verification: package tests passed (core 210, settings 84, IPC 22, CLI 16), VM runner tests (35), app build and whitespace. VM gates `presence`, `api-settings`, `web` and `command-picker` passed; `presence` screenshots were reviewed. `api-parity` timed out at its pre-existing "idle shell after restart" step, which also failed on a run without these changes. The test VM needed `ApplePersistenceIgnoreState` for the test bundle after another run's crash left AppKit's reopen prompt blocking every launch. Deferred: plugin-reported targets for their own `command run`, element frames following later scrolling, and directed event copies to plugin instances.
+
+### MVP integration with main 9e14da4 — verified branch, main update blocked
+
+The MVP checkpoint `55545b3` is reconciled with main `9e14da4` in
+`feature/mvp-foundations`, preserving newer API parity, presence, implemented
+plugin persistence, onboarding and docs. This supersedes the earlier plan-only
+plugin-persistence note and pre-integration catalog counts: the shared catalog
+now has **110 methods / 95 built-ins / 217 definitions**, including request
+metadata, separate plugin data/panel state contracts and the newer window/web
+shapes. Removed `storage.*` methods remain removed.
+
+Final run `20261017T010343Z-f7eb7523` passed **21/21 selected VM gates**;
+**418 package tests**, **37 runner tests**, three targeted mutation checks,
+native builds, **629 standard schemas**, and the separate audit of **1,019 native
+responses / 73 methods / 40 command IDs** passed. All 504 source and 2,313
+host-product hashes matched before final documentation-only edits. The first
+behavioral pass exposed schema omissions in the response audit; the final run
+includes their corrections.
+
+Main's checkout accumulated substantial overlapping uncommitted work during
+verification. The unanswered coordination question is not approval to alter it:
+main remains untouched, with the verified integration retained as a local branch
+commit. No full-suite/manual release certification, push or deployment is claimed.
+See [integration evidence and blocker](mvp-foundations.md#integration-with-newer-main--verified-main-update-blocked).
