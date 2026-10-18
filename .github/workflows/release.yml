@@ -182,6 +182,9 @@ jobs:
           actual_commit="$(gh api "repos/$GH_REPO/commits/$RELEASE_TAG" --jq .sha)"
           test "$actual_commit" = "$EXPECTED_COMMIT" || { echo "Release tag moved during the build." >&2; exit 1; }
           notes=(assets/*-arm64.md)
-          test "${#notes[@]}" -eq 1 && test -s "${notes[0]}" || { echo "Expected one reviewed release notes asset." >&2; exit 1; }
+          if [[ "${#notes[@]}" -ne 1 || ! -s "${notes[0]}" ]]; then
+            echo "Expected one reviewed release notes asset." >&2
+            exit 1
+          fi
           gh release create "$RELEASE_TAG" assets/*.zip assets/*.dmg assets/*-source.tar.gz assets/SHA256SUMS assets/appcast.xml assets/*-arm64.md \
             --draft --verify-tag --title "Slate Terminal $RELEASE_VERSION" --notes-file "${notes[0]}"

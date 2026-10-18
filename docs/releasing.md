@@ -27,6 +27,8 @@ python3 -m unittest discover -s Tests/VMRunner -v
 python3 scripts/check-workflows.py
 ```
 
+Before tagging, workflow validation must include ShellCheck. If the script reports that ShellCheck is unavailable, use an existing or task-local official binary and rerun it; that partial check does not cover CI shell lint.
+
 The security scanner checks every reachable blob and commit plus private filenames in every historical tree. Reports contain only rule/location metadata. `--tree-only` is useful during cleanup but is not a publication audit. Scanners cannot prove the absence of every possible secret; review findings, dependency sources, and the publication diff too.
 
 ## Shared credentials across worktrees
