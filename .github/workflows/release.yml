@@ -107,7 +107,7 @@ jobs:
           shasum -a 256 ./*.zip ./*.dmg ./*-source.tar.gz ./appcast.xml ./*-arm64.md > SHA256SUMS
           shasum -a 256 -c SHA256SUMS
       - name: Retain verified distributables
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-assets
           path: |
