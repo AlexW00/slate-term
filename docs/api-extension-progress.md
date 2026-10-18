@@ -1,6 +1,6 @@
 # API extension implementation progress
 
-## Next public release integration — local verification passed
+## Public release 0.2.1 — published; production upgrade verified
 
 The public release branch combines product changes from local main `11861a7`
 with the released updater and release tooling at `f07f93b`. Product changes are
@@ -11,8 +11,8 @@ link, and the new changelog/release workflow are retained.
 Acceptance covers updater contract completeness, package and release checks,
 new terminal history and restoration behavior, plugin compatibility, retained
 shell/run behavior, saved layouts, onboarding, and real native contract responses.
-A signed candidate must pass DMG installation before publication; the actual
-0.1.0-to-candidate update is verified through Sparkle after publication is authorized.
+The signed DMG passed installation checks, and the production 0.1.0-to-0.2.1
+update passed after authorized publication on 2026-10-18.
 Earlier branch receipts below remain evidence only for their recorded sources.
 
 2026-10-18: the integrated source passed 463 package tests, 75 release-tooling tests
@@ -32,9 +32,30 @@ startup, retired the history fixture's terminal before teardown, and corrected
 stale or incomplete shell/context fixture assumptions without removing behavioral checks.
 
 Independent native screenshot review found no substantiated major or minor issues.
-The website staging and JavaScript checks passed; rendered browser review remains
-unavailable because the browser integration returns Transport closed. Signed
-candidate DMG installation and the production Sparkle upgrade remain release-stage checks.
+The website staging and JavaScript checks passed. Chrome rendering and fresh
+independent screenshot review subsequently passed for a local copy of the website.
+
+Release `v0.2.1` targets `f01c91239b2bd7c221a770a7385f2e17ad9c0d4e`;
+CI run `39106523483` and signed Release run `39106523490` both passed.
+Published assets matched all reviewed checksums, including the stable DMG alias,
+and passed feed/archive/notes signatures, source-manifest, code-signing, notarization,
+and Gatekeeper checks. Verification artifacts are under
+`artifacts/release-v0.2.1-verified/`.
+
+The actual candidate DMG passed VM installation, terminal execution, browser-engine
+content rendering, and the production update check. The browser viewport appeared
+blank in whole-VM captures for both 0.2.1 and the published 0.1.0 baseline, while
+WebKit content snapshots rendered correctly. Whole-window browser display therefore
+remains unverified; the comparison does not establish its cause.
+
+The real production update started from the published 0.1.0 build 1 DMG.
+VMPal pointer clicks activated Download Update and Install and Relaunch after
+signed notes loaded. The old process exited, Sparkle installed and relaunched
+0.2.1 build 3, the installed signature passed, and the settings file and complete
+two-pane workspace with a named tab were preserved. Evidence is in
+`production-upgrade/results/result.json` and adjacent screenshots beneath the
+release artifact directory. Cancellation, consent, and signature-rejection checks
+remain separate isolated-fixture evidence from the gates above.
 
 ## In-app updates — implemented; focused VM verification passed
 

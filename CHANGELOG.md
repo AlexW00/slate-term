@@ -14,7 +14,7 @@ Detailed change record for agents and maintainers. Public release notes live in 
 
 ### Internal
 
-## 0.2.1 — Pending publication
+## 0.2.1 — 2026-10-18
 
 Integrated from local main `11861a7` into the public release lineage; existing updater, signing, and source-distribution behavior is retained.
 
@@ -42,9 +42,9 @@ Integrated from local main `11861a7` into the public release lineage; existing u
 
 ### Internal
 
-- Replaced the notes guard with an explicit conditional for CI ShellCheck compatibility. The v0.2.0 tag stopped at validation and produced no release; v0.2.1 is the replacement candidate.
+- Replaced the notes guard with an explicit conditional for CI ShellCheck compatibility. The v0.2.0 tag stopped at validation and produced no release; v0.2.1 is the published replacement.
 - Reconciled the new complete automation catalog with the released updater, preserving one shared descriptor and adding request-parser/result-schema regression tests plus native updater response capture. API generation 1 remains in place; the terminal behavior changes above are called out explicitly for clients.
-- Updated native gate dependencies and fixture panel identity, kept all updater gates, and expanded the combined inventory to 90 invocations. Corrected shell/context fixture assumptions and terminal-history teardown; 20 selected VM gates passed after fixes. Signed installation and upgrade checks remain separate release-stage evidence.
+- Updated native gate dependencies and fixture panel identity, kept all updater gates, and expanded the combined inventory to 90 invocations. Corrected shell/context fixture assumptions and terminal-history teardown; 20 selected VM gates passed after fixes. Separate release verification passed for the signed DMG and the real production 0.1.0 build 1 → 0.2.1 build 3 update, including relaunch and settings/workspace preservation.
 - CI and Release now share explicit engine cache restore/save steps, retaining validated engine inputs before later packaging or signing failures. Engine validation and tests still run on cache hits; GitHub tag scope limits reuse to the same tag and eligible default-branch caches.
 - Release validation rejects missing, empty, invalid UTF-8, NUL-containing, or oversized notes before the macOS job. Public update configuration is checked before compilation, and the built app is still checked afterward.
 - Draft GitHub release descriptions now use the same checksum-verified, curated Markdown as the signed in-app release notes.
