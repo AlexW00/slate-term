@@ -33,7 +33,7 @@ Detailed change record for agents and maintainers. Public release notes live in 
 ### Internal
 
 - Integrated committed development main through `239ab7f`, after `892ed26`, preserving public updater, signing and release tooling. Uncommitted development files and unmerged branches are excluded.
-- Added focus-policy, responder, presence-animation and dimming regression coverage. Development build and 470 package tests passed; final integrated native and release evidence is recorded separately.
+- Added focus-policy, responder, presence-animation and dimming regression coverage. Integrated public source passed 487 package tests, release-tooling checks, VM-runner tests, workflow validation with ShellCheck, and the full-history security scan. Native regression, candidate-DMG installation and production upgrade checks were deferred at the maintainer’s explicit request because another task owns the VM.
 
 ## 0.4.0 — 2026-10-19
 
