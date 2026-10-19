@@ -2024,7 +2024,10 @@ playBtn.addEventListener("click", () => setPlaying(!playing));
 function frame(nowMs) {
   if (playing && visible && landed && !document.hidden) {
     if (last != null) {
-      const nt = t + Math.min(.1, (nowMs - last) / 1000);
+      // Give the prompts more reading time while keeping the build steps brisk.
+      const typingPrompt = typEls.some(([, , a, b]) => t >= a && t < b);
+      const rate = typingPrompt ? .5 : 1;
+      const nt = t + Math.min(.1, (nowMs - last) / 1000) * rate;
       if (nt >= TOTAL) { t = 0; cache = {}; jumpRender(0); }
       else { t = nt; render(t); }
     }
