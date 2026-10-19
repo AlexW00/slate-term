@@ -12,7 +12,7 @@ Detailed change record for agents and maintainers. Public release notes live in 
 
 ### Internal
 
-## 0.5.0 — Pending publication
+## 0.5.0 — 2026-10-19
 
 ### Added
 
@@ -34,6 +34,7 @@ Detailed change record for agents and maintainers. Public release notes live in 
 
 - Integrated committed development main through `239ab7f`, after `892ed26`, preserving public updater, signing and release tooling. Uncommitted development files and unmerged branches are excluded.
 - Added focus-policy, responder, presence-animation and dimming regression coverage. Integrated public source passed 487 package tests, release-tooling checks, VM-runner tests, workflow validation with ShellCheck, and the full-history security scan. Native regression, candidate-DMG installation and production upgrade checks were deferred at the maintainer’s explicit request because another task owns the VM.
+- Published build 6 from `33bf709` after successful tag-triggered CI and Release workflows. Verified downloaded checksums, app/DMG signatures and notarization tickets, signed feed/archive/notes, complete corresponding source, and stable/versioned installer equality. Native regression, candidate-DMG installation and the production 0.4.0-to-0.5.0 upgrade were skipped at the maintainer’s explicit request.
 
 ## 0.4.0 — 2026-10-19
 
