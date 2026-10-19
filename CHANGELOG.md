@@ -12,7 +12,7 @@ Detailed change record for agents and maintainers. Public release notes live in 
 
 ### Internal
 
-## 0.3.0 — Pending publication
+## 0.3.0 — 2026-10-19
 
 Integrated committed local main `17162fa` after the previous integration at `11861a7`, preserving the public updater and release pipeline.
 
@@ -37,6 +37,7 @@ Integrated committed local main `17162fa` after the previous integration at `118
 ### Internal
 
 - Expanded configuration, split-directory, tab-menu, presence, browser-settings, picker-scroll, pane-header, and saved-layout regression checks. Release verification is recorded separately from implementation coverage.
+- Published build 4 from `77c7aca` after successful tag-triggered CI and Release workflows. Verified public assets, signatures, source, notes, and installer alias. The signed DMG passed installation, launch, terminal, and browser DOM/snapshot checks in VMPal. The production 0.2.1 build 3 → 0.3.0 build 4 update passed native Download and Install and Relaunch, preserving settings and the saved workspace. Nine selected native gates passed, including a successful tab-overview rerun; this is not full-suite certification. The VM's known WebKit display-compositing limitation remains distinct from browser DOM and snapshot checks.
 
 ## 0.2.1 — 2026-10-18
 
