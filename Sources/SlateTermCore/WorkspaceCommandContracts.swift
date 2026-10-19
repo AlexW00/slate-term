@@ -59,6 +59,7 @@ extension AutomationContracts {
                 result = "LegacySplitCommit"
                 conditions.append(requires("resultingTreeDepthAtMost64AndNativeMinimum80PointGeometry"))
                 semantics["splittingClearsZoom"] = .bool(true)
+                semantics["terminalWorkingDirectory"] = .string("inheritTargetWhenEnabledOtherwiseConfiguredDefault")
                 semantics["newPaneType"] = .string("terminal"); semantics["newPaneFraction"] = .number(0.5)
             }
             if id == "tab.new" || id == "window.new" { result = "NewTabCommit" }
@@ -97,6 +98,7 @@ extension AutomationContracts {
                 required.append("direction"); result = "PaneLayoutCommit"
                 conditions += [requires("resultingTreeDepthAtMost64"), requires("builtinOrActiveCompatiblePanelType")]
                 semantics["splittingClearsZoom"] = .bool(true)
+                semantics["terminalWorkingDirectory"] = .string("inheritTargetWhenEnabledOtherwiseConfiguredDefault")
                 semantics["fractionMeaning"] = .string("newPaneShareNotAlwaysFirstChildShare")
             case "pane.move":
                 parameters.merge(["target": S.paneID, "direction": directions]) { _, value in value }

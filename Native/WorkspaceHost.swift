@@ -596,9 +596,16 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         try validateAPIGuards(params, method: method)
         let client = caller ?? AutomationCaller(origin: .administrative, audience: operations.administrativeAudience)
         let operation = try suppliedOperation ?? client.admit(method, metadata: metadata, through: operations)
-        let presenceCall = beginPresence(method, contract: contract, params: params, operation: operation)
+        let createsPane = method == "command.run"
+            && ["pane.split", "split.left", "split.right", "split.up", "split.down"].contains(params["id"]?.string ?? "")
+        var presenceCall = createsPane ? nil : beginPresence(method, contract: contract, params: params, operation: operation)
         do {
             let result = try await routeAdmitted(method, contract: contract, params: params, operation: operation, caller: caller)
+            // A split's activity belongs to its new pane, which exists only after success.
+            if createsPane, let actor = operation.actor, let rawPane = result.object?["paneId"]?.string,
+               let pane = try? PaneID(parsing: rawPane) {
+                presenceCall = presence.begin(actor: actor, pane: pane, method: method, action: .command)
+            }
             if let presenceCall { presence.end(presenceCall, result: result, failed: false) }
             return result
         } catch {
@@ -768,6 +775,63 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 try operation.validateCaller()
                 try self.validateAPIGuards(params, method: id)
             }
+        }
+    }
+
+    /// Freeze the target before confirmation and reuse the API's guarded clearing operation.
+    private func confirmBrowserDataClear(_ id: String, params: [String: JSONValue],
+                                         completion: @escaping (Result<JSONValue, Error>) -> Void) throws -> Bool {
+        let clear = try prepareBrowserDataClear(id, params: params, operation: .init(origin: .native))
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = id == "browser.clearData" ? "Clear Browser Data?" : "Clear This Site’s Data?"
+        let target = id == "browser.clearData" ? "all sites in the shared Browser profile" : "the site group for \(try BrowserDataRequest.siteHost(params["url"]!.string!)) in this browser’s profile (including any parent domain and other subdomains grouped by WebKit)"
+        alert.informativeText = "This removes cookies, caches and saved website storage for \(target). You may be signed out and lose offline website data.\n\nPrivate Browser panes are separate from the shared profile. Open pages are not closed or reloaded and may save data again. This cannot be undone."
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Clear Data")
+        guard runConfirmationAlert(alert) == .alertSecondButtonReturn else { return false }
+        Task {
+            do { completion(.success(try await clear())) }
+            catch { completion(.failure(error)) }
+        }
+        return true
+    }
+
+    private func refreshBrowserSettings() {
+        settingsModel?.updateBrowserSites(workspace.panes.compactMap { pane in
+            guard let browser = leaves[pane.id] as? BrowserPane else { return nil }
+            let url = browser.currentURL.flatMap { (try? BrowserDataRequest.siteHost($0)) == nil ? nil : $0 } ?? ""
+            return SettingsModel.BrowserSite(id: pane.id.description, identity: browser.automation.viewID,
+                                            title: browser.paneTitle, url: url, isPrivate: browser.mode == .privateBrowser)
+        })
+    }
+
+    private func clearBrowserDataFromSettings(siteOnly: Bool) {
+        guard let model = settingsModel, !model.clearingBrowserData else { return }
+        model.browserDataError = nil
+        model.browserDataMessage = nil
+        do {
+            var params: [String: JSONValue] = [:]
+            if siteOnly {
+                guard let site = model.selectedBrowserSite,
+                      let browser = leaves[try PaneID(parsing: site.id)] as? BrowserPane,
+                      browser.automation.viewID == site.identity else {
+                    throw RPCFailure(code: -32022, message: "Browser pane was closed or replaced. Refresh the open panes.")
+                }
+                params = ["pane": .string(site.id), "url": .string(model.browserSiteURL)]
+            }
+            model.clearingBrowserData = true
+            let confirmed = try confirmBrowserDataClear(siteOnly ? "browser.clearSiteData" : "browser.clearData", params: params) { [weak model] result in
+                model?.clearingBrowserData = false
+                switch result {
+                case .success: model?.browserDataMessage = siteOnly ? "Site data cleared." : "Shared Browser data cleared."
+                case .failure(let error): model?.browserDataError = (error as? RPCFailure)?.message ?? String(describing: error)
+                }
+            }
+            if !confirmed { model.clearingBrowserData = false }
+        } catch {
+            model.clearingBrowserData = false
+            model.browserDataError = (error as? RPCFailure)?.message ?? String(describing: error)
         }
     }
 
@@ -1065,7 +1129,11 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                     containers[pane]?.setHeaderVisible(model.headerVisible)
                 }
                 persistence = persistWorkspace()
-            } else { persistence = try reconcile(next, transition: transition, operation: operation) }
+            } else {
+                let anchor = (id == "pane.split" || id.hasPrefix("split.")) ? try targetPaneID(params) : nil
+                let directory = anchor.flatMap { shellSessions[$0]?.report?.workingDirectory ?? terminals[$0]?.context.workingDirectory }
+                persistence = try reconcile(next, splitDirectory: directory, transition: transition, operation: operation)
+            }
             return operationResult(mutationResponse(id, result: result), transition: transition, operation: operation, workspacePersistence: persistence)
         case .panesSend:
             guard let text = params["text"]?.string else { throw RPCFailure(code: -32602, message: "text is required") }
@@ -1186,10 +1254,17 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 }
                 if let path = params["screenshot"]?.string { try? Self.captureWindow(alert.window.windowNumber, path: path) }
                 if let focus = params["focusPane"] { _ = try? self.call("command.run", params: ["id": .string("pane.focus"), "pane": focus]) }
+                if let pane = params["replacePane"] {
+                    _ = try? self.call("command.run", params: ["id": .string("pane.type"), "pane": pane,
+                                                               "type": .string("terminal"), "force": .bool(true)])
+                }
                 alert.buttons[params["answer"] == .string("clear") ? 1 : 0].performClick(nil)
             }
             defer { testConfirmationHandler = nil }
-            runUserCommand(id, params: params["pane"].map { ["pane": $0] } ?? [:])
+            if params["settings"] == .bool(true) {
+                if id == "browser.clearData" { settingsModel?.clearBrowserData?() }
+                else { settingsModel?.clearBrowserSiteData?() }
+            } else { runUserCommand(id, params: params["pane"].map { ["pane": $0] } ?? [:]) }
             return shown
         case "debug.closeConfirmation" where integration:
             let answer = params["answer"]?.string ?? "cancel"
@@ -1288,6 +1363,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             if params["close"] == .bool(true) { header.performClose() }
             var info = header.info.object!
             if let action = params["clickAction"]?.string { try header.clickHeaderActionForTesting(action); info = header.info.object! }
+            if params["clickRestore"] == .bool(true) { header.performRestore(); info = header.info.object! }
             if let path = params["renameScreenshot"]?.string, case .integer(let number) = info["renameWindowNumber"], info["editing"] == .bool(true) {
                 try Self.captureWindow(number, path: path)
             }
@@ -1505,8 +1581,12 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             showSettings()
             guard let model = settingsModel else { throw RPCFailure(code: -32000, message: "Settings unavailable") }
             if let section = params["section"]?.string { model.selection = SettingsSection(rawValue: section) }
+            if let value = params["workingDirectory"]?.string { model.workingDirectory = value }
+            if case .bool(let value) = params["inheritWorkingDirectory"] { model.inheritWorkingDirectory = value }
             if let value = params["fontSize"]?.string { model.fontSize = value }
             if let value = params["searchURL"]?.string { model.searchURL = value }
+            if let value = params["browserPane"]?.string { model.selectBrowserPane(value) }
+            if let value = params["browserSiteURL"]?.string { model.browserSiteURL = value }
             if let value = params["theme"]?.string { model.theme = value }
             if case .bool(let value) = params["fontThicken"] { model.fontThicken = value }
             if let value = params["minimumContrast"]?.string { model.minimumContrast = value }
@@ -1552,6 +1632,11 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             if params["revert"] == .bool(true) { refreshSettings(force: true) }
             return .object(["dirty": .bool(model.isDirty), "error": model.error.map(JSONValue.string) ?? .null,
                             "fontSize": .string(model.fontSize), "searchURL": .string(model.searchURL),
+                            "browserPanes": .array(model.browserSites.map { .string($0.id) }),
+                            "browserPane": .string(model.selectedBrowserPane), "browserSiteURL": .string(model.browserSiteURL),
+                            "canClearBrowserSite": .bool(model.canClearBrowserSite), "clearingBrowserData": .bool(model.clearingBrowserData),
+                            "browserDataError": model.browserDataError.map(JSONValue.string) ?? .null,
+                            "browserDataMessage": model.browserDataMessage.map(JSONValue.string) ?? .null,
                             "values": .object(model.values.mapValues(JSONValue.string)),
                             "palettes": .array(AppConfiguration.BundledTerminalTheme.allCases.map { .string($0.rawValue) }),
                             "customPalettes": .array(model.customPalettes.map { .string($0.name) }),
@@ -1569,6 +1654,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             }
             if params["show"] == .bool(true), commandPicker?.isVisible != true { try toggleCommandPicker(params) }
             if let query = params["query"]?.string { commandPicker?.setQueryForTesting(query) }
+            if case .integer(let delta) = params["scrollDelta"], let bounded = Int32(exactly: delta) { try commandPicker?.scrollForTesting(bounded) }
             if case .integer(let row) = params["clickRow"] { try commandPicker?.clickRowForTesting(row, clickCount: params["doubleClick"] == .bool(true) ? 2 : 1) }
             if params["dismiss"] == .bool(true) { commandPicker?.dismiss(restoreFocus: true) }
             return commandPicker?.info ?? .object(["visible": .bool(false)])
@@ -1896,7 +1982,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
 
     /// Prepare new surfaces before committing the value model; failures leave the old tree intact.
     @discardableResult
-    private func reconcile(_ next: Workspace, recipes: [PaneID: SavedLayoutPane] = [:], restoration: WorkspaceRestoration? = nil, transition suppliedTransition: WorkspaceTransition? = nil,
+    private func reconcile(_ next: Workspace, recipes: [PaneID: SavedLayoutPane] = [:], restoration: WorkspaceRestoration? = nil, splitDirectory: String? = nil, transition suppliedTransition: WorkspaceTransition? = nil,
                            operation suppliedOperation: WorkspaceOperationContext? = nil,
                            observation: WorkspaceTransition.Observation = .startup,
                            additionalPublications: [EventPublication] = [], beforeCommit: () throws -> Void = {}) throws -> WorkspacePersistence {
@@ -1950,6 +2036,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 }
                 let directory = recipes[pane.id]?.configuration["directory"]?.string.flatMap { $0.isEmpty ? nil : ($0 as NSString).expandingTildeInPath }
                     ?? restorationDirectory(restoration?.directories[pane.id.description])
+                    ?? settings.current.terminal.startingDirectory(inheriting: splitDirectory)
                 if integration { fputs("Integration startup: creating terminal surface\n", stderr) }
                 created[pane.id] = try TerminalView(runtime: runtime, environment: environment, directory: directory)
                 if integration {
@@ -2124,6 +2211,11 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                     catch { self.present(error) }
                 }
                 container.onClose = { [weak self] in self?.runUserCommand("pane.close", params: ["pane": .string(pane.id.description)]) }
+                container.onRestore = { [weak self, weak container] in
+                    guard let self, let container, self.containers[pane.id] === container,
+                          (try? self.workspace.resolvedTab(pane: pane.id))?.zoomedPane == pane.id else { return }
+                    self.runUserCommand("pane.zoom", params: ["pane": .string(pane.id.description)])
+                }
                 container.onRename = { [weak self, weak container] title in
                     guard let self, let container, self.containers[pane.id] === container,
                           let current = self.workspace.panes.first(where: { $0.id == pane.id }) else { return }
@@ -2181,6 +2273,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 containers[pane.id] = container
             }
             containers[pane.id]?.setHeaderVisible(pane.headerVisible)
+            containers[pane.id]?.setMaximized(next.tabs.contains { $0.zoomedPane == pane.id })
             updatePaneTitle(pane.id)
         }
         refreshHeaderActions()
@@ -2204,6 +2297,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 window.tabbingMode = .preferred
                 window.tabbingIdentifier = "slate-term"
                 window.delegate = self
+                window.renameTabHandler = { [weak self, weak window] in
+                    guard let self, let window, self.windows[tab.id] === window else { return }
+                    self.runUserCommand("tab.rename", params: ["tab": .string(tab.id.description)])
+                }
                 window.keybindingHandler = { [weak self] event in
                     guard let self else { return false }
                     let bindings = self.activeKeyBindings.sorted { $0.key.description < $1.key.description }
@@ -3087,6 +3184,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 guard let self else { return }
                 try self.saveSettings(source: source, changes: changes)
             }
+            model.refreshBrowserSites = { [weak self] in self?.refreshBrowserSettings() }
+            model.clearBrowserData = { [weak self] in self?.clearBrowserDataFromSettings(siteOnly: false) }
+            model.clearBrowserSiteData = { [weak self] in self?.clearBrowserDataFromSettings(siteOnly: true) }
             model.registerPlugin = { [weak self] in self?.registerPlugin() }
             model.setPluginEnabled = { [weak self] id, enabled in
                 self?.changePluginFromSettings(id, method: enabled ? .pluginsEnable : .pluginsDisable)
@@ -3148,6 +3248,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         model.commands = pluginCatalog.activeRegistrations.flatMap(\.workspaceCommands) + CommandRegistry.commands
             + unavailableCommands.map { .init(id: $0, title: "\($0) (Unavailable)", key: "", shift: false) }
         refreshPluginSettingsStatus()
+        refreshBrowserSettings()
     }
 
     private func refreshPluginSettingsStatus() {
@@ -3416,21 +3517,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                     }
                     params["url"] = .string(url)
                 }
-                // Freeze the store, URL, pane and guards before the modal's nested event loop.
-                var payload = params
-                payload.removeValue(forKey: "id")
-                let clear = try prepareBrowserDataClear(id, params: payload, operation: .init(origin: .native))
-                let alert = NSAlert()
-                alert.alertStyle = .warning
-                alert.messageText = id == "browser.clearData" ? "Clear Browser Data?" : "Clear This Site’s Data?"
-                let target = id == "browser.clearData" ? "all sites in the shared Browser profile" : "the site group for \(try BrowserDataRequest.siteHost(params["url"]!.string!)) in this browser’s profile (including any parent domain and other subdomains grouped by WebKit)"
-                alert.informativeText = "This removes cookies, caches and saved website storage for \(target). You may be signed out and lose offline website data.\n\nPrivate Browser panes are separate from the shared profile. Open pages are not closed or reloaded and may save data again. This cannot be undone."
-                alert.addButton(withTitle: "Cancel")
-                alert.addButton(withTitle: "Clear Data")
-                guard runConfirmationAlert(alert) == .alertSecondButtonReturn else { return }
-                Task { [weak self] in
-                    do { _ = try await clear() }
-                    catch { if self?.server != nil { self?.present(error) } }
+                params.removeValue(forKey: "id")
+                _ = try confirmBrowserDataClear(id, params: params) { [weak self] result in
+                    if case .failure(let error) = result, self?.server != nil { self?.present(error) }
                 }
                 return
             }

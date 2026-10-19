@@ -36,6 +36,8 @@ final class SettingsModel: ObservableObject {
     @Published var selection: SettingsSection? = .general
     @Published var theme = "system"
     @Published var shell = ""
+    @Published var workingDirectory = "~"
+    @Published var inheritWorkingDirectory = true
     @Published var fontFamily = ""
     @Published var fontSize = ""
     @Published var fontThicken = false
@@ -50,6 +52,42 @@ final class SettingsModel: ObservableObject {
     @Published var integration = "auto"
     @Published var restore = true
     @Published var searchURL = ""
+    struct BrowserSite: Identifiable, Equatable {
+        let id: String
+        let identity: String
+        let title: String
+        let url: String
+        let isPrivate: Bool
+    }
+    @Published var browserSites: [BrowserSite] = []
+    @Published var selectedBrowserPane = ""
+    @Published var browserSiteURL = ""
+    @Published var clearingBrowserData = false
+    @Published var browserDataMessage: String?
+    @Published var browserDataError: String?
+    var refreshBrowserSites: (() -> Void)?
+    var clearBrowserData: (() -> Void)?
+    var clearBrowserSiteData: (() -> Void)?
+    var selectedBrowserSite: BrowserSite? { browserSites.first { $0.id == selectedBrowserPane } }
+    var canClearBrowserSite: Bool {
+        selectedBrowserSite != nil && (try? BrowserDataRequest.siteHost(browserSiteURL)) != nil
+    }
+
+    func selectBrowserPane(_ id: String) {
+        selectedBrowserPane = id
+        browserSiteURL = selectedBrowserSite?.url ?? ""
+        browserDataMessage = nil
+        browserDataError = nil
+    }
+
+    func updateBrowserSites(_ sites: [BrowserSite]) {
+        let previous = selectedBrowserSite
+        browserSites = sites
+        if selectedBrowserSite == nil || selectedBrowserSite?.identity != previous?.identity {
+            selectedBrowserPane = sites.first?.id ?? ""
+            browserSiteURL = selectedBrowserSite?.url ?? ""
+        }
+    }
     @Published var notifyAutomatic = true
     @Published var notifyMinimumSeconds = "30"
     @Published var notifyTools = true
@@ -91,6 +129,8 @@ final class SettingsModel: ObservableObject {
 
     var values: [String: String] {
         var values = ["appearance.theme": AppConfiguration.quotedString(theme),
+                      "terminal.working_directory": AppConfiguration.quotedString(workingDirectory),
+                      "terminal.inherit_working_directory": inheritWorkingDirectory ? "true" : "false",
                       "terminal.shell": AppConfiguration.quotedString(shell),
                       "terminal.font_family": AppConfiguration.quotedString(fontFamily),
                       "terminal.font_size": fontSize,
@@ -122,6 +162,8 @@ final class SettingsModel: ObservableObject {
         let preserveError = !force && self.source == source && !baseline.isEmpty && error == nil
         theme = configuration.theme.rawValue
         shell = configuration.terminal.shell
+        workingDirectory = configuration.terminal.workingDirectory
+        inheritWorkingDirectory = configuration.terminal.inheritWorkingDirectory
         fontFamily = configuration.terminal.fontFamily
         fontSize = String(configuration.terminal.fontSize)
         fontThicken = configuration.terminal.fontThicken
@@ -413,6 +455,12 @@ private struct SettingsView: View {
     private var terminal: some View {
         Group {
             Section {
+                Toggle("New splits use the current directory", isOn: $model.inheritWorkingDirectory)
+                terminalField("Default directory", text: $model.workingDirectory, key: "working_directory")
+            } header: { Text("Working directory") } footer: {
+                Text("The default applies to new windows, tabs, and splits without an inherited directory. Use ~ for home or an absolute path. Changes apply to new terminals.")
+            }
+            Section {
                 terminalField("Font family", text: $model.fontFamily, key: "font_family")
                 terminalField("Size (points)", text: $model.fontSize, key: "font_size")
                 Toggle("Thicken text", isOn: $model.fontThicken)
@@ -469,12 +517,52 @@ private struct SettingsView: View {
         }
     }
 
-    private var browser: some View {
+    @ViewBuilder private var browser: some View {
         Section {
             TextField("Search URL", text: $model.searchURL)
         } header: { Text("Search engine") } footer: {
             Text("Use {query} where the search text belongs. For example: https://www.google.com/search?q={query}")
         }
+        Section {
+            LabeledContent("Shared Browser profile") {
+                Button("Clear All Browser Data…", role: .destructive) { model.clearBrowserData?() }
+                    .disabled(model.clearingBrowserData)
+            }
+        } header: { Text("Website data") } footer: {
+            Text("Remove cookies, caches and saved website storage for all sites. Private Browser panes and plugins are separate.")
+        }
+        Section {
+            if model.browserSites.isEmpty {
+                Text("Open a Browser or Private Browser pane to clear a specific site’s data.")
+                    .foregroundStyle(.secondary)
+            } else {
+                Picker("Browser pane", selection: Binding(get: { model.selectedBrowserPane }, set: model.selectBrowserPane)) {
+                    ForEach(model.browserSites) { site in
+                        Text("\(site.title) — \(site.isPrivate ? "Private Browser" : "Browser") (\(site.id))").tag(site.id)
+                    }
+                }
+                TextField("Site URL", text: $model.browserSiteURL, prompt: Text("https://example.com"))
+                    .autocorrectionDisabled()
+                LabeledContent("Profile", value: model.selectedBrowserSite?.isPrivate == true
+                               ? "This private pane only" : "Shared across Browser panes")
+            }
+            HStack {
+                Button("Refresh Open Panes") { model.refreshBrowserSites?() }
+                Spacer()
+                Button("Clear Site Data…", role: .destructive) { model.clearBrowserSiteData?() }
+                    .disabled(!model.canClearBrowserSite)
+            }
+            .disabled(model.clearingBrowserData)
+            if model.clearingBrowserData {
+                HStack { ProgressView().controlSize(.small); Text("Clearing website data…") }
+            }
+            if let message = model.browserDataMessage { Text(message).foregroundStyle(.secondary) }
+            if let error = model.browserDataError { Text(error).foregroundStyle(.red).textSelection(.enabled) }
+        } header: { Text("Clear a specific site") } footer: {
+            Text("Choose an open pane, then use its site URL or enter another HTTP(S) URL. WebKit may group parent domains and subdomains together. Clearing takes effect after confirmation; open pages may save data again.")
+        }
+        .disabled(model.clearingBrowserData)
+        .onAppear { model.refreshBrowserSites?() }
     }
 
     private var keyboard: some View {

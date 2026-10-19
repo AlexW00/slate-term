@@ -5,10 +5,46 @@ import SlateTermCore
 final class WorkspaceWindow: NSWindow {
     let identity = "window-" + UUID().uuidString
     var keybindingHandler: ((NSEvent) -> Bool)?
+    var renameTabHandler: (() -> Void)? {
+        didSet {
+            NotificationCenter.default.removeObserver(self, name: NSMenu.didBeginTrackingNotification, object: nil)
+            if renameTabHandler != nil {
+                NotificationCenter.default.addObserver(self, selector: #selector(tabMenuWillTrack(_:)),
+                                                      name: NSMenu.didBeginTrackingNotification, object: nil)
+            }
+        }
+    }
     var fullscreenTransitionPending = false
     var fullscreenTransition = "idle"
     var presentationRevision = UUID().uuidString
     var presentationSample: [String: JSONValue]?
+
+    @objc private func tabMenuWillTrack(_ notification: Notification) {
+        guard let menu = notification.object as? NSMenu,
+              menu.items.contains(where: { $0.action == #selector(NSWindow.moveTabToNewWindow(_:)) && $0.target === self }),
+              !menu.items.contains(where: { $0.action == #selector(renameTabFromMenu(_:)) }) else { return }
+        let item = NSMenuItem(title: "Rename Tab…", action: #selector(renameTabFromMenu(_:)), keyEquivalent: "")
+        item.target = self
+        menu.insertItem(item, at: 0)
+        menu.insertItem(.separator(), at: 1)
+    }
+
+    private var canRenameTabFromMenu: Bool {
+        let selected = tabGroup?.selectedWindow ?? self
+        return renameTabHandler != nil && selected.isVisible && !selected.isMiniaturized
+            && selected.attachedSheet == nil && attachedSheet == nil && NSApp.modalWindow == nil
+    }
+
+    override func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(renameTabFromMenu(_:)) { return canRenameTabFromMenu }
+        return super.validateMenuItem(menuItem)
+    }
+
+    @objc private func renameTabFromMenu(_ sender: Any?) {
+        guard canRenameTabFromMenu else { return }
+        makeKeyAndOrderFront(nil)
+        renameTabHandler?()
+    }
 
     override func toggleFullScreen(_ sender: Any?) {
         guard !fullscreenTransitionPending else { return }

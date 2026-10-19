@@ -32,6 +32,9 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
     private let typeButton = PaneHeaderButton()
     private let titleField = PaneTitleField(string: "")
     private let closeButton = PaneHeaderButton()
+    private let restoreButton = PaneHeaderButton()
+    private lazy var restoreWidth = restoreButton.widthAnchor.constraint(equalToConstant: 0)
+    private lazy var restoreTrailing = restoreButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor)
     let dragHandle = PaneDragHandle(frame: .zero)
     var moveMenu: (() -> NSMenu)?
     var dropView: PaneDropView { view as! PaneDropView }
@@ -49,6 +52,7 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
     private let presenceOverlay = PresenceOverlayView()
     private var isActive = true
     var onClose: (() -> Void)?
+    var onRestore: (() -> Void)?
     var onFocus: (() -> Void)?
     var onInsertWelcomeCommand: ((String) -> Void)? {
         didSet {
@@ -119,7 +123,15 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
         closeButton.action = #selector(closePane)
         closeButton.setAccessibilityLabel("Close \(typeName) Pane")
         closeButton.toolTip = "Close Pane"
-        for child in [dragHandle, typeButton, titleField, actionStrip, closeButton] { child.translatesAutoresizingMaskIntoConstraints = false; header.addSubview(child) }
+        restoreButton.image = NSImage(systemSymbolName: "arrow.down.right.and.arrow.up.left", accessibilityDescription: nil)?.withSymbolConfiguration(.init(pointSize: 10, weight: .medium))
+        restoreButton.isBordered = false
+        restoreButton.setButtonType(.momentaryPushIn)
+        restoreButton.target = self
+        restoreButton.action = #selector(restorePane)
+        restoreButton.setAccessibilityLabel("Restore Pane Size")
+        restoreButton.toolTip = "Restore Pane Size"
+        restoreButton.isHidden = true
+        for child in [dragHandle, typeButton, titleField, actionStrip, restoreButton, closeButton] { child.translatesAutoresizingMaskIntoConstraints = false; header.addSubview(child) }
         for child in [header, content.view] { child.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(child) }
         if let welcomeView {
             welcomeView.onFocus = { [weak self] in self?.onFocus?() }
@@ -148,9 +160,7 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
             presenceOverlay.topAnchor.constraint(equalTo: view.topAnchor),
             presenceOverlay.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
-        // Fill the largest symmetric title region without compressing the type control.
-        let preferredTitleWidth = titleField.widthAnchor.constraint(equalTo: header.widthAnchor)
-        preferredTitleWidth.priority = .init(248)
+        // Hug the title text so empty header space does not trigger renaming.
         let titleLeadingLimit = titleField.leadingAnchor.constraint(greaterThanOrEqualTo: typeButton.trailingAnchor, constant: 8)
         let titleTrailingLimit = titleField.trailingAnchor.constraint(lessThanOrEqualTo: actionStrip.leadingAnchor, constant: -6)
         // At the split's 80-point minimum there may be no title space at all.
@@ -158,13 +168,14 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
         titleLeadingLimit.priority = .init(250)
         titleTrailingLimit.priority = .init(250)
         NSLayoutConstraint.activate([
-            preferredTitleWidth, titleLeadingLimit, titleTrailingLimit,
+            titleLeadingLimit, titleTrailingLimit,
             header.topAnchor.constraint(equalTo: view.topAnchor), header.leadingAnchor.constraint(equalTo: view.leadingAnchor), header.trailingAnchor.constraint(equalTo: view.trailingAnchor), headerHeight,
             dragHandle.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 3), dragHandle.centerYAnchor.constraint(equalTo: header.centerYAnchor), dragHandle.widthAnchor.constraint(equalToConstant: 20), dragHandle.heightAnchor.constraint(equalToConstant: 22),
             typeButton.leadingAnchor.constraint(equalTo: dragHandle.trailingAnchor, constant: 3), typeButton.centerYAnchor.constraint(equalTo: header.centerYAnchor), typeButton.widthAnchor.constraint(lessThanOrEqualTo: header.widthAnchor, multiplier: 0.35),
             titleField.centerXAnchor.constraint(equalTo: header.centerXAnchor), titleField.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             titleField.widthAnchor.constraint(greaterThanOrEqualToConstant: 0),
-            actionStrip.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -2), actionStrip.centerYAnchor.constraint(equalTo: header.centerYAnchor), actionStrip.heightAnchor.constraint(equalToConstant: 22),
+            actionStrip.trailingAnchor.constraint(equalTo: restoreButton.leadingAnchor, constant: -2), actionStrip.centerYAnchor.constraint(equalTo: header.centerYAnchor), actionStrip.heightAnchor.constraint(equalToConstant: 22),
+            restoreWidth, restoreTrailing, restoreButton.centerYAnchor.constraint(equalTo: header.centerYAnchor), restoreButton.heightAnchor.constraint(equalToConstant: 22),
             closeButton.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -5), closeButton.centerYAnchor.constraint(equalTo: header.centerYAnchor), closeButton.widthAnchor.constraint(equalToConstant: 22), closeButton.heightAnchor.constraint(equalToConstant: 22),
         ])
         constrainContent()
@@ -220,6 +231,13 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
         headerHeight.constant = visible ? 28 : 0
         view.needsLayout = true
         view.layoutSubtreeIfNeeded()
+    }
+
+    func setMaximized(_ maximized: Bool) {
+        _ = view
+        restoreButton.isHidden = !maximized
+        restoreWidth.constant = maximized ? 22 : 0
+        restoreTrailing.constant = maximized ? -2 : 0
     }
 
     func setTitle(_ title: String) {
@@ -378,6 +396,11 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
     }
     @objc private func resetPluginView() { onResetPluginView?() }
     @objc private func closePane() { onClose?() }
+    @objc private func restorePane() {
+        guard !restoreButton.isHiddenOrHasHiddenAncestor else { return }
+        onRestore?()
+    }
+    func performRestore() { restoreButton.performClick(nil) }
     func performClose() { closeButton.performClick(nil) }
 
     func setHeaderActions(_ actions: [PaneHeaderAction]) {
@@ -510,6 +533,8 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
                  "headerActions": .array(headerActions.map { .object(["id": .string($0.id), "enabled": .bool($0.enabled)]) }),
                  "visibleHeaderActions": .array(headerVisible ? actionStrip.arrangedSubviews.compactMap { $0.identifier?.rawValue }.map(JSONValue.string) : []),
                  "actionsBeforeClose": .bool(actionStrip.frame.maxX <= closeButton.frame.minX),
+                 "restoreVisible": .bool(!restoreButton.isHiddenOrHasHiddenAncestor),
+                 "restoreBeforeClose": .bool(actionStrip.frame.maxX <= restoreButton.frame.minX && restoreButton.frame.maxX <= closeButton.frame.minX),
                  "dragHandleVisible": .bool(dragHandle.frame.minX >= 0 && dragHandle.frame.maxX <= typeButton.frame.minX && !dragHandle.isHiddenOrHasHiddenAncestor),
                  "closeVisible": .bool(closeButton.frame.minX >= 0 && closeButton.frame.maxX <= header.bounds.width && !closeButton.isHiddenOrHasHiddenAncestor), "attached": .bool(header.window != nil)])
     }

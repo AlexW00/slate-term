@@ -10,6 +10,8 @@ extension AutomationContracts {
     static let terminalConfigurationFields: [String: JSONValue] = {
         typealias S = APISchema
         return [
+            "working_directory": S.string(minimumLength: 1, format: "slate-working-directory"),
+            "inherit_working_directory": S.boolean,
             "shell": S.string(pattern: "^/", format: "slate-shell-path"),
             "font_family": S.string(minimumLength: 1, format: "slate-configuration-line"),
             "font_size": S.annotated(S.number, ["minimum": .integer(1), "maximum": .integer(256)]),

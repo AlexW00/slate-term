@@ -55,9 +55,9 @@ private func requestBytes(metadata: JSONValue) throws -> Data {
     let (call, began) = tracker.begin(actor: try actor(note: "reading"), pane: "p2", action: .read, now: 10)
     #expect(began.map(\.phase) == [.began])
     tracker.end(try #require(call), result: .ok(nil), element: nil, now: 10.04)
-    #expect(tracker.expire(now: 11.5).isEmpty)
+    #expect(tracker.expire(now: 14.99).isEmpty)
     #expect(tracker.records.first?.result == nil, "Short calls never show a result")
-    let ended = tracker.expire(now: 11.61)
+    let ended = tracker.expire(now: 15.01)
     #expect(ended.map(\.phase) == [.ended])
     #expect(tracker.records.isEmpty)
     #expect(tracker.expire(now: 20).isEmpty)
@@ -72,8 +72,8 @@ private func requestBytes(metadata: JSONValue) throws -> Data {
     #expect(began.count == 1 && again.isEmpty)
     #expect(tracker.records.count == 1)
     #expect(tracker.records[0].count == 2 && tracker.records[0].note == "rereading" && tracker.records[0].pulse == 2)
-    #expect(tracker.expire(now: 2.0).isEmpty)
-    #expect(tracker.expire(now: 2.61).count == 1)
+    #expect(tracker.expire(now: 5.99).isEmpty)
+    #expect(tracker.expire(now: 6.01).count == 1)
 }
 
 @Test func callWithoutNoteKeepsThePreviousNote() throws {
@@ -91,8 +91,8 @@ private func requestBytes(metadata: JSONValue) throws -> Data {
     tracker.end(try #require(call), result: .failed("exit 1"), element: nil, now: 4.2)
     #expect(tracker.records[0].result == .failed("exit 1"))
     #expect(tracker.display(now: 4.3).first?.elapsed == nil)
-    #expect(tracker.expire(now: 5.4).isEmpty)
-    #expect(tracker.expire(now: 5.51).count == 1)
+    #expect(tracker.expire(now: 9.19).isEmpty)
+    #expect(tracker.expire(now: 9.21).count == 1)
 }
 
 @Test func leasesOutliveCallsUntilReleaseOrTTL() throws {

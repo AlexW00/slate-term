@@ -13,6 +13,7 @@ private let settingsSchemaFormats: SchemaFormatChecks = [
     "slate-keybinding-setting": { $0.hasPrefix("keybind.") && (try? KeyChord.parse(String($0.dropFirst(8)))) != nil },
     "slate-search-url-template": { (try? AppConfiguration.parse("[browser]\nsearch_url = " + AppConfiguration.quotedString($0))) != nil },
     "slate-configuration-line": { (try? AppConfiguration.parse("[terminal]\nfont_family = " + AppConfiguration.quotedString($0))) != nil },
+    "slate-working-directory": { (try? AppConfiguration.parse("[terminal]\nworking_directory = " + AppConfiguration.quotedString($0))) != nil },
     "slate-shell-path": { (try? AppConfiguration.parse("[terminal]\nshell_integration = 'off'\nshell = " + AppConfiguration.quotedString($0))) != nil }
 ]
 
@@ -50,6 +51,10 @@ private let settingsSchemaFormats: SchemaFormatChecks = [
     let schema = AutomationContracts.settings[.configPatch]!.input
     let samples: [[String: JSONValue]] = [[:], ["terminal.font_size": .number(16.5)], ["terminal.font_size": .integer(257)],
         ["appearance.theme": .string("auto")], ["appearance.theme": .string("system")], ["appearance.theme": .string("unknown")],
+        ["terminal.working_directory": .string("~/Projects")], ["terminal.working_directory": .string("/tmp/project with spaces")],
+        ["terminal.working_directory": .string("relative")], ["terminal.working_directory": .string("~someone/path")],
+        ["terminal.working_directory": .string("/tmp/invalid\tpath")], ["terminal.working_directory": .string("")],
+        ["terminal.inherit_working_directory": .bool(false)], ["terminal.inherit_working_directory": .string("false")],
         ["terminal.padding_x": .integer(64)], ["terminal.padding_x": .number(1.5)], ["terminal.font_thicken": .string("true")],
         ["terminal.dark_theme": .string("My Palette")], ["terminal.dark_theme": .string("../bad")],
         ["keybind.cmd+x": .string("pane.focus")], ["keybind.CMD+🦊": .string("unbound")],

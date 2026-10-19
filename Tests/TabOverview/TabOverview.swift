@@ -26,7 +26,7 @@ struct TabOverview {
         return view.subviews.lazy.compactMap { nativeView(className, in: $0) }.first
     }
 
-    static func overviewMenu(in window: WorkspaceWindow) throws -> (NSMenu, Int) {
+    static func overviewMenu(in window: WorkspaceWindow, target: WorkspaceWindow? = nil) throws -> (NSMenu, Int) {
         guard let frame = window.contentView?.superview, let bar = nativeView("NSTabBar", in: frame) else {
             throw Failure(description: "Native tab bar not found")
         }
@@ -40,12 +40,28 @@ struct TabOverview {
                let index = menu.items.firstIndex(where: { $0.action == #selector(NSWindow.toggleTabOverview(_:)) }) {
                 menu.update()
                 try require(menu.items[index].isEnabled, "Native overview menu item is disabled")
-                try require(menu.items[index].target === window, "Native overview menu targets another window")
+                try require(menu.items[index].target === (target ?? window), "Native overview menu targets another window")
                 return (menu, index)
             }
             view = candidate.superview
         }
         throw Failure(description: "Native Show All Tabs menu item not found")
+    }
+
+    static func trackedRenameItem(in menu: NSMenu, window: WorkspaceWindow) throws -> NSMenuItem {
+        let close: @MainActor () -> Void = { menu.cancelTracking() }
+        let timer = Timer(timeInterval: 0.15, repeats: false) { _ in
+            MainActor.assumeIsolated { close() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        defer { timer.invalidate() }
+        menu.popUp(positioning: nil, at: NSPoint(x: 150, y: 250), in: window.contentView)
+        menu.update()
+        guard let rename = menu.items.first(where: { $0.title == "Rename Tab…" }) else {
+            throw Failure(description: "Tracked native tab menu has no Rename Tab item")
+        }
+        try require(menu.items.filter { $0.title == "Rename Tab…" }.count == 1, "Duplicate rename items")
+        return rename
     }
 
     static func key(_ characters: String, code: UInt16, in picker: NSWindow) {
@@ -77,6 +93,10 @@ struct TabOverview {
             windows.forEach { $0.close() }
         }
         let first = windows[0], second = windows[1]
+        var renamed: [WorkspaceWindow] = []
+        first.renameTabHandler = { renamed.append(first) }
+        second.renameTabHandler = { renamed.append(second) }
+        defer { windows.forEach { $0.renameTabHandler = nil } }
         first.addTabbedWindow(second, ordered: .above)
         second.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -132,6 +152,31 @@ struct TabOverview {
         }
         try require(group.windows.count == 2 && first.tabGroup === group && second.tabGroup === group,
                     "Overview changed native tab membership")
+        // Right-clicking a background tab must preserve selection until Rename is chosen.
+        let (backgroundMenu, _) = try overviewMenu(in: first, target: second)
+        let backgroundRename = try trackedRenameItem(in: backgroundMenu, window: first)
+        try require(backgroundRename.target === second && backgroundRename.isEnabled, "Rename targets the wrong background tab")
+        try require(group.selectedWindow === first && renamed.isEmpty, "Opening the menu renamed or selected a tab")
+        backgroundMenu.performActionForItem(at: backgroundMenu.index(of: backgroundRename))
+        try await eventually("Background rename did not select its own tab") { group.selectedWindow === second && second.isKeyWindow }
+        try require(renamed.count == 1 && renamed[0] === second, "Rename did not dispatch to the clicked tab")
+
+        let (selectedMenu, _) = try overviewMenu(in: second)
+        let selectedRename = try trackedRenameItem(in: selectedMenu, window: second)
+        try require(selectedRename.target === second && selectedRename.isEnabled, "Selected tab rename unavailable")
+        _ = try trackedRenameItem(in: selectedMenu, window: second)
+        selectedMenu.performActionForItem(at: selectedMenu.index(of: selectedRename))
+        try require(renamed.count == 2 && renamed.last === second, "Selected rename dispatched incorrectly")
+
+        let sheet = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100),
+                            styleMask: [.titled], backing: .buffered, defer: false)
+        sheet.isReleasedWhenClosed = false
+        second.beginSheet(sheet, completionHandler: nil)
+        selectedMenu.update()
+        try require(!selectedRename.isEnabled, "Rename enabled while a sheet is attached")
+        second.endSheet(sheet)
+        sheet.orderOut(nil)
+        print("PASS native tab context menu rename for selected/background tabs, repeat opening and sheet validation")
         print("PASS native Show All Tabs menu dispatch, toggle close, Escape, reopen and thumbnail tab selection")
     }
 

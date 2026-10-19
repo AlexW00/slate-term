@@ -8,11 +8,35 @@ Detailed change record for agents and maintainers. Public release notes live in 
 
 ### Changed
 
-- Moved website canonical and sharing URLs, and the README website link, to `slate.weichart.de`. Configured the GitHub Pages custom domain and a DNS-only Cloudflare CNAME to `alexw00.github.io`.
-
 ### Fixed
 
 ### Internal
+
+## 0.3.0 — Pending publication
+
+Integrated committed local main `17162fa` after the previous integration at `11861a7`, preserving the public updater and release pipeline.
+
+### Added
+
+- New terminal splits inherit the targeted terminal's current directory by default. Settings and the shared API expose `terminal.inherit_working_directory` and `terminal.working_directory`; unavailable directories fall back to the configured default, then home.
+- Added Rename Tab to the native tab context menu, using the existing rename sheet and shared title operation.
+- Added all-site and selected-site browser data clearing to Settings, retaining confirmation and separate shared, private-pane, and plugin stores.
+- Added a Restore Pane Size button to maximized pane headers.
+
+### Changed
+
+- Agent activity and result indicators remain visible for five seconds; newly split panes show the initiating agent activity.
+- Updated the website's terminal previews, product wording, and download presentation. Canonical and sharing links use `slate.weichart.de`.
+
+### Fixed
+
+- Preserve command-picker scroll position during background availability refreshes.
+- Keep saved-layout preview geometry stable when editing or reverting pane-bar visibility.
+- Limit pane-title renaming to the title text instead of empty header space.
+
+### Internal
+
+- Expanded configuration, split-directory, tab-menu, presence, browser-settings, picker-scroll, pane-header, and saved-layout regression checks. Release verification is recorded separately from implementation coverage.
 
 ## 0.2.1 — 2026-10-18
 

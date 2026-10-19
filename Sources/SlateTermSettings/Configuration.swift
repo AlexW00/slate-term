@@ -53,6 +53,8 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
     public enum CursorBlink: String, Codable, Sendable { case auto, on, off }
     public struct Terminal: Equatable, Sendable, Encodable {
         public let shell: String
+        public let workingDirectory: String
+        public let inheritWorkingDirectory: Bool
         public let fontFamily: String
         /// Typographic points. Slate Terminal accepts finite sizes in 1...256.
         public let fontSize: Double
@@ -68,10 +70,24 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
         public let lightTheme: TerminalTheme
         public let darkTheme: TerminalTheme
         enum CodingKeys: String, CodingKey {
+            case workingDirectory = "working_directory", inheritWorkingDirectory = "inherit_working_directory"
             case shell, fontFamily = "font_family", fontSize = "font_size", shellIntegration = "shell_integration"
             case fontThicken = "font_thicken", minimumContrast = "minimum_contrast"
             case cursorStyle = "cursor_style", cursorBlink = "cursor_blink"
             case paddingX = "padding_x", paddingY = "padding_y", lightTheme = "light_theme", darkTheme = "dark_theme"
+        }
+
+        /// Resolve a split's observed directory before the configured default, then home.
+        public func startingDirectory(inheriting directory: String?) -> String {
+            let fallback = (workingDirectory as NSString).expandingTildeInPath
+            for candidate in [inheritWorkingDirectory ? directory : nil, fallback].compactMap({ $0 }) {
+                var isDirectory: ObjCBool = false
+                guard candidate.hasPrefix("/"), !candidate.utf8.contains(0),
+                      FileManager.default.fileExists(atPath: candidate, isDirectory: &isDirectory), isDirectory.boolValue,
+                      FileManager.default.isExecutableFile(atPath: candidate) else { continue }
+                return candidate
+            }
+            return NSHomeDirectory()
         }
 
         /// Only rendering options: shell command and integration remain app-owned.
@@ -141,7 +157,7 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
     public static let defaults = AppConfiguration(
         browser: Browser(searchURL: "https://www.google.com/search?q={query}"),
         theme: .system,
-        terminal: Terminal(shell: "/bin/zsh", fontFamily: "SF Mono", fontSize: 13, shellIntegration: .auto,
+        terminal: Terminal(shell: "/bin/zsh", workingDirectory: "~", inheritWorkingDirectory: true, fontFamily: "SF Mono", fontSize: 13, shellIntegration: .auto,
                            fontThicken: false, minimumContrast: 1, cursorStyle: .block, cursorBlink: .auto,
                            paddingX: 2, paddingY: 2, lightTheme: TerminalTheme(.builtinLight), darkTheme: TerminalTheme(.builtinDark)),
         restoreWorkspace: true,
@@ -164,6 +180,8 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
         let defaults = Self.defaults
         let terminal = Terminal(
             shell: raw.terminal?.shell ?? defaults.terminal.shell,
+            workingDirectory: raw.terminal?.workingDirectory ?? defaults.terminal.workingDirectory,
+            inheritWorkingDirectory: raw.terminal?.inheritWorkingDirectory ?? defaults.terminal.inheritWorkingDirectory,
             fontFamily: raw.terminal?.fontFamily ?? defaults.terminal.fontFamily,
             fontSize: raw.terminal?.fontSize?.value ?? defaults.terminal.fontSize,
             shellIntegration: raw.terminal?.shellIntegration ?? defaults.terminal.shellIntegration,
@@ -191,6 +209,10 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
                   !value.unicodeScalars.contains(where: { CharacterSet.newlines.contains($0) || $0.value == 0 }) else {
                 throw ConfigurationError.invalid("\(name) must be a nonempty single-line string")
             }
+        }
+        guard (terminal.workingDirectory.hasPrefix("/") || terminal.workingDirectory == "~" || terminal.workingDirectory.hasPrefix("~/")),
+              !terminal.workingDirectory.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+            throw ConfigurationError.invalid("terminal.working_directory must be an absolute path or start with ~/, without control characters")
         }
         guard terminal.shell.hasPrefix("/") else { throw ConfigurationError.invalid("terminal.shell must be an absolute executable path") }
         // The pinned engine reparses commands for automatic integration using a
@@ -261,6 +283,8 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
         if terminal.paddingY != previous.terminal.paddingY { keys.append("terminal.padding_y") }
         if terminal.lightTheme != previous.terminal.lightTheme { keys.append("terminal.light_theme") }
         if terminal.darkTheme != previous.terminal.darkTheme { keys.append("terminal.dark_theme") }
+        if terminal.workingDirectory != previous.terminal.workingDirectory { keys.append("terminal.working_directory") }
+        if terminal.inheritWorkingDirectory != previous.terminal.inheritWorkingDirectory { keys.append("terminal.inherit_working_directory") }
         if terminal.shell != previous.terminal.shell { keys.append("terminal.shell") }
         if terminal.shellIntegration != previous.terminal.shellIntegration { keys.append("terminal.shell_integration") }
         return keys
@@ -337,6 +361,8 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
     }
     private struct TerminalValues: Decodable {
         let shell: String?
+        let workingDirectory: String?
+        let inheritWorkingDirectory: Bool?
         let fontFamily: String?
         let fontSize: Number?
         let shellIntegration: ShellIntegration?
@@ -349,6 +375,7 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
         let lightTheme: TerminalTheme?
         let darkTheme: TerminalTheme?
         enum Keys: String, CodingKey, CaseIterable {
+            case workingDirectory = "working_directory", inheritWorkingDirectory = "inherit_working_directory"
             case shell, fontFamily = "font_family", fontSize = "font_size", shellIntegration = "shell_integration"
             case fontThicken = "font_thicken", minimumContrast = "minimum_contrast"
             case cursorStyle = "cursor_style", cursorBlink = "cursor_blink"
@@ -357,6 +384,8 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
         init(from decoder: any Decoder) throws {
             let c = try checkedContainer(decoder, Keys.self)
             shell = try c.decodeIfPresent(String.self, forKey: .shell)
+            workingDirectory = try c.decodeIfPresent(String.self, forKey: .workingDirectory)
+            inheritWorkingDirectory = try c.decodeIfPresent(Bool.self, forKey: .inheritWorkingDirectory)
             fontFamily = try c.decodeIfPresent(String.self, forKey: .fontFamily)
             fontSize = try c.decodeIfPresent(Number.self, forKey: .fontSize)
             shellIntegration = try c.decodeIfPresent(ShellIntegration.self, forKey: .shellIntegration)

@@ -33,6 +33,16 @@ slate-term rpc METHOD --params '{...}'     # call any catalog method directly
 - Outside a Slate terminal, pass `--socket PATH` or set `SLATE_TERM_SOCKET`.
 - Some features may be newer than the running build, for example `appearance.get`. Check `api describe` before relying on them.
 
+## Preserve the user's focus
+
+Keep the user's active pane, tab and window focused while working. Change focus only when the user asks, or when the task requires an interaction that cannot work without it. Creating a pane or running commands in it does not require focusing it.
+
+- Use explicit pane IDs for inspection, terminal commands and captures. Avoid `--active`, `panes focus`, `tabs focus`, `window.focus`, `presence focus` and app activation as routine setup.
+- When splitting, read the source pane's `layoutRevision`, then use `slate-term panes split --pane SOURCE --right --focus-policy preserve --expected-layout-revision REVISION`. Keep the returned `paneId` and target it directly for subsequent calls. Plain `panes split --right` defaults to focusing the new pane.
+- Through the socket or plugin bridge, use `command.run` with `id: "pane.split"`, `focus: "preserve"` and the current `expectedLayoutRevision`. Use other operations' preserve-focus options where available.
+- Read the new terminal's state, shell and session with `panes inspect --pane NEW_PANE`; wait for its prompt, then use `terminal run --pane NEW_PANE --session-id SESSION --shell SHELL --command '…'`. Capture output with `terminal capture --pane NEW_PANE`.
+- If focus is necessary, make the fewest changes needed. Do not focus a pane and immediately restore the old one as a workaround: both changes can interrupt the user.
+
 ## Key concepts
 
 - **Panes and tabs.** IDs such as `p1` and `t1` are stable slots. A terminal's `sessionId` changes when its shell is replaced. Pass `--session-id` or `sessionId` for delayed terminal work.

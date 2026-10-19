@@ -10,6 +10,8 @@ theme = "auto" # auto (follow macOS), light, dark; "system" is also accepted
 
 [terminal]
 shell = "/bin/zsh"
+working_directory = "~" # default for new terminals
+inherit_working_directory = true # new splits inherit the targeted terminal directory
 font_family = "SF Mono"
 font_size = 13
 font_thicken = false
@@ -69,6 +71,16 @@ Register, enable/disable, remove plugins and view their live status directly in 
 ## Agent activity
 
 **Settings → AI Agents → Show agent activity on panes** (`agents.show_activity`, default `true`) controls whether panes show agent activity frames and tags. The same switch is available as `agents.activity.show`, `agents.activity.hide` and `agents.activity.toggle` in the ⌘K picker and through `command.run`, as `slate-term agent-activity show|hide|toggle`, and through `config.patch`. It changes presentation only; it does not change what agents can do, and `presence.list`, holds and events keep working. Activity is shown only for agents that identify themselves; see [agent presence](presence.md).
+
+## Working directory
+
+New terminal splits inherit the targeted terminal's last observed working directory by default. This applies to keyboard shortcuts, the command picker, `split.*`, and `pane.split` through the CLI or registered-plugin bridge. Explicit pane/tab targets determine the source, even when another pane has focus. Splitting a browser or plugin uses the default directory.
+
+In **Settings → Terminal → Working directory**, turn off **New splits use the current directory** to always use **Default directory**. The corresponding TOML keys are `terminal.inherit_working_directory` (default `true`) and `terminal.working_directory` (default `"~"`). The default also applies to new tabs and windows. Use an absolute path or `~/…`; shell variables are not expanded. These settings apply immediately to subsequent terminal creation without replacing existing sessions.
+
+An unavailable inherited directory falls back to the configured directory, then home. Explicit saved-layout directories and restored-session directories take precedence. Shell startup files can still change the directory after launch. Inheritance uses shell integration reports, or terminal directory reports when shell integration is unavailable.
+
+Both settings are readable in `config.get` and writable with `config.patch`, `slate-term config set`, or the registered-plugin API. They do not add separate one-click commands; the existing split commands and configurable shortcuts use these preferences.
 
 ## Terminal palettes
 
@@ -131,6 +143,8 @@ The app gives Ghostty validated, app-managed color snapshots under `state/palett
 **Browser** shares one persistent website-data profile across all panes and workspaces. **Private Browser** creates a separate ephemeral store for each pane; closing or replacing it discards that store. Both use the search setting below. Workspace restoration preserves the pane kind and a normal browser's starting URL, but not its back/forward history. Private Browser URLs are never included in workspace snapshots; private panes reopen at a fresh blank page. Persistent website storage survives even when workspace restoration is disabled.
 
 The profile's opaque WebKit identifier is kept privately at `state/browser-profile.json` under the app state directory; WebKit manages the actual profile files. Separate `SLATE_TERM_STATE_DIR` fixtures use separate profiles. Do not delete the identifier to clear data: use **Workspace → Browser → Clear Browser Data…**, also available in the command bar and configurable shortcuts. A native warning explains the effects before deleting. **Clear This Site’s Data…** works on focused Browser or Private Browser HTTP(S) pages. [Automation](automation.md#browser-profiles-and-website-data) documents precise site-group scope and noninteractive CLI/API equivalents.
+
+Settings → Browser also provides **Clear All Browser Data…** and **Clear Site Data…**, using the same confirmed operations. For site clearing, choose an open Browser or Private Browser pane and use its URL or enter another absolute HTTP(S) URL. The selected pane determines the profile: normal panes share storage, while each private pane has its own storage. **Refresh Open Panes** updates the selector. This selector lists open panes, not an inventory of stored sites. Clearing runs immediately after confirmation and does not require **Apply**.
 
 ## Browser search
 

@@ -148,6 +148,47 @@ with http.server.ThreadingHTTPServer(('127.0.0.1', 0), Page) as server:
             eventually('native private site clear completed', lambda: value(p2)['saved'] is None)
             assert value('p1')['saved'] == 'not-target', 'Modal focus changes redirected clearing'
 
+            # Settings uses the same consent and store guards, with explicit pane and URL selection.
+            state = app.rpc('debug.settings', section='Browser', browserPane=p2)
+            assert set(state['browserPanes']) == {'p1', p2, p3}
+            assert state['browserSiteURL'] == url and state['canClearBrowserSite']
+            state = app.rpc('debug.settings', browserSiteURL='not-a-url')
+            assert not state['canClearBrowserSite'] and not state['dirty']
+            app.rpc('debug.settings', browserSiteURL=url)
+            seed(p2, 'settings-private'); seed('p1', 'settings-shared')
+            shown = app.rpc('debug.browserDataConfirmation', settings=True, id='browser.clearSiteData', answer='cancel')
+            assert shown['warning'] and value(p2)['saved'] == 'settings-private'
+            assert not app.rpc('debug.settings')['clearingBrowserData']
+            app.rpc('debug.browserDataConfirmation', settings=True, id='browser.clearSiteData', answer='clear', focusPane='p1')
+            eventually('settings private clear', lambda: value(p2)['saved'] is None)
+            assert value('p1')['saved'] == 'settings-shared'
+            eventually('settings completion feedback', lambda: app.rpc('debug.settings')['browserDataMessage'] == 'Site data cleared.')
+
+            # A custom URL selects data independently of the pane's current page.
+            navigate('p1', other); seed('p1', 'settings-other')
+            app.rpc('debug.settings', browserPane='p1', browserSiteURL=url)
+            app.rpc('debug.browserDataConfirmation', settings=True, id='browser.clearSiteData', answer='clear')
+            eventually('settings site clear finished', lambda: not app.rpc('debug.settings')['clearingBrowserData'])
+            assert value('p1')['saved'] == 'settings-other'
+            navigate('p1'); assert value('p1')['saved'] is None
+            seed('p1', 'settings-all'); seed(p2, 'keep-private')
+            app.rpc('debug.browserDataConfirmation', settings=True, answer='cancel')
+            assert value('p1')['saved'] == 'settings-all'
+            app.rpc('debug.browserDataConfirmation', settings=True, answer='clear')
+            eventually('settings all-data clear', lambda: value('p1')['saved'] is None)
+            assert value(p2)['saved'] == 'keep-private'
+            state = app.rpc('debug.settings')
+            assert not state['dirty'] and state['browserDataError'] is None
+            # Replacing the selected pane during confirmation must fail without clearing another profile.
+            seed('p1', 'survives-replacement')
+            app.rpc('debug.settings', browserPane=p3, browserSiteURL=url)
+            app.rpc('debug.browserDataConfirmation', settings=True, id='browser.clearSiteData', answer='clear', replacePane=p3)
+            eventually('settings stale-pane failure', lambda: app.rpc('debug.settings')['browserDataError'] is not None)
+            assert 'closed or replaced' in app.rpc('debug.settings')['browserDataError']
+            assert value('p1')['saved'] == 'survives-replacement' and value(p2)['saved'] == 'keep-private'
+            switch(p3, 'private-browser')
+            print('PASS Settings browser clearing: selection, explicit URL, cancellation, shared/private isolation and completion', flush=True)
+
             # Both commands are available in the bar with Private Browser focus.
             command('pane.focus', pane=p2)
             picker = app.rpc('debug.commandPicker', show=True, pane=p2, query='Clear')

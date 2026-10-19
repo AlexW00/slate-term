@@ -139,3 +139,38 @@ func invalidSearchTemplatesAreRejected(template: String) {
     #expect(configuration.keyBindings[try KeyChord.parse("cmd+1")] == "tab.select3")
     #expect(configuration.keyBindings[try KeyChord.parse("cmd+shift+]")] == "tab.next")
 }
+
+@Test func terminalDirectoryDefaultsAndOverridesApplyToNewSessions() throws {
+    let defaults = AppConfiguration.defaults.terminal
+    #expect(defaults.inheritWorkingDirectory)
+    #expect(defaults.workingDirectory == "~")
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let inherited = root.appendingPathComponent("project with spaces")
+    try FileManager.default.createDirectory(at: inherited, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let source = "[terminal]\nworking_directory = \(AppConfiguration.quotedString(root.path))\n"
+    let config = try AppConfiguration.parse(source)
+    #expect(config.terminal.startingDirectory(inheriting: inherited.path) == inherited.path)
+    #expect(config.terminal.startingDirectory(inheriting: nil) == root.path)
+    #expect(config.terminal.startingDirectory(inheriting: root.appendingPathComponent("missing").path) == root.path)
+    #expect(config.terminal.startingDirectory(inheriting: "relative") == root.path)
+    let disabled = try AppConfiguration.parse(source + "inherit_working_directory = false\n")
+    #expect(disabled.terminal.startingDirectory(inheriting: inherited.path) == root.path)
+    #expect(disabled.restartRequired(from: .defaults).isEmpty)
+    #expect(Set(disabled.changedKeys(from: .defaults)) == ["terminal.working_directory", "terminal.inherit_working_directory"])
+    try FileManager.default.removeItem(at: inherited)
+    #expect(config.terminal.startingDirectory(inheriting: inherited.path) == root.path)
+    let missing = try AppConfiguration.parse("[terminal]\nworking_directory = '/nonexistent-slate-test-directory'\n")
+    #expect(missing.terminal.startingDirectory(inheriting: nil) == NSHomeDirectory())
+    let patched = try ConfigurationPatch.updating(source: "# keep\n", values: [
+        "terminal.working_directory": .string(root.path), "terminal.inherit_working_directory": .bool(false)])
+    #expect(patched.contains("# keep"))
+    #expect(try AppConfiguration.parse(patched).terminal == disabled.terminal)
+}
+
+@Test(arguments: ["", "relative/path", "~someone/path", "/tmp\ninvalid", "/tmp\u{0}invalid"])
+func invalidTerminalWorkingDirectoriesAreRejected(path: String) {
+    #expect(throws: (any Error).self) {
+        try AppConfiguration.parse("[terminal]\nworking_directory = \(AppConfiguration.quotedString(path))\n")
+    }
+}

@@ -1,7 +1,7 @@
 import AppKit
 import SlateTermCore
 
-struct PickerCommand {
+struct PickerCommand: Equatable {
     let item: CommandSearchItem
     let symbol: String
     let shortcut: String
@@ -115,6 +115,7 @@ final class CommandPicker: NSWindowController, NSWindowDelegate, NSSearchFieldDe
     }
 
     func update(commands: [PickerCommand]) {
+        guard self.commands != commands else { return }
         self.commands = commands
         reload(preserveSelection: true)
     }
@@ -292,6 +293,7 @@ final class CommandPicker: NSWindowController, NSWindowDelegate, NSSearchFieldDe
         return label
     }
     private func reload(preserveSelection: Bool) {
+        let scrollOrigin = scroll.contentView.bounds.origin
         let selected = results.indices.contains(table.selectedRow) ? results[table.selectedRow].item.id : nil
         let available = commands.filter { $0.unavailable == nil }
         let byID = Dictionary(uniqueKeysWithValues: available.map { ($0.item.id, $0) })
@@ -299,7 +301,16 @@ final class CommandPicker: NSWindowController, NSWindowDelegate, NSSearchFieldDe
         if !preserveSelection || !results.contains(where: { $0.item.id == mouseFocusedID && $0.item.id == selected }) { mouseFocusedID = nil }
         table.reloadData()
         let row = preserveSelection ? selected.flatMap { id in results.firstIndex { $0.item.id == id } } ?? 0 : 0
-        if !results.isEmpty { table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false); table.scrollRowToVisible(row) }
+        if !results.isEmpty {
+            table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            if preserveSelection {
+                // Background availability updates must not undo manual scrolling.
+                scroll.contentView.scroll(to: scrollOrigin)
+                scroll.reflectScrolledClipView(scroll.contentView)
+            } else {
+                table.scrollRowToVisible(row)
+            }
+        }
         count.stringValue = "\(results.count)"
         empty.isHidden = !results.isEmpty
         scroll.isHidden = results.isEmpty
@@ -374,6 +385,13 @@ final class CommandPicker: NSWindowController, NSWindowDelegate, NSSearchFieldDe
         reload(preserveSelection: false)
     }
     var contextWindow: NSWindow? { sourceWindow }
+    func scrollForTesting(_ delta: Int32) throws {
+        guard let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1,
+                                  wheel1: delta, wheel2: 0, wheel3: 0).flatMap(NSEvent.init(cgEvent:)) else {
+            throw RPCFailure(code: -32000, message: "Could not create picker scroll event")
+        }
+        scroll.scrollWheel(with: event)
+    }
     func clickRowForTesting(_ row: Int, clickCount: Int = 1) throws {
         guard results.indices.contains(row), let window else { throw RPCFailure(code: -32602, message: "Picker row is unavailable") }
         table.scrollRowToVisible(row)
@@ -399,6 +417,7 @@ final class CommandPicker: NSWindowController, NSWindowDelegate, NSSearchFieldDe
                  "centerOffsetX": .number(content.map { frame.midX - $0.midX } ?? 0),
                  "centerOffsetY": .number(content.map { frame.midY - $0.midY } ?? 0),
                  "executeLabel": .string(runLabel.stringValue),
+                 "scrollY": .number(scroll.contentView.bounds.origin.y),
                  "selected": results.indices.contains(table.selectedRow) ? .string(results[table.selectedRow].item.id) : .null,
                  "results": .array(results.map { .object(["id": .string($0.item.id), "title": .string($0.item.title),
                     "enabled": .bool($0.unavailable == nil), "reason": $0.unavailable.map(JSONValue.string) ?? .null]) }),

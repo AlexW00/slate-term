@@ -433,6 +433,12 @@ while True: time.sleep(1)
             cli('update', '--file', str(definition_file), '--expected-saved-layout-revision', saved['revision'])
             assert json.loads(path.read_text())['name'] == 'CLI Edit'
             rpc('debug.savedLayouts', file=file, name='Development', save=True)
+            # Capture pane sizing independently of launcher packaging checks.
+            rpc('debug.savedLayouts', file=file, pane=original['tabs'][0]['panes'][0]['id'])
+            rpc('debug.savedLayouts', headerVisible=False)
+            screenshot('bar-hidden-dark')
+            rpc('debug.savedLayouts', headerVisible=True)
+            screenshot('final-dark')
             # Package launcher in the temporary test directory, never user Applications.
             launcher = base / 'Development.app'
             rpc('debug.savedLayouts', launcherPath=str(launcher))
@@ -451,11 +457,6 @@ while True: time.sleep(1)
             assert info == plistlib.loads((launcher / 'Contents/Info.plist').read_bytes())
 
             # Light, narrow, dirty and selected terminal inspector rendering.
-            rpc('debug.savedLayouts', file=file, pane=original['tabs'][0]['panes'][0]['id'])
-            rpc('debug.savedLayouts', headerVisible=False)
-            screenshot('bar-hidden-dark')
-            rpc('debug.savedLayouts', headerVisible=True)
-            screenshot('final-dark')
             rpc('debug.settings', theme='light', apply=True)
             rpc('debug.savedLayouts', name='Development Draft')
             screenshot('final-light')

@@ -40,6 +40,7 @@ public enum AutomationSchemaVocabulary {
         "slate-key-chord": "KeyChord.parse configuration shortcut syntax and supported modifiers/key names.",
         "slate-keybinding-setting": "The keybind. prefix followed by a valid KeyChord.",
         "slate-configuration-line": "A nonempty configuration-line-safe value without prohibited line/control characters, as accepted by AppConfiguration.",
+        "slate-working-directory": "An absolute or home-relative configured directory without control characters; availability is checked when creating terminals.",
         "slate-shell-path": "An absolute configured shell path accepted by AppConfiguration; live executable availability is checked separately.",
         "slate-palette-name": "A bundled terminal theme or safe custom palette name accepted by AppConfiguration.TerminalTheme; availability is checked separately.",
         "slate-search-url-template": "An AppConfiguration browser search URL template with a query placeholder in the permitted URL component, not the authority.",

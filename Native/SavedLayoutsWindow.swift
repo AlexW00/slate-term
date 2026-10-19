@@ -210,11 +210,12 @@ struct SavedLayoutsView: View {
                         .frame(maxWidth: .infinity, alignment: .leading).padding()
                 }
                 Divider()
-                if model.conflict || model.isDirty {
-                    Text(model.conflict ? "File changed externally. Revert to reload." : "Unsaved changes")
-                        .font(.callout).foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.top, 12)
-                }
+                // Reserve status space so editing or reverting does not resize the preview.
+                Text(model.conflict ? "File changed externally. Revert to reload." : "Unsaved changes")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.top, 12)
+                    .opacity(model.conflict || model.isDirty ? 1 : 0)
+                    .accessibilityHidden(!model.conflict && !model.isDirty)
                 HStack {
                     Button("Create Spotlight Launcher…", action: model.makeLauncher)
                         .disabled(model.definition == nil || model.isDirty || model.conflict || model.launcherUnavailable != nil)
@@ -414,7 +415,6 @@ private struct SavedLayoutMap: View {
                             Text(pane?.title.isEmpty == false ? pane!.title : type?.title ?? pane?.type ?? "Pane")
                                 .font(.system(size: 10, weight: .medium)).lineLimit(1)
                             Spacer(minLength: 0)
-                            Image(systemName: "ellipsis").font(.system(size: 10, weight: .medium))
                         }.foregroundStyle(.secondary).padding(.horizontal, 8).frame(height: 25)
                             .background(active ? Color.accentColor.opacity(0.08) : Color.primary.opacity(0.04))
                         Divider()

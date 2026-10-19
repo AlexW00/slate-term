@@ -90,6 +90,29 @@ with tempfile.TemporaryDirectory(prefix='slate-picker-', dir='/tmp') as temporar
             assert not any(r['id'] in ['command.picker', 'pane.type', 'pane.focus', 'tab.focus'] for r in state['results'])
             capture('command-picker-dark.png')
             capture('command-picker-dark-context.png', context=True)
+            # Idle catalog refreshes must leave a manually scrolled list in place.
+            selected = picker()['selected']
+            picker(scrollDelta=-480)
+            eventually('Native wheel scroll moves the command list', lambda: picker()['scrollY'] > 200)
+            scrolled = picker()['scrollY']
+            stable_until = time.monotonic() + 2.5
+            while time.monotonic() < stable_until:
+                state = picker()
+                assert abs(state['scrollY'] - scrolled) < 1, ('Idle refresh reset the scroll position', scrolled, state)
+                assert state['selected'] == selected
+                time.sleep(.05)
+            rpc('plugins.register', packagePath=package_fixture(dict(id='scroll-refresh', title='Scroll Refresh', commands=[
+                dict(id='check', title='Scroll Refresh Check', executable='/usr/bin/true')]), directory))
+            state = picker()
+            assert any(r['id'] == 'plugin.scroll-refresh.check' for r in state['results'])
+            assert abs(state['scrollY'] - scrolled) < 1, ('Changed catalog reset the scroll position', scrolled, state)
+            key('down')
+            assert picker()['scrollY'] < scrolled, 'Keyboard navigation must still reveal its selected row'
+            picker(scrollDelta=-480)
+            eventually('Second native wheel scroll', lambda: picker()['scrollY'] > 200)
+            state = picker(query='split')
+            assert state['scrollY'] < 1 and state['selected'] == 'split.right', state
+            picker(query='')
             state = picker(sourceWidth=500, sourceHeight=400)
             assert state['attachedToSource'] and state['insideSource'] and abs(state['centerOffsetX']) < .5 and abs(state['centerOffsetY']) < .5, state
             capture('command-picker-compact-context.png', context=True)

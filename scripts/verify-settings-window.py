@@ -87,10 +87,22 @@ with http.server.ThreadingHTTPServer(('127.0.0.1', 0), Page) as server:
                 search = 'https://duckduckgo.com/?q={query}'
                 assert rpc('debug.settings', searchURL=search, apply=True)['error'] is None
                 assert rpc('config.get')['current']['browser']['search_url'] == search
+                state = rpc('debug.settings', workingDirectory='~/Projects', inheritWorkingDirectory=False, apply=True)
+                assert state['error'] is None and not state['dirty'], state
+                terminal = rpc('config.get')['current']['terminal']
+                assert terminal['working_directory'] == '~/Projects' and terminal['inherit_working_directory'] is False
+                rpc('debug.settings', workingDirectory='~', inheritWorkingDirectory=True, apply=True)
                 for section in ['General', 'Terminal', 'Browser', 'Keyboard Shortcuts', 'Plugins']:
                     rpc('debug.settings', section=section)
                     time.sleep(0.3)
                     rpc('debug.screenshot', settings=True, path=str(ROOT / f'artifacts/settings-{section.lower().replace(" ", "-")}.png'))
+
+                state = rpc('debug.settings', section='Browser')
+                assert state['browserPanes'] == [] and not state['canClearBrowserSite']
+                rpc('debug.settings', width=1000, height=560)
+                time.sleep(0.4)
+                rpc('debug.screenshot', settings=True, path=str(ROOT / 'artifacts/settings-browser-empty-small.png'))
+                rpc('debug.settings', width=1060, height=680)
 
                 state = rpc('debug.settings', section='Keyboard Shortcuts')
                 assert not state['hasToolbar'], 'Settings should not install a collapsing navigation toolbar'
@@ -167,6 +179,23 @@ with http.server.ThreadingHTTPServer(('127.0.0.1', 0), Page) as server:
                 eventually('right pane focused', lambda: next(t for t in rpc('workspace.get')['tabs'] if t['id'] == 't1')['focusedPane'] == right)
                 rpc('debug.key', chord='ctrl+alt+j')
                 eventually('bottom pane focused', lambda: next(t for t in rpc('workspace.get')['tabs'] if t['id'] == 't1')['focusedPane'] == bottom)
+                command('pane.type', pane='p1', type='browser', force=True)
+                site = f'http://127.0.0.1:{server.server_port}/settings'
+                rpc('browser.navigate', pane='p1', url=site)
+                state = rpc('debug.settings', section='Browser', browserPane='p1', width=1060, height=680)
+                assert state['browserSiteURL'] == site and state['canClearBrowserSite']
+                time.sleep(0.4)
+                rpc('debug.screenshot', settings=True, path=str(ROOT / 'artifacts/settings-browser-populated.png'))
+                rpc('debug.settings', width=1000, height=560)
+                time.sleep(0.4)
+                rpc('debug.screenshot', settings=True, path=str(ROOT / 'artifacts/settings-browser-populated-small.png'))
+                command('pane.type', pane='p1', type='private-browser', force=True)
+                rpc('browser.navigate', pane='p1', url=site)
+                rpc('debug.settings', section='Browser', browserPane='p1', width=1060, height=680)
+                time.sleep(0.4)
+                rpc('debug.screenshot', settings=True, path=str(ROOT / 'artifacts/settings-browser-private.png'))
+                command('pane.type', pane='p1', type='terminal', force=True)
+
                 print('PASS: settings persistence, validation, conflicts, native sections, browser and workspace shortcuts')
             finally:
                 if app.poll() is None:

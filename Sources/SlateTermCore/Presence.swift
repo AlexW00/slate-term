@@ -219,8 +219,8 @@ public struct PresenceTransition: Equatable, Sendable {
 
 /// Pure presence bookkeeping with an injected clock in seconds.
 public struct PresenceTracker: Sendable {
-    public static let minimumHold = 1.6
-    public static let resultHold = 1.3
+    public static let minimumHold = 5.0
+    public static let resultHold = 5.0
     /// Calls shorter than this never show a spinner or a result.
     public static let liveThreshold = 0.5
     public static let defaultLeaseSeconds = 60.0

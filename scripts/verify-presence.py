@@ -38,6 +38,47 @@ with AppFixture('presence') as app:
     eventually('target prompt', lambda: app.rpc('pane.inspect', pane=target).get('state') == 'prompt')
     agent = dict(app.env, SLATE_TERM_ACTOR='claude', SLATE_TERM_PANE_ID='p1')
     other = dict(app.env, SLATE_TERM_ACTOR='claude', SLATE_TERM_PANE_ID='p9')
+    # Both split routes put presence on the new pane, including splits from home.
+    # Preserving focus also lets an agent run and capture without interrupting typing.
+    app.rpc('command.run', id='pane.focus', pane='p1')
+    for source, direction in [('p1', 'down'), (target, 'left')]:
+        cursor = app.rpc('events.head')['cursor']
+        revision = app.rpc('pane.inspect', pane=source)['layoutRevision']
+        created = app.cli('panes', 'split', '--pane', source, '--' + direction,
+                          '--focus-policy', 'preserve', '--expected-layout-revision', revision,
+                          '--note', 'creating a command pane', env=agent)['paneId']
+        [split] = activities()
+        assert split['pane'] == created and split['actionKind'] == 'command', split
+        assert shown(source) == [] and shown(created)[0]['note'] == 'creating a command pane'
+        assert next(t for t in app.rpc('tabs.list') if t['id'] == 't1')['focusedPane'] == 'p1'
+        assert all(e['pane'] == created for e in presence_events(cursor))
+        time.sleep(2)
+        assert any(a['pane'] == created for a in activities()), 'Split tag must remain readable'
+        snapshot('split-' + direction, settle=0)
+        eventually('new split prompt', lambda: app.rpc('pane.inspect', pane=created).get('state') == 'prompt')
+        info = app.rpc('pane.inspect', pane=created)
+        app.cli('terminal', 'run', '--pane', created, '--session-id', info['sessionId'],
+                '--shell', info['shell'], '--command', 'echo PRESERVED_FOCUS', env=agent)
+        app.cli('terminal', 'capture', '--pane', created, env=agent)
+        assert next(t for t in app.rpc('tabs.list') if t['id'] == 't1')['focusedPane'] == 'p1'
+        native = next(p for p in app.rpc('debug.inspect')['panes'] if p['paneId'] == 'p1')
+        assert native['firstResponder'], native
+        app.rpc('command.run', id='pane.close', pane=created, force=True)
+        eventually('split presence clears', lambda: activities() == [])
+
+    for direction in ['left', 'right', 'up', 'down']:
+        created = app.cli('command', 'run', 'split.' + direction, '--pane', target,
+                          '--note', 'creating a split', env=agent)['paneId']
+        assert [a['pane'] for a in activities()] == [created]
+        assert shown(target) == [] and shown(created)
+        app.rpc('command.run', id='pane.close', pane=created, force=True)
+        eventually('split presence clears', lambda: activities() == [])
+
+    revision = app.rpc('pane.inspect', pane=target)['layoutRevision']
+    app.cli('panes', 'split', '--pane', target, '--right', '--focus-policy', 'preserve',
+            '--type', 'missing-plugin', '--expected-layout-revision', revision, env=agent, error=True)
+    assert activities() == [] and shown(target) == [], 'A rejected split has no new pane to highlight'
+
     cursor = app.rpc('events.head')['cursor']
 
     # Calls without an agent identity never show presence.

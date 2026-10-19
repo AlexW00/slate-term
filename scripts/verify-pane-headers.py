@@ -50,6 +50,19 @@ with AppFixture('pane-headers', configuration) as app:
     eventually('registered page ready', lambda: js('typeof workspace') == 'object')
     document = app.rpc('web.get', pane=panel)
     command('pane.focus', pane='p1')
+    # Maximized chrome restores the original split through the native button.
+    original_layout = app.rpc('layout.get', pane='p1')
+    for pane in ['p1', panel]:
+        assert not native(pane)['header']['restoreVisible']
+        command('pane.zoom', pane=pane)
+        header = native(pane)['header']
+        assert header['restoreVisible'] and header['restoreBeforeClose'] and header['closeVisible'], header
+        screenshot('maximized-' + pane)
+        app.rpc('debug.paneHeader', pane=pane, clickRestore=True)
+        assert not native(pane)['header']['restoreVisible']
+        assert next(t for t in app.rpc('workspace.get')['tabs'] if t['id'] == 't1').get('zoomedPane') is None
+        assert app.rpc('layout.get', pane='p1') == original_layout
+    command('pane.focus', pane='p1')
     before = native()
     snapshot = app.rpc('workspace.get')
     revision = inspect()['layoutRevision']
@@ -185,6 +198,8 @@ while True: time.sleep(1)
     assert native(hidden_panes[0])['header']['height'] == 0
     # Background tabs must update without selecting/activating their window.
     key_tab = app.rpc('workspace.get')['keyTabID']
+    app.rpc('debug.activate', tab=key_tab)
+    eventually('foreground window ready', lambda: any(w['key'] for w in app.rpc('window.list')['windows']))
     key_window = next(w['windowId'] for w in app.rpc('window.list')['windows'] if w['key'])
     command('pane.header.show', pane='p1')
     assert app.rpc('workspace.get')['keyTabID'] == key_tab

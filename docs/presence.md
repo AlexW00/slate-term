@@ -23,10 +23,10 @@ Presence is strictly for agents that identify themselves. Only administrative cl
 - it carries no actor (plain scripts, shell tools, people);
 - it comes from a registered plugin page or background service (their metadata actor is ignored, and `presence.hold/release` fail for them with `-32602`);
 - it carries a `cause` (event-caused work, so subscribers cannot loop on presence events);
-- it targets the agent's own `home` pane;
-- the method does not act on one pane (for example `context.get`, `pane.inspect`, `workspace.snapshot`, settings, events), or its pane is only implied by `--tab`/`--active`.
+- its activity belongs to the agent's own `home` pane (a split belongs to the new pane);
+- the method does not act on one pane (for example `context.get`, `pane.inspect`, `workspace.snapshot`, settings, events), or its pane is only implied by `--tab`/`--active` (successful splits use their returned pane ID).
 
-Presence begins when the call is admitted, before the method validates its arguments, so a call that is then rejected still shows briefly.
+Presence normally begins when the call is admitted, before the method validates its arguments, so a call that is then rejected still shows briefly. Splits begin presence only after success, on the newly created pane; failed splits do not highlight the source pane.
 
 An agent that runs a plugin command through `command run` shows on that command's target pane as itself.
 
@@ -37,11 +37,12 @@ An agent that runs a plugin command through `command run` shows on that command'
 | `terminal capture/send/key/run/wait`, `panes send/capture` | The pane |
 | `web snapshot/screenshot`, `browser snapshot/screenshot/navigate/eval`, `web scroll` without a target, an unmatched `web wait` | The pane |
 | `web click/fill/select/check/set-value/focus/key`, `web scroll` with a target, matched `web wait`, `browser click/fill/select/scroll/wait` | The element, using the action's returned `rect` |
-| `command run` for a pane-scoped command | The pane |
+| `command run` for `split.left/right/up/down` or `pane.split` | The newly created pane, after the split succeeds |
+| `command run` for other pane-scoped commands | The pane |
 
 All pills stay in a single bottom-right group, even for element actions. Only the highlight moves to the specific element. Pills are fully rounded native Liquid Glass containers, detached 14 pt from the content area's bottom and right edges (above a browser's native status strip). They overlay content without resizing the terminal. Empty overlay space remains click-through. A pill with no live origin is disabled and does not redirect focus. The `+N` overflow chip is only a summary, not a guessed navigation target.
 
-- **Timing.** Every call shows for at least 1.6 s, then fades. A call that is still running keeps its tag. `terminal run`, waits and navigation that take longer than 0.5 s show a spinner and elapsed time, then ✓ or ✕ (`exit N` for a failing run) for 1.3 s.
+- **Timing.** Every call shows for at least 5 s, then fades. A call that is still running keeps its tag. `terminal run`, waits and navigation that take longer than 0.5 s show a spinner and elapsed time, then ✓ or ✕ (`exit N` for a failing run) for 5 s.
 - **Merging.** Calls from the same agent session to the same pane merge into one activity. The hold extends, the note updates when a call supplies one, and the frame pulses once.
 - **Several agents.** The frame becomes a gradient through their colors in arrival order. Tags keep arrival order. From three tags up, or in panes narrower than 200 pt, tags shrink to the name (the newest keeps its note unless the pane is narrow). Tags that still do not fit fold into a `+N` chip.
 - **Labels.** A tag shows the agent name. While two sessions of the same agent are active, each label gains its home pane, for example `claude · p1` and `claude · p7`.

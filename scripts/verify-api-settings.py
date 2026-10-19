@@ -1,12 +1,53 @@
 #!/usr/bin/env python3
 """Shared appearance writer, conflict protection, pending-editor preservation and bridge parity."""
 import json
+import os
+import shlex
 from api_fixture import AppFixture, eventually
 from plugin_package_fixture import package_fixture
 
 source = '# preserved comment\n[appearance]\ntheme = "auto" # follow OS\n[terminal]\nshell = "/bin/zsh"\n[plugins.\"acme.tools\".custom]\ncount = 7\n'
 with AppFixture('api-settings', source) as app:
     app.capture_contracts()
+    # Verify actual shell directories, including a background split target.
+    project = app.root / 'project with spaces'
+    fallback = app.root / 'default directory'
+    project.mkdir()
+    fallback.mkdir()
+
+    def prompt(pane):
+        eventually('terminal prompt', lambda: app.rpc('context.get', pane=pane, scope='pane')['terminal']['state'] == 'prompt')
+
+    def check_directory(pane, expected):
+        prompt(pane)
+        output = app.root / 'pwd.txt'
+        result = app.rpc('terminal.run', pane=pane, command='pwd -P > ' + shlex.quote(str(output)), timeoutMilliseconds=10000)
+        assert result['exitCode'] == 0, result
+        assert output.read_text().strip() == os.path.realpath(expected), (pane, output.read_text(), expected)
+
+    def close(pane):
+        app.rpc('command.run', id='pane.close', pane=pane, force=True)
+
+    prompt('p1')
+    app.rpc('terminal.run', pane='p1', command='cd -- ' + shlex.quote(str(project)), timeoutMilliseconds=10000)
+    eventually('changed directory report', lambda: app.rpc('context.get', pane='p1', scope='pane')['terminal']['workingDirectory'] == str(project))
+    # The native shortcut uses the same operation as CLI and plugin commands.
+    app.rpc('debug.activate')
+    app.rpc('debug.key', chord='cmd+d', workspaceOnly=True)
+    native = next(p['paneId'] for p in app.rpc('workspace.snapshot')['panes'] if p['paneId'] != 'p1')
+    check_directory(native, project)
+    app.rpc('terminal.run', pane=native, command='cd -- ' + shlex.quote(str(fallback)), timeoutMilliseconds=10000)
+    targeted = app.cli('command', 'run', 'split.down', '--pane', 'p1')['paneId']
+    check_directory(targeted, project)
+    close(targeted)
+    close(native)
+    app.cli('config', 'set', '--key', 'terminal.working_directory', '--value', json.dumps(str(fallback)), '--expected-source-revision', app.rpc('config.get')['sourceRevision'])
+    app.cli('config', 'set', '--key', 'terminal.inherit_working_directory', '--value', 'false', '--expected-source-revision', app.rpc('config.get')['sourceRevision'])
+    disabled = app.rpc('command.run', id='pane.split', pane='p1', direction='right', expectedLayoutRevision=app.rpc('pane.inspect', pane='p1')['layoutRevision'])['paneId']
+    check_directory(disabled, fallback)
+    close(disabled)
+    # Restore defaults before the existing settings conflict tests.
+    app.rpc('config.patch', values={'terminal.working_directory': '~', 'terminal.inherit_working_directory': True}, expectedSourceRevision=app.rpc('config.get')['sourceRevision'])
     initial = app.rpc('config.get')
     assert initial['sourceRevision'] and initial['appliedRevision'] and initial['appliedMatchesSource']
     session = app.rpc('context.get', pane='p1', scope='pane')['terminal']['sessionId']
@@ -98,6 +139,11 @@ with AppFixture('api-settings', source) as app:
         return app.rpc('debug.pluginEval', pane='p1', script=script)
 
     eventually('plugin document', lambda: evaluate('typeof workspace') == 'object')
+    # Registered pages can configure and create terminal splits through the public API.
+    evaluate('await workspace.call("config.patch", {expectedSourceRevision:(await workspace.call("config.get")).sourceRevision,values:{"terminal.working_directory":' + json.dumps(str(fallback)) + ',"terminal.inherit_working_directory":false}})')
+    plugin_split = evaluate('await workspace.panes.split({direction:"right",expectedLayoutRevision:(await workspace.panes.inspect()).layoutRevision})')['paneId']
+    check_directory(plugin_split, fallback)
+    close(plugin_split)
     assert evaluate('await workspace.self()')['caller']['identitySource'] == 'bridgeBound'
     assert evaluate('await workspace.panes.inspect()')['paneId'] == 'p1'
     stale = evaluate('await workspace.panes.inspect({expectedWorkspaceRevision:"stale"}).then(()=>null,e=>e.code)')
