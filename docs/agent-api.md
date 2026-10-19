@@ -41,7 +41,7 @@ Errors `-32050` (conflict), `-32051` (unavailable/bounds), `-32052` (reserved fo
 
 ## Layout, tabs and native windows
 
-See [guarded layout operations](layout-api.md) for atomic pane/root split with type/fraction/focus, pane move, subtree resize, manual title set/clear, native tab reorder/move/detach and paginated native window inspection/focus. Layout/tab rearrangement requires an observed revision. Typed CLI and registered-page wrappers use the same command route, including window operations and the native detach convenience alias.
+See [guarded layout operations](layout-api.md) for atomic pane/root split with type/fraction/focus, pane move, subtree resize, manual title set/clear, native tab reorder/move/detach and paginated native window inspection/focus. Structural automation preserves focus by default; request `focus: new` for creation or `focus: target` for pane movement only when selection is intended. Layout/tab rearrangement requires an observed revision. Typed CLI and registered-page wrappers use the same command route, including window operations and the native detach convenience alias.
 
 ## Appearance and application configuration
 

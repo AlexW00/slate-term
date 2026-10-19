@@ -2,14 +2,22 @@
 
 These commands use the same model/native reconciliation as menus and registered page controls. See [agent identity and guards](agent-api.md) for target resolution and recovery. `workspace.get` and `layout.get` keep their legacy shapes.
 
+## Focus preservation
+
+CLI, registered pages and services preserve the current pane, tab and native key window during structural work. `split.*`, `pane.split`, `tab.new`, `window.new` and `layouts.open` default to `focus: preserve`; pass `focus: new` to select the created content. `pane.move` accepts `preserve` (default) or `target`. Moving the currently selected pane across tabs follows that same pane; moving a background pane keeps the destination's selection and terminal history order. Creating the first workspace necessarily establishes its initial selection.
+
+Native shortcuts, menu actions, pane drags and layout launchers explicitly select their result. Automation uses `--focus-policy new` for pane/tab/layout creation, or `--focus-policy target` for pane movement. `window.new` accepts `{focus:"new"}` through `command.run`. Read `api.describe.workspaceFocus` and each command's input schema for policies.
+
+Explicit pane/tab/window focus commands, tab navigation, pane zoom, and presentation commands such as Find or browser address editing still move focus intentionally. `window.focus` only activates the application when `activate: true`. Closing the selected pane/tab chooses a surviving target. Ordinary reconciliation preserves Settings and existing native responders; it does not raise every workspace window. New background windows appear behind existing windows.
+
 ## Pane and layout commands
 
 Use `command.run` with an explicit `id` and ordinary `pane`/`tab` targeting:
 
 | ID | Arguments | Required precondition |
 | --- | --- | --- |
-| `pane.split` | `direction`: left/right/up/down; `target`: pane (default) or root; `type`: terminal (default), browser, or registered panel ID; `newPaneFraction`: default 0.5; `focus`: new (default) or preserve | `expectedLayoutRevision` |
-| `pane.move` | `target`: destination pane ID in any same-app tab/window; `direction`: left/right/up/down | Source `expectedLayoutRevision`; also `expectedWorkspaceRevision` for different tabs |
+| `pane.split` | `direction`: left/right/up/down; `target`: pane (default) or root; `type`: terminal (default), browser, or registered panel ID; `newPaneFraction`: default 0.5; `focus`: preserve (default) or new | `expectedLayoutRevision` |
+| `pane.move` | `target`: destination pane ID in any same-app tab/window; `direction`: left/right/up/down; `focus`: preserve (default) or target | Source `expectedLayoutRevision`; also `expectedWorkspaceRevision` for different tabs |
 | `layout.resize` | `path`: array of first/second branches; `firstChildFraction` | `expectedLayoutRevision` |
 | `pane.title.set` | `title`: string | Optional ordinary identity/revision guards |
 | `pane.title.clear` | None | Optional ordinary identity/revision guards |
@@ -40,7 +48,7 @@ slate-term panes clear-title --pane p1
 
 **Move Pane…** (`pane.move.chooseDestination`) opens the native destination menu for a visible pane bar and is shared with the picker/Workspace menu/configurable shortcuts. API movement itself requires neither a visible bar nor a drag session. Inactive native tabs can be destinations with valid displayed-group geometry; minimized/ordered-out groups fail closed.
 
-A plain `panes split --right` continues to call its legacy alias. Supplying type/root/fraction/focus options selects the guarded atomic operation.
+A plain `panes split --right` continues to call its legacy alias. Supplying type/root/fraction options selects the guarded atomic operation. `--focus-policy` alone works with the simple alias and does not require a layout revision.
 
 ## Pane bar visibility
 

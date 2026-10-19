@@ -116,7 +116,7 @@ with AppFixture('layout-api') as app:
     app.rpc('command.run', id='window.focus', windowId='missing-window', error=-32051)
     # Move the first tab into a differently sized destination while preserving its
     # selected tab, then reorder a three-tab group without rebuilding live contents.
-    t3 = app.rpc('command.run', id='window.new')['tabId']
+    t3 = app.rpc('command.run', id='window.new', focus='new')['tabId']
     app.rpc('debug.commandPicker', show=True, tab=t3)
     app.rpc('debug.commandPicker', sourceWidth=720, sourceHeight=700)
     app.rpc('debug.commandPicker', dismiss=True)

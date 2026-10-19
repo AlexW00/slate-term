@@ -126,14 +126,19 @@ private func requestBytes(metadata: JSONValue) throws -> Data {
     #expect(record?.leaseUntil == PresenceTracker.maximumLeaseSeconds)
 }
 
-@Test func agentsAndSessionsGetSeparateRecordsAndLabelsDisambiguateOnlyWhenNeeded() throws {
+@Test func agentLabelsStayStableAsOtherSessionsJoinAndLeave() throws {
     var tracker = PresenceTracker()
     _ = tracker.begin(actor: try actor(home: "p1"), pane: "p5", action: .read, now: 0)
     _ = tracker.begin(actor: try actor("codex", home: "p9"), pane: "p5", action: .read, now: 0)
     #expect(tracker.display(now: 0).map(\.label) == ["claude", "codex"])
-    _ = tracker.begin(actor: try actor("Claude", home: "p7"), pane: "p5", action: .read, now: 0)
+    let (other, _) = tracker.begin(actor: try actor("Claude", home: "p7"), pane: "p5", action: .read, now: 0)
     #expect(tracker.records.count == 3)
-    #expect(tracker.display(now: 0).map(\.label) == ["claude · p1", "codex", "Claude · p7"])
+    #expect(Set(tracker.records.map(\.id)).count == 3)
+    #expect(tracker.display(now: 0).map(\.label) == ["claude", "codex", "Claude"])
+    #expect(tracker.records.map(\.home) == ["p1", "p9", "p7"])
+    tracker.end(try #require(other), result: .ok(nil), element: nil, now: 0.1)
+    #expect(tracker.expire(now: 6).count == 1)
+    #expect(tracker.display(now: 6).map(\.label) == ["claude", "codex"])
 }
 
 @Test func elementsAndClosedPanes() throws {

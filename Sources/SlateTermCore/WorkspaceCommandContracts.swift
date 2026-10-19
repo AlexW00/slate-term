@@ -62,6 +62,9 @@ extension AutomationContracts {
                 semantics["terminalWorkingDirectory"] = .string("inheritTargetWhenEnabledOtherwiseConfiguredDefault")
                 semantics["newPaneType"] = .string("terminal"); semantics["newPaneFraction"] = .number(0.5)
             }
+            if id.hasPrefix("split.") || id == "tab.new" || id == "window.new" {
+                parameters["focus"] = S.defaulted(S.strings(["new", "preserve"]), .string("preserve"))
+            }
             if id == "tab.new" || id == "window.new" { result = "NewTabCommit" }
             if id == "window.new" { conditions = []; semantics["mode"] = .string("newWindowGroup") }
             if id == "tab.new" { semantics["mode"] = .string("targetGroupOrNewWindowWhenNoWorkspace") }
@@ -94,20 +97,21 @@ extension AutomationContracts {
             case "pane.split":
                 parameters.merge(["direction": directions, "target": S.defaulted(S.strings(["pane", "root"]), .string("pane")),
                     "type": S.defaulted(S.string(minimumLength: 1), .string("terminal")), "newPaneFraction": S.defaulted(fraction, .number(0.5)),
-                    "focus": S.defaulted(S.strings(["new", "preserve"]), .string("new"))]) { _, value in value }
+                    "focus": S.defaulted(S.strings(["new", "preserve"]), .string("preserve"))]) { _, value in value }
                 required.append("direction"); result = "PaneLayoutCommit"
                 conditions += [requires("resultingTreeDepthAtMost64"), requires("builtinOrActiveCompatiblePanelType")]
                 semantics["splittingClearsZoom"] = .bool(true)
                 semantics["terminalWorkingDirectory"] = .string("inheritTargetWhenEnabledOtherwiseConfiguredDefault")
                 semantics["fractionMeaning"] = .string("newPaneShareNotAlwaysFirstChildShare")
             case "pane.move":
-                parameters.merge(["target": S.paneID, "direction": directions]) { _, value in value }
+                parameters.merge(["target": S.paneID, "direction": directions, "focus": S.defaulted(S.strings(["target", "preserve"]), .string("preserve"))]) { _, value in value }
                 required += ["target", "direction"]; result = "PaneMoveCommit"
                 conditions += [requires("liveDestinationPaneAndUnzoomedSourceAndDestination"), requires("expectedWorkspaceRevisionForCrossTabMove"),
                     requires("resultingTreeDepthAtMost64AndBothNativeGeometriesAvailable")]
                 semantics["samePaneDestination"] = .string("unchangedSuccessWhenGeometryAvailable")
                 semantics["contentLifetime"] = .string("preservedExceptTabScopedPluginRebindingAcrossTabs")
                 semantics["lastSourcePane"] = .string("retiresEmptySourceTabAndGroup")
+                semantics["preserveFocus"] = .string("retainSelectedPaneIncludingWhenItMovesAcrossTabs")
             case "layout.resize":
                 parameters.merge(["path": S.array(S.strings(["first", "second"]), maximum: 64), "firstChildFraction": fraction]) { _, value in value }
                 required += ["path", "firstChildFraction"]

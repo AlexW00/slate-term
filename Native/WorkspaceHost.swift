@@ -26,7 +26,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     func reconcileNotificationFocus(_ next: Workspace, transition: WorkspaceTransition, operation: WorkspaceOperationContext) throws -> WorkspacePersistence {
         // Explicit source navigation must release the rename sheet before focusing content.
         tabRename?.cancelForLifecycle()
-        return try reconcile(next, transition: transition, operation: operation)
+        return try reconcile(next, transition: transition, operation: operation, requestFocus: true)
     }
     private var pluginCatalog: PluginCatalog
     private var packageOperationBusy = false
@@ -137,6 +137,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     var appearanceRefreshScheduled = false
     var publishedAppearanceRevision: String?
     private var settingsWindow: SettingsWindowController?
+    private var nativeKeyChangeCount = 0
     private let savedLayouts: SavedLayouts
     private let layoutStartup = LayoutStartup()
     private var layoutRecipes: [PaneID: SavedLayoutPane] = [:]
@@ -209,9 +210,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             guard let self else { throw SocketError.disconnected }
             return try self.captureLayout(source: source, directories: directories, urls: urls, commands: commands)
         }
-        savedLayouts.open = { [weak self] definition, operation in
+        savedLayouts.open = { [weak self] definition, focus, operation in
             guard let self else { throw SocketError.disconnected }
-            return try self.openSavedLayout(definition, operation: operation)
+            return try self.openSavedLayout(definition, focus: focus, operation: operation)
         }
         savedLayouts.invoke = { [weak self] method, params, operation in
             guard let self else { throw SocketError.disconnected }
@@ -386,6 +387,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             if engineChanged { try runtime.reload(from: url) }
         }
         applyAppearance()
+        updatePaneDimming()
         presence.render()
         for browser in leaves.values.compactMap({ $0 as? BrowserPane }) { browser.browserConfiguration = settings.current.browser }
         persistWorkspace()
@@ -1129,7 +1131,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 var next = workspace
                 try next.focusTab(target.tab)
                 let transition = try WorkspaceTransition(observing: next, from: workspace, revisions: revisions, action: .windowFocus)
-                let persistence = try reconcile(next, transition: transition, operation: operation)
+                let persistence = try reconcile(next, transition: transition, operation: operation, requestFocus: true)
                 if target.window.isMiniaturized {
                     target.window.deminiaturize(nil)
                     target.window.makeKeyAndOrderFront(nil)
@@ -1174,7 +1176,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             } else {
                 let anchor = (id == "pane.split" || id.hasPrefix("split.")) ? try targetPaneID(params) : nil
                 let directory = anchor.flatMap { shellSessions[$0]?.report?.workingDirectory ?? terminals[$0]?.context.workingDirectory }
-                persistence = try reconcile(next, splitDirectory: directory, transition: transition, operation: operation)
+                persistence = try reconcile(next, splitDirectory: directory, transition: transition, operation: operation,
+                                            requestFocus: CommandRegistry.requestsFocus(id, params: params))
             }
             return operationResult(mutationResponse(id, result: result), transition: transition, operation: operation, workspacePersistence: persistence)
         case .panesSend:
@@ -1220,7 +1223,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             if case .integer(let delay) = params["delayMilliseconds"], (0...2000).contains(delay) { notificationDelivery.testingAuthorizationDelayMilliseconds = delay }
             if case .bool(let success) = params["submissionSucceeds"] { notificationDelivery.testingSubmissionSucceeds = success }
             return .object(["pending": .integer(notificationPending), "authorizationInspections": .integer(notificationDelivery.authorizationInspectionCount),
-                "appActive": .bool(NSApp.isActive),
+                "appActive": .bool(NSApp.isActive), "nativeKeyChangeCount": .integer(nativeKeyChangeCount),
+                "settingsKey": .bool(settingsWindow?.window != nil && NSApp.keyWindow === settingsWindow?.window),
                 "keyTab": windows.first(where: { $0.value === NSApp.keyWindow }).map { .string($0.key.description) } ?? .null,
                 "tabTitles": .object(Dictionary(uniqueKeysWithValues: windows.map { ($0.key.description, .string($0.value.tab.title)) }))])
         case "debug.pluginPersistence" where integration:
@@ -1626,6 +1630,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             if let value = params["workingDirectory"]?.string { model.workingDirectory = value }
             if case .bool(let value) = params["inheritWorkingDirectory"] { model.inheritWorkingDirectory = value }
             if let value = params["fontSize"]?.string { model.fontSize = value }
+            if case .number(let value) = params["unfocusedPaneDim"] { model.unfocusedPaneDim = value }
+            if case .integer(let value) = params["unfocusedPaneDim"] { model.unfocusedPaneDim = Double(value) }
             if let value = params["searchURL"]?.string { model.searchURL = value }
             if params["refreshBrowserSites"] == .bool(true) { refreshBrowserSettings() }
             if let value = params["browserSite"]?.string { model.selectBrowserSite(value) }
@@ -1874,7 +1880,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         return try SavedLayoutDefinition(name: "Untitled Layout", tabs: tabs).validated()
     }
 
-    private func openSavedLayout(_ definition: SavedLayoutDefinition,
+    private func openSavedLayout(_ definition: SavedLayoutDefinition, focus: Bool,
                                  operation: WorkspaceOperationContext) throws -> JSONValue {
         let problems = definition.problems(types: savedLayouts.types())
         guard problems.isEmpty else { throw RPCFailure(code: -32602, message: problems.joined(separator: "\n")) }
@@ -1895,7 +1901,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 }
             }
         }
-        let opening = try definition.opening(in: workspace)
+        let opening = try definition.opening(in: workspace, focus: focus)
         var openingRecipes: [PaneID: SavedLayoutPane] = [:]
         for (id, var pane) in opening.panes {
             if let type = savedLayouts.types().first(where: { $0.id == pane.type }) {
@@ -1912,7 +1918,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         // Reserve before any old sessions are torn down; ordinary runs cannot steal these slots.
         try terminalControl.reserveStartup(startupPanes)
         let persistence: WorkspacePersistence
-        do { persistence = try reconcile(openingWorkspace, recipes: openingRecipes, transition: transition, operation: operation) }
+        do { persistence = try reconcile(openingWorkspace, recipes: openingRecipes, transition: transition, operation: operation, requestFocus: focus) }
         catch { startupPanes.forEach { terminalControl.releaseStartup($0) }; throw error }
         for (id, pane) in openingRecipes where pane.type == "terminal" {
             if let command = pane.configuration["command"]?.string, !command.isEmpty, let session = shellSessions[id] {
@@ -1937,7 +1943,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                   let id = UUID(uuidString: String(url.path.dropFirst())) else {
                 throw RPCFailure(code: -32602, message: "Invalid saved layout launcher URL")
             }
-            _ = try call("layouts.open", params: ["id": .string(id.uuidString)])
+            _ = try call("layouts.open", params: ["id": .string(id.uuidString), "focus": .string("new")])
         } catch { present(error) }
     }
 
@@ -2026,11 +2032,18 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     /// Prepare new surfaces before committing the value model; failures leave the old tree intact.
     @discardableResult
     private func reconcile(_ next: Workspace, recipes: [PaneID: SavedLayoutPane] = [:], restoration: WorkspaceRestoration? = nil, splitDirectory: String? = nil, transition suppliedTransition: WorkspaceTransition? = nil,
-                           operation suppliedOperation: WorkspaceOperationContext? = nil,
+                           operation suppliedOperation: WorkspaceOperationContext? = nil, requestFocus: Bool = false,
                            observation: WorkspaceTransition.Observation = .startup,
                            additionalPublications: [EventPublication] = [], beforeCommit: () throws -> Void = {}) throws -> WorkspacePersistence {
         guard !reconciling else { throw RPCFailure(code: APIError.conflict, message: "Workspace reconciliation is already in progress") }
         let operation = suppliedOperation ?? WorkspaceOperationContext(origin: .native)
+        let previous = workspace
+        let previousKeyWindow = NSApp.keyWindow
+        let existingWindows = Set(windows.keys)
+        let previousKeyWasWorkspace = previousKeyWindow.map { key in windows.values.contains { $0 === key } } ?? false
+        let presentedTabs = Set(previous.groups.filter { group in
+            group.tabs.contains { windows[$0]?.isVisible == true }
+        }.flatMap(\.tabs))
         let transition = try suppliedTransition ?? WorkspaceTransition(observing: next, from: workspace, revisions: revisions, action: observation)
         guard transition.workspace == next else { throw RPCFailure(code: APIError.conflict, message: "Prepared workspace does not match reconciliation") }
         leaves.values.compactMap { $0 as? BrowserPane }.forEach { $0.rememberFocus() }
@@ -2391,22 +2404,33 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 renderedZoom[tab.id] = tab.zoomedPane
             }
         }
-        reconcileNativeGroups()
-        if commandPicker?.isVisible != true, tabRename == nil, let tab = next.tabs.first(where: { $0.id == next.keyTabID }), let window = windows[tab.id] {
-            window.makeKeyAndOrderFront(nil)
-            focusResponder(tab.focusedPane, in: window)
+        reconcileNativeGroups(previous: previous, existingWindows: existingWindows, presentedTabs: presentedTabs)
+        let selectWindow = requestFocus || (existingWindows.isEmpty && previousKeyWindow == nil)
+            || (previousKeyWasWorkspace && previous.keyTabID != next.keyTabID)
+        if commandPicker?.isVisible != true, tabRename == nil,
+           let tab = next.tabs.first(where: { $0.id == next.keyTabID }), let window = windows[tab.id] {
+            if selectWindow { window.makeKeyAndOrderFront(nil) }
+            if selectWindow || (window === previousKeyWindow && previous.tabs.first(where: { $0.id == tab.id })?.focusedPane != tab.focusedPane) {
+                focusResponder(tab.focusedPane, in: window)
+            }
         }
+        // Native regrouping must not redirect an existing Settings or workspace key window.
+        if !selectWindow, let previousKeyWindow, previousKeyWindow.isVisible,
+           NSApp.keyWindow !== previousKeyWindow { previousKeyWindow.makeKey() }
         for id in changedTabs {
             windows[id]?.contentView?.layoutSubtreeIfNeeded()
             (windows[id]?.contentViewController as? WorkspaceSplitController)?.applyInitialFractions()
         }
         // Rebuilding a background tab can remove its first responder too.
         if commandPicker?.isVisible != true, tabRename == nil {
-            for tab in next.tabs {
+            for tab in next.tabs where changedTabs.contains(tab.id) {
                 if let window = windows[tab.id] { focusResponder(tab.focusedPane, in: window) }
             }
         }
-        synchronizeTerminalFocus(commandPicker?.isVisible == true ? nil : workspace.tabs.first { $0.id == workspace.keyTabID }?.focusedPane)
+        let keyPane = next.tabs.first { windows[$0.id] === NSApp.keyWindow }?.focusedPane
+        let terminalInput = keyPane.flatMap { terminals[$0] }
+        let terminalHasResponder = terminalInput.map { $0.window?.firstResponder === $0 } ?? false
+        synchronizeTerminalFocus(commandPicker?.isVisible == true || !terminalHasResponder ? nil : keyPane)
         observeNativeTabGroups()
         createdPlugins.values.forEach { $0.activate() }
         pluginInstances.prune(workspace: workspace)
@@ -2470,7 +2494,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }
         var next = workspace
         do {
-            _ = try CommandRegistry.execute("pane.move", params: ["pane": .string(pane.description), "target": .string(target.description), "direction": .string(direction.rawValue)], workspace: &next)
+            _ = try CommandRegistry.execute("pane.move", params: ["pane": .string(pane.description), "target": .string(target.description), "direction": .string(direction.rawValue), "focus": .string("target")], workspace: &next)
             try validateMutationGeometry("pane.move", params: ["pane": .string(pane.description), "target": .string(target.description)], next: next, result: .object([:]))
             return next
         } catch { return nil }
@@ -2498,7 +2522,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
               let tab = try? workspace.resolvedTab(pane: pane), proposedMove(source: source, target: target, direction: direction) != nil else { return false }
         do {
             _ = try call("command.run", params: ["id": .string("pane.move"), "pane": .string(pane.description), "target": .string(target.description),
-                                                "direction": .string(direction.rawValue), "expectedLayoutRevision": .string(revisions.layoutRevision(tab.id)!),
+                                                "direction": .string(direction.rawValue), "focus": .string("target"), "expectedLayoutRevision": .string(revisions.layoutRevision(tab.id)!),
                                                 "expectedWorkspaceRevision": .string(revisions.revision)])
             return true
         } catch { present(error); return false }
@@ -2554,6 +2578,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         do {
             var params = values.mapValues(JSONValue.string)
             params["id"] = .string("pane.move")
+            params["focus"] = .string("target")
             _ = try call("command.run", params: params)
         } catch { present(error) }
     }
@@ -2669,13 +2694,20 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         for (id, terminal) in terminals { terminal.setFocused(id == pane) }
         // Keep the selected pane readable even when a picker/popover owns key
         // focus. This indicates pane selection, not application activation.
-        for tab in workspace.tabs {
-            for id in tab.layout.paneIDs { containers[id]?.setActive(id == tab.focusedPane) }
-        }
+        updatePaneDimming()
         refreshNotifications()
     }
 
+    private func updatePaneDimming() {
+        for tab in workspace.tabs {
+            for id in tab.layout.paneIDs {
+                containers[id]?.setActive(id == tab.focusedPane, dimAmount: settings.current.unfocusedPaneDim)
+            }
+        }
+    }
+
     func windowDidResignKey(_ notification: Notification) {
+        if integration { nativeKeyChangeCount += 1 }
         guard !reconciling, let window = notification.object as? NSWindow else { return }
         for browser in leaves.values.compactMap({ $0 as? BrowserPane }) where browser.view.window === window { browser.rememberFocus() }
         for terminal in leaves.values.compactMap({ $0 as? TerminalPaneController }) where terminal.view.window === window { terminal.rememberFocus() }
@@ -2683,6 +2715,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     func windowDidBecomeKey(_ notification: Notification) {
+        if integration { nativeKeyChangeCount += 1 }
         guard !reconciling, let window = notification.object as? NSWindow,
               let id = windows.first(where: { $0.value === window })?.key else { return }
         do {
@@ -2766,7 +2799,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         return result
     }
 
-    private func reconcileNativeGroups() {
+    private func reconcileNativeGroups(previous: Workspace, existingWindows: Set<TabID>, presentedTabs: Set<TabID>) {
         var selected: [GroupID: NSWindow] = [:]
         for window in windows.values {
             if let native = window.tabGroup, let id = nativeGroupIDs[ObjectIdentifier(native)], let current = native.selectedWindow { selected[id] = current }
@@ -2777,6 +2810,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             // Keep the destination's actual native group/frame even when an arriving
             // tab becomes its first member. A model group is not a window identity.
             let anchor = desired.first { window in window.tabGroup.map { nativeGroupIDs[ObjectIdentifier($0)] == group.id } ?? false } ?? first
+            let changed = previous.groups.first { $0.id == group.id } != group
+            let shouldShow = group.tabs.contains { !existingWindows.contains($0) || presentedTabs.contains($0) }
+            // Never-ordered singleton windows may not have an AppKit tab group yet.
+            if anchor.tabGroup == nil, changed, shouldShow, !anchor.isVisible, !anchor.isMiniaturized { anchor.orderBack(nil) }
             guard let native = anchor.tabGroup else { continue }
             for outsider in native.windows where !desired.contains(where: { $0 === outsider }) { native.removeWindow(outsider) }
             for (index, window) in desired.enumerated() where native.windows.firstIndex(where: { $0 === window }) != index {
@@ -2788,8 +2825,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             }
             let focused: NSWindow? = workspace.keyTabID.flatMap { group.tabs.contains($0) ? windows[$0] : nil }
             let retained = selected[group.id].flatMap { current in desired.contains(where: { $0 === current }) ? current : nil }
-            native.selectedWindow = focused ?? retained ?? first
-            native.selectedWindow?.orderFront(nil)
+            let selection = focused ?? retained ?? first
+            if native.selectedWindow !== selection { native.selectedWindow = selection }
+            // Show new or detached groups behind existing windows. Unchanged groups retain their order.
+            if changed, shouldShow, !selection.isVisible, !selection.isMiniaturized { selection.orderBack(nil) }
         }
     }
 
@@ -2969,7 +3008,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         if id.hasPrefix("layout-template.") {
             let layoutID = String(id.dropFirst("layout-template.".count))
             commandPicker?.dismiss(restoreFocus: true)
-            do { _ = try call("layouts.open", params: ["id": .string(layoutID)]) }
+            do { _ = try call("layouts.open", params: ["id": .string(layoutID), "focus": .string("new")]) }
             catch { present(error) }
             return
         }
@@ -3533,6 +3572,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
 
     private func runUserCommand(_ id: String, params: [String: JSONValue], capturedWithoutWorkspace: Bool = false) {
         var params = params
+        params.merge(CommandRegistry.nativeFocusParameters(id)) { current, _ in current }
         params["id"] = .string(id)
         do {
             try synchronizeNativeGroups()

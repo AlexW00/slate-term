@@ -9,6 +9,34 @@ from plugin_package_fixture import package_fixture
 source = '# preserved comment\n[appearance]\ntheme = "auto" # follow OS\n[terminal]\nshell = "/bin/zsh"\n[plugins.\"acme.tools\".custom]\ncount = 7\n'
 with AppFixture('api-settings', source) as app:
     app.capture_contracts()
+    # The shared numeric setting applies to retained panes through API, CLI and native Settings.
+    dim_key = 'appearance.unfocused_pane_dim'
+    sibling = app.rpc('command.run', id='split.right', pane='p1', focus='new')['paneId']
+    session_before = app.rpc('context.get', pane='p1', scope='pane')['terminal']['sessionId']
+    def shade(pane):
+        return app.rpc('debug.paneHeader', pane=pane)
+    for amount in [0, 0.35, 1]:
+        result = app.rpc('config.patch', values={dim_key: amount}, expectedSourceRevision=app.rpc('config.get')['sourceRevision'])
+        assert not result['restartRequired']
+        assert shade('p1')['dimAmount'] == amount
+        assert shade(sibling)['dimAmount'] == 0
+    app.rpc('command.run', id='pane.focus', pane='p1')
+    assert shade('p1')['dimAmount'] == 0 and shade(sibling)['dimAmount'] == 1
+    before = app.config.read_text()
+    for invalid in [-0.1, 1.1, True, '0.5', None]:
+        app.rpc('config.patch', values={dim_key: invalid}, expectedSourceRevision=app.rpc('config.get')['sourceRevision'], error=-32602)
+        assert app.config.read_text() == before
+    app.cli('config', 'set', '--key', dim_key, '--value', '0.2', '--expected-source-revision', app.rpc('config.get')['sourceRevision'])
+    assert shade(sibling)['dimAmount'] == 0.2
+    app.rpc('debug.settings', unfocusedPaneDim=0.4, apply=True)
+    assert shade(sibling)['dimAmount'] == 0.4
+    saved_dim = app.config.read_text()
+    updated_dim = saved_dim.replace('"unfocused_pane_dim" = 0.4', '"unfocused_pane_dim" = 0.08')
+    assert updated_dim != saved_dim
+    app.config.write_text(updated_dim)
+    eventually('TOML dim reload', lambda: shade(sibling)['dimAmount'] == 0.08)
+    assert app.rpc('context.get', pane='p1', scope='pane')['terminal']['sessionId'] == session_before
+    app.rpc('command.run', id='pane.close', pane=sibling, force=True)
     # Verify actual shell directories, including a background split target.
     project = app.root / 'project with spaces'
     fallback = app.root / 'default directory'
@@ -139,6 +167,8 @@ with AppFixture('api-settings', source) as app:
         return app.rpc('debug.pluginEval', pane='p1', script=script)
 
     eventually('plugin document', lambda: evaluate('typeof workspace') == 'object')
+    evaluate('await workspace.call("config.patch", {expectedSourceRevision:(await workspace.call("config.get")).sourceRevision,values:{"appearance.unfocused_pane_dim":0.25}})')
+    assert app.rpc('config.get')['current']['appearance']['unfocused_pane_dim'] == 0.25
     # Registered pages can configure and create terminal splits through the public API.
     evaluate('await workspace.call("config.patch", {expectedSourceRevision:(await workspace.call("config.get")).sourceRevision,values:{"terminal.working_directory":' + json.dumps(str(fallback)) + ',"terminal.inherit_working_directory":false}})')
     plugin_split = evaluate('await workspace.panes.split({direction:"right",expectedLayoutRevision:(await workspace.panes.inspect()).layoutRevision})')['paneId']

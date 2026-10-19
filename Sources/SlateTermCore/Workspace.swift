@@ -154,10 +154,11 @@ public struct Workspace: Equatable, Sendable {
 
     /// Move an existing pane beside another pane, retaining its identity across tabs.
     /// Validate the complete replacement before committing so rejected moves are atomic.
-    public mutating func move(_ pane: PaneID, beside target: PaneID, direction: Direction) throws {
+    public mutating func move(_ pane: PaneID, beside target: PaneID, direction: Direction, focus selectTarget: Bool = true) throws {
         let index = try tabIndex(containing: pane)
         let destination = try tabIndex(containing: target)
         guard pane != target else { return }
+        let followsSelectedPane = keyTabID == tabs[index].id && tabs[index].focusedPane == pane
         if index != destination {
             var next = self
             let sourceTab = tabs[index].id
@@ -184,9 +185,10 @@ public struct Workspace: Equatable, Sendable {
             let destinationIndex = next.tabs.firstIndex { $0.id == destinationTab }!
             next.tabs[destinationIndex].layout = layout
             next.tabs[destinationIndex].zoomedPane = nil
-            next.focus(pane, in: destinationIndex)
-            // The source terminal may not have existed in destination history yet.
-            // focus inserts terminals; nonterminal transfers leave it unchanged.
+            if selectTarget || followsSelectedPane { next.focus(pane, in: destinationIndex) }
+            else if panes.first(where: { $0.id == pane })?.type == .terminal {
+                next.tabs[destinationIndex].terminalHistory.append(pane)
+            }
             self = next
             return
         }
@@ -198,7 +200,7 @@ public struct Workspace: Equatable, Sendable {
         _ = try layout.checkedPaneIDs()
         tabs[index].layout = layout
         tabs[index].zoomedPane = nil
-        focus(pane, in: index)
+        if selectTarget { focus(pane, in: index) }
     }
 
     /// Replace the contents of a slot without changing its layout or identity.
@@ -280,7 +282,7 @@ public struct Workspace: Equatable, Sendable {
     }
 
     @discardableResult
-    public mutating func newTab(in group: GroupID? = nil) throws -> TabID {
+    public mutating func newTab(in group: GroupID? = nil, focus: Bool = true) throws -> TabID {
         if let group, !groups.contains(where: { $0.id == group }) { throw WorkspaceError.groupNotFound(group) }
         try requireAvailable(nextPane)
         try requireAvailable(nextTab)
@@ -297,7 +299,7 @@ public struct Workspace: Equatable, Sendable {
             groups.append(TabGroup(id: GroupID(nextGroup), tabs: [tab]))
             nextGroup += 1
         }
-        keyTabID = tab
+        if focus || keyTabID == nil { keyTabID = tab }
         return tab
     }
 

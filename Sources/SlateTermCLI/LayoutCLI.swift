@@ -22,7 +22,7 @@ struct Tabs: ParsableCommand {
     @Option(help: "Manual tab name, at most 100 characters / 1024 UTF-8 bytes after trimming, without controls.") var title: String?
     @Option(help: "Destination group ID for move.") var group: String?
     @Option(help: "Zero-based final index; move appends when omitted.") var index: Int?
-    @Option(help: "target or preserve (default) for rearrangement.") var focusPolicy: String?
+    @Option(help: "preserve (default), new for creation, or target for rearrangement.") var focusPolicy: String?
     func run() throws {
         var params = try target.params(connection: connection)
         if action == .setTitle {
@@ -39,7 +39,13 @@ struct Tabs: ParsableCommand {
             if action == .reorder, index == nil { throw ValidationError("reorder requires --index") }
             if action != .move && group != nil { throw ValidationError("--group is only valid for move") }
             if action == .detach && index != nil { throw ValidationError("detach does not take --index") }
-        } else if group != nil || index != nil || focusPolicy != nil { throw ValidationError("Rearrangement options require reorder, detach or move") }
+        } else {
+            if group != nil || index != nil { throw ValidationError("Rearrangement options require reorder, detach or move") }
+            if let focusPolicy {
+                guard action == .new else { throw ValidationError("--focus-policy requires new or rearrangement") }
+                params["focus"] = .string(focusPolicy)
+            }
+        }
         if action == .list { try connection.call("tabs.list", params: params) }
         else {
             params["id"] = .string(action.commandID!)
@@ -64,7 +70,7 @@ struct Panes: ParsableCommand {
     @Flag var down = false
     @Flag(help: "Split the entire tab root instead of a leaf.") var root = false
     @Option(help: "Fraction assigned to the new pane, independent of edge.") var newPaneFraction: Double?
-    @Option(help: "new (default) or preserve for split focus.") var focusPolicy: String?
+    @Option(help: "preserve (default), new for split, or target for move.") var focusPolicy: String?
     @Option(help: "Destination pane ID in any tab/window of this app. Cross-tab moves additionally require --expected-workspace-revision.") var destination: String?
     @Option(help: "Manual pane title, at most 4096 UTF-8 bytes after trimming.") var title: String?
     @Option(help: "Literal input text for send. No shell escaping is added.") var text: String?
@@ -73,7 +79,8 @@ struct Panes: ParsableCommand {
     func run() throws {
         var params = try target.params(connection: connection)
         let directions = [(left, "left"), (right, "right"), (up, "up"), (down, "down")].filter(\.0)
-        if action != .split && (root || newPaneFraction != nil || focusPolicy != nil) { throw ValidationError("Root/fraction/focus options require split") }
+        if action != .split && (root || newPaneFraction != nil) { throw ValidationError("Root/fraction options require split") }
+        if action != .split && action != .move && focusPolicy != nil { throw ValidationError("--focus-policy requires split or move") }
         if action != .move && destination != nil { throw ValidationError("--destination requires move") }
         if action != .setTitle && title != nil { throw ValidationError("--title requires set-title") }
         if action != .send && text != nil { throw ValidationError("--text requires send") }
@@ -98,7 +105,7 @@ struct Panes: ParsableCommand {
             try connection.call("panes.send", params: params)
         case .split, .move:
             guard directions.count == 1 else { throw ValidationError("Choose exactly one of --left, --right, --up, --down") }
-            let advanced = root || newPaneFraction != nil || focusPolicy != nil || type != nil || action == .move
+            let advanced = root || newPaneFraction != nil || type != nil || action == .move
             if advanced {
                 guard target.expectedLayoutRevision != nil else { throw ValidationError("Atomic split/move options require --expected-layout-revision") }
                 params["id"] = .string(action == .split ? "pane.split" : "pane.move")
@@ -110,9 +117,9 @@ struct Panes: ParsableCommand {
                     params["target"] = .string(root ? "root" : "pane")
                     if let type { params["type"] = .string(type) }
                     if let newPaneFraction { params["newPaneFraction"] = .number(newPaneFraction) }
-                    if let focusPolicy { params["focus"] = .string(focusPolicy) }
                 }
             } else { params["id"] = .string("split.\(directions[0].1)") }
+            if let focusPolicy { params["focus"] = .string(focusPolicy) }
             try connection.call("command.run", params: params)
         case .setTitle, .clearTitle:
             params["id"] = .string(action == .setTitle ? "pane.title.set" : "pane.title.clear")

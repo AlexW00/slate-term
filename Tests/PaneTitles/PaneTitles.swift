@@ -95,6 +95,13 @@ struct PaneTitlesGate {
         right.setActive(false)
         try require(left.info.object!["dimmed"] == .bool(false), "Active pane must stay undimmed")
         try require(right.info.object!["dimmed"] == .bool(true), "Inactive pane must be dimmed")
+        right.setActive(false, dimAmount: 0)
+        try require(right.info.object!["dimmed"] == .bool(false), "Zero must disable dimming")
+        right.setActive(false, dimAmount: 0.35)
+        try require(right.info.object!["dimAmount"] == .number(0.35), "Inactive pane must use configured dimming")
+        left.setActive(true, dimAmount: 1)
+        try require(left.info.object!["dimmed"] == .bool(false), "Selected pane must remain clear at maximum dimming")
+        right.setActive(false)
         let point = right.content.view.convert(NSPoint(x: 20, y: 20), to: right.view)
         try require(right.view.hitTest(point) !== right.view.subviews.last, "Dim overlay must not intercept input")
         for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
@@ -215,6 +222,33 @@ struct PaneTitlesGate {
         left.setHeaderVisible(true)
         try check(left)
         try require(abs(retainedContent.bounds.height - shownHeight) < 0.5, "Showing failed to restore header height")
+
+        // Hold motion must retain its phase during refreshes and stop for reduced motion or a settled result.
+        root.view.wantsLayer = true
+        let hold = PresenceHoldLayer()
+        hold.frame = CGRect(x: 4, y: 4, width: 7, height: 7)
+        root.view.layer?.addSublayer(hold)
+        hold.setHolding(true, reduceMotion: false)
+        settle()
+        let started = hold.animation(forKey: PresenceHoldLayer.animationKey)?.beginTime
+        try require(started != nil && !hold.isHidden, "Hold did not start breathing")
+        hold.setHolding(true, reduceMotion: false)
+        try require(hold.animation(forKey: PresenceHoldLayer.animationKey)?.beginTime == started,
+                    "A hold refresh restarted its animation")
+        hold.setHolding(true, reduceMotion: true)
+        settle()
+        try require(hold.animation(forKey: PresenceHoldLayer.animationKey) == nil && !hold.isHidden,
+                    "Reduced motion must retain a static hold diamond")
+        let reduced = hold.presentation() ?? hold
+        try require(reduced.opacity == 1 && reduced.transform.m11 == 1 && reduced.position == CGPoint(x: 7.5, y: 7.5),
+                    "Reduced motion changed the diamond's visibility, scale or center")
+        hold.setHolding(true, reduceMotion: false)
+        try require(hold.animation(forKey: PresenceHoldLayer.animationKey) != nil, "Motion did not resume")
+        hold.setHolding(false, reduceMotion: false)
+        try require(hold.animation(forKey: PresenceHoldLayer.animationKey) == nil && hold.isHidden,
+                    "A settled result retained hold animation")
+        hold.removeFromSuperlayer()
+        print("PASS hold animation: stable refresh phase, static centered reduced motion, resume and stop")
         print("PASS production pane header: centered titles, safe bounds, Unicode/live titles, commit/cancel/blur, command-backed buttons, hidden height reclamation/content retention/rename cancellation and native renders")
     }
 }

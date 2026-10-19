@@ -77,6 +77,7 @@ slate-term layouts update --file recipe.json --expected-saved-layout-revision RE
 slate-term layouts windows
 slate-term layouts capture --window WINDOW_ID --name Development
 slate-term layouts open --id UUID
+slate-term layouts open --id UUID --focus-policy new # explicitly select it
 slate-term layouts launcher --id UUID --path /absolute/path/Development.app --name Development --icon slate
 slate-term layouts startup-status
 slate-term layouts configuration --pane p2
@@ -92,7 +93,7 @@ slate-term layouts configuration --pane p2
 | `layouts.update` | `{definition,expectedSavedLayoutRevision}` → saved entry. Existing missing plugins may be preserved while repairing/editing a file. |
 | `layouts.windows` | Array of `{id,title,tabs,groupId,windowIds,workspaceRevision}` for live workspace groups. `id` is an opaque epoch-qualified whole-group selector; `windowIds` links to the per-tab native windows returned by `window.list`. |
 | `layouts.capture` | `{window,name,includeDirectories?,includeURLs?,includeCommands?}` → saved entry. Directories/URLs default true; commands false. |
-| `layouts.open` | `{id,expectedWorkspaceRevision?}` → new group selector (`window`), `groupId`, native `windowIds`, `paneIds`, startup status and standard workspace commit fields. Always opens a new window group; `replaceWindow` and `force` are rejected. |
+| `layouts.open` | `{id,focus?,expectedWorkspaceRevision?}` → new group selector (`window`), `groupId`, native `windowIds`, `paneIds`, startup status and standard workspace commit fields. Always opens a new window group and preserves focus by default; `focus: "new"` selects it. `replaceWindow` and `force` are rejected. |
 | `layouts.launcher` | `{id,path,name?,icon?}` → `{id,path}`. Creates a new locally signed `.app` at an explicit absolute destination, without dialogs or overwrites. Requires the default layout library. Name defaults to the layout name; icon defaults to `slate` (Slate’s app icon). `api.describe.savedLayouts.launcherIcons` lists supported icons. |
 | `layouts.startupStatus` | No params; current layout-started terminal states and diagnostics, not command text. |
 

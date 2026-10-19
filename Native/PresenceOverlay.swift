@@ -23,6 +23,8 @@ final class PresenceOverlayView: NSView {
     static let fade: TimeInterval = 0.45
     private static let move: TimeInterval = 0.3
     static let tagHeight: CGFloat = 21
+    private static let ringInset: CGFloat = 1.5
+    private static let paneCornerRadius: CGFloat = 7
 
     var onActivate: ((String) -> Void)?
     /// Keep pills over content, clear of a browser's native status strip.
@@ -44,6 +46,17 @@ final class PresenceOverlayView: NSView {
     }
     override var acceptsFirstResponder: Bool { false }
 
+    @available(macOS 27.0, *)
+    override var cornerConfiguration: NSViewCornerConfiguration? {
+        .corners(radius: .containerConcentric(Self.paneCornerRadius + Self.ringInset))
+    }
+
+    @available(macOS 27.0, *)
+    override func viewDidChangeEffectiveCornerRadii() {
+        super.viewDidChangeEffectiveCornerRadii()
+        needsLayout = true
+    }
+
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
@@ -53,6 +66,8 @@ final class PresenceOverlayView: NSView {
         overflow.alphaValue = 0
         addSubview(overflow)
         setAccessibilityElement(false)
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(accessibilityOptionsChanged),
+            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
     }
     required init?(coder: NSCoder) { nil }
 
@@ -81,6 +96,10 @@ final class PresenceOverlayView: NSView {
             for tag in tags.values { tag.restyle(scale: scale, dark: effectiveAppearance.isDark) }
             overflow.restyle(scale: scale, dark: effectiveAppearance.isDark)
         }
+    }
+
+    @objc private func accessibilityOptionsChanged() {
+        restyleTags()
     }
 
     func update(_ next: [PresenceOverlayItem]) {
@@ -126,7 +145,7 @@ final class PresenceOverlayView: NSView {
         let paneItems = items.filter { $0.element == nil }
         withoutActions {
             paneRing.frame = bounds
-            paneRing.update(path: CGPath(roundedRect: bounds.insetBy(dx: 1.5, dy: 1.5), cornerWidth: 7, cornerHeight: 7, transform: nil),
+            paneRing.update(path: paneRingPath,
                             colors: paneItems.map { NSColor(rgb: $0.rgb) }, animated: animated)
         }
         paneRing.setVisible(!paneItems.isEmpty, animated: animated)
@@ -210,6 +229,45 @@ final class PresenceOverlayView: NSView {
         }
     }
 
+    /// Corner order follows the flipped overlay: top-left, top-right, bottom-right, bottom-left.
+    private var paneRingRadii: [CGFloat] {
+        let minimum = Self.paneCornerRadius
+        if #available(macOS 27.0, *), let corners = effectiveCornerRadii {
+            return [corners.topLeft, corners.topRight, corners.bottomRight, corners.bottomLeft]
+                .map { max(minimum, $0 - Self.ringInset) }
+        }
+        var radii = Array(repeating: minimum, count: 4)
+        guard let window, !window.styleMask.contains(.fullScreen), let content = window.contentView else { return radii }
+        let frame = convert(bounds, to: content)
+        let bottom = content.isFlipped ? frame.maxY : frame.minY
+        let contentBottom = content.isFlipped ? content.bounds.maxY : content.bounds.minY
+        // macOS 26 has 16-point window corners, without the public concentric-radius API.
+        // Only panes touching an outer bottom corner inherit that radius.
+        if abs(bottom - contentBottom) < 0.5 {
+            if abs(frame.minX - content.bounds.minX) < 0.5 { radii[3] = 16 - Self.ringInset }
+            if abs(frame.maxX - content.bounds.maxX) < 0.5 { radii[2] = 16 - Self.ringInset }
+        }
+        return radii
+    }
+
+    private var paneRingPath: CGPath {
+        let rect = bounds.insetBy(dx: Self.ringInset, dy: Self.ringInset)
+        let limit = max(0, min(rect.width, rect.height) / 2)
+        let radii = paneRingRadii.map { min($0, limit) }
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: rect.minX + radii[0], y: rect.minY))
+        path.addArc(tangent1End: CGPoint(x: rect.maxX, y: rect.minY),
+                    tangent2End: CGPoint(x: rect.maxX, y: rect.maxY), radius: radii[1])
+        path.addArc(tangent1End: CGPoint(x: rect.maxX, y: rect.maxY),
+                    tangent2End: CGPoint(x: rect.minX, y: rect.maxY), radius: radii[2])
+        path.addArc(tangent1End: CGPoint(x: rect.minX, y: rect.maxY),
+                    tangent2End: CGPoint(x: rect.minX, y: rect.minY), radius: radii[3])
+        path.addArc(tangent1End: CGPoint(x: rect.minX, y: rect.minY),
+                    tangent2End: CGPoint(x: rect.maxX, y: rect.minY), radius: radii[0])
+        path.closeSubpath()
+        return path
+    }
+
     private func move(_ tag: PresenceTagView, to frame: CGRect, animated: Bool) {
         guard tag.frame != frame else { return }
         NSAnimationContext.runAnimationGroup { context in
@@ -270,6 +328,10 @@ final class PresenceOverlayView: NSView {
             case .failed: fields["status"] = .string("failed")
             }
             if let tag = tags[item.id] {
+                fields["detail"] = .string(tag.detailText)
+                if let center = tag.holdIconCenterY { fields["holdIconCenterY"] = .number(center) }
+                fields["holdAnimation"] = tag.holdAnimationState
+                if item.element == nil { fields["ringCornerRadii"] = .array(paneRingRadii.map { .number($0) }) }
                 fields["compact"] = .bool(tag.isCompact)
                 fields["shown"] = .bool(tag.alphaValue > 0)
                 fields["glass"] = .bool(tag.usesGlass)
@@ -432,6 +494,51 @@ private final class PresenceRingLayer: CALayer {
     }
 }
 
+/// A centered hold diamond whose breathing continues through ordinary label and appearance refreshes.
+@MainActor
+final class PresenceHoldLayer: CAShapeLayer {
+    static let animationKey = "holdBreathing"
+
+    override init() {
+        super.init()
+        let diamond = CGMutablePath()
+        diamond.move(to: CGPoint(x: 3.5, y: 0))
+        diamond.addLine(to: CGPoint(x: 7, y: 3.5))
+        diamond.addLine(to: CGPoint(x: 3.5, y: 7))
+        diamond.addLine(to: CGPoint(x: 0, y: 3.5))
+        diamond.closeSubpath()
+        path = diamond
+        isHidden = true
+    }
+    override init(layer: Any) { super.init(layer: layer) }
+    required init?(coder: NSCoder) { nil }
+
+    func setHolding(_ holding: Bool, reduceMotion: Bool) {
+        isHidden = !holding
+        guard holding, !reduceMotion else {
+            removeAnimation(forKey: Self.animationKey)
+            return
+        }
+        guard animation(forKey: Self.animationKey) == nil else { return }
+        let easing = CAMediaTimingFunction(controlPoints: 0.77, 0, 0.175, 1)
+        let opacity = CAKeyframeAnimation(keyPath: "opacity")
+        opacity.values = [0.45, 1, 0.45]
+        let scale = CAKeyframeAnimation(keyPath: "transform.scale")
+        scale.values = [0.9, 1, 0.9]
+        for animation in [opacity, scale] {
+            animation.keyTimes = [0, 0.5, 1]
+            animation.timingFunctions = [easing, easing]
+            animation.duration = 2.8
+        }
+        let breathing = CAAnimationGroup()
+        breathing.animations = [opacity, scale]
+        breathing.duration = 2.8
+        breathing.repeatCount = .infinity
+        breathing.beginTime = convertTime(CACurrentMediaTime(), from: nil)
+        add(breathing, forKey: Self.animationKey)
+    }
+}
+
 /// The name tag: status icon or spinner, agent name, optional note and elapsed time or result.
 /// Text is drawn with CATextLayers and measured directly, without Auto Layout.
 @MainActor
@@ -449,6 +556,18 @@ private final class PresenceTagView: NSButton {
     private let textContent = PresenceTagContentView()
 
     var usesGlass: Bool { glass.superview === self && glass.contentView === textContent }
+    var detailText: String { detail.string as? String ?? "" }
+    var holdIconCenterY: CGFloat? { holdIcon.isHidden ? nil : holdIcon.frame.midY }
+    var holdAnimationState: JSONValue {
+        let shown = holdIcon.presentation() ?? holdIcon
+        return .object([
+            "active": .bool(holdIcon.animation(forKey: PresenceHoldLayer.animationKey) != nil),
+            "reduceMotion": .bool(PresenceOverlayView.reduceMotion),
+            "opacity": .number(Double(shown.opacity)),
+            "scale": .number(shown.transform.m11),
+            "centerY": .number(shown.position.y),
+        ])
+    }
     override var isFlipped: Bool { true }
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard !isHidden, alphaValue > 0.01, !isLeaving, frame.contains(point) else { return nil }
@@ -467,6 +586,7 @@ private final class PresenceTagView: NSButton {
     }
 
     private let icon = CATextLayer()
+    private let holdIcon = PresenceHoldLayer()
     private let spinner = CAShapeLayer()
     private let nameText = CATextLayer()
     private let note = CATextLayer()
@@ -510,6 +630,7 @@ private final class PresenceTagView: NSButton {
         spinner.strokeEnd = 0.75
         spinner.isHidden = true
         textContent.layer?.addSublayer(spinner)
+        textContent.layer?.addSublayer(holdIcon)
     }
     required init?(coder: NSCoder) { nil }
 
@@ -563,6 +684,7 @@ private final class PresenceTagView: NSButton {
         var symbol = "●"
         var text = ""
         var spinning = false
+        var holding = false
         var statusColor = agent
         if let count = overflowCount {
             nameText.string = "+\(count)"
@@ -575,8 +697,8 @@ private final class PresenceTagView: NSButton {
             switch item.status {
             case .active: break
             case .live(let elapsed): spinning = true; text = elapsed
-            case .held: symbol = "◆"; text = "held"
-            case .ok(let value): symbol = "✓"; text = value ?? ""; statusColor = .systemGreen
+            case .held: holding = true
+            case .ok(let value): symbol = "✓"; text = value ?? ""; statusColor = .labelColor
             case .failed(let value):
                 symbol = "✕"; text = value ?? ""
                 statusColor = NSColor.systemRed.blended(withFraction: dark ? 0.35 : 0.15, of: dark ? .white : .black) ?? .systemRed
@@ -588,7 +710,9 @@ private final class PresenceTagView: NSButton {
         detail.foregroundColor = (text.isEmpty || statusColor == agent ? NSColor.secondaryLabelColor : statusColor).cgColor
         spinner.strokeColor = agent.cgColor
         spinner.isHidden = !spinning
-        icon.isHidden = spinning || symbol.isEmpty
+        holdIcon.fillColor = statusColor.cgColor
+        holdIcon.setHolding(holding, reduceMotion: PresenceOverlayView.reduceMotion)
+        icon.isHidden = spinning || holding || symbol.isEmpty
         if spinning, spinner.animation(forKey: "spin") == nil {
             let spin = CABasicAnimation(keyPath: "transform.rotation.z")
             spin.fromValue = 0
@@ -610,6 +734,7 @@ private final class PresenceTagView: NSButton {
     private func segments(compact: Bool) -> [(layer: CALayer, width: CGFloat)] {
         var parts: [(CALayer, CGFloat)] = []
         if !spinner.isHidden { parts.append((spinner, 9)) }
+        else if !holdIcon.isHidden { parts.append((holdIcon, 7)) }
         else if !icon.isHidden { parts.append((icon, Self.measure(icon.string as? String ?? "", Self.iconFont))) }
         parts.append((nameText, Self.measure(nameText.string as? String ?? "", Self.nameFont)))
         if !compact, let text = note.string as? String, !text.isEmpty { parts.append((note, Self.measure(text, Self.noteFont))) }
@@ -634,8 +759,9 @@ private final class PresenceTagView: NSButton {
         let limit = bounds.width - 7
         for (layer, natural) in parts {
             let width = max(0, min(natural, limit - x))
-            if layer === spinner {
-                layer.frame = CGRect(x: x, y: (bounds.height - 9) / 2, width: 9, height: 9)
+            if layer === spinner || layer === holdIcon {
+                // Center the shape itself, independent of a font's baseline and glyph bearings.
+                layer.frame = CGRect(x: x, y: (bounds.height - natural) / 2, width: natural, height: natural)
             } else {
                 let lineHeight: CGFloat = layer === icon ? 11 : 13
                 layer.frame = CGRect(x: x, y: (bounds.height - lineHeight) / 2, width: width, height: lineHeight)

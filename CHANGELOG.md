@@ -12,6 +12,29 @@ Detailed change record for agents and maintainers. Public release notes live in 
 
 ### Internal
 
+## 0.5.0 — Pending publication
+
+### Added
+
+- Added configurable unfocused-pane dimming in Settings → Appearance and `appearance.unfocused_pane_dim` through the shared configuration API/CLI. The default is 8%; 0 disables dimming, and applying changes updates existing panes without restarting sessions.
+
+### Changed
+
+- Structural automation preserves focus by default when splitting or moving panes, creating tabs/windows, or opening saved layouts. Explicit creation `new` and movement `target` focus policies remain available; native user controls continue selecting their results.
+- Agent labels stay stable without pane-ID suffixes. Holds use a centered breathing diamond without a text suffix, with a static diamond for Reduce Motion. Success checkmarks use the neutral label color.
+- Bundled agent guidance requires actor identity in every fresh-shell command block, preserves user focus, and prefers Slate's browser unless the task requires another integration.
+- Slowed prompt typing in the website showcase.
+
+### Fixed
+
+- Agent activity frames follow outer window corners while retaining smaller corners at pane splits.
+- Background layout reconciliation no longer raises workspace windows or takes keyboard focus from Settings and existing editors. Explicit navigation still reasserts the requested focus.
+
+### Internal
+
+- Integrated committed development main through `239ab7f`, after `892ed26`, preserving public updater, signing and release tooling. Uncommitted development files and unmerged branches are excluded.
+- Added focus-policy, responder, presence-animation and dimming regression coverage. Development build and 470 package tests passed; final integrated native and release evidence is recorded separately.
+
 ## 0.4.0 — 2026-10-19
 
 ### Added

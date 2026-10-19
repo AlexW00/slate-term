@@ -123,3 +123,14 @@ import SlateTermCore
     #expect(remove.action.method == "browser.removeSiteData")
     #expect(remove.site == "Example.COM")
 }
+
+@Test func structuralCLIExposesPreserveAndExplicitFocusPolicies() throws {
+    let split = try Panes.parse(["split", "--pane", "p1", "--right", "--focus-policy", "new"])
+    #expect(split.focusPolicy == "new" && split.target.expectedLayoutRevision == nil)
+    let move = try Panes.parse(["move", "--pane", "p2", "--destination", "p1", "--down", "--focus-policy", "preserve", "--expected-layout-revision", "r"])
+    #expect(move.focusPolicy == "preserve")
+    let tab = try Tabs.parse(["new", "--focus-policy", "new"])
+    #expect(tab.focusPolicy == "new")
+    let layout = try SavedLayoutsCommand.parse(["open", "--id", "id", "--focus-policy", "new"])
+    #expect(layout.focusPolicy == "new")
+}

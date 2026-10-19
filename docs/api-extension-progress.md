@@ -728,3 +728,9 @@ verification. The unanswered coordination question is not approval to alter it:
 main remains untouched, with the verified integration retained as a local branch
 commit. No full-suite/manual release certification, push or deployment is claimed.
 See [integration evidence and blocker](mvp-foundations.md#integration-with-newer-main--verified-main-update-blocked).
+
+### Structural automation focus preservation — implemented, native rerun pending
+
+Shared command adapters now preserve focus for splits, pane moves, new tabs/windows and saved-layout opening. Creation accepts `focus: new`; movement accepts `focus: target`. Native user controls supply the explicit policy. CLI, registered-page and service callers use the same schemas and dispatch, independent of actor metadata. Reconciliation preserves existing native key windows/responders and presents new background windows behind them. See [focus audit and verification](focus-preservation-audit.md).
+
+The original Settings focus-stealing bug was reproduced in the VM before the fix. All 470 package tests pass. The first changed-source VM batch passed native pane-header/hold animation checks, but focus-dependent gates included an application-activation failure; the VM was subsequently confirmed locked. Several old fixtures required explicit selection under the new defaults. Those fixtures and reviewed edge cases are corrected. Independent screenshot review found the lock screen rather than Slate, so the batch supplies no rendered acceptance evidence. All relevant selected gates and fresh rendered review must run after unlocking. Native verification of the final source remains pending; this is not a native pass or a release qualification.

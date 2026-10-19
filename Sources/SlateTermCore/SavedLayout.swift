@@ -63,7 +63,7 @@ public struct SavedLayoutDefinition: Equatable, Codable, Sendable {
                                              panes: [SavedLayoutPane(id: PaneID(1), type: "terminal")])])
     }
 
-    public func opening(in workspace: Workspace) throws -> SavedLayoutOpening {
+    public func opening(in workspace: Workspace, focus: Bool = true) throws -> SavedLayoutOpening {
         _ = try validated()
         var result = workspace
         var mapping: [PaneID: SavedLayoutPane] = [:]
@@ -78,7 +78,7 @@ public struct SavedLayoutDefinition: Equatable, Codable, Sendable {
                 try buildSavedTree(tab.layout, seed: seed, tab: tabID, path: [], recipes: recipes,
                                    workspace: &result, mapping: &mapping)
             }
-            try result.focusTab(firstTab)
+            try result.focusTab(focus ? firstTab : workspace.keyTabID ?? firstTab)
             return SavedLayoutOpening(workspace: result, groupID: groupID, panes: mapping)
         } catch let error as RPCFailure { throw error }
         catch { throw invalidSavedLayout("Could not open saved layout: \(error)") }

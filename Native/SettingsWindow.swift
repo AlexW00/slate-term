@@ -35,6 +35,7 @@ final class SettingsModel: ObservableObject {
     }
     @Published var selection: SettingsSection? = .general
     @Published var theme = "system"
+    @Published var unfocusedPaneDim = 0.08
     @Published var shell = ""
     @Published var workingDirectory = "~"
     @Published var inheritWorkingDirectory = true
@@ -119,6 +120,7 @@ final class SettingsModel: ObservableObject {
 
     var values: [String: String] {
         var values = ["appearance.theme": AppConfiguration.quotedString(theme),
+                      "appearance.unfocused_pane_dim": String(unfocusedPaneDim),
                       "terminal.working_directory": AppConfiguration.quotedString(workingDirectory),
                       "terminal.inherit_working_directory": inheritWorkingDirectory ? "true" : "false",
                       "terminal.shell": AppConfiguration.quotedString(shell),
@@ -151,6 +153,7 @@ final class SettingsModel: ObservableObject {
         guard force || !isDirty || baseline.isEmpty else { return }
         let preserveError = !force && self.source == source && !baseline.isEmpty && error == nil
         theme = configuration.theme.rawValue
+        unfocusedPaneDim = configuration.unfocusedPaneDim
         shell = configuration.terminal.shell
         workingDirectory = configuration.terminal.workingDirectory
         inheritWorkingDirectory = configuration.terminal.inheritWorkingDirectory
@@ -430,6 +433,19 @@ private struct SettingsView: View {
                 .pickerStyle(.segmented)
             } header: { Text("Appearance") } footer: {
                 Text("Auto follows your Mac’s appearance. Applies to the app and terminal panes.")
+            }
+            Section {
+                HStack {
+                    Slider(value: $model.unfocusedPaneDim, in: 0...1, step: 0.01) {
+                        Text("Unfocused pane dimming")
+                    }
+                        .accessibilityValue(Text(model.unfocusedPaneDim, format: .percent.precision(.fractionLength(0))))
+                    Text(model.unfocusedPaneDim, format: .percent.precision(.fractionLength(0)))
+                        .monospacedDigit()
+                        .frame(width: 44, alignment: .trailing)
+                }
+            } header: { Text("Pane dimming") } footer: {
+                Text("Dims unselected panes in every window. 0% turns dimming off. Choose Apply to update open panes.")
             }
             Section {
                 PalettePicker(title: "Light palette", selection: $model.lightTheme, customPalettes: model.customPalettes,

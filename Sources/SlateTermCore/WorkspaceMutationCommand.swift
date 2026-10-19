@@ -48,7 +48,7 @@ public enum WorkspaceMutationCommand {
             let typeName = try string("type", default: "terminal")
             guard !typeName.isEmpty else { throw invalid("type must not be empty") }
             let type = PaneType(identifier: typeName)
-            guard let focus = try PaneSplitFocus(rawValue: string("focus", default: "new")) else { throw invalid("focus must be new or preserve") }
+            guard let focus = try PaneSplitFocus(rawValue: string("focus", default: "preserve")) else { throw invalid("focus must be new or preserve") }
             let fraction = try number("newPaneFraction", default: 0.5)
             let created = try target == "root"
                 ? next.splitRoot(tab.id, direction: direction(), type: type, newPaneFraction: fraction, focus: focus)
@@ -59,7 +59,9 @@ public enum WorkspaceMutationCommand {
             let target = try PaneID(parsing: string("target"))
             let destination = try workspace.resolvedTab(pane: target)
             guard destination.zoomedPane == nil else { throw RPCFailure(code: APIError.unavailable, message: "Unzoom the destination tab before moving a pane") }
-            try next.move(targetPane, beside: target, direction: direction())
+            let focus = try string("focus", default: "preserve")
+            guard ["target", "preserve"].contains(focus) else { throw invalid("focus must be target or preserve") }
+            try next.move(targetPane, beside: target, direction: direction(), focus: focus == "target")
             result["paneId"] = .string(targetPane.description)
             result["tabId"] = .string(destination.id.description)
             result["sourceTabId"] = .string(tab.id.description)

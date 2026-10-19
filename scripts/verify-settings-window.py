@@ -74,6 +74,15 @@ with http.server.ThreadingHTTPServer(('127.0.0.1', 0), Page) as server:
                 assert state['error'] is None and not state['dirty'], state
                 assert '# Keep my preferences' in config.read_text() and '# points' in config.read_text()
                 assert rpc('config.get')['current']['terminal']['font_size'] == 17
+                rpc('debug.settings', section='Appearance', unfocusedPaneDim=0.35)
+                assert rpc('config.get')['current']['appearance']['unfocused_pane_dim'] == 0.08
+                rpc('debug.settings', revert=True)
+                assert rpc('debug.settings')['values']['appearance.unfocused_pane_dim'] == '0.08'
+                state = rpc('debug.settings', unfocusedPaneDim=0.35, apply=True)
+                assert state['error'] is None and not state['dirty'], state
+                assert rpc('config.get')['current']['appearance']['unfocused_pane_dim'] == 0.35
+                time.sleep(0.3)
+                rpc('debug.screenshot', settings=True, path=str(ROOT / 'artifacts/settings-pane-dimming.png'))
                 saved = config.read_text()
                 state = rpc('debug.settings', fontSize='0', apply=True)
                 assert state['error'] and config.read_text() == saved

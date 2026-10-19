@@ -146,6 +146,7 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
     }
     public let browser: Browser
     public let theme: Theme
+    public var unfocusedPaneDim: Double = 0.08
     public let terminal: Terminal
     public let restoreWorkspace: Bool
     public let keyBindings: [KeyChord: String]
@@ -178,6 +179,10 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
     public static func parse(_ source: String) throws -> AppConfiguration {
         let raw = try TOMLDecoder().decode(Raw.self, from: source)
         let defaults = Self.defaults
+        let unfocusedPaneDim = raw.appearance?.unfocusedPaneDim?.value ?? defaults.unfocusedPaneDim
+        guard unfocusedPaneDim.isFinite, (0...1).contains(unfocusedPaneDim) else {
+            throw ConfigurationError.invalid("appearance.unfocused_pane_dim must be finite and between 0 and 1")
+        }
         let terminal = Terminal(
             shell: raw.terminal?.shell ?? defaults.terminal.shell,
             workingDirectory: raw.terminal?.workingDirectory ?? defaults.terminal.workingDirectory,
@@ -239,7 +244,7 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
               plugins.keys.allSatisfy({ (try? PluginSettingsPatch.validateNamespace($0)) != nil }) else {
             throw ConfigurationError.invalid("Invalid plugin settings namespace or settings exceed 64 KiB / 64 plugins")
         }
-        return AppConfiguration(browser: try Browser.parse(raw.browser?.searchURL ?? defaults.browser.searchURL), theme: raw.appearance?.theme ?? defaults.theme, terminal: terminal,
+        return AppConfiguration(browser: try Browser.parse(raw.browser?.searchURL ?? defaults.browser.searchURL), theme: raw.appearance?.theme ?? defaults.theme, unfocusedPaneDim: unfocusedPaneDim, terminal: terminal,
                                 restoreWorkspace: raw.layout?.restoreWorkspace ?? defaults.restoreWorkspace, keyBindings: bindings, plugins: plugins, notifications: raw.notifications ?? NotificationPolicy(),
                                 showAgentActivity: raw.agents?.showActivity ?? defaults.showAgentActivity)
     }
@@ -269,6 +274,7 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
         keys += notificationValues.filter(\.1).map { "notifications." + $0.0 }
         if browser != previous.browser { keys.append("browser.search_url") }
         if theme != previous.theme { keys.append("appearance.theme") }
+        if unfocusedPaneDim != previous.unfocusedPaneDim { keys.append("appearance.unfocused_pane_dim") }
         if keyBindings != previous.keyBindings { keys.append("keybind") }
         if plugins != previous.plugins { keys.append("plugins") }
         if restoreWorkspace != previous.restoreWorkspace { keys.append("layout.restore_workspace") }
@@ -299,7 +305,7 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
     public func encode(to encoder: any Encoder) throws {
         enum Keys: String, CodingKey { case appearance, terminal, layout, keybind, browser, plugins, notifications, agents }
         var container = encoder.container(keyedBy: Keys.self)
-        try container.encode(["theme": theme.rawValue], forKey: .appearance)
+        try container.encode(["theme": JSONValue.string(theme.rawValue), "unfocused_pane_dim": .number(unfocusedPaneDim)], forKey: .appearance)
         try container.encode(terminal, forKey: .terminal)
         try container.encode(browser, forKey: .browser)
         try container.encode(notifications, forKey: .notifications)
@@ -347,9 +353,12 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
     }
     private struct Appearance: Decodable {
         let theme: Theme?
-        enum Keys: String, CodingKey, CaseIterable { case theme }
+        let unfocusedPaneDim: Number?
+        enum Keys: String, CodingKey, CaseIterable { case theme, unfocusedPaneDim = "unfocused_pane_dim" }
         init(from decoder: any Decoder) throws {
-            theme = try checkedContainer(decoder, Keys.self).decodeIfPresent(Theme.self, forKey: .theme)
+            let c = try checkedContainer(decoder, Keys.self)
+            theme = try c.decodeIfPresent(Theme.self, forKey: .theme)
+            unfocusedPaneDim = try c.decodeIfPresent(Number.self, forKey: .unfocusedPaneDim)
         }
     }
     private struct LayoutValues: Decodable {

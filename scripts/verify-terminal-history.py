@@ -72,7 +72,7 @@ with AppFixture('terminal-history') as app:
     assert native()['firstResponder']
     app.rpc('command.run', id='pane.focus', pane=other)
     revision = app.rpc('pane.inspect', pane='p1')['layoutRevision']
-    app.rpc('command.run', id='pane.move', pane='p1', target=other, direction='right', expectedLayoutRevision=revision)
+    app.rpc('command.run', id='pane.move', pane='p1', target=other, direction='right', focus='target', expectedLayoutRevision=revision)
     eventually('PTY focus survives inactive pane reparenting', lambda: native()['firstResponder'] and not native()['findFocused'])
     app.rpc('debug.terminalFindFocus', pane='p1')
     app.rpc('command.run', id='pane.close', pane=other, force=True)

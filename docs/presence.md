@@ -5,16 +5,26 @@ When a coding agent acts on a pane through the CLI, Slate frames the smallest ta
 ## Identifying an agent
 
 ```sh
-export SLATE_TERM_ACTOR=claude          # once per agent session
+export SLATE_TERM_ACTOR=claude          # repeat in every fresh shell/tool call
 slate-term terminal capture --pane p2 --note "reading failing test output"
 slate-term web click --pane p3 --ref REF --note "submitting the form"
 slate-term --help                        # --actor overrides the variable for one call
 ```
 
+Every agent invocation must carry its identity. An export persists only in that shell and its child processes, not across fresh-shell tool calls. Begin each command block with the export, or pass `--actor claude` on every invocation. An inline `SLATE_TERM_ACTOR=claude slate-term …` assignment covers only that one command.
+
+To carry the identity into every child shell, set it when launching the agent:
+
+```sh
+SLATE_TERM_ACTOR=codex codex
+```
+
+Child processes inherit the variable when the execution tool preserves the parent environment. An already running agent still needs the per-call export or flag. Keep this setting scoped to that agent; do not add a global agent identity to ordinary interactive shells.
+
 - `SLATE_TERM_ACTOR` or `--actor` names the agent: 1–32 ASCII letters, digits, `.`, `_`, `-` or `:`, starting with a letter or digit. `claude:reviewer` style labels are allowed; colors follow the part before `:`.
 - `--note` is optional per call: one line, at most 80 characters (320 UTF-8 bytes), without control characters. `--note` without a valid actor is an error.
 - An invalid inherited `SLATE_TERM_ACTOR` is ignored with a warning, so a bad export never breaks other calls. An invalid `--actor` is an error. Shell-integration hooks and `api describe` never send an actor.
-- The CLI sends actor information in request metadata, next to `cause`: `"metadata":{"version":1,"actor":{"name":"claude","note":"…","home":"p1","origin":{"instanceId":"APP-EPOCH","sessionId":"TERMINAL-SESSION"}}}`. `home` is the launching pane from `SLATE_TERM_PANE_ID`; it disambiguates labels but is not sufficient for navigation. Optional `origin` binds it to `SLATE_TERM_INSTANCE_ID` and `SLATE_TERM_SESSION_ID`. Explicit action targets such as `--pane p2` never replace the launching identity. A different socket or explicit app instance does not inherit it.
+- The CLI sends actor information in request metadata, next to `cause`: `"metadata":{"version":1,"actor":{"name":"claude","note":"…","home":"p1","origin":{"instanceId":"APP-EPOCH","sessionId":"TERMINAL-SESSION"}}}`. `home` is the launching pane from `SLATE_TERM_PANE_ID`; it distinguishes sessions but is not sufficient for navigation. Optional `origin` binds it to `SLATE_TERM_INSTANCE_ID` and `SLATE_TERM_SESSION_ID`. Explicit action targets such as `--pane p2` never replace the launching identity. A different socket or explicit app instance does not inherit it.
 - Only hosts advertising `api.describe.presence.version == 1` receive an actor. An older host silently gets the call without it. `presence.originVersion == 1` separately advertises session-bound navigation; hosts without it still receive the actor label/home, without `origin`.
 - Background services never send an actor; `--actor`/`--note` fail in a service session.
 
@@ -48,7 +58,8 @@ All pills stay in a single bottom-right group, even for element actions. Only th
 - **Timing.** Every call shows for at least 5 s, then fades. A call that is still running keeps its tag. `terminal run/start`, waits and navigation that take longer than 0.5 s show a spinner and elapsed time, then ✓ or ✕ (`exit N` for a failing run) for 5 s. An adopted `terminal start` keeps its activity until the operation finishes, is rejected, or loses its session, even after the submitting client disconnects. Operation status/result/wait queries do not create separate activity.
 - **Merging.** Calls from the same agent session to the same pane merge into one activity. The hold extends, the note updates when a call supplies one, and the frame pulses once.
 - **Several agents.** Agents targeting the same pane or identical element bounds share one frame. Each agent gets an equal-width share of its gradient (halves for two, thirds for three), with smooth blends between colors in arrival order. Color changes fade over 250 ms, or update immediately with Reduce Motion. Different element bounds retain separate frames. Tags keep arrival order. From three tags up, or in panes narrower than 200 pt, tags shrink to the name (the newest keeps its note unless the pane is narrow). Tags that still do not fit fold into a `+N` chip.
-- **Labels.** A tag shows the agent name. While two sessions of the same agent are active, each label gains its home pane, for example `claude · p1` and `claude · p7`.
+- **Labels.** A tag always shows the agent name without a pane-ID suffix. Other sessions joining or leaving do not change its label. Records retain separate session identities and click targets.
+- **Holds.** A centered diamond breathes over a 2.8-second cycle while the hold remains active. It has no status text suffix. Reduce Motion keeps the diamond static; command spinners and settled result symbols remain distinct.
 - **Colors.** Known agents keep one color (`claude`, `codex`, `gemini`, `cursor`, `copilot`, `amp`, `opencode`, `aider`). Other names get a stable color from a separate palette.
 
 ## Holds

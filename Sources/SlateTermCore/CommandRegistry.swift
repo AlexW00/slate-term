@@ -134,6 +134,21 @@ public enum CommandRegistry {
         .init(id: "agents.activity.toggle", title: "Toggle Agent Activity", key: "", shift: false),
     ]
 
+    /// Native creation and movement intentionally select their result; automation defaults to preservation.
+    public static func nativeFocusParameters(_ id: String) -> [String: JSONValue] {
+        if id.hasPrefix("split.") || ["pane.split", "tab.new", "window.new"].contains(id) { return ["focus": .string("new")] }
+        if id == "pane.move" { return ["focus": .string("target")] }
+        return [:]
+    }
+
+    /// Explicit navigation can reassert native focus even when model selection is unchanged.
+    public static func requestsFocus(_ id: String, params: [String: JSONValue]) -> Bool {
+        if ["pane.focus", "tab.focus", "window.focus", "pane.zoom", "tab.next", "tab.previous", "tab.detachCurrent"].contains(id)
+            || id.hasPrefix("focus.") || id.hasPrefix("tab.select") { return true }
+        if let policy = nativeFocusParameters(id)["focus"] { return params["focus"] == policy }
+        return ["tab.reorder", "tab.move", "tab.detach"].contains(id) && params["focus"] == .string("target")
+    }
+
     public static func execute(_ id: String, params: [String: JSONValue], workspace: inout Workspace) throws -> JSONValue {
         guard commands.contains(where: { $0.id == id }) else {
             throw RPCFailure(code: -32601, message: "Unknown command: \(id)")
@@ -161,11 +176,18 @@ public enum CommandRegistry {
                 pane: params["pane"].map { try PaneID(parsing: requireString($0, name: "pane")) },
                 tab: params["tab"].map { try TabID(parsing: requireString($0, name: "tab")) }).id
         }
+        func creationFocus() throws -> PaneSplitFocus {
+            guard let value = params["focus"] else { return .preserve }
+            guard let name = value.string, let policy = PaneSplitFocus(rawValue: name) else {
+                throw RPCFailure(code: -32602, message: "focus must be new or preserve")
+            }
+            return policy
+        }
         switch id {
         case "split.left", "split.right", "split.up", "split.down":
             let direction = Direction(rawValue: String(id.dropFirst("split.".count)))!
             let target = try pane()
-            let result = try workspace.split(target, direction: direction)
+            let result = try workspace.split(target, direction: direction, focus: creationFocus())
             return .object(["paneId": .string(result.description)])
         case "focus.left", "focus.right", "focus.up", "focus.down":
             try workspace.focus(pane(), direction: Direction(rawValue: String(id.dropFirst("focus.".count)))!)
@@ -187,9 +209,9 @@ public enum CommandRegistry {
             let existing = params["tab"] == nil && workspace.keyTabID == nil ? nil : try tab()
             let group = workspace.groups.first { $0.tabs.contains(where: { $0 == existing }) }?.id
             if let existing, group == nil { throw WorkspaceError.tabNotFound(existing) }
-            return .object(["tabId": .string(try workspace.newTab(in: group).description)])
+            return .object(["tabId": .string(try workspace.newTab(in: group, focus: creationFocus() == .new).description)])
         case "window.new":
-            return .object(["tabId": .string(try workspace.newTab().description)])
+            return .object(["tabId": .string(try workspace.newTab(focus: creationFocus() == .new).description)])
         case "tab.close":
             let target = try tab()
             try workspace.closeTab(target)

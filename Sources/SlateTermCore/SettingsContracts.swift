@@ -34,7 +34,9 @@ extension AutomationContracts {
         let browserFields = ["search_url": S.string(format: "slate-search-url-template")]
         let layoutFields = ["restore_workspace": S.boolean]
         let agentFields = ["show_activity": S.boolean]
-        var patchFields: [String: JSONValue] = ["appearance.theme": S.strings(["auto", "system", "light", "dark"])]
+        let paneDim = S.annotated(S.number, ["minimum": .integer(0), "maximum": .integer(1)])
+        var patchFields: [String: JSONValue] = ["appearance.theme": S.strings(["auto", "system", "light", "dark"]),
+                                               "appearance.unfocused_pane_dim": paneDim]
         for (section, fields) in [("terminal", terminalConfigurationFields), ("notifications", notificationFields), ("browser", browserFields), ("layout", layoutFields), ("agents", agentFields)] {
             for (key, schema) in fields { patchFields[section + "." + key] = schema }
         }
@@ -74,7 +76,7 @@ extension AutomationContracts {
             "TOMLValue": S.oneOf([S.string(), S.boolean, S.number, S.array(S.reference("TOMLValue")), S.record(S.reference("TOMLValue"))]),
             "ConfigurationPatch": patch,
             "AppConfiguration": complete([
-                "appearance": complete(["theme": S.strings(["system", "light", "dark"])]), "terminal": complete(terminalConfigurationFields),
+                "appearance": complete(["theme": S.strings(["system", "light", "dark"]), "unfocused_pane_dim": paneDim]), "terminal": complete(terminalConfigurationFields),
                 "agents": complete(agentFields), "browser": complete(browserFields), "layout": complete(layoutFields), "notifications": S.reference("NotificationPolicy"),
                 "keybind": S.annotated(S.record(keybindingCommand), ["propertyNames": S.string(format: "slate-key-chord")]),
                 "plugins": S.annotated(S.record(namespaceValues), ["maxProperties": .integer(64), "x-maxEncodedJSONBytes": .integer(65_536), "propertyNames": pluginNamespace])

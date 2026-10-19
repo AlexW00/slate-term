@@ -278,10 +278,11 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
         super.viewWillDisappear()
     }
 
-    func setActive(_ active: Bool) {
+    func setActive(_ active: Bool, dimAmount: Double = 0.08) {
         _ = view
         isActive = active
-        inactiveShade.isHidden = active
+        inactiveShade.dimAmount = dimAmount
+        inactiveShade.isHidden = active || dimAmount == 0
         if !active { renamePopover?.close() }
     }
 
@@ -529,6 +530,7 @@ final class PaneContainer: NSViewController, NSTextFieldDelegate, NSPopoverDeleg
                  "titleCentered": .bool(titleField.alignment == .center),
                  "editing": .bool(renamePopover?.isShown == true), "draft": .string(renameField.currentEditor()?.string ?? renameField.stringValue),
                  "active": .bool(isActive), "dimmed": .bool(!inactiveShade.isHidden),
+                 "dimAmount": .number(inactiveShade.isHidden ? 0 : inactiveShade.dimAmount),
                  "renameWindowNumber": renameField.window.map { .integer($0.windowNumber) } ?? .null,
                  "headerActions": .array(headerActions.map { .object(["id": .string($0.id), "enabled": .bool($0.enabled)]) }),
                  "visibleHeaderActions": .array(headerVisible ? actionStrip.arrangedSubviews.compactMap { $0.identifier?.rawValue }.map(JSONValue.string) : []),
@@ -560,9 +562,10 @@ private final class PaneTitleField: NSTextField {
 /// Paint over retained Metal/WebKit content without intercepting clicks or drags.
 @MainActor
 private final class PaneInactiveShade: NSView {
+    var dimAmount: Double = 0.08 { didSet { needsDisplay = true } }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.black.withAlphaComponent(0.08).setFill()
+        NSColor.black.withAlphaComponent(dimAmount).setFill()
         bounds.fill()
     }
 }

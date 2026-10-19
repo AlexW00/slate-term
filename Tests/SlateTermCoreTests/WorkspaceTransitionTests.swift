@@ -10,7 +10,7 @@ import Testing
     #expect(legacy.changes == explicit.changes)
     #expect(before.panes.count == 1 && revisions.revision == "test:w:0")
     #expect(legacy.workspace.panes.count == 2 && legacy.revisions.revision == "test:w:1")
-    #expect(legacy.changes.map(\.topic) == ["host.pane.created", "host.layout.changed", "host.focus.changed", "host.workspace.changed"])
+    #expect(legacy.changes.map(\.topic) == ["host.pane.created", "host.layout.changed", "host.workspace.changed"])
     let created = try #require(legacy.changes.first)
     #expect(created.payload["actionKind"] == .string("pane.split"))
     #expect(created.payload["anchor"] == .string("p1"))
@@ -113,7 +113,7 @@ import Testing
                                                  workspace: workspace, revisions: revisions)
     let fact = try #require(legacy.changes.first)
     #expect(fact.payload["newPaneFraction"] == .number(0.5))
-    #expect(fact.payload["targetKind"] == .string("pane") && fact.payload["focus"] == .string("new"))
+    #expect(fact.payload["targetKind"] == .string("pane") && fact.payload["focus"] == .string("preserve"))
 }
 
 @Test func semanticFocusAndDetachAliasesAgreeAndStaleObservationsFail() throws {

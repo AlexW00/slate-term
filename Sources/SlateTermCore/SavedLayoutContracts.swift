@@ -109,7 +109,7 @@ extension AutomationContracts {
                     "commands": .string("configuredStartupCommandsOnlyNeverCurrentShellCommands"), "includesTerminalHistory": .bool(false),
                     "pluginConfiguration": .string("startingRecipeNotRuntimeState"), "includeURLsIncludesPrivateBrowser": .bool(true)
                 ]) { _, value in value }),
-            .layoutsOpen: contract(["id": S.uuid], required: ["id"], result: S.reference("SavedLayoutOpen"), guards: workspaceGuards,
+            .layoutsOpen: contract(["id": S.uuid, "focus": S.defaulted(S.strings(["new", "preserve"]), .string("preserve"))], required: ["id"], result: S.reference("SavedLayoutOpen"), guards: workspaceGuards,
                 conditions: [uniqueFile, knownFields, requires("allReferencedPaneTypesAvailable"), requires("configuredTerminalDirectoriesExist"),
                     requires("startupCommandsRequireAutomaticLocalShellIntegrationAndAvailableRunReservations")],
                 semantics: ["mode": .string("newWindowGroupOnly"), "allocatesFreshRuntimeIDs": .bool(true), "mergesPluginFieldDefaults": .bool(true),

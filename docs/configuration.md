@@ -7,6 +7,7 @@ Slate Terminal reads `~/.config/slate-term/config.toml`. A missing file uses def
 ```toml
 [appearance]
 theme = "auto" # auto (follow macOS), light, dark; "system" is also accepted
+unfocused_pane_dim = 0.08 # 0–1; 0 disables dimming
 
 [terminal]
 shell = "/bin/zsh"
@@ -63,6 +64,12 @@ Register, enable/disable, remove plugins and view their live status directly in 
 **⌘K** opens the [command picker](command-picker.md) for built-in and plugin commands. Its `command.picker` binding and **⌘,** (`settings.open`) are configurable like other actions.
 
 **Keyboard Shortcuts** lists each action with one editable shortcut and a **Reset** button. Click the shortcut (or **Record** for an unbound action) and press a replacement key combination. Escape cancels recording; Delete clears the binding. Reset restores the action's default shortcut. Assigning or resetting replaces that action's existing bindings. Conflicts are rejected without changing either action. Use **Apply** to save.
+
+## Pane dimming
+
+**Settings → Appearance → Unfocused pane dimming** sets the black overlay on unselected panes in every window. The slider ranges from 0% to 100%, with an 8% default. The selected pane stays clear. Choose **Apply** to update existing panes without restarting their sessions.
+
+The TOML key `appearance.unfocused_pane_dim` accepts finite numbers from 0 to 1. Read it through `config.get` and change it through `config.patch`, registered plugins/services, or `slate-term config set --key appearance.unfocused_pane_dim --value 0.2 --expected-source-revision REVISION`. These use the same validation and source-preserving writer as native Settings. No separate picker action or shortcut is added for this numeric preference.
 
 ## Notifications
 

@@ -32,3 +32,21 @@ import SlateTermCore
     #expect(parsed.terminal.fontFamily == quoted)
     #expect(parsed.plugins.isEmpty)
 }
+
+@Test func unfocusedPaneDimmingValidatesAndRoundTripsWithoutRestart() throws {
+    #expect(try AppConfiguration.parse("").unfocusedPaneDim == 0.08)
+    let source = "# keep\n[appearance]\nunfocused_pane_dim = 0.08 # shade\n"
+    for amount in [0.0, 0.35, 1.0] {
+        let updated = try ConfigurationPatch.updating(source: source, values: ["appearance.unfocused_pane_dim": .number(amount)])
+        let config = try AppConfiguration.parse(updated)
+        #expect(config.unfocusedPaneDim == amount)
+        #expect(updated.contains("# keep") && updated.contains("# shade"))
+        #expect(config.changedKeys(from: .defaults) == ["appearance.unfocused_pane_dim"])
+        #expect(config.restartRequired(from: .defaults).isEmpty)
+        let encoded = try JSONValue.encoding(config)
+        #expect(encoded.object?["appearance"]?.object?["unfocused_pane_dim"] == (try JSONValue.encoding(amount)))
+    }
+    for literal in ["-0.1", "1.01", "nan", "inf", "true", "'0.5'", "2026-10-19T00:00:00Z"] {
+        #expect(throws: (any Error).self) { try AppConfiguration.parse("[appearance]\nunfocused_pane_dim = " + literal) }
+    }
+}

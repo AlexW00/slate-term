@@ -9,7 +9,7 @@ public struct PresenceActor: Equatable, Hashable, Sendable {
 
     public let name: String
     public let note: String?
-    /// Claimed launching pane, also used to disambiguate labels. Not a navigation identity by itself.
+    /// Claimed launching pane. Not a navigation identity by itself.
     public let home: String?
     public let origin: PresenceOrigin?
 
@@ -189,7 +189,7 @@ public struct PresenceRecord: Equatable, Sendable {
     }
 }
 
-/// A record prepared for display, with a disambiguated label.
+/// A record prepared for display, with a stable agent label.
 public struct PresenceDisplay: Equatable, Sendable {
     public let record: PresenceRecord
     public let label: String
@@ -354,15 +354,11 @@ public struct PresenceTracker: Sendable {
         records.contains { !$0.isLeased && $0.reportingSince != nil }
     }
 
-    /// Labels gain the home pane only while two sessions of the same agent are active.
+    /// Keep labels stable as other sessions of the same agent join and leave.
     public func display(now: Double) -> [PresenceDisplay] {
-        var homes: [String: Set<String>] = [:]
-        for record in records { homes[record.actorKey, default: []].insert(record.home ?? "") }
         return records.map { record in
-            let ambiguous = (homes[record.actorKey]?.count ?? 0) > 1
-            let label = ambiguous ? "\(record.actor) · \(record.home ?? "?")" : record.actor
             let elapsed = record.isLeased ? nil : record.reportingSince.flatMap { now - $0 >= Self.liveThreshold ? now - $0 : nil }
-            return PresenceDisplay(record: record, label: label, elapsed: elapsed)
+            return PresenceDisplay(record: record, label: record.actor, elapsed: elapsed)
         }
     }
 

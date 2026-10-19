@@ -64,7 +64,7 @@ public struct WorkspaceTransition: Sendable {
             split = Split(pane: try PaneID(parsing: created), anchor: try anchor(),
                           target: advanced ? parameters["target"]?.string ?? "pane" : "pane",
                           direction: advanced ? parameters["direction"]!.string! : String(id.dropFirst("split.".count)),
-                          fraction: fraction, focus: advanced ? parameters["focus"]?.string ?? "new" : "new")
+                          fraction: fraction, focus: parameters["focus"]?.string ?? "preserve")
         } else if id == "pane.move" {
             move = Move(pane: try anchor(), destination: try PaneID(parsing: parameters["target"]!.string!),
                         direction: parameters["direction"]!.string!)

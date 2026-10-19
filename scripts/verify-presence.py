@@ -17,6 +17,14 @@ with AppFixture('presence') as app:
     app.capture_contracts()
     assert app.rpc('api.describe')['presence']['version'] == 1
     app.cli('appearance', 'dark')
+    app.rpc('debug.activate')
+
+    def fixture_is_active():
+        state = app.rpc('debug.notifications')
+        return state['appActive'] and state['keyTab'] == 't1'
+
+    # Reject a locked or inactive desktop before accepting any rendered evidence.
+    eventually('presence fixture active with its native key window', fixture_is_active)
 
     def activities():
         return app.rpc('presence.list')['activities']
@@ -100,13 +108,14 @@ with AppFixture('presence') as app:
     app.cli('terminal', 'capture', '--pane', 'p1', env=agent)
     assert all(a['pane'] != 'p1' for a in activities()) and shown('p1') == []
 
-    # A second session of the same agent gets a disambiguated label. Holds pin both
-    # records, so the check does not race the minimum hold on a slow VM.
+    # Labels remain stable when another session of the same agent joins.
+    # Holds pin distinct records so this does not race the minimum display time.
     for environment in [agent, other]:
         held = app.cli('presence', 'hold', '--pane', target, env=environment)
         app.contract_capture.record('presence.hold', {'pane': target}, held, client='cli')
     labels = sorted(t['label'] for t in shown(target))
-    assert labels == ['claude · p1', 'claude · p9'], labels
+    assert labels == ['claude', 'claude'], labels
+    assert len({t['id'] for t in shown(target)}) == 2
     for environment in [agent, other]:
         released = app.cli('presence', 'release', '--pane', target, env=environment)
         app.contract_capture.record('presence.release', {'pane': target}, released, client='cli')
@@ -184,8 +193,40 @@ with AppFixture('presence') as app:
     assert activities(), 'A hold outlives the minimum hold'
     snapshot('held-dark')
     [pill] = shown(target)
+    assert pill['detail'] == '', pill
+    assert pill['holdIconCenterY'] == pill['frame']['height'] / 2, pill
+    motion = pill['holdAnimation']
+    assert motion['active'] != motion['reduceMotion'], motion
+    samples = []
+    for _ in range(15):
+        sample = shown(target)[0]['holdAnimation']
+        assert abs(sample['centerY'] - pill['frame']['height'] / 2) < 0.01, sample
+        samples.append(sample)
+        time.sleep(0.2)
+    (ROOT / 'artifacts/presence-hold-animation-samples.json').write_text(json.dumps(samples, indent=2))
+    if motion['reduceMotion']:
+        assert all(s['opacity'] == s['scale'] == 1 for s in samples), samples
+    else:
+        assert max(s['opacity'] for s in samples) - min(s['opacity'] for s in samples) > 0.4, samples
+        assert max(s['scale'] for s in samples) - min(s['scale'] for s in samples) > 0.07, samples
+        for name, predicate in [('low', lambda m: m['opacity'] < 0.55), ('high', lambda m: m['opacity'] > 0.9)]:
+            eventually('hold breath ' + name, lambda: predicate(shown(target)[0]['holdAnimation']))
+            snapshot('hold-breath-' + name, settle=0, activate=False)
+    top_left, top_right, bottom_right, bottom_left = pill['ringCornerRadii']
+    assert top_left == top_right == bottom_left == 7 and bottom_right > 7, pill
     assert pill['hitTarget'] and not pill['clickable'], pill
     assert pill['frame']['bottomInset'] == 14 and pill['cornerRadius'] == pill['frame']['height'] / 2, pill
+    # Outer window corners follow the window; split intersections keep the pane radius.
+    app.cli('presence', 'hold', '--pane', 'p1', '--ttl', '30', env=other)
+    [left_pill] = shown('p1')
+    assert left_pill['ringCornerRadii'][:3] == [7, 7, 7] and left_pill['ringCornerRadii'][3] > 7, left_pill
+    snapshot('outer-corners-dark')
+    app.rpc('command.run', id='pane.zoom', pane=target)
+    eventually('zoomed outer corners', lambda: all(radius > 7 for radius in shown(target)[0]['ringCornerRadii'][2:]))
+    snapshot('zoomed-corners-dark')
+    app.rpc('command.run', id='pane.zoom', pane=target)
+    eventually('split corners restored', lambda: shown(target)[0]['ringCornerRadii'][3] == 7)
+    app.cli('presence', 'release', '--pane', 'p1', env=other)
     app.cli('appearance', 'light')
     snapshot('held-light')
     app.cli('appearance', 'dark')
@@ -321,13 +362,15 @@ with AppFixture('presence-focus') as app:
         window = app.rpc('window.get', windowId=info['windowId'])
         tab = next(t for t in app.rpc('tabs.list') if t['id'] == info['tabId'])
         native = next(p for p in app.rpc('debug.inspect')['panes'] if p['paneId'] == pane)
-        return window['key'] and tab['focusedPane'] == pane and native.get('firstResponder') is True
+        application = app.rpc('debug.notifications')
+        return (application['appActive'] and application['keyTab'] == info['tabId']
+                and window['key'] and tab['focusedPane'] == pane and native.get('firstResponder') is True)
 
     instance = app.rpc('workspace.snapshot')['appInstanceId']
     origin = 'p1'
     session = inspect(origin)['sessionId']
     origin_window = inspect(origin)['windowId']
-    command('window.new')
+    command('window.new', focus='new')
     target = app.rpc('tabs.list')[-1]['focusedPane']
     eventually('focus target prompt', lambda: inspect(target).get('state') == 'prompt')
     env = dict(app.env, SLATE_TERM_ACTOR='claude', SLATE_TERM_PANE_ID=origin,
@@ -348,6 +391,7 @@ with AppFixture('presence-focus') as app:
     assert pill['clickable'] and pill['outsidePassesThrough'] and pill['glass'], pill
     assert pill['frame']['bottomInset'] == 14 and pill['cornerRadius'] == pill['frame']['height'] / 2
     app.rpc('command.run', id='window.focus', windowId=inspect(target)['windowId'], activate=True)
+    eventually('native target active and focused before click', lambda: focus_is(target))
     time.sleep(0.6)
     subprocess.run(['/usr/sbin/screencapture', '-x', str(ROOT / 'artifacts/presence-clickable.png')], check=True)
     assert app.rpc('debug.presenceClick', pane=target, activityId=activity)['clicked']

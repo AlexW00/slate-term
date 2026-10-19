@@ -93,6 +93,9 @@ with tempfile.TemporaryDirectory(prefix="slate-pane-move-", dir="/tmp") as tempo
             before = state()
             capture("light")
             cli("panes", "focus", "--pane", p3)
+            rpc("debug.activate", pane=p3)
+            eventually("Owned app active before native menu input", lambda: rpc("debug.inspect")["applicationActive"])
+            before = state()
             rpc("debug.menuPreview", pane=p3, move=True, path=str(ARTIFACTS / "pane-movement-menu.png"))
             assert panes()[p3]["firstResponder"] and panes()[p3]["terminalFocus"], "Cancelled move menu stole typing focus"
             result = move(p3, "p1")

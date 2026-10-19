@@ -50,7 +50,10 @@ private let settingsSchemaFormats: SchemaFormatChecks = [
 @Test func configurationPatchContractsAgreeWithTypedSourceEditing() throws {
     let schema = AutomationContracts.settings[.configPatch]!.input
     let samples: [[String: JSONValue]] = [[:], ["terminal.font_size": .number(16.5)], ["terminal.font_size": .integer(257)],
-        ["appearance.theme": .string("auto")], ["appearance.theme": .string("system")], ["appearance.theme": .string("unknown")],
+        ["appearance.unfocused_pane_dim": .number(0.35)], ["appearance.unfocused_pane_dim": .integer(0)],
+        ["appearance.unfocused_pane_dim": .integer(1)], ["appearance.unfocused_pane_dim": .number(-0.1)],
+        ["appearance.unfocused_pane_dim": .number(1.1)], ["appearance.unfocused_pane_dim": .bool(true)],
+        ["appearance.unfocused_pane_dim": .null], ["appearance.theme": .string("auto")], ["appearance.theme": .string("system")], ["appearance.theme": .string("unknown")],
         ["terminal.working_directory": .string("~/Projects")], ["terminal.working_directory": .string("/tmp/project with spaces")],
         ["terminal.working_directory": .string("relative")], ["terminal.working_directory": .string("~someone/path")],
         ["terminal.working_directory": .string("/tmp/invalid\tpath")], ["terminal.working_directory": .string("")],

@@ -36,7 +36,7 @@ with AppFixture('cross-window-pane-movement') as app:
         return app.rpc('command.run', id=id, **params)
 
     def window():
-        result = command('window.new')
+        result = command('window.new', focus='new')
         return app.rpc('tabs.list')[-1]['focusedPane']
 
     def guards(source):
@@ -167,7 +167,7 @@ while True: time.sleep(1)
     # Same native group, inactive source tab: retire only its membership, retaining group/window/frame.
     source = window()
     source_info = inspect(source)
-    destination_tab = command('tab.new', pane=source)['tabId']
+    destination_tab = command('tab.new', pane=source, focus='new')['tabId']
     target = next(t['focusedPane'] for t in app.rpc('tabs.list') if t['id'] == destination_tab)
     target_info = inspect(target)
     target_window = app.rpc('window.get', windowId=target_info['windowId'])

@@ -20,7 +20,7 @@ final class SavedLayouts {
     var types: () -> [SavedLayoutPaneType] = { [] }
     var windows: () -> [LayoutSourceWindow] = { [] }
     var capture: ((String, Bool, Bool, Bool) throws -> SavedLayoutDefinition)?
-    var open: ((SavedLayoutDefinition, WorkspaceOperationContext) throws -> JSONValue)?
+    var open: ((SavedLayoutDefinition, Bool, WorkspaceOperationContext) throws -> JSONValue)?
     var invoke: ((String, [String: JSONValue], WorkspaceOperationContext) throws -> JSONValue)?
     var onChange: (() -> Void)?
     private(set) var editorModel: SavedLayoutsModel?
@@ -56,7 +56,7 @@ final class SavedLayouts {
         case "layouts.validate", "layouts.create": allowed = ["definition"]
         case "layouts.update": allowed = ["definition", "expectedSavedLayoutRevision"]
         case "layouts.capture": allowed = ["window", "name", "includeDirectories", "includeURLs", "includeCommands"]
-        case "layouts.open": allowed = ["id"]
+        case "layouts.open": allowed = ["id", "focus"]
         case "layouts.launcher": allowed = ["id", "path", "name", "icon"]
         default: throw RPCFailure(code: -32601, message: "Unknown saved layout operation")
         }
@@ -118,7 +118,10 @@ final class SavedLayouts {
             guard let open, let definition = saved.definition else { throw RPCFailure(code: -32022, message: "Workspace is unavailable") }
             let problems = definition.problems(types: types())
             guard problems.isEmpty else { throw RPCFailure(code: -32602, message: problems.joined(separator: "\n")) }
-            return try open(definition, operation)
+            let focus = params["focus"]?.string ?? "preserve"
+            guard params["focus"] == nil || params["focus"]?.string != nil,
+                  ["new", "preserve"].contains(focus) else { throw RPCFailure(code: -32602, message: "focus must be new or preserve") }
+            return try open(definition, focus == "new", operation)
         case "layouts.launcher":
             guard usesDefaultLibrary else { throw RPCFailure(code: -32602, message: "Spotlight launchers require the default ~/.config/slate-term/layouts library") }
             let saved = try entry()
@@ -197,7 +200,7 @@ final class SavedLayouts {
             let id = entries[index].definition!.id
             guard editorModel?.hasDraft(id: id) != true else { throw RPCFailure(code: -32602, message: "Save or revert this layout’s unsaved changes first") }
             if command == "layouts.launcher" { try createLauncher(id: id, operation: operation); return }
-            _ = try request("layouts.open", params: ["id": .string(id.uuidString)], operation: operation)
+            _ = try request("layouts.open", params: ["id": .string(id.uuidString), "focus": .string("new")], operation: operation)
         default: throw RPCFailure(code: -32601, message: "Unknown saved layout command")
         }
     }

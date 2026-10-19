@@ -115,6 +115,11 @@ public enum AutomationCapabilities {
     public static let fields: [String: JSONValue] = [
             "pluginPersistence": pluginPersistence,
             "updates": updates, "presence": presence,
+            "workspaceFocus": .object([
+                "structuralDefault": .string("preserve"), "creationPolicy": .array(["preserve", "new"].map(JSONValue.string)),
+                "movePolicy": .array(["preserve", "target"].map(JSONValue.string)),
+                "implicitWindowActivation": .bool(false), "nativeUserActionsSelectResults": .bool(true)
+            ]),
             "windowControls": .object([
                 "version": .integer(1), "commands": .array(NativeWindowAction.commands.sorted().map(JSONValue.string)),
                 "target": .string("selectedNativeWindowId"), "framePolicy": .string("containedInOneVisibleScreen"),

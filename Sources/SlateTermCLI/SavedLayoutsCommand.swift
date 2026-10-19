@@ -14,6 +14,7 @@ struct SavedLayoutsCommand: ParsableCommand {
     @Argument var action: Action
     @OptionGroup var connection: Connection
     @Option(help: "Saved layout UUID (get/open/launcher).") var id: String?
+    @Option(help: "preserve (default) or new for open.") var focusPolicy: String?
     @Option(help: "Inspect fields for one pane type, e.g. terminal or a plugin ID.") var type: String?
     @Option(help: "JSON definition file (validate/create/update).") var file: String?
     @Option(help: "Document revision from get; required for update.") var expectedSavedLayoutRevision: String?
@@ -30,6 +31,10 @@ struct SavedLayoutsCommand: ParsableCommand {
     func run() throws {
         var params: [String: JSONValue] = [:]
         if let id { params["id"] = .string(id) }
+        if let focusPolicy {
+            guard action == .open else { throw ValidationError("--focus-policy requires open") }
+            params["focus"] = .string(focusPolicy)
+        }
         if let type { params["type"] = .string(type) }
         if let file {
             let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: file))
