@@ -12,7 +12,7 @@ Detailed change record for agents and maintainers. Public release notes live in 
 
 ### Internal
 
-## 0.4.0 — Pending publication
+## 0.4.0 — 2026-10-19
 
 ### Added
 
@@ -37,6 +37,7 @@ Detailed change record for agents and maintainers. Public release notes live in 
 - Integrated committed VM-owner lock recovery/waiting and generated-shell syntax coverage; preserved public strict-mode, updater, and structured-error checks.
 - Integrated committed development main through `892ed26`, preserving the public signing, updater, and release pipeline. Uncommitted development documentation and unmerged branches are excluded.
 - Added command contract, native overview, picker, shortcut, explicit target, sheet rejection, and trusted-client regression coverage. Verification results are recorded with the release evidence.
+- Published build 5 from `06f2e9a` after successful tag-triggered CI and Release workflows. Verified checksums, signatures, corresponding source, reviewed notes, notarization tickets, and installer alias equality. Ten selected native gates passed; this is not full-suite certification. Candidate-DMG installation and the production 0.3.0-to-0.4.0 upgrade were not run.
 
 ## 0.3.0 — 2026-10-19
 
