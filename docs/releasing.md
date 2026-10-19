@@ -6,7 +6,47 @@ Slate's release workflow builds Apple Silicon apps for macOS 27 or later. A succ
 
 For meaningful implementation work, follow [slate-changelog](../.agents/skills/slate-changelog/SKILL.md) and keep the detailed [change ledger](../CHANGELOG.md) current in the same change. For release work, follow [slate-release](../.agents/skills/slate-release/SKILL.md): reconcile the ledger against the actual changes since the last published stable tag, then curate `docs/releases/vX.Y.Z.md`. Both the GitHub release description and signed in-app notes use that reviewed file. Routine internal details can stay in the ledger; retain user-relevant compatibility, security, breaking changes, and limitations.
 
-Preparation, building a signed draft, and publishing are separate operations. Carry the user's existing authorization forward and honor any release hold. Build includes the reviewed commit and tag pushes when explicitly requested; publication still needs explicit authorization. A draft is marked Pending publication in the ledger until it is actually public. The release skill requires a candidate DMG installation in VMPal, followed by a real previous-version upgrade through Sparkle after authorized publication.
+Preparation, building a signed draft, and publishing are separate operations. Carry the user's existing authorization forward and honor any release hold. Build includes the reviewed commit and tag pushes when explicitly requested; publication still needs explicit authorization. A draft is marked Pending publication in the ledger until it is actually public. Normal release verification includes a candidate DMG installation in VMPal and a real previous-version upgrade through Sparkle after authorized publication. Explicit maintainer waivers are recorded as waivers, never passes.
+
+## Routine release commands
+
+The existing tag pipeline owns builds, signing and packaging. `scripts/release-finalize.py` handles the repeated post-tag work on macOS with Python 3.9+, Swift/CryptoKit, Apple verification tools and an authenticated `gh` session. It uses the existing public release-environment key/feed variables; no signing secret or Python package installation is needed.
+
+```sh
+bash scripts/release-preflight.sh
+# Review/commit/push the candidate and create its fresh tag within authorization.
+python3 scripts/release-finalize.py watch --tag vX.Y.Z
+python3 scripts/release-finalize.py verify --tag vX.Y.Z
+# Exercise the downloaded DMG in VMPal, or record an explicit maintainer waiver.
+python3 scripts/release-finalize.py publish --tag vX.Y.Z --native-evidence PATH
+# Perform the production Sparkle upgrade unless explicitly waived.
+python3 scripts/release-finalize.py reconcile --tag vX.Y.Z
+```
+
+`status` provides a one-shot workflow/draft readout; `watch` prints transitions and stops on failure or its bounded timeout. It works before the draft exists. A failed run is never automatically restarted. Each command can be resumed independently; the default directory is `artifacts/releases/TAG`, or pass the same `--output PATH` throughout.
+
+`verify` downloads missing/changed assets against GitHub's SHA-256 digests and checks the complete checksum inventory, stable DMG equality, Sparkle feed/archive/notes signatures, tagged notes, source manifest and tagged project tree, matching ZIP/DMG app contents, embedded update configuration, Apple signatures, stapled tickets and Gatekeeper assessment. It reuses the source and appcast validators used during packaging. It extracts a fresh app for verification and never launches it. The receipt binds the exact source commit, release ID and asset identities.
+
+`publish` rechecks candidate identity, successful workflows and local hashes before promoting a newer version/build to latest stable. Use `--native-waiver 'maintainer instruction and reason'` only for an actual explicit waiver; `--native-evidence` records a reference, not an automated assertion that native testing passed. Publication intent is saved before the remote mutation. A retry of an already-published newest release makes no further remote edit and proceeds to public verification.
+
+`public` can also run independently. It anonymously verifies the latest feed and installer alias, and the immutable versioned assets, against the already-verified bytes. Completed immutable downloads are reused after hashing; mutable latest routes are always fetched again. Network failures and latest-route propagation have bounded retries; a mismatched immutable asset fails immediately. No repeated signature/source parsing is needed when every public byte matches the verified candidate.
+
+`reconcile` requires public verification and replaces only the selected release's Pending publication heading with GitHub's actual publication date. Repeating it is a no-op. It does not stage, commit or push. `--ledger PATH` can update an already-prepared matching section in another checkout without copying its changelog or touching Unreleased entries.
+
+### Which checks remain necessary
+
+| Work | Reason and automation |
+| --- | --- |
+| Scope, version and curated notes | Judgment based on the committed diff; semantic reconciliation remains review work. |
+| Cheap local preflight | Detect problems before creating a release tag; one command. |
+| Tag CI and signed build | The candidate's actual build and signing evidence; watched together. |
+| Downloaded asset verification | Checks what GitHub serves, including matching source and immutable signed URLs; one command. |
+| Anonymous public delivery | Draft checks cannot establish latest routing or unauthenticated access; included in publish. |
+| Changed-behavior native gates | Select by the release diff; an unchanged successful check need not be repeated. |
+| Candidate DMG install and previous-version upgrade | Distinct installer/updater paths; keep separate evidence or explicit waivers. |
+| Ledger publication date | Deterministic bookkeeping; one narrow idempotent command. |
+
+Do not rerun the full native inventory or all rejection/cancellation fixtures automatically for unrelated changes. CI and Release currently repeat some tests and builds; consolidating their execution graph is a separate pipeline change, not a reason to discard either existing result. Ordinary releases do not repeat public-history sanitization or credential provisioning.
 
 ## Repository checks
 
@@ -18,16 +58,7 @@ CI and Release restore the same pinned engine cache, keyed by runner OS/architec
 
 The macOS jobs use the Apple Silicon `xcode-27` runner because the app requires SDK 27. Each job installs Apple's optional Metal Toolchain if the shader compiler is unavailable. The bootstrap pins Ghostty, Zig, downloaded archive hashes, and the local Ghostty patch. It disables Sentry and gettext, and rejects their symbols in the resulting library. The license collector checks pinned dependency notices, including Sparkle and its bundled third-party notices, and installs them into the app. The Swift library and Xcode package pin inventories are checked separately because Sparkle belongs only to the native app.
 
-Run the inexpensive checks locally:
-
-```sh
-python3 scripts/security-scan.py --include-untracked
-python3 -m unittest discover -s Tests/Release -v
-python3 -m unittest discover -s Tests/VMRunner -v
-python3 scripts/check-workflows.py
-```
-
-Before tagging, workflow validation must include ShellCheck. If the script reports that ShellCheck is unavailable, use an existing or task-local official binary and rerun it; that partial check does not cover CI shell lint.
+Run `bash scripts/release-preflight.sh` before tagging. It batches the history scan, release-tooling tests, VM-runner tests and workflow validation, and requires ShellCheck on PATH. Use an existing or task-local official ShellCheck binary if needed. It does not build, tag, access signing credentials or publish.
 
 The security scanner checks every reachable blob and commit plus private filenames in every historical tree. Reports contain only rule/location metadata. `--tree-only` is useful during cleanup but is not a publication audit. Scanners cannot prove the absence of every possible secret; review findings, dependency sources, and the publication diff too.
 
@@ -108,13 +139,7 @@ Use a fresh tools directory or reuse the verified existing distribution; the boo
 
 GitHub’s [latest release asset route](https://docs.github.com/en/repositories/releasing-projects-on-github/linking-to-releases) makes the feed available only once its release is public and selected as latest. Draft assets are inaccessible to unauthenticated clients, and GitHub excludes drafts and prereleases from its [latest release API](https://docs.github.com/en/rest/releases/releases#get-the-latest-release). No public feed is changed by the tag workflow: it only uploads the candidate appcast beside the candidate archives in a draft. There is no release-publication workflow, website deployment, or automatic publishing action.
 
-When separately authorized to publish:
-
-1. Verify the draft’s source, ZIP, both DMGs, appcast, notes, and checksums. Confirm `Slate-Terminal-arm64.dmg` is byte-identical to the versioned DMG. Check that the appcast’s tag-specific archive and notes URLs match assets on that same draft.
-2. Verify version and build numbers both advance beyond the current stable release. The workflow run number supplies the build number; do not promote an older tag or rerun as latest. Sparkle refuses downgrades, but an older latest feed could hide an available newer release.
-3. Publish the draft as a stable release and explicitly select **Set as the latest release**. Keep prereleases on a separate future channel; this pipeline supports stable versions only.
-4. Without GitHub authentication, fetch the stable feed URL and each referenced archive/notes URL. Compare downloaded bytes with `SHA256SUMS`, and confirm the stable feed resolves to the newly published tag. A private repository, missing appcast on the latest release, deletion, or an incorrectly selected latest release will break the stable endpoint.
-5. Exercise checking, download, signature rejection, installation, and relaunch using the previous signed app in a clean VM. Publication and checksums do not prove native install behavior. CDN propagation can delay availability; retain prior releases and never rewrite assets in place.
+Use the routine release commands below to verify and publish within existing authorization. They never replace assets or move a tag. A failure after publication leaves the release public; resume readback and investigate rather than deleting the release.
 
 This single-release feed intentionally targets macOS 27 and Apple Silicon. A future OS-support split needs a reviewed multi-version feed design before increasing the minimum OS; otherwise older systems would see no compatible item. Changing keys also needs a deliberate Sparkle key-rotation release, not a silent variable replacement. See Sparkle’s [publishing](https://sparkle-project.org/documentation/publishing/), [security configuration](https://sparkle-project.org/documentation/customization/), and [manual nested signing](https://sparkle-project.org/documentation/sandboxing/#code-signing) guidance.
 

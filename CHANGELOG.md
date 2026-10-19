@@ -12,6 +12,8 @@ Detailed change record for agents and maintainers. Public release notes live in 
 
 ### Internal
 
+- Added a reusable release finalizer for workflow monitoring, downloaded artifact verification, authorized publication, resumable anonymous delivery checks and narrow ledger reconciliation. Batched local preflight checks and shortened the release skill; native evidence and explicit waivers remain distinct.
+
 ## 0.5.0 — 2026-10-19
 
 ### Added
