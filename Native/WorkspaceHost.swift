@@ -600,7 +600,17 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             && ["pane.split", "split.left", "split.right", "split.up", "split.down"].contains(params["id"]?.string ?? "")
         var presenceCall = createsPane ? nil : beginPresence(method, contract: contract, params: params, operation: operation)
         do {
-            let result = try await routeAdmitted(method, contract: contract, params: params, operation: operation, caller: caller)
+            let completion: (@MainActor (TerminalOperationStatus) -> Void)?
+            if method == "terminal.start", let handle = presenceCall {
+                completion = { [weak self] status in
+                    self?.presence.end(handle, result: .object(["exitCode": status.exitCode.map(JSONValue.integer) ?? .null]),
+                                       failed: status.state != .completed)
+                }
+            } else { completion = nil }
+            let result = try await routeAdmitted(method, contract: contract, params: params, operation: operation,
+                                                 caller: caller, onTerminalCompletion: completion)
+            // Adopted starts own their presence until the shell operation settles.
+            if method == "terminal.start" { presenceCall = nil }
             // A split's activity belongs to its new pane, which exists only after success.
             if createsPane, let actor = operation.actor, let rawPane = result.object?["paneId"]?.string,
                let pane = try? PaneID(parsing: rawPane) {
@@ -628,7 +638,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     private func routeAdmitted(_ method: String, contract: AutomationMethod?, params input: [String: JSONValue],
-                               operation: WorkspaceOperationContext, caller: AutomationCaller?) async throws -> JSONValue {
+                               operation: WorkspaceOperationContext, caller: AutomationCaller?,
+                               onTerminalCompletion: (@MainActor (TerminalOperationStatus) -> Void)? = nil) async throws -> JSONValue {
         var params = input
         if contract == .pluginsRegister || contract == .pluginsValidate {
             return try await installPlugin(params: params, validateOnly: contract == .pluginsValidate, operation: operation)
@@ -665,8 +676,16 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             let invoke = try preparePluginCommand(id, params: params, operation: operation)
             return try await invoke()
         }
+        if method == "browser.listData" {
+            guard withoutAPIGuards(params).isEmpty else { throw RPCFailure(code: -32602, message: "browser.listData takes no parameters") }
+            let sites = await browserData.sites()
+            try Task.checkCancellation()
+            try operation.validateCaller()
+            try validateAPIGuards(params, method: method)
+            return .object(["storage": .string("persistent"), "sites": .array(sites.map(JSONValue.string))])
+        }
         let browserDataCommand = method == "command.run" ? params["id"]?.string : method
-        if let id = browserDataCommand, ["browser.clearData", "browser.clearSiteData"].contains(id) {
+        if let id = browserDataCommand, method == "browser.removeSiteData" || ["browser.clearData", "browser.clearSiteData"].contains(id) {
             var payload = params
             if method == "command.run" { payload.removeValue(forKey: "id") }
             return try await prepareBrowserDataClear(id, params: payload, operation: operation)()
@@ -679,7 +698,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             let pane = try terminalPane(params)
             var input = withoutAPIGuards(params)
             if input["sessionId"] == nil { input["sessionId"] = params["expectedAnchorSessionId"] }
-            return try await terminalControl.call(String(method.dropFirst("terminal.".count)), pane: pane, params: input, validateCaller: operation.validateCaller)
+            return try await terminalControl.call(String(method.dropFirst("terminal.".count)), pane: pane, params: input,
+                                                   onCompletion: onTerminalCompletion, validateCaller: operation.validateCaller)
         }
         if contract?.family == .events {
             try synchronizeNativeGroups()
@@ -758,8 +778,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                                          operation: WorkspaceOperationContext) throws -> () async throws -> JSONValue {
         try validateAPIGuards(params, method: id)
         let payload = withoutAPIGuards(params)
-        let request = try BrowserDataRequest(kind: id == "browser.clearData" ? .all : .site, params: payload)
-        let pane = request.host == nil ? nil : try targetPaneID(payload)
+        let request = try BrowserDataRequest(kind: id == "browser.clearData" ? .all : id == "browser.removeSiteData" ? .storedSite : .site, params: payload)
+        let pane = request.kind == .site ? try targetPaneID(payload) : nil
         let browser = pane.flatMap { leaves[$0] as? BrowserPane }
         if pane != nil && browser == nil { throw RPCFailure(code: -32602, message: "Target pane is not a browser") }
         let store = browser?.web.configuration.websiteDataStore ?? browserData.persistent
@@ -785,7 +805,13 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = id == "browser.clearData" ? "Clear Browser Data?" : "Clear This Site’s Data?"
-        let target = id == "browser.clearData" ? "all sites in the shared Browser profile" : "the site group for \(try BrowserDataRequest.siteHost(params["url"]!.string!)) in this browser’s profile (including any parent domain and other subdomains grouped by WebKit)"
+        let target: String
+        if id == "browser.clearData" { target = "all sites in the shared Browser profile" }
+        else if id == "browser.removeSiteData" {
+            target = "\(params["site"]!.string!) in the shared Browser profile (including subdomains grouped with it)"
+        } else {
+            target = "the site group for \(try BrowserDataRequest.siteHost(params["url"]!.string!)) in this browser’s profile (including any parent domain and other subdomains grouped by WebKit)"
+        }
         alert.informativeText = "This removes cookies, caches and saved website storage for \(target). You may be signed out and lose offline website data.\n\nPrivate Browser panes are separate from the shared profile. Open pages are not closed or reloaded and may save data again. This cannot be undone."
         alert.addButton(withTitle: "Cancel")
         alert.addButton(withTitle: "Clear Data")
@@ -798,12 +824,17 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     private func refreshBrowserSettings() {
-        settingsModel?.updateBrowserSites(workspace.panes.compactMap { pane in
-            guard let browser = leaves[pane.id] as? BrowserPane else { return nil }
-            let url = browser.currentURL.flatMap { (try? BrowserDataRequest.siteHost($0)) == nil ? nil : $0 } ?? ""
-            return SettingsModel.BrowserSite(id: pane.id.description, identity: browser.automation.viewID,
-                                            title: browser.paneTitle, url: url, isPrivate: browser.mode == .privateBrowser)
-        })
+        guard let model = settingsModel else { return }
+        let refreshID = UUID()
+        model.browserSitesRefreshID = refreshID
+        model.loadingBrowserSites = true
+        Task { [weak self, weak model] in
+            guard let self, let model else { return }
+            let sites = await self.browserData.sites()
+            guard model.browserSitesRefreshID == refreshID else { return }
+            model.updateBrowserSites(sites)
+            model.loadingBrowserSites = false
+        }
     }
 
     private func clearBrowserDataFromSettings(siteOnly: Bool) {
@@ -813,18 +844,18 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         do {
             var params: [String: JSONValue] = [:]
             if siteOnly {
-                guard let site = model.selectedBrowserSite,
-                      let browser = leaves[try PaneID(parsing: site.id)] as? BrowserPane,
-                      browser.automation.viewID == site.identity else {
-                    throw RPCFailure(code: -32022, message: "Browser pane was closed or replaced. Refresh the open panes.")
+                guard model.canClearBrowserSite else {
+                    throw RPCFailure(code: -32602, message: "Select a stored site first.")
                 }
-                params = ["pane": .string(site.id), "url": .string(model.browserSiteURL)]
+                params = ["site": .string(model.selectedBrowserSite)]
             }
             model.clearingBrowserData = true
-            let confirmed = try confirmBrowserDataClear(siteOnly ? "browser.clearSiteData" : "browser.clearData", params: params) { [weak model] result in
+            let confirmed = try confirmBrowserDataClear(siteOnly ? "browser.removeSiteData" : "browser.clearData", params: params) { [weak self, weak model] result in
                 model?.clearingBrowserData = false
                 switch result {
-                case .success: model?.browserDataMessage = siteOnly ? "Site data cleared." : "Shared Browser data cleared."
+                case .success:
+                    model?.browserDataMessage = siteOnly ? "Site data cleared." : "Shared Browser data cleared."
+                    self?.refreshBrowserSettings()
                 case .failure(let error): model?.browserDataError = (error as? RPCFailure)?.message ?? String(describing: error)
                 }
             }
@@ -1013,6 +1044,17 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 return .object(["paneId": .string(paneID.description), "reloading": .bool(true)])
             }
             if id == "command.picker" { try toggleCommandPicker(params); return .object([:]) }
+            if id == "tab.showAll" {
+                guard Set(withoutAPIGuards(params).keys).isSubset(of: ["id", "pane", "tab"]) else {
+                    throw RPCFailure(code: -32602, message: "Unknown tab.showAll parameter")
+                }
+                let tab = try targetTab(params)
+                guard let window = windows[tab.id] else {
+                    throw RPCFailure(code: APIError.unavailable, message: "The target window is unavailable")
+                }
+                try window.showAllTabs()
+                return .object(["tabId": .string(tab.id.description), "overviewVisible": .bool(true)])
+            }
             if id == "tab.rename" {
                 guard Set(withoutAPIGuards(params).keys).isSubset(of: ["id", "pane", "tab"]) else {
                     throw RPCFailure(code: -32602, message: "Unknown tab.rename parameter")
@@ -1148,7 +1190,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
              .eventsHead, .eventsPoll, .eventsEmit, .pluginsRestart,
              .webGet, .webSnapshot, .webClick, .webFill, .webSelect, .webScroll, .webWait, .webFocus, .webKey, .webCheck, .webSetValue, .webScreenshot,
              .browserGet, .browserNavigate, .browserSnapshot, .browserClick, .browserFill, .browserSelect,
-             .browserScroll, .browserWait, .browserEval, .browserScreenshot, .browserClearData, .browserClearSiteData,
+             .browserScroll, .browserWait, .browserEval, .browserScreenshot, .browserClearData, .browserClearSiteData, .browserListData, .browserRemoveSiteData,
              .serviceStart, .serviceStop, .serviceList, .serviceStatus, .serviceLogs, .serviceReady:
             throw RPCFailure(code: -32603, message: "This API operation requires the shared asynchronous entry")
         }
@@ -1578,15 +1620,15 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                                 "layoutsAvailable": .bool(settingsModel?.layouts != nil),
                                 "notificationAuthorization": settingsModel.map { .string($0.notificationAuthorization) } ?? .null])
             }
-            showSettings()
+            showSettings(section: nil, refreshBrowserSites: false)
             guard let model = settingsModel else { throw RPCFailure(code: -32000, message: "Settings unavailable") }
             if let section = params["section"]?.string { model.selection = SettingsSection(rawValue: section) }
             if let value = params["workingDirectory"]?.string { model.workingDirectory = value }
             if case .bool(let value) = params["inheritWorkingDirectory"] { model.inheritWorkingDirectory = value }
             if let value = params["fontSize"]?.string { model.fontSize = value }
             if let value = params["searchURL"]?.string { model.searchURL = value }
-            if let value = params["browserPane"]?.string { model.selectBrowserPane(value) }
-            if let value = params["browserSiteURL"]?.string { model.browserSiteURL = value }
+            if params["refreshBrowserSites"] == .bool(true) { refreshBrowserSettings() }
+            if let value = params["browserSite"]?.string { model.selectBrowserSite(value) }
             if let value = params["theme"]?.string { model.theme = value }
             if case .bool(let value) = params["fontThicken"] { model.fontThicken = value }
             if let value = params["minimumContrast"]?.string { model.minimumContrast = value }
@@ -1632,8 +1674,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             if params["revert"] == .bool(true) { refreshSettings(force: true) }
             return .object(["dirty": .bool(model.isDirty), "error": model.error.map(JSONValue.string) ?? .null,
                             "fontSize": .string(model.fontSize), "searchURL": .string(model.searchURL),
-                            "browserPanes": .array(model.browserSites.map { .string($0.id) }),
-                            "browserPane": .string(model.selectedBrowserPane), "browserSiteURL": .string(model.browserSiteURL),
+                            "browserSites": .array(model.browserSites.map(JSONValue.string)),
+                            "browserSite": .string(model.selectedBrowserSite), "loadingBrowserSites": .bool(model.loadingBrowserSites),
+                            "showsDefaultDirectory": .bool(!model.inheritWorkingDirectory), "workingDirectory": .string(model.workingDirectory),
                             "canClearBrowserSite": .bool(model.canClearBrowserSite), "clearingBrowserData": .bool(model.clearingBrowserData),
                             "browserDataError": model.browserDataError.map(JSONValue.string) ?? .null,
                             "browserDataMessage": model.browserDataMessage.map(JSONValue.string) ?? .null,
@@ -1665,7 +1708,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             let controlLetter = chord.modifiers.contains(.ctrl) && !chord.modifiers.contains(.cmd) && (97...122).contains(scalar)
             let text = controlLetter ? String(UnicodeScalar(scalar & 0x1f)!) : key
             let menuOnly = params["menu"] == .bool(true)
-            let window = menuOnly ? nil : (params["tabRename"] == .bool(true) ? tabRename?.window : (params["layouts"] == .bool(true) ? settingsWindow?.window : (params["picker"] == .bool(true) ? commandPicker?.window : (params["settings"] == .bool(true) ? settingsWindow?.window : windows[try targetTab(params).id]))))
+            let window = menuOnly ? nil : (params["tabOverview"] == .bool(true) ? NSApp.keyWindow : (params["tabRename"] == .bool(true) ? tabRename?.window : (params["layouts"] == .bool(true) ? settingsWindow?.window : (params["picker"] == .bool(true) ? commandPicker?.window : (params["settings"] == .bool(true) ? settingsWindow?.window : windows[try targetTab(params).id])))))
             guard let code = ["d": UInt16(2), "j": UInt16(38), "h": 4, "k": 40, "l": 37, "1": 18, "2": 19, "=": 24, "left": 123, "right": 124, "up": 126, "down": 125, "e": 14, "r": 15, "return": 36, "t": 17, "n": 45, "w": 13, "[": 33, "]": 30, ",": 43, "q": 12, "s": 1, "escape": 53, "delete": 51][chord.key],
                   let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: chord.nativeModifiers, timestamp: ProcessInfo.processInfo.systemUptime,
                                                windowNumber: window?.windowNumber ?? 0, context: nil, characters: text,
@@ -2809,7 +2852,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         addCommands(["layouts.edit", "layouts.openWindow", "layouts.captureWindow", "plugins.reload", "plugins.panelState.reset"], to: workspaceMenu)
         workspaceMenu.addItem(.separator())
         for (title, commands) in [
-            ("Tabs", ["tab.new", "tab.rename", "tab.title.clear", "tab.close", "tab.previous", "tab.next"]),
+            ("Tabs", ["tab.new", "tab.showAll", "tab.rename", "tab.title.clear", "tab.close", "tab.previous", "tab.next"]),
             ("Browser", ["browser.back", "browser.forward", "browser.focusAddress", "browser.reload", "browser.clearSiteData", "browser.clearData"]),
             ("Split Pane", ["split.left", "split.right", "split.up", "split.down"]),
             ("Focus Pane", ["focus.left", "focus.right", "focus.up", "focus.down"]),
@@ -2861,7 +2904,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         aiItem.submenu = aiMenu
         menu.addItem(aiItem)
         let windowMenu = NSMenu(title: "Window")
-        addCommands(["tab.previous", "tab.next"], to: windowMenu)
+        addCommands(["tab.showAll", "tab.previous", "tab.next"], to: windowMenu)
         addCommands(["tab.detachCurrent"], to: windowMenu)
         let windowItem = NSMenuItem(title: "Window", action: nil, keyEquivalent: "")
         windowItem.submenu = windowMenu
@@ -3026,6 +3069,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 case "pane.copyID": symbol = "doc.on.doc"; keywords = "clipboard panel identifier"
                 case "pane.header.show", "pane.header.hide", "pane.header.toggle":
                     symbol = "rectangle.topthird.inset.filled"; keywords = "panel header chrome title bar show hide toggle"
+                case "tab.showAll": detail = "Tabs"; symbol = "square.grid.2x2"; keywords = "overview thumbnails window tabs"
                 case "tab.rename": detail = "Tabs"; symbol = "pencil"; keywords = "name title rename"
                 case "tab.title.clear": detail = "Tabs"; symbol = "textformat"; keywords = "reset rename manual title"
                 case "pane.rename": symbol = "pencil"; keywords = "name title panel"
@@ -3057,6 +3101,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                     else if command.id == "browser.clearSiteData", let pane,
                             (leaves[pane.id] as? BrowserPane)?.currentURL.flatMap({ try? BrowserDataRequest.siteHost($0) }) == nil { unavailable = "Open an HTTP or HTTPS site to clear its data" }
                     else if command.id == "tab.title.clear", tab?.manualTitle == nil { unavailable = "This tab has no manual name" }
+                    else if command.id == "tab.showAll", tab.flatMap({ windows[$0.id] })?.canShowAllTabs != true { unavailable = "Requires a visible window with multiple tabs and no sheet" }
                     else if command.id == "tab.rename" { unavailable = TabRenameController.unavailableReason(window: tab.flatMap { windows[$0.id] }, editor: tabRename) }
                     else if command.id == "pane.title.clear", pane?.manualTitle == nil { unavailable = "This pane has no manual title" }
                     else if command.id == "pane.move.chooseDestination", let pane,
@@ -3176,7 +3221,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
 
     @objc private func showSettings() { showSettings(section: nil) }
 
-    func showSettings(section: SettingsSection?) {
+    func showSettings(section: SettingsSection?, refreshBrowserSites: Bool = true) {
         if settingsWindow == nil {
             let model = SettingsModel(configURL: settings.configURL)
             settingsModel = model
@@ -3213,7 +3258,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             settingsWindow = SettingsWindowController(model: model) { [weak self] in self?.refreshSettings(force: true) }
             settingsWindow?.shouldClose = { [weak self] in self?.confirmSettingsClose() ?? true }
         }
-        refreshSettings()
+        refreshSettings(refreshBrowserSites: refreshBrowserSites)
         Task { [weak self] in
             guard let self else { return }
             self.settingsModel?.notificationAuthorization = await self.notificationDelivery.authorization()
@@ -3235,7 +3280,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         catch let error as CocoaError where error.code == .fileReadNoSuchFile { return "" }
     }
 
-    func refreshSettings(force: Bool = false) {
+    func refreshSettings(force: Bool = false, refreshBrowserSites: Bool = true) {
         guard let model = settingsModel else { return }
         do {
             let source = try configurationSource()
@@ -3248,7 +3293,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         model.commands = pluginCatalog.activeRegistrations.flatMap(\.workspaceCommands) + CommandRegistry.commands
             + unavailableCommands.map { .init(id: $0, title: "\($0) (Unavailable)", key: "", shift: false) }
         refreshPluginSettingsStatus()
-        refreshBrowserSettings()
+        if refreshBrowserSites && model.selection == .browser { refreshBrowserSettings() }
     }
 
     private func refreshPluginSettingsStatus() {
@@ -3466,6 +3511,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         if id?.hasPrefix("browser.") == true { return focusedBrowser != nil }
         if let id, id.hasPrefix("split.") { return splitUnavailableReason(id, params: [:]) == nil }
         if id == "tab.detachCurrent", let tab = try? targetTab([:]) { return (workspace.groups.first { $0.tabs.contains(tab.id) }?.tabs.count ?? 0) > 1 }
+        if id == "tab.showAll" { return (try? targetTab([:])).flatMap { windows[$0.id] }?.canShowAllTabs == true }
         if id == "tab.rename" { return TabRenameController.unavailableReason(window: (try? targetTab([:])).flatMap { windows[$0.id] }, editor: tabRename) == nil }
         if id == "tab.title.clear" { return (try? targetTab([:]))?.manualTitle != nil }
         if id == "pane.move.chooseDestination", let pane = try? targetPaneID([:]) {
@@ -3723,6 +3769,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             let geometry = (split as? WorkspaceSplitController)?.appliedGeometry ?? .null
             return .object(["tabId": .string(tab.id.description), "title": .string(window.title), "width": .number(window.frame.width), "height": .number(window.frame.height),
                             "visible": .bool(window.isVisible), "miniaturized": .bool(window.isMiniaturized), "key": .bool(window.isKeyWindow),
+                            "overviewVisible": .bool(window.tabGroup?.isOverviewVisible ?? false),
                             "splitSubviews": .integer(split?.splitView.subviews.count ?? 0),
                             "arrangedSubviews": .integer(split?.splitView.arrangedSubviews.count ?? 0),
                             "splitWidth": .number(Double(split?.splitView.bounds.width ?? 0)),

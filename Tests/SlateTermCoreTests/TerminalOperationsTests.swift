@@ -15,6 +15,78 @@ private func runtimeReport(_ state: ShellReport.State, _ sequence: Int, command:
 }
 private enum RuntimeTestError: Error { case send, conditionTimeout }
 
+@Test @MainActor func completionSurvivesCallerCancellationWithoutUsingAWaitSlot() async throws {
+    let operations = TerminalOperations()
+    var finished: [TerminalOperationStatus] = []
+    let id = try operations.start(pane: PaneID(1), sessionId: "s", command: "slow", afterSequence: 0,
+        onCompletion: { finished.append($0) }, send: {})
+    let waiter = Task { try await operations.wait(id) }
+    try await awaitOperationCondition { operations.waiterCount == 1 }
+    waiter.cancel()
+    _ = try? await waiter.value
+    #expect(operations.waiterCount == 0 && finished.isEmpty)
+    let line = try operations.claimInput(pane: PaneID(1), sessionId: "s", emptyBuffer: true)
+    operations.observe(pane: PaneID(1), sessionId: "s", report: runtimeReport(.running, 1, command: line)) { "" }
+    #expect(finished.isEmpty)
+    operations.observe(pane: PaneID(1), sessionId: "s", report: runtimeReport(.prompt, 2)) { "done" }
+    operations.close()
+    #expect(finished.count == 1 && finished.first?.commandId == id && finished.first?.state == .completed)
+}
+
+@Test @MainActor func completionHandlesSynchronousFailureRejectionAndDisposalOnce() throws {
+    for ending in ["delivery", "draft", "session", "pane", "close", "synchronous"] {
+        let operations = TerminalOperations()
+        var finished: [TerminalOperationStatus] = []
+        let id = try operations.start(pane: PaneID(1), sessionId: "s", command: "work", afterSequence: 0,
+            onCompletion: { status in
+                finished.append(status)
+                operations.remove(pane: PaneID(1)) // Reentrant disposal cannot invoke this callback twice.
+            }, send: {
+                if ending == "delivery" { throw RuntimeTestError.send }
+                if ending == "synchronous" {
+                    let line = try operations.claimInput(pane: PaneID(1), sessionId: "s", emptyBuffer: true)
+                    operations.observe(pane: PaneID(1), sessionId: "s", report: runtimeReport(.running, 1, command: line)) { "" }
+                    operations.observe(pane: PaneID(1), sessionId: "s", report: runtimeReport(.prompt, 2)) { "done" }
+                }
+            })
+        switch ending {
+        case "draft":
+            #expect(throws: TerminalOperationError.editingBufferNotEmpty) {
+                try operations.claimInput(pane: PaneID(1), sessionId: "s", emptyBuffer: false)
+            }
+        case "session": operations.loseSession(pane: PaneID(1), sessionId: "s")
+        case "pane": operations.remove(pane: PaneID(1))
+        default: break
+        }
+        operations.close()
+        #expect(finished.count == 1 && finished.first?.commandId == id)
+        let expected: TerminalOperationState = ending == "synchronous" ? .completed
+            : ["delivery", "draft"].contains(ending) ? .rejected : .sessionLost
+        #expect(finished.first?.state == expected)
+    }
+}
+
+@Test @MainActor func completionKeepsNonzeroExitAndInterruptionOutcomes() throws {
+    for interrupted in [false, true] {
+        let operations = TerminalOperations()
+        var finished: TerminalOperationStatus?
+        _ = try operations.start(pane: PaneID(1), sessionId: "s", command: "false", afterSequence: 0,
+            onCompletion: { finished = $0 }, send: {})
+        let line = interrupted ? "different command"
+            : try operations.claimInput(pane: PaneID(1), sessionId: "s", emptyBuffer: true)
+        operations.observe(pane: PaneID(1), sessionId: "s",
+            report: runtimeReport(.running, 1, command: line)) { "" }
+        if !interrupted {
+            let prompt = ShellReport(state: .prompt, pid: 123, sequence: 2, workingDirectory: "/tmp", command: nil, exitCode: 7)
+            operations.observe(pane: PaneID(1), sessionId: "s", report: prompt) { "done" }
+        }
+        #expect(finished?.state == (interrupted ? .interrupted : .completed))
+        #expect(finished?.exitCode == (interrupted ? nil : 7))
+        #expect(finished?.failure == (interrupted ? .otherCommand : nil))
+        operations.close()
+    }
+}
+
 @Test @MainActor func cancellingAWaitLeavesAdoptedInputClaimableAndResultsReconnectable() async throws {
     let operations = TerminalOperations()
     defer { operations.close() }

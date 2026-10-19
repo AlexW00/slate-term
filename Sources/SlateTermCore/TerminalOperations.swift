@@ -21,6 +21,8 @@ public final class TerminalOperations {
     }
     private var waiters: [UUID: Waiter] = [:]
     private var waitReservations = Set<UUID>()
+    // One host callback per adopted operation, bounded by the active operation limit.
+    private var completions: [UUID: @MainActor (TerminalOperationStatus) -> Void] = [:]
 
     public init() {}
     public var activeCount: Int { store.activeCount }
@@ -37,20 +39,22 @@ public final class TerminalOperations {
     /// its retained status tells the caller what happened without losing identity.
     public func start(pane: PaneID, sessionId: String, command: String, shell: ShellKind = .zsh, afterSequence: Int?,
                       usingReservation: Bool = false,
+                      onCompletion: (@MainActor (TerminalOperationStatus) -> Void)? = nil,
                       validateCaller: @MainActor () throws -> Void = {}, send: () throws -> Void) throws -> UUID {
         try Task.checkCancellation()
         try validateCaller()
         try Task.checkCancellation()
         let status = try store.start(pane: pane, sessionId: sessionId, command: command, shell: shell,
                                      afterSequence: afterSequence, usingReservation: usingReservation)
+        completions[status.commandId] = onCompletion
         do { try send() }
         catch { store.submissionFailed(status.commandId) }
-        resolveFinishedWaiters()
+        resolveFinishedOperations()
         return status.commandId
     }
 
     public func claimInput(pane: PaneID, sessionId: String, emptyBuffer: Bool) throws -> String {
-        defer { resolveFinishedWaiters() }
+        defer { resolveFinishedOperations() }
         return try store.claimInput(pane: pane, sessionId: sessionId, emptyBuffer: emptyBuffer)
     }
 
@@ -60,12 +64,12 @@ public final class TerminalOperations {
             let text = capture()
             store.completeCapture(id, text: text)
         }
-        resolveFinishedWaiters()
+        resolveFinishedOperations()
     }
 
     public func loseSession(pane: PaneID, sessionId: String) {
         store.loseSession(pane: pane, sessionId: sessionId)
-        resolveFinishedWaiters()
+        resolveFinishedOperations()
     }
 
     /// Authoritative pane disposal, not a stale session callback.
@@ -73,13 +77,13 @@ public final class TerminalOperations {
         store.releaseReservation(pane)
         let sessions = Set(store.list().filter { $0.paneId == pane && !$0.state.isFinished }.map(\.sessionId))
         for session in sessions { store.loseSession(pane: pane, sessionId: session) }
-        resolveFinishedWaiters()
+        resolveFinishedOperations()
     }
 
     public func close() {
         closed = true
         store.close()
-        resolveFinishedWaiters()
+        resolveFinishedOperations()
     }
 
     public func wait(_ id: UUID, timeoutMilliseconds: Int = 30_000,
@@ -144,7 +148,12 @@ public final class TerminalOperations {
     private static func validateTimeout(_ milliseconds: Int) throws {
         guard (1...maximumTimeoutMilliseconds).contains(milliseconds) else { throw TerminalOperationWaitError.invalidTimeout(milliseconds) }
     }
-    private func resolveFinishedWaiters() {
+    private func resolveFinishedOperations() {
+        // Remove before invocation: a completion may reenter the coordinator.
+        for id in Array(completions.keys) {
+            guard let status = try? store.status(id), status.state.isFinished else { continue }
+            completions.removeValue(forKey: id)?(status)
+        }
         for (id, waiter) in waiters {
             do {
                 guard try store.status(waiter.operation).state.isFinished else { continue }

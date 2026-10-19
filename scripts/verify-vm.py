@@ -13,6 +13,7 @@ import re
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tarfile
@@ -353,6 +354,82 @@ def guest_main(plan):
     return exit_code
 
 
+LOCK = '/tmp/slate-ui-tests.lock'
+
+
+def process_start(pid):
+    """Start time of a local process, None when it no longer exists, '' when unknown.
+    Comparing start times keeps a reused PID from looking like the original owner."""
+    try:
+        result = subprocess.run(['/bin/ps', '-o', 'lstart=', '-p', str(pid)], capture_output=True, text=True, timeout=10)
+    except Exception:
+        return ''  # Unknown: a lock recording it is never treated as stale.
+    started = result.stdout.strip() if isinstance(result.stdout, str) else ''
+    return started or (None if result.returncode == 1 else '')
+
+
+def lock_owner_alive(owner, host, start_of=process_start):
+    """A lock is stale only when its owner ran on this host and that process is gone.
+    Anything that cannot be checked, including old-format locks, counts as alive."""
+    if not isinstance(owner, dict) or owner.get('host') != host:
+        return True
+    pid, started = owner.get('pid'), owner.get('started')
+    if not isinstance(pid, int) or not isinstance(started, str) or not started:
+        return True
+    current = start_of(pid)
+    return current == '' or current == started
+
+
+def owned_by(run_id):
+    """Shell test that the lock still belongs to `run_id`. The owner file has no final newline,
+    which makes `read` fail, so compare its whole contents instead."""
+    return '[ "$(cat ' + LOCK + '/owner 2>/dev/null)" = ' + shlex.quote(str(run_id)) + ' ]'
+
+
+def record_owner(shell, owner):
+    """Rewrite this run's owner record, for example once its guest directory exists."""
+    shell(owned_by(owner['runId']) + ' && printf %s ' + shlex.quote(json.dumps(owner)) + ' > ' + LOCK + '/owner.json')
+
+
+def release_lock(shell, run_id):
+    """Remove the lock only if `run_id` still owns it."""
+    shell('! ' + owned_by(run_id) + ' || rm -rf ' + LOCK)
+
+
+def acquire_lock(shell, owner, wait_seconds, recover, sleep=time.sleep, clock=time.monotonic):
+    """Take the guest lock, waiting for a live owner and recovering one whose host process died.
+    Returns the recovered owners. `shell` raises CalledProcessError when a command fails."""
+    record = shlex.quote(json.dumps(owner))
+    take = ('mkdir ' + LOCK + ' && printf %s ' + shlex.quote(owner['runId']) + ' > ' + LOCK + '/owner && printf %s '
+            + record + ' > ' + LOCK + '/owner.json')
+    deadline = clock() + wait_seconds
+    recovered, announced = [], None
+    while True:
+        try:
+            shell(take)
+            return recovered
+        except subprocess.CalledProcessError:
+            pass  # Held by another run, or the VM is busy with other commands.
+        try:
+            current = json.loads(shell('cat ' + LOCK + '/owner.json', capture=True).stdout)
+        except (subprocess.CalledProcessError, ValueError):
+            current = None
+        if isinstance(current, dict) and not lock_owner_alive(current, owner['host']):
+            # Stop what the dead run left in the guest before reusing the VM. If that cannot be
+            # confirmed, keep the lock: its tests may still be running.
+            recover(current)
+            release_lock(shell, current.get('runId'))
+            recovered.append(current)
+            print('Recovered VM lock from ended run ' + str(current.get('runId')), file=sys.stderr, flush=True)
+            continue
+        if clock() >= deadline:
+            raise RuntimeError('VM lock is held by ' + json.dumps(current) + '; inspect ' + LOCK + ' inside the VM')
+        if announced != current:
+            print('Waiting for VM lock held by ' + json.dumps(current), file=sys.stderr, flush=True)
+            announced = current
+        sleep(15)
+
+
 def host_main(args):
     available = gates()
     if args.list or (not args.tests and not getattr(args, 'all', False)):
@@ -392,7 +469,8 @@ def host_main(args):
     guest_stopped = True
     runtime = None
     package_bin = None
-    lock = '/tmp/slate-ui-tests.lock'
+    lock = LOCK
+    owner = {'runId': run_id, 'host': socket.gethostname(), 'pid': os.getpid(), 'worktree': str(ROOT)}
     host_env = dict(os.environ)
     host_env.pop('SLATE_VM_PREBUILT', None)
     host_env.pop('SLATE_VM_BUILD_ONLY', None)
@@ -445,8 +523,6 @@ def host_main(args):
             home = shell('printf "%s" "$HOME"', capture=True).stdout
             runtime = home + '/Developer/slate-vm/runtime/bin'
             shell('test -x ' + shlex.quote(runtime + '/python3') + ' || { echo "Missing prepared guest runtime" >&2; exit 1; }')
-            shell('mkdir ' + lock + ' && printf %s ' + shlex.quote(run_id) + ' > ' + lock + '/owner')
-            locked = True
         for gate in selected_gates:
             if gate.location == 'host' and gate.name != 'whitespace':
                 status = host_gate(gate)
@@ -500,11 +576,25 @@ def host_main(args):
                 archive = Path(temporary) / 'bundle.tar.gz'
                 with tarfile.open(archive, 'w:gz') as tar:
                     tar.add(bundle, arcname='.')
+                # Lock only for guest work: host builds can take minutes and need no VM.
+                def recover(stale):
+                    remote_dir = stale.get('remote')
+                    if isinstance(remote_dir, str) and re.fullmatch(r'/tmp/slate-ui\.[A-Za-z0-9]{8}', remote_dir):
+                        script = remote_dir + '/source/scripts/verify-vm.py'
+                        shell('test ! -f ' + shlex.quote(script) + ' || ' + shlex.quote(runtime + '/python3') + ' '
+                              + shlex.quote(script) + ' --cleanup-guest')
+                    receipt.setdefault('recoveredStaleLocks', []).append(stale)
+                owner['started'] = process_start(os.getpid())
+                acquire_lock(shell, owner, getattr(args, 'lock_wait', 0), recover)
+                locked = True
                 directory = shell('mktemp -d /tmp/slate-ui.XXXXXXXX', capture=True).stdout.strip()
                 if not re.fullmatch(r'/tmp/slate-ui\.[A-Za-z0-9]{8}', directory):
                     raise RuntimeError('Unexpected guest temporary directory; refusing transfer/cleanup: ' + directory)
                 remote = directory
                 receipt['guestDirectory'] = remote
+                # A later run that finds this owner dead cleans up this directory's processes.
+                owner['remote'] = remote
+                record_owner(shell, owner)
                 checked(cli + ['cp', '--timeout', '5m', str(archive), args.vm + ':' + remote + '/bundle.tar.gz'])
             guest_command = ('set -eu; cd ' + shlex.quote(remote) + '; mkdir source; tar -xzf bundle.tar.gz -C source; '
                              'cd source; export PATH=' + shlex.quote(runtime + ':/usr/bin:/bin:/usr/sbin:/sbin') + '; '
@@ -584,7 +674,7 @@ def host_main(args):
                 print('VM lock retained: teardown unconfirmed; inspect ' + lock + ' inside the VM', file=sys.stderr)
             if locked and guest_stopped:
                 try:
-                    shell('read -r owner < ' + lock + '/owner; test "$owner" != ' + shlex.quote(run_id) + ' || rm -rf ' + lock)
+                    release_lock(shell, run_id)
                     locked = False
                 except subprocess.CalledProcessError:
                     receipt['lockCleanupFailed'] = True
@@ -616,6 +706,8 @@ def main():
     parser.add_argument('--vmpal', help='VMPal CLI executable (bundled helper used if not on PATH)')
     parser.add_argument('--timeout', type=int, default=600, help='Seconds per guest test (default: 600)')
     parser.add_argument('--keep-guest', action='store_true', help='Keep the isolated guest run directory for debugging')
+    parser.add_argument('--lock-wait', type=int, default=1800, metavar='SECONDS',
+                        help='Wait this long for another run to release the VM (default: 1800)')
     parser.add_argument('--guest', help=argparse.SUPPRESS)
     parser.add_argument('--cleanup-guest', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()

@@ -91,6 +91,14 @@ with http.server.ThreadingHTTPServer(('127.0.0.1', 0), Page) as server:
                 assert state['error'] is None and not state['dirty'], state
                 terminal = rpc('config.get')['current']['terminal']
                 assert terminal['working_directory'] == '~/Projects' and terminal['inherit_working_directory'] is False
+                state = rpc('debug.settings', section='Terminal', inheritWorkingDirectory=True)
+                assert not state['showsDefaultDirectory'] and state['workingDirectory'] == '~/Projects'
+                time.sleep(0.3)
+                rpc('debug.screenshot', settings=True, path=str(ROOT / 'artifacts/settings-terminal-inherited.png'))
+                state = rpc('debug.settings', inheritWorkingDirectory=False)
+                assert state['showsDefaultDirectory'] and state['workingDirectory'] == '~/Projects'
+                time.sleep(0.3)
+                rpc('debug.screenshot', settings=True, path=str(ROOT / 'artifacts/settings-terminal-default.png'))
                 rpc('debug.settings', workingDirectory='~', inheritWorkingDirectory=True, apply=True)
                 for section in ['General', 'Terminal', 'Browser', 'Keyboard Shortcuts', 'Plugins']:
                     rpc('debug.settings', section=section)
@@ -98,11 +106,28 @@ with http.server.ThreadingHTTPServer(('127.0.0.1', 0), Page) as server:
                     rpc('debug.screenshot', settings=True, path=str(ROOT / f'artifacts/settings-{section.lower().replace(" ", "-")}.png'))
 
                 state = rpc('debug.settings', section='Browser')
-                assert state['browserPanes'] == [] and not state['canClearBrowserSite']
+                assert state['browserSites'] == [] and not state['canClearBrowserSite']
                 rpc('debug.settings', width=1000, height=560)
                 time.sleep(0.4)
                 rpc('debug.screenshot', settings=True, path=str(ROOT / 'artifacts/settings-browser-empty-small.png'))
                 rpc('debug.settings', width=1060, height=680)
+
+                command('pane.type', pane='p1', type='browser', force=True)
+                site = f'http://127.0.0.1:{server.server_port}/settings'
+                rpc('browser.navigate', pane='p1', url=site)
+                rpc('browser.eval', pane='p1', script='localStorage.setItem("fixture","stored");true')
+                command('pane.type', pane='p1', type='terminal', force=True)
+                rpc('debug.settings', section='Browser', refreshBrowserSites=True, width=1060, height=680)
+                eventually('stored sites loaded', lambda: '127.0.0.1' in rpc('debug.settings')['browserSites'] and not rpc('debug.settings')['loadingBrowserSites'])
+                state = rpc('debug.settings', browserSite='127.0.0.1')
+                assert state['canClearBrowserSite'], state
+                time.sleep(0.4)
+                rpc('debug.screenshot', settings=True, path=str(ROOT / 'artifacts/settings-browser-populated.png'))
+                rpc('debug.settings', width=1000, height=560)
+                time.sleep(0.4)
+                rpc('debug.screenshot', settings=True, path=str(ROOT / 'artifacts/settings-browser-populated-small.png'))
+
+                print('PASS requested settings: directory visibility/value retention and stored sites without browser panes', flush=True)
 
                 state = rpc('debug.settings', section='Keyboard Shortcuts')
                 assert not state['hasToolbar'], 'Settings should not install a collapsing navigation toolbar'
@@ -117,7 +142,7 @@ with http.server.ThreadingHTTPServer(('127.0.0.1', 0), Page) as server:
                 rpc('debug.settings', recordAction='New Tab', recordPrevious='cmd+alt+t')
                 rpc('debug.key', settings=True, chord='cmd+n', dispatch=True)
                 state = rpc('debug.settings')
-                assert 'already assigned' in state['error'] and state['shortcuts']['cmd+n'] == 'window.new', state
+                assert state['error'] and 'already assigned' in state['error'] and state['shortcuts']['cmd+n'] == 'window.new', state
                 rpc('debug.settings', revert=True)
                 rpc('debug.settings', recordAction='New Tab', recordPrevious='cmd+alt+t')
                 rpc('debug.key', settings=True, chord='escape', dispatch=True)
@@ -179,23 +204,6 @@ with http.server.ThreadingHTTPServer(('127.0.0.1', 0), Page) as server:
                 eventually('right pane focused', lambda: next(t for t in rpc('workspace.get')['tabs'] if t['id'] == 't1')['focusedPane'] == right)
                 rpc('debug.key', chord='ctrl+alt+j')
                 eventually('bottom pane focused', lambda: next(t for t in rpc('workspace.get')['tabs'] if t['id'] == 't1')['focusedPane'] == bottom)
-                command('pane.type', pane='p1', type='browser', force=True)
-                site = f'http://127.0.0.1:{server.server_port}/settings'
-                rpc('browser.navigate', pane='p1', url=site)
-                state = rpc('debug.settings', section='Browser', browserPane='p1', width=1060, height=680)
-                assert state['browserSiteURL'] == site and state['canClearBrowserSite']
-                time.sleep(0.4)
-                rpc('debug.screenshot', settings=True, path=str(ROOT / 'artifacts/settings-browser-populated.png'))
-                rpc('debug.settings', width=1000, height=560)
-                time.sleep(0.4)
-                rpc('debug.screenshot', settings=True, path=str(ROOT / 'artifacts/settings-browser-populated-small.png'))
-                command('pane.type', pane='p1', type='private-browser', force=True)
-                rpc('browser.navigate', pane='p1', url=site)
-                rpc('debug.settings', section='Browser', browserPane='p1', width=1060, height=680)
-                time.sleep(0.4)
-                rpc('debug.screenshot', settings=True, path=str(ROOT / 'artifacts/settings-browser-private.png'))
-                command('pane.type', pane='p1', type='terminal', force=True)
-
                 print('PASS: settings persistence, validation, conflicts, native sections, browser and workspace shortcuts')
             finally:
                 if app.poll() is None:

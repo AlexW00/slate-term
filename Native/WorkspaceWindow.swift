@@ -53,11 +53,30 @@ final class WorkspaceWindow: NSWindow {
         super.toggleFullScreen(sender)
     }
 
+    var canShowAllTabs: Bool {
+        guard let group = tabGroup, group.windows.count > 1,
+              let selected = group.selectedWindow else { return false }
+        return selected.isVisible && !selected.isMiniaturized && selected.attachedSheet == nil
+            && NSApp.modalWindow == nil
+            && !group.windows.contains { ($0 as? WorkspaceWindow)?.fullscreenTransitionPending == true }
+    }
+
+    func showAllTabs() throws {
+        guard canShowAllTabs else {
+            throw RPCFailure(code: APIError.unavailable, message: "Show All Tabs requires a visible window with multiple tabs and no sheet")
+        }
+        setTabOverviewVisible(true)
+    }
+
+    private func setTabOverviewVisible(_ visible: Bool) {
+        tabGroup?.isOverviewVisible = visible
+    }
+
     override func toggleTabOverview(_ sender: Any?) {
         // AppKit's native action can be a no-op on macOS 27 even though the
         // group's overview works. Use the public visibility setter directly.
         guard let group = tabGroup else { return }
-        group.isOverviewVisible.toggle()
+        setTabOverviewVisible(!group.isOverviewVisible)
     }
 
     override func sendEvent(_ event: NSEvent) {

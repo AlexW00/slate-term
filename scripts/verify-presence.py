@@ -10,7 +10,7 @@ from api_fixture import AppFixture, ROOT, eventually
 
 assert subprocess.check_output(['/usr/sbin/sysctl', '-n', 'hw.model'], text=True).strip().startswith('VirtualMac'), 'Run this UI gate through scripts/verify-vm.py'
 
-HTML = '''<!doctype html><title>Presence fixture</title><style>body{padding:40px}input,button{display:block;margin:12px}</style>
+HTML = '''<!doctype html><title>Presence fixture</title><style>body{padding:40px}input,button{display:block;margin:12px}button{width:240px;height:48px}</style>
 <input id="email"><button id="go" onclick="document.title='clicked'">Go</button>'''
 
 with AppFixture('presence') as app:
@@ -142,6 +142,35 @@ with AppFixture('presence') as app:
     assert shown(target)[0]['status'] == 'failed'
     eventually('run presence ends', lambda: activities() == [], timeout=6)
 
+    # A start returns before completion; its activity survives the submitting CLI.
+    started = app.cli('terminal', 'start', '--pane', target, '--shell', 'zsh',
+                      '--command', 'sleep 8; false', '--note', 'checking async work', env=agent)
+    time.sleep(5.5)
+    [running] = activities()
+    assert running['live'] and running['actionKind'] == 'run' and 'result' not in running, running
+    assert shown(target)[0]['status'] == 'live', shown(target)
+    snapshot('async-running', settle=0, activate=False)
+    result = app.cli('terminal', 'operationWait', '--command-id', started['commandId'], env=agent)
+    assert result['exitCode'] == 1, result
+    [finished] = activities()
+    assert not finished['live'] and finished['result'] == 'failed', finished
+    assert shown(target)[0]['status'] == 'failed', shown(target)
+    eventually('start presence ends', lambda: activities() == [], timeout=6)
+
+    # Previously omitted pane reads and edits use the same actor metadata.
+    metadata = {'version': 1, 'actor': {'name': 'claude', 'home': 'p1'}}
+    for method, params, action in [
+        ('terminal.history', {}, 'read'),
+        ('terminal.historyExport', {'path': str(app.root / 'history.txt')}, 'read'),
+        ('terminal.search', {'action': 'set', 'query': 'sleep'}, 'write'),
+        ('terminal.search', {'action': 'end'}, 'write'),
+    ]:
+        app.rpc(method, pane=target, request_metadata=metadata, **params)
+        [activity] = activities()
+        assert activity['pane'] == target and activity['actionKind'] == action, (method, activity)
+        assert shown(target), method
+    eventually('pane edits presence ends', lambda: activities() == [], timeout=6)
+
     # A hold keeps the tag across calls until release.
     held = app.cli('presence', 'hold', '--pane', target, '--ttl', '30', '--note', 'triaging', env=agent)
     assert held['pane'] == target
@@ -199,12 +228,66 @@ with AppFixture('presence') as app:
     assert shown(target)[0]['target'] == 'pane', 'A new pane-level call returns the frame to the pane'
     eventually('presence ends', lambda: activities() == [], timeout=6)
 
+    # Identical element targets share one native ring, including when membership changes.
+    def click_as(name, selector='#go'):
+        return app.rpc('web.click', pane=target, selector=selector,
+                       expectedViewId=info['viewId'], expectedDocumentId=info['documentId'],
+                       request_metadata={'version': 1, 'actor': {'name': name, 'home': 'p1'}})
+
+    def shared_ring(count):
+        tags = shown(target)
+        assert len(tags) == count and all(t['target'] == 'element' for t in tags), tags
+        assert len({t['ringID'] for t in tags}) == 1, tags
+        assert all(t['ringColors'] == count for t in tags), tags
+        expected = [0] + [(i + 0.5) / count for i in range(count)] + [1]
+        assert tags[0]['ringStops'] == expected, tags
+        assert tags[0]['ringWidth'] == tags[0]['element']['width'] + 9.5, tags
+        return tags[0]['ringID']
+
+    click_as('claude')
+    shared = shared_ring(1)
+    click_as('codex')
+    assert shared_ring(2) == shared
+    snapshot('shared-two')
+    click_as('claude')
+    click_as('gemini')
+    assert shared_ring(3) == shared
+    snapshot('shared-three')
+
+    # Moving one agent to another element leaves two colors on the original ring.
+    click_as('gemini', '#email')
+    tags = shown(target)
+    assert [t['ringColors'] for t in tags] == [2, 2, 1], tags
+    assert tags[0]['ringID'] == tags[1]['ringID'] == shared != tags[2]['ringID'], tags
+    snapshot('separate-elements')
+    # Refresh the short holds before checking rapid membership changes.
+    click_as('claude')
+    click_as('codex')
+    # Rejoining and leaving during a color fade must preserve the shared ring.
+    click_as('gemini')
+    assert shared_ring(3) == shared
+    app.rpc('web.snapshot', pane=target,
+            request_metadata={'version': 1, 'actor': {'name': 'codex', 'home': 'p1'}})
+    tags = shown(target)
+    assert [t['ringColors'] for t in tags] == [2, 1, 2], tags
+    assert tags[0]['ringID'] == tags[2]['ringID'] == shared, tags
+    assert tags[1]['target'] == 'pane', tags
+    snapshot('shared-departure')
+    app.rpc('web.snapshot', pane=target,
+            request_metadata={'version': 1, 'actor': {'name': 'gemini', 'home': 'p1'}})
+    tags = shown(target)
+    assert [t['ringColors'] for t in tags] == [1, 2, 2], tags
+    assert tags[0]['ringID'] == shared and tags[1]['ringID'] == tags[2]['ringID'], tags
+    eventually('shared presence ends', lambda: activities() == [], timeout=6)
+    eventually('shared overlay clears', lambda: shown(target) == [], timeout=3)
+
     # Three agents on one pane compress all but the newest tag.
     for name in ['gemini', 'codex', 'claude']:
         app.cli('presence', 'hold', '--pane', target, '--note', f'{name} is looking', env=dict(app.env, SLATE_TERM_ACTOR=name, SLATE_TERM_PANE_ID='p1'))
     tags = shown(target)
     assert [t['label'] for t in tags] == ['gemini', 'codex', 'claude'], tags
     assert [t['compact'] for t in tags] == [True, True, False], tags
+    assert len({t['ringID'] for t in tags}) == 1 and all(t['ringColors'] == 3 for t in tags), tags
     assert all(t['glass'] and t['outsidePassesThrough'] for t in tags), tags
     snapshot('crowded')
 
@@ -286,6 +369,22 @@ with AppFixture('presence-focus') as app:
     controller = command('split.right', pane=target)['paneId']
     command('pane.type', pane=controller, type='presence.controller', force=True)
     eventually('presence page bridge', lambda: app.rpc('debug.pluginEval', pane=controller, script='typeof workspace') == 'object')
+    actor_metadata = dict(version=1, actor=dict(name='codex', home=origin))
+    view = app.rpc('web.get', pane=controller)
+    app.rpc('pane.title', pane=controller, title='Presence controller title',
+            expectedViewId=view['viewId'], expectedDocumentId=view['documentId'], request_metadata=actor_metadata)
+    for action in ['patch', 'reset']:
+        [editing] = [a for a in app.rpc('presence.list')['activities'] if a['pane'] == controller]
+        assert editing['actor'] == 'codex' and editing['actionKind'] == 'write', editing
+        assert shown(controller), action
+        state = app.rpc('plugins.panelState.get', pane=controller)
+        params = dict(pane=controller, expectedPanelId=state['panelId'], expectedStateRevision=state['revision'])
+        if action == 'patch':
+            params['operations'] = [dict(op='set', key='presenceTest', value=True)]
+        app.rpc('plugins.panelState.' + action, request_metadata=actor_metadata, **params)
+    [editing] = [a for a in app.rpc('presence.list')['activities'] if a['pane'] == controller]
+    assert editing['count'] == 3 and editing['actionKind'] == 'write', editing
+    assert shown(controller)
     script = 'await workspace.presence.focus({activityId:' + json.dumps(activity) + '})'
     assert app.rpc('debug.pluginEval', pane=controller, script=script)['paneId'] == origin
     eventually('page origin focus', lambda: focus_is(origin))

@@ -2,15 +2,28 @@ import Foundation
 
 /// Data clearing is distinct from navigation: never guess a scheme or use live focus/URL for API calls.
 public struct BrowserDataRequest: Sendable {
-    public enum Kind: Sendable { case all, site }
+    public enum Kind: Sendable { case all, site, storedSite }
     public let kind: Kind
     public let host: String?
 
     public init(kind: Kind, params: [String: JSONValue]) throws {
-        let allowed: Set<String> = kind == .all ? [] : ["pane", "tab", "url"]
+        let allowed: Set<String>
+        switch kind {
+        case .all: allowed = []
+        case .site: allowed = ["pane", "tab", "url"]
+        case .storedSite: allowed = ["site"]
+        }
         guard Set(params.keys).isSubset(of: allowed) else { throw Self.invalid("Unknown browser data parameter") }
         self.kind = kind
         if kind == .all { host = nil; return }
+        if kind == .storedSite {
+            guard let site = params["site"]?.string, !site.isEmpty, site.utf8.count <= 16_384,
+                  !site.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+                throw Self.invalid("site must be a nonempty stored site name without control characters, at most 16384 UTF-8 bytes")
+            }
+            host = site
+            return
+        }
         guard let text = params["url"]?.string else { throw Self.invalid("url is required") }
         host = try Self.siteHost(text)
         for key in ["pane", "tab"] where params[key] != nil {

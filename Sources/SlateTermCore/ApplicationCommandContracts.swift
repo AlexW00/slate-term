@@ -136,7 +136,7 @@ extension AutomationContracts {
                     "dismissesOpenedRecord": .bool(true), "nextSelection": .string("firstOutstandingRecord")])
         }
         for id in ["plugins.reload", "terminal.find", "terminal.find.next", "terminal.find.previous", "terminal.find.end",
-                   "pane.move.chooseDestination", "tab.rename"] {
+                   "pane.move.chooseDestination", "tab.rename", "tab.showAll"] {
             var fields: [String: JSONValue] = ["paneId": S.paneID]
             var conditions: [JSONValue]
             var semantics: [String: JSONValue] = [:]
@@ -144,6 +144,12 @@ extension AutomationContracts {
             case "plugins.reload":
                 fields["reloading"] = S.constant(.bool(true)); conditions = [requires("registeredPluginPane")]
                 semantics["resultMeans"] = .string("reloadRequestedNotReadiness")
+            case "tab.showAll":
+                fields = ["tabId": S.tabID, "overviewVisible": S.constant(.bool(true))]
+                conditions = [requires("visibleNativeWindowWithMultipleTabsAndNoSheet")]
+                semantics["nativeUI"] = .bool(true)
+                semantics["idempotent"] = .bool(true)
+                semantics["scope"] = .string("targetTabNativeWindowGroup")
             case "tab.rename":
                 fields = ["tabId": S.tabID, "editing": S.constant(.bool(true))]
                 conditions = [requires("nativeTabCanPresentRenameEditor")]

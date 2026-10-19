@@ -12,6 +12,32 @@ Detailed change record for agents and maintainers. Public release notes live in 
 
 ### Internal
 
+## 0.4.0 — Pending publication
+
+### Added
+
+- Added Show All Tabs (`tab.showAll`) to the command picker, Workspace/Window menus, configurable shortcuts, and shared CLI/page/service command API. It opens the targeted native window group's overview without toggling an already-open overview closed; single-tab windows and sheets reject it.
+- Browser Settings lists sites with stored shared browsing data and supports removing a selected stored site, including sites no longer open. Shared `browser.listData` and `browser.removeSiteData` methods support the CLI and trusted clients.
+
+### Changed
+
+- Unnamed tabs display New Tab; clearing a manual title restores that label.
+- Working-directory settings use a native folder chooser and a clearer inheritance control.
+- Agent focus frames blend when agents target the same element.
+- Updated the website mockups with a revised demo sequence, hero presentation, and plugin gallery examples.
+
+### Fixed
+
+- Agent indicators now cover asynchronous terminal starts, terminal history/export/search, plugin automatic-title and panel-state edits, and browser site-data clearing. A started command retains its activity until completion, rejection, or session loss, independently of the submitting client.
+- Shell reports preserve unknown command text, prioritize Slate hooks, and stop detached retries when the app or reporting shell is gone. Older Bash with strict unset-variable checks loads only the compatible preexec hooks.
+- Terminal CLI `start --shell` accepts the same shell-language assertion as `run`.
+
+### Internal
+
+- Integrated committed VM-owner lock recovery/waiting and generated-shell syntax coverage; preserved public strict-mode, updater, and structured-error checks.
+- Integrated committed development main through `892ed26`, preserving the public signing, updater, and release pipeline. Uncommitted development documentation and unmerged branches are excluded.
+- Added command contract, native overview, picker, shortcut, explicit target, sheet rejection, and trusted-client regression coverage. Verification results are recorded with the release evidence.
+
 ## 0.3.0 — 2026-10-19
 
 Integrated committed local main `17162fa` after the previous integration at `11861a7`, preserving the public updater and release pipeline.

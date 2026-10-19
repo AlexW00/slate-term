@@ -57,6 +57,18 @@ import SlateTermCore
     #expect(command.action == .operationWait && command.commandId == id)
 }
 
+@Test func terminalStartAcceptsAShellBeforeConnecting() throws {
+    let missingSocket = "/tmp/slate-missing-\(UUID().uuidString).sock"
+    let command = try TerminalCommand.parse(["start", "--pane", "p2", "--command", "true",
+                                             "--shell", "zsh", "--socket", missingSocket])
+    do {
+        try command.run()
+        Issue.record("A nonexistent socket unexpectedly accepted a command")
+    } catch {
+        #expect(!(error is ValidationError), "start accepts the same shell assertion as run")
+    }
+}
+
 @Test func cliLiteralAliasesStayInTheAuthoritativeCatalog() throws {
     let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     let directory = root.appendingPathComponent("Sources/SlateTermCLI")
@@ -102,4 +114,12 @@ import SlateTermCore
     }
     let poll = try Events.parse(["poll", "--recipient", "service:svc:G1", "--scope", "global"])
     #expect(poll.recipient == "service:svc:G1" && poll.scope == "global")
+}
+
+@Test func browserStoredDataCLIExposesPaneIndependentOperations() throws {
+    let list = try BrowserCommand.parse(["list-data"])
+    #expect(list.action.method == "browser.listData")
+    let remove = try BrowserCommand.parse(["remove-site-data", "--site", "Example.COM"])
+    #expect(remove.action.method == "browser.removeSiteData")
+    #expect(remove.site == "Example.COM")
 }

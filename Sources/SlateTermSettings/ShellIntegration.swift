@@ -92,16 +92,21 @@ public enum ShellIntegration {
         _slate_mark_prompt='${_slate_nil:$((_slate_line=1)):0}'
         _slate_mark_continuation='${_slate_nil:$((_slate_line=2)):0}'
         _slate_mark_running='${_slate_nil:$((_slate_line=0)):0}$(_slate_preexec)'
-        # Apple's bash 3.2 gets no Ghostty injection; its script still adds prompt marks
-        # and bash-preexec without re-running startup files. It is not written for set -u.
-        if ! builtin declare -F __ghostty_precmd >/dev/null && [[ -r ${GHOSTTY_RESOURCES_DIR-}/shell-integration/bash/ghostty.bash ]]; then
-            # Ghostty's later prompt hooks read these even on Bash 3.2.
-            builtin : "${GHOSTTY_SHELL_FEATURES=}" "${PS0=}" "${BASHPID=$$}"
-            _slate_nounset=${-//[!u]/}
-            builtin set +u
-            builtin source "$GHOSTTY_RESOURCES_DIR/shell-integration/bash/ghostty.bash"
-            [[ -n $_slate_nounset ]] && builtin set -u
-            builtin unset _slate_nounset
+        # Apple's bash 3.2 gets no Ghostty injection. Ghostty's script still adds prompt marks
+        # and bash-preexec without re-running startup files, but it is not written for bash 3.2
+        # under set -u (it reads BASHPID and unset feature flags). Load only bash-preexec then.
+        if ! builtin declare -F __ghostty_precmd >/dev/null && [[ -d ${GHOSTTY_RESOURCES_DIR-}/shell-integration/bash ]]; then
+            if [[ $- == *u* && $_slate_run_input == false ]]; then
+                [[ -n ${bash_preexec_imported-} ]] || builtin source "$GHOSTTY_RESOURCES_DIR/shell-integration/bash/bash-preexec.sh"
+            else
+                # Ghostty sets this when it injects; its prompt hooks read it unguarded.
+                : "${GHOSTTY_SHELL_FEATURES=}"
+                _slate_nounset=${-//[!u]/}
+                builtin set +u
+                builtin source "$GHOSTTY_RESOURCES_DIR/shell-integration/bash/ghostty.bash"
+                [[ -n $_slate_nounset ]] && builtin set -u
+                builtin unset _slate_nounset
+            fi
         fi
         function _slate_prompt() {
             builtin local status=$?
@@ -130,11 +135,11 @@ public enum ShellIntegration {
                     command=${command#  }
                 fi
             fi
-            # Empty attached option values are rejected by the CLI parser.
-            builtin local -a command_args
-            command_args=("--command=${command:0:4096}")
-            if [[ -z $command ]]; then command_args=(--command ""); fi
-            "$SLATE_TERM_CLI" shell update --shell bash --run-input "$_slate_run_input" --state running --pid "$$" --sequence "$(( 2 * _slate_n + 1 ))" --cwd="$PWD" "${command_args[@]}" >/dev/null 2>&1
+            # An empty `--command=` is a missing value; leave it out when the text is unknown.
+            builtin local -a text
+            text=()
+            [[ -n $command ]] && text=(--command="${command:0:4096}")
+            "$SLATE_TERM_CLI" shell update --shell bash --run-input "$_slate_run_input" --state running --pid "$$" --sequence "$(( 2 * _slate_n + 1 ))" --cwd="$PWD" ${text[@]+"${text[@]}"} >/dev/null 2>&1
             # bash-preexec with extdebug skips the user's command when a hook fails.
             return 0
         }
@@ -147,8 +152,9 @@ public enum ShellIntegration {
             return "$status"
         }
         if [[ -n ${bash_preexec_imported-} ]]; then
-            precmd_functions+=(_slate_prompt)
-            preexec_functions+=(_slate_preexec)
+            # First, so a failing hook later in the list cannot stop Slate's reports.
+            precmd_functions=(_slate_prompt ${precmd_functions[@]+"${precmd_functions[@]}"})
+            preexec_functions=(_slate_preexec ${preexec_functions[@]+"${preexec_functions[@]}"})
         elif [[ $(builtin declare -p PROMPT_COMMAND 2>/dev/null) == "declare -a"* ]]; then
             PROMPT_COMMAND=(_slate_prompt "${PROMPT_COMMAND[@]}" _slate_ensure)
         else

@@ -156,9 +156,13 @@ class Terminal:
     def write(self, text):
         os.write(self.fd, text.encode() if isinstance(text, str) else text)
 
-    def text(self):
+    def raw(self):
         with self.lock:
             return self.output.decode('utf-8', 'replace')
+
+    def text(self):
+        """Screen text without escape sequences: fish highlights each character as it is typed."""
+        return re.sub(r'\x1b(\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(\x07|\x1b\\)|[P^_][^\x1b]*\x1b\\|[@-Z\\-_])', '', self.raw())
 
     def close(self):
         try:
@@ -411,7 +415,7 @@ for name, kind, executable, runs in shells():
         else:
             # bash 3.2 never claims input: the host refuses runs before sending a key.
             assert not s.host.claims
-            assert '\x1b]133;A' in s.terminal.text(), 'bash 3.2 lacks prompt marks from the bundled script'
+            assert '\x1b]133;A' in s.terminal.raw(), 'bash 3.2 lacks prompt marks from the bundled script'
         if kind == 'bash':
             # A command missing from history must not report the previous entry's text.
             s.type_line('set +o history')

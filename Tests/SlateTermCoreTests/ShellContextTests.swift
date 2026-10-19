@@ -99,7 +99,12 @@ private func report(_ state: ShellReport.State, _ sequence: Int, pid: Int = 123)
     for byte in Array(UInt8(1)...UInt8(31)) + [127] { payload.unicodeScalars.append(UnicodeScalar(byte)) }
     payload += " end"
     var shells: [(ShellKind, String)] = [(.zsh, "/bin/zsh"), (.bash, "/bin/bash")]
-    for path in ["/opt/homebrew/bin/bash", "/opt/homebrew/bin/fish", "/usr/local/bin/fish"] where FileManager.default.isExecutableFile(atPath: path) {
+    // Test shells built by scripts/build-test-shells.sh, when present.
+    let built = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        .deletingLastPathComponent().appendingPathComponent(".build/test-shells").path
+    let candidates = ["/opt/homebrew/bin/bash", "/opt/homebrew/bin/fish", "/usr/local/bin/fish",
+                      built + "/bash-5.2/bash", built + "/bash-5.3/bash", built + "/fish-4/fish"]
+    for path in candidates where FileManager.default.isExecutableFile(atPath: path) {
         shells.append((ShellKind(executablePath: path)!, path))
     }
     for (kind, path) in shells {

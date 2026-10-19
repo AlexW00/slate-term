@@ -190,6 +190,8 @@ public enum AutomationCapabilities {
             "browserData": .object([
                 "version": .integer(1), "persistentProfile": .string("appWide"), "privateProfile": .string("perPaneEphemeral"),
                 "clearAllMethod": .string("browser.clearData"), "clearSiteMethod": .string("browser.clearSiteData"),
+                "listMethod": .string("browser.listData"), "removeStoredSiteMethod": .string("browser.removeSiteData"),
+                "storedSiteRequired": .array([.string("site")]), "storedSites": .string("sortedUniqueWebKitRecordDisplayNames"),
                 "siteRequired": .array([.string("pane"), .string("url")]), "siteGranularity": .string("webkitDomainGroupIncludingSubdomains"),
                 "apiConfirmation": .bool(false), "nativeConfirmation": .bool(true),
                 "resultFields": .array(["cleared", "scope", "storage", "host"].map(JSONValue.string))

@@ -50,7 +50,7 @@ final class TabRenameController: NSObject, NSTextFieldDelegate {
         field.delegate = self
         let heading = NSTextField(labelWithString: "Rename Tab")
         heading.font = .systemFont(ofSize: 14, weight: .semibold)
-        let hint = NSTextField(labelWithString: "Leave empty to use Slate Terminal.")
+        let hint = NSTextField(labelWithString: "Leave empty to use \(TabTitle.defaultTitle).")
         hint.font = .systemFont(ofSize: 11)
         hint.textColor = .secondaryLabelColor
         errorLabel.font = .systemFont(ofSize: 11)

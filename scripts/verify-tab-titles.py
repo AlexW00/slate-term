@@ -3,10 +3,11 @@
 import json
 import subprocess
 import sys
+import time
 from api_fixture import AppFixture, APP, ROOT, eventually
 from plugin_package_fixture import package_fixture
 
-configuration = '[appearance]\ntheme = "light"\n[keybind]\n"cmd+ctrl+r" = "tab.rename"\n"cmd+ctrl+shift+r" = "tab.title.clear"\n'
+configuration = '[appearance]\ntheme = "light"\n[keybind]\n"cmd+ctrl+e" = "tab.showAll"\n"cmd+ctrl+r" = "tab.rename"\n"cmd+ctrl+shift+r" = "tab.title.clear"\n'
 with AppFixture('tab-titles', configuration=configuration) as app:
     def command(id, **params):
         return app.rpc('command.run', id=id, **params)
@@ -38,7 +39,9 @@ with AppFixture('tab-titles', configuration=configuration) as app:
     commands = {c['id']: c for c in app.rpc('command.list')}
     assert not commands['tab.rename']['contract']['requiresArguments']
     assert commands['tab.title.set']['contract']['requiresArguments']
-    assert tab()['manualTitle'] is None and tab()['title'] == 'Slate Terminal'
+    assert not commands['tab.showAll']['contract']['requiresArguments']
+    app.rpc('command.run', id='tab.showAll', tab='t1', error=-32051)
+    assert tab()['manualTitle'] is None and tab()['title'] == 'New Tab'
     layout_revision = tab()['layoutRevision']
     cursor = app.rpc('events.head')['cursor']
     reply = app.cli('tabs', 'set-title', '--tab', 't1', '--title', '  Build 日本語  ')
@@ -78,6 +81,39 @@ with AppFixture('tab-titles', configuration=configuration) as app:
     second = app.cli('tabs', 'new', '--tab', 't1')['tabId']
     app.rpc('debug.activate', tab=second)
     eventually('foreground tab key', lambda: native(second)['key'])
+    def overview():
+        return next(w for w in app.rpc('debug.inspect')['windows'] if w['tabId'] == 't1')['overviewVisible']
+
+    def close_overview():
+        time.sleep(.8)
+        app.rpc('debug.key', tabOverview=True, chord='escape', dispatch=True)
+        eventually('Escape closes overview', lambda: not overview())
+        eventually('Overview restores focus', lambda: native(second)['key'])
+
+    app.rpc('command.run', id='tab.showAll', tab='t999', error=-32602)
+    app.rpc('command.run', id='tab.showAll', tab='t1', toggle=True, error=-32602)
+    app.rpc('command.run', id='tab.showAll', tab='t1', expectedWorkspaceRevision='stale', error=-32050)
+    before_overview = app.rpc('workspace.snapshot')
+    assert app.cli('command', 'run', 'tab.showAll', '--tab', 't1') == dict(tabId='t1', overviewVisible=True)
+    eventually('CLI opens overview for explicitly targeted group', overview)
+    assert command('tab.showAll', tab='t1')['overviewVisible']
+    after_overview = app.rpc('workspace.snapshot')
+    # Snapshots include sampling times and transient native presentation state.
+    for field in ['workspaceRevision', 'groups', 'tabs']:
+        assert after_overview[field] == before_overview[field], (field, before_overview[field], after_overview[field])
+    sessions = lambda snapshot: {p['paneId']: p.get('sessionId') for p in snapshot['panes']}
+    assert sessions(after_overview) == sessions(before_overview)
+    close_overview()
+    info = app.rpc('debug.commandPicker', show=True, query='Show All Tabs')
+    assert info['selected'] == 'tab.showAll', info
+    app.rpc('debug.screenshot', picker=True, pickerContext=True, pickerCrop=False, path=str(ROOT / 'artifacts/show-all-tabs-command.png'))
+    app.rpc('debug.key', picker=True, chord='return', dispatch=True)
+    eventually('Picker opens native overview', overview)
+    assert not app.rpc('debug.commandPicker')['visible']
+    close_overview()
+    app.rpc('debug.key', tab=second, chord='cmd+ctrl+e')
+    eventually('Shortcut opens overview', overview)
+    close_overview()
     key_before = native(second)['windowId']
     sessions_before = {p['paneId']: p.get('sessionId') for p in app.rpc('workspace.snapshot')['panes']}
     command('tab.title.set', tab='t1', title='Background')
@@ -97,6 +133,7 @@ with AppFixture('tab-titles', configuration=configuration) as app:
     # Exercise shortcut opening, actual native Return/Escape, invalid draft and conflict.
     app.rpc('debug.key', tab='t1', chord='cmd+ctrl+r')
     assert editor()['editing']
+    app.rpc('command.run', id='tab.showAll', tab=second, error=-32051)
     first_editor = editor()['windowNumber']
     command('tab.rename', tab='t1')
     assert editor()['windowNumber'] == first_editor
@@ -142,7 +179,7 @@ with AppFixture('tab-titles', configuration=configuration) as app:
     app.rpc('debug.screenshot', path=str(ROOT / 'artifacts/tab-titles-dark.png'))
     cursor = app.rpc('events.head')['cursor']
     app.rpc('debug.key', tab='t1', chord='cmd+ctrl+shift+r')
-    assert tab()['manualTitle'] is None and native()['title'] == 'Slate Terminal'
+    assert tab()['manualTitle'] is None and native()['title'] == 'New Tab'
     assert facts(cursor)[0]['payload']['origin']['kind'] == 'native'
     command('tab.title.set', tab='t1', title='日本語 ' * 25)
     app.rpc('debug.screenshot', path=str(ROOT / 'artifacts/tab-titles-long.png'))
@@ -180,11 +217,15 @@ with AppFixture('tab-titles', configuration=configuration) as app:
     app.cli('panes', 'type', '--pane', panel, '--type', 'tabnames', '--force')
     eventually('page bridge ready', lambda: js('typeof workspace') == 'object')
     assert js("await workspace.call('api.describe')") == app.rpc('api.describe')
+    app.rpc('debug.activate', tab=second)
+    assert js("await workspace.command('tab.showAll', {tab:'t1'})")['overviewVisible']
+    eventually('Registered page opens overview', overview)
+    close_overview()
     cursor = app.rpc('events.head')['cursor']
     assert js("await workspace.tabs.setTitle('From page', {tab:'t1'})")['tabId'] == 't1'
     assert facts(cursor)[0]['payload']['origin']['kind'] == 'plugin'
     assert js("await workspace.tabs.clearTitle({tab:'t1'})")['manualTitle'] is None
-    assert tab()['title'] == 'Slate Terminal'
+    assert tab()['title'] == 'New Tab'
     assert js("await workspace.tabs.setTitle('Bound page')")['tabId'] == second
     context = app.root / 'service-context.json'
     worker = app.root / 'service.py'
@@ -199,6 +240,9 @@ while True: time.sleep(1)
     eventually('service ready', context.exists)
     service_env = dict(app.env, **json.loads(context.read_text()))
     assert app.cli('rpc', 'api.describe', env=service_env) == app.rpc('api.describe')
+    assert app.cli('command', 'run', 'tab.showAll', '--tab', 't1', env=service_env)['overviewVisible']
+    eventually('Service opens overview', overview)
+    close_overview()
     cursor = app.rpc('events.head')['cursor']
     assert app.cli('tabs', 'set-title', '--tab', 't1', '--title', 'Tab 2', env=service_env)['title'] == 'Tab 2'
     assert facts(cursor)[0]['payload']['origin']['kind'] == 'service'
@@ -251,5 +295,5 @@ while True: time.sleep(1)
     app.path = app.ready.read_text().strip()
     app.env['SLATE_TERM_SOCKET'] = app.path
     assert tab()['manualTitle'] == native()['title'] == 'Persisted after restart'
-    assert app.cli('tabs', 'clear-title', '--tab', 't1')['title'] == 'Slate Terminal'
+    assert app.cli('tabs', 'clear-title', '--tab', 't1')['title'] == 'New Tab'
     print('PASS tab titles: shared CLI/page/service set/clear, native shortcut/picker/Return/Escape, validation/conflicts, atomic facts, focus/session retention, no-op save recovery, recipe capture/open and restart')

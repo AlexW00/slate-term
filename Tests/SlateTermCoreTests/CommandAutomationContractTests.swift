@@ -136,3 +136,14 @@ private let commandSchemaDefinitions = [AutomationContracts.commandDefinitions, 
     #expect(schemaAccepts(builtinContracts["plugins.reload"]!.result, .object(["paneId": .string("p1"), "reloading": .bool(true)]), definitions: commandSchemaDefinitions))
     #expect(!schemaAccepts(builtinContracts["terminal.find"]!.input, .object(["id": .string("terminal.find"), "query": .string("not-a-command-argument")])))
 }
+
+@Test func showAllTabsHasOneGuardedParameterlessCommandContract() throws {
+    let command = try #require(CommandRegistry.commands.first { $0.id == "tab.showAll" })
+    #expect(command.title == "Show All Tabs")
+    #expect(!command.contract.requiresArguments && !command.contract.workspaceIndependent)
+    let contract = try #require(builtinContracts[command.id])
+    #expect(schemaAccepts(contract.input, .object(["id": .string(command.id), "tab": .string("t2")])))
+    #expect(!schemaAccepts(contract.input, .object(["id": .string(command.id), "toggle": .bool(true)])))
+    #expect(schemaAccepts(contract.result, .object(["tabId": .string("t2"), "overviewVisible": .bool(true)]), definitions: commandSchemaDefinitions))
+    #expect(!schemaAccepts(contract.result, .object(["tabId": .string("t2"), "overviewVisible": .bool(false)]), definitions: commandSchemaDefinitions))
+}

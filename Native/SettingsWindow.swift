@@ -52,40 +52,30 @@ final class SettingsModel: ObservableObject {
     @Published var integration = "auto"
     @Published var restore = true
     @Published var searchURL = ""
-    struct BrowserSite: Identifiable, Equatable {
-        let id: String
-        let identity: String
-        let title: String
-        let url: String
-        let isPrivate: Bool
-    }
-    @Published var browserSites: [BrowserSite] = []
-    @Published var selectedBrowserPane = ""
-    @Published var browserSiteURL = ""
+    @Published var browserSites: [String] = []
+    @Published var selectedBrowserSite = ""
+    @Published var loadingBrowserSites = false
+    var browserSitesRefreshID = UUID()
     @Published var clearingBrowserData = false
     @Published var browserDataMessage: String?
     @Published var browserDataError: String?
     var refreshBrowserSites: (() -> Void)?
     var clearBrowserData: (() -> Void)?
     var clearBrowserSiteData: (() -> Void)?
-    var selectedBrowserSite: BrowserSite? { browserSites.first { $0.id == selectedBrowserPane } }
     var canClearBrowserSite: Bool {
-        selectedBrowserSite != nil && (try? BrowserDataRequest.siteHost(browserSiteURL)) != nil
+        !loadingBrowserSites && browserSites.contains(selectedBrowserSite)
     }
 
-    func selectBrowserPane(_ id: String) {
-        selectedBrowserPane = id
-        browserSiteURL = selectedBrowserSite?.url ?? ""
+    func selectBrowserSite(_ site: String) {
+        selectedBrowserSite = site
         browserDataMessage = nil
         browserDataError = nil
     }
 
-    func updateBrowserSites(_ sites: [BrowserSite]) {
-        let previous = selectedBrowserSite
+    func updateBrowserSites(_ sites: [String]) {
         browserSites = sites
-        if selectedBrowserSite == nil || selectedBrowserSite?.identity != previous?.identity {
-            selectedBrowserPane = sites.first?.id ?? ""
-            browserSiteURL = selectedBrowserSite?.url ?? ""
+        if !sites.contains(selectedBrowserSite) {
+            selectedBrowserSite = sites.first ?? ""
         }
     }
     @Published var notifyAutomatic = true
@@ -456,9 +446,15 @@ private struct SettingsView: View {
         Group {
             Section {
                 Toggle("New splits use the current directory", isOn: $model.inheritWorkingDirectory)
-                terminalField("Default directory", text: $model.workingDirectory, key: "working_directory")
+                if !model.inheritWorkingDirectory {
+                    terminalField("Default directory", text: $model.workingDirectory, key: "working_directory")
+                }
             } header: { Text("Working directory") } footer: {
-                Text("The default applies to new windows, tabs, and splits without an inherited directory. Use ~ for home or an absolute path. Changes apply to new terminals.")
+                if model.inheritWorkingDirectory {
+                    Text("New splits start in the current terminal’s directory. Changes apply to new terminals.")
+                } else {
+                    Text("The default applies to new windows, tabs, and splits. Use ~ for home or an absolute path. Changes apply to new terminals.")
+                }
             }
             Section {
                 terminalField("Font family", text: $model.fontFamily, key: "font_family")
@@ -532,22 +528,35 @@ private struct SettingsView: View {
             Text("Remove cookies, caches and saved website storage for all sites. Private Browser panes and plugins are separate.")
         }
         Section {
-            if model.browserSites.isEmpty {
-                Text("Open a Browser or Private Browser pane to clear a specific site’s data.")
-                    .foregroundStyle(.secondary)
+            if model.loadingBrowserSites && model.browserSites.isEmpty {
+                HStack { ProgressView().controlSize(.small); Text("Loading website data…") }
+            } else if model.browserSites.isEmpty {
+                Text("No stored website data.").foregroundStyle(.secondary)
             } else {
-                Picker("Browser pane", selection: Binding(get: { model.selectedBrowserPane }, set: model.selectBrowserPane)) {
-                    ForEach(model.browserSites) { site in
-                        Text("\(site.title) — \(site.isPrivate ? "Private Browser" : "Browser") (\(site.id))").tag(site.id)
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(model.browserSites, id: \.self) { site in
+                            Button { model.selectBrowserSite(site) } label: {
+                                HStack {
+                                    Text(site).lineLimit(1).truncationMode(.middle)
+                                    Spacer()
+                                    Image(systemName: model.selectedBrowserSite == site ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(model.selectedBrowserSite == site ? Color.accentColor : Color.secondary)
+                                }
+                                .padding(.vertical, 7)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityValue(model.selectedBrowserSite == site ? "Selected" : "")
+                        }
                     }
                 }
-                TextField("Site URL", text: $model.browserSiteURL, prompt: Text("https://example.com"))
-                    .autocorrectionDisabled()
-                LabeledContent("Profile", value: model.selectedBrowserSite?.isPrivate == true
-                               ? "This private pane only" : "Shared across Browser panes")
+                .frame(height: min(CGFloat(model.browserSites.count) * 32, 160))
+                .accessibilityLabel("Sites with stored data")
             }
             HStack {
-                Button("Refresh Open Panes") { model.refreshBrowserSites?() }
+                Button("Refresh Sites") { model.refreshBrowserSites?() }
+                    .disabled(model.loadingBrowserSites)
                 Spacer()
                 Button("Clear Site Data…", role: .destructive) { model.clearBrowserSiteData?() }
                     .disabled(!model.canClearBrowserSite)
@@ -559,7 +568,7 @@ private struct SettingsView: View {
             if let message = model.browserDataMessage { Text(message).foregroundStyle(.secondary) }
             if let error = model.browserDataError { Text(error).foregroundStyle(.red).textSelection(.enabled) }
         } header: { Text("Clear a specific site") } footer: {
-            Text("Choose an open pane, then use its site URL or enter another HTTP(S) URL. WebKit may group parent domains and subdomains together. Clearing takes effect after confirmation; open pages may save data again.")
+            Text("Stored sites in the shared Browser profile, including sites with no open panes. Private Browser data is separate. Clearing a site also removes data for subdomains grouped with it; open pages may save data again.")
         }
         .disabled(model.clearingBrowserData)
         .onAppear { model.refreshBrowserSites?() }

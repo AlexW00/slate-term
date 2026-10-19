@@ -83,7 +83,7 @@ with tempfile.TemporaryDirectory(prefix="slate-pane-titles-", dir="/tmp") as tem
             assert check('p1')['dimmed'] and check(p2)['active']
             cli('command', 'run', 'pane.focus', '--pane', 'p1')
             assert check('p1')['active'] and check(p2)['dimmed']
-            assert all(w['title'] == 'Slate Terminal' for w in rpc('debug.inspect')['windows'])
+            assert all(w['title'] == 'New Tab' for w in rpc('debug.inspect')['windows'])
             menu = rpc('debug.menuTree')
             assert not any(item['title'] == 'Pane' for item in menu), menu
             workspace_menu = next(item for item in menu if item['title'] == 'Workspace')

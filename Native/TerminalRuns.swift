@@ -70,11 +70,12 @@ final class TerminalRuns {
         catch { throw Self.map(error) }
     }
     func start(pane: PaneID, sessionID: String, command: String, shell: ShellKind = .zsh, baseline: Int? = nil,
-               usingReservation: Bool = false, validateCaller: @MainActor () throws -> Void = {},
+               usingReservation: Bool = false, onCompletion: (@MainActor (TerminalOperationStatus) -> Void)? = nil,
+               validateCaller: @MainActor () throws -> Void = {},
                send: () throws -> Void) throws -> UUID {
         try Self.validate(command)
         return try mapped { try operations.start(pane: pane, sessionId: sessionID, command: command, shell: shell, afterSequence: baseline,
-            usingReservation: usingReservation, validateCaller: validateCaller, send: send) }
+            usingReservation: usingReservation, onCompletion: onCompletion, validateCaller: validateCaller, send: send) }
     }
     /// Blocking compatibility form of start + wait. Timeout and caller cancellation end
     /// only this wait; the adopted operation stays tracked under its commandId.

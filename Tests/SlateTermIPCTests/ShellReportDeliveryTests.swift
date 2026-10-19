@@ -61,11 +61,12 @@ private final class BusyHost: @unchecked Sendable {
     }
 }
 
-private func report(_ state: String, sequence: Int, socket: String, command: String? = nil) -> Process {
+/// `pid` is the reporting shell; it must be alive, or delivery stops retrying. The test process stands in.
+private func report(_ state: String, sequence: Int, socket: String, command: String? = "work", pid: Int32 = getpid()) -> Process {
     let process = Process()
     process.executableURL = cli
-    process.arguments = ["shell", "update", "--shell", "bash", "--run-input", "false", "--state", state, "--pid", "4242",
-                         "--sequence", "\(sequence)", "--cwd=/tmp"] + (state == "prompt" ? ["--exit-code", "0"] : ["--command=\(command ?? "work")"])
+    process.arguments = ["shell", "update", "--shell", "bash", "--run-input", "false", "--state", state, "--pid", "\(pid)",
+                         "--sequence", "\(sequence)", "--cwd=/tmp"] + (state == "prompt" ? ["--exit-code", "0"] : command.map { ["--command=\($0)"] } ?? [])
     process.environment = ["SLATE_TERM_SOCKET": socket, "SLATE_TERM_PANE_ID": "p1", "SLATE_TERM_CONTEXT_TOKEN": "token"]
     return process
 }
@@ -84,6 +85,10 @@ private func eventually(_ condition: () -> Bool, seconds: TimeInterval = 8) {
     let deadline = Date().addingTimeInterval(seconds)
     while !condition(), Date() < deadline { usleep(20_000) }
 }
+
+/// These tests wait synchronously on processes and fake hosts. Run one at a time so they never
+/// starve the shared test threads and distort the timings they measure.
+@Suite(.serialized) struct ShellReportDeliveryTests {
 
 /// The launch race: the shell reports its first prompt while the app is too busy to accept.
 /// The prompt must not wait, and the report must still arrive.
@@ -105,6 +110,14 @@ private func eventually(_ condition: () -> Bool, seconds: TimeInterval = 8) {
     defer { host.close() }
     _ = try timedRun(report("running", sequence: 3, socket: host.path, command: "-la starts with a dash"))
     #expect(host.reports.value.first?["command"] == .string("-la starts with a dash"), "The report arrived before the hook returned")
+}
+
+/// bash cannot always tell what started (history off); the report still marks the start.
+@Test func runningReportWithoutCommandTextIsStillDelivered() throws {
+    let host = try BusyHost(acceptAfter: 0)
+    defer { host.close() }
+    _ = try timedRun(report("running", sequence: 5, socket: host.path, command: nil))
+    #expect(host.reports.value.first?["command"] == .string(""))
 }
 
 /// A busy host delays a command's start by about a second at most; the report still arrives.
@@ -137,10 +150,56 @@ private func eventually(_ condition: () -> Bool, seconds: TimeInterval = 8) {
     #expect(sequences() == Set((1...count).map { $0 * 2 }))
 }
 
-@Test func shellReportWithoutAHostFailsQuietlyAndFast() throws {
+/// After the app quits its socket is gone; nothing may linger retrying, or quitting leaks processes.
+@Test func shellReportWithoutAHostFailsQuietlyAndLeavesNothingBehind() throws {
+    let socket = "/tmp/slate-missing-\(UUID().uuidString.prefix(8)).sock"
     for state in ["prompt", "running"] {
-        #expect(try timedRun(report(state, sequence: 2, socket: "/tmp/slate-missing-\(UUID().uuidString.prefix(8)).sock")) < 1.5)
+        #expect(try timedRun(report(state, sequence: 2, socket: socket)) < 1.5)
     }
+    usleep(500_000)
+    let ps = Process()
+    ps.executableURL = URL(fileURLWithPath: "/bin/ps")
+    ps.arguments = ["-axww", "-o", "command="]
+    ps.environment = [:]
+    let output = Pipe()
+    ps.standardOutput = output
+    try ps.run()
+    let listing = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    ps.waitUntilExit()
+    #expect(!listing.contains(socket) && !listing.split(separator: "\n").contains { $0.contains("--deliver") && $0.contains(socket) })
+}
+
+/// A killed app leaves its socket file behind, and connecting to it is refused just like a full
+/// queue. Once the reporting shell is gone too, the copy must stop retrying and exit.
+@Test func deliveryForAnEndedShellStopsRetrying() throws {
+    let socket = "/tmp/slate-dead-\(UUID().uuidString.prefix(8)).sock"
+    let listener = try makeSocket(nonblocking: false)
+    try withSocketAddress(socket) { address, length in
+        guard bind(listener, address, length) == 0 else { throw SocketError.system("bind", errno) }
+    }
+    Darwin.close(listener)  // The file stays; connections are refused.
+    defer { unlink(socket) }
+    let ended = Process()
+    ended.executableURL = URL(fileURLWithPath: "/usr/bin/true")
+    try ended.run()
+    ended.waitUntilExit()
+    func lingering(pid: Int32) throws -> Bool {
+        let process = report("prompt", sequence: 2, socket: socket, pid: pid)
+        process.arguments = (process.arguments ?? []) + ["--socket", socket]
+        _ = try timedRun(process)
+        usleep(800_000)
+        let ps = Process()
+        ps.executableURL = URL(fileURLWithPath: "/bin/ps")
+        ps.arguments = ["-axww", "-o", "command="]
+        let output = Pipe()
+        ps.standardOutput = output
+        try ps.run()
+        let listing = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        ps.waitUntilExit()
+        return listing.split(separator: "\n").contains { $0.contains("--deliver") && $0.contains(socket) }
+    }
+    #expect(try !lingering(pid: ended.processIdentifier), "A copy for an ended shell outlived the app")
+    #expect(try lingering(pid: getpid()), "A live shell's report keeps retrying while the host is busy")
 }
 
 /// Other processes can read arguments; the detached copy gets command text only on stdin.
@@ -161,4 +220,5 @@ private func eventually(_ condition: () -> Bool, seconds: TimeInterval = 8) {
     #expect(!listing.contains(marker))
     eventually { !host.reports.value.isEmpty }
     #expect(host.reports.value.first?["command"] == .string("export TOKEN=\(marker)"))
+}
 }

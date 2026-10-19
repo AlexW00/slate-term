@@ -39,11 +39,20 @@ private func requestBytes(metadata: JSONValue) throws -> Data {
 @Test func onlyPaneActingMethodsShowPresence() {
     #expect(PresenceAction.forMethod("terminal.capture") == .read)
     #expect(PresenceAction.forMethod("terminal.run") == .run)
+    #expect(PresenceAction.forMethod("terminal.start") == .run)
+    for method in ["terminal.history", "terminal.historyExport"] {
+        #expect(PresenceAction.forMethod(method) == .read)
+    }
+    for method in ["terminal.search", "pane.title", "plugins.panelState.patch", "plugins.panelState.reset", "browser.clearSiteData"] {
+        #expect(PresenceAction.forMethod(method) == .write)
+    }
     #expect(PresenceAction.forMethod("web.click") == .write)
     #expect(PresenceAction.forMethod("browser.navigate") == .navigate)
     #expect(PresenceAction.forMethod("command.run", commandID: "pane.zoom") == .command)
     #expect(PresenceAction.forMethod("command.run", commandID: "plugins.panelState.reset") == .command)
-    for method in ["context.get", "pane.inspect", "workspace.snapshot", "events.poll", "config.patch", "web.get", "browser.get"] {
+    for method in ["context.get", "pane.inspect", "workspace.snapshot", "events.poll", "config.patch", "web.get", "browser.get",
+                   "terminal.operations", "terminal.operationStatus", "terminal.operationResult", "terminal.operationWait",
+                   "plugins.panelState.get", "plugins.settings.patch", "plugins.data.patch", "plugins.service.start"] {
         #expect(PresenceAction.forMethod(method) == nil)
     }
     #expect(PresenceAction.forMethod("command.run", commandID: "agents.activity.toggle") == nil)

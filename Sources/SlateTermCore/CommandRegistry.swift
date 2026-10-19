@@ -68,6 +68,7 @@ public enum CommandRegistry {
         .init(id: "pane.rename", title: "Rename Pane…", key: "", shift: false),
         .init(id: "pane.title.set", title: "Set Pane Title", key: "", shift: false),
         .init(id: "pane.title.clear", title: "Clear Pane Title", key: "", shift: false),
+        .init(id: "tab.showAll", title: "Show All Tabs", key: "", shift: false),
         .init(id: "tab.rename", title: "Rename Tab…", key: "", shift: false),
         .init(id: "tab.title.set", title: "Set Tab Title", key: "", shift: false),
         .init(id: "tab.title.clear", title: "Reset Tab Name", key: "", shift: false),

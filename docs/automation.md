@@ -160,17 +160,23 @@ Choose **Browser** (`browser`) for one app-wide persistent profile, shared acros
 | --- | --- | --- |
 | Clear Browser Data… (`browser.clearData`) | Always available; native warning, Cancel by default | No dialog; no payload arguments, clears only the persistent profile |
 | Clear This Site’s Data… (`browser.clearSiteData`) | Available on an HTTP(S) browser page, including Private Browser; captures the pane/URL before a native warning | Explicit `url` required; browser `pane` required (or a trusted caller's captured pane default) |
+| List stored sites (`browser.listData`) | Browser Settings lists the persistent profile's stored sites without requiring open panes | No arguments; returns `{storage:"persistent",sites:[string]}` |
+| Remove a stored site (`browser.removeSiteData`) | Select a stored site in Browser Settings, then confirm removal | Explicit `site` from the stored-site list; no pane required |
 
 ```sh
 slate-term panes type --pane p2 --type private-browser --force
 slate-term browser clear-data
+slate-term browser list-data
+slate-term browser remove-site-data --site example.com
 slate-term browser clear-site-data --pane p2 --url https://example.com/path
 slate-term command run browser.clearSiteData --pane p2 --params '{"url":"https://example.com"}'
 ```
 
 Canonical RPCs are `browser.clearData {}` and `browser.clearSiteData {pane,url}`. The same IDs work through `command.run`. Registered pages may use `workspace.browser.clearData({})` / `clearSiteData({pane,url})` or `workspace.call`. API invocation never opens a confirmation dialog, including through `command.run`. Unknown payload fields, invalid URLs, unsupported guards and stale targets fail closed; there is no `force` or implicit current-page URL in API calls. URLs must be absolute HTTP(S), without credentials. Optional app/workspace/layout guards use the common contract; DOM identity/session guards are not a website-store identity.
 
-Replies are `{cleared:true, scope:"all"|"site", storage:"persistent"|"private", host:string|null}`. Site clearing uses WebKit's public-suffix-list domain-grouped website records: it can remove the parent site's data and other subdomains, across HTTP/HTTPS and ports, **not just one exact origin or path**. Unrelated domain groups and other stores are preserved. Clearing a site through any Browser pane affects the shared profile; clearing through a Private Browser affects only that pane.
+`browser.listData {}` returns sorted, unique WebKit record display names from the app-wide persistent profile. `browser.removeSiteData {site}` removes records whose display name exactly matches `site`; it never normalizes the name or infers an open pane. Use the returned name unchanged. It must be nonempty, contain no control characters, and fit within 16,384 UTF-8 bytes. Both methods ignore caller pane defaults and reject explicit pane/tab targets. They exclude private and plugin stores. Registered clients use `workspace.browser.listData({})` and `workspace.browser.removeSiteData({site})`. Listing is a read; removal is a noninteractive mutation. Neither is a command-picker action: listing is read-only, and removal requires a selected name. Private site clearing remains available through the existing pane-specific command.
+
+Replies are `{cleared:true, scope:"all"|"site", storage:"persistent"|"private", host:string|null}`. Stored-site removal returns `scope:"site"`, `storage:"persistent"` and the exact supplied name in `host`. Site clearing uses WebKit's public-suffix-list domain-grouped website records: it can remove the parent site's data and other subdomains, across HTTP/HTTPS and ports, **not just one exact origin or path**. Unrelated domain groups and other stores are preserved. Clearing a site through any Browser pane affects the shared profile; clearing through a Private Browser affects only that pane.
 
 These operations remove WebKit-managed cookies, caches and saved website storage. They do not close/reload pages, clear back/forward lists, erase live JavaScript state, or promise to reset every in-memory login/session. Open pages may recreate data; close them first when necessary. Only one clear per store is admitted at a time. Cancellation before submission prevents deletion; after WebKit accepts removal, disconnect/cancellation cannot roll it back. Discovery is under `api.describe.browserData`. `-32602` denotes invalid requests, `-32022` a closed/replaced pane and `-32020` a clear already in progress. No automatic mutation retries.
 

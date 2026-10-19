@@ -59,3 +59,30 @@ import Testing
     #expect(CommandRegistry.commands.contains { $0.id == "browser.clearData" })
     #expect(CommandRegistry.commands.contains { $0.id == "browser.clearSiteData" })
 }
+
+@Test func storedSiteRequestsPreserveExactRecordNamesAndRejectRouting() throws {
+    for name in ["Example.COM", "bücher.example", "localhost", String(repeating: "界", count: 5461) + "a"] {
+        #expect(try BrowserDataRequest(kind: .storedSite, params: ["site": .string(name)]).host == name)
+    }
+    for params: [String: JSONValue] in [[:], ["site": .null], ["site": .string("")],
+        ["site": .string("example.com\n")], ["site": .string("example\u{007f}.com")],
+        ["site": .string(String(repeating: "界", count: 5462))],
+        ["site": .string("example.com"), "pane": .string("p1")],
+        ["site": .string("example.com"), "tab": .string("t1")],
+        ["site": .string("example.com"), "url": .string("https://example.com")]] {
+        #expect(throws: RPCFailure.self) { try BrowserDataRequest(kind: .storedSite, params: params) }
+    }
+}
+
+@Test func storedSiteMethodsStayIndependentOfPaneDefaultsAndCommands() {
+    let defaults = AutomationDefaults(pane: PaneID(2), tab: TabID(1))
+    #expect(AutomationMethod.browserListData.admission == .read)
+    #expect(AutomationMethod.browserRemoveSiteData.admission == .mutation)
+    #expect(AutomationMethod.browserListData.resolving([:], defaults: defaults).isEmpty)
+    let params: [String: JSONValue] = ["site": .string("example.com")]
+    #expect(AutomationMethod.browserRemoveSiteData.resolving(params, defaults: defaults) == params)
+    for method in [AutomationMethod.browserListData, .browserRemoveSiteData] {
+        #expect(method.isPublic && method.family == .browser)
+        #expect(!CommandRegistry.commands.contains { $0.id == method.rawValue })
+    }
+}

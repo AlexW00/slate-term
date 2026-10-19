@@ -97,12 +97,24 @@ struct TabOverview {
         first.renameTabHandler = { renamed.append(first) }
         second.renameTabHandler = { renamed.append(second) }
         defer { windows.forEach { $0.renameTabHandler = nil } }
+        try require(!first.canShowAllTabs, "Single-tab overview should be unavailable")
         first.addTabbedWindow(second, ordered: .above)
         second.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         try await eventually("Fixture did not acquire key focus") { NSApp.isActive && second.isKeyWindow }
         guard let group = second.tabGroup else { throw Failure(description: "Native tab group missing") }
         try require(group.windows.count == 2 && group.selectedWindow === second, "Unexpected initial group")
+        second.fullscreenTransitionPending = true
+        try require(!first.canShowAllTabs && !second.canShowAllTabs, "Background target bypassed the selected tab transition")
+        second.fullscreenTransitionPending = false
+        try require(second.canShowAllTabs, "Multiple-tab overview should be available")
+        try second.showAllTabs()
+        try await eventually("Shared show action did not open overview") { group.isOverviewVisible }
+        try await Task.sleep(for: .milliseconds(700))
+        try first.showAllTabs()
+        try require(group.isOverviewVisible, "Repeated show must not close overview")
+        group.isOverviewVisible = false
+        try await eventually("Overview did not close after shared action") { second.isKeyWindow }
         let (menu, index) = try overviewMenu(in: second)
 
         menu.performActionForItem(at: index)
@@ -173,6 +185,7 @@ struct TabOverview {
         sheet.isReleasedWhenClosed = false
         second.beginSheet(sheet, completionHandler: nil)
         selectedMenu.update()
+        try require(!second.canShowAllTabs && !first.canShowAllTabs, "Overview enabled while a sheet is attached")
         try require(!selectedRename.isEnabled, "Rename enabled while a sheet is attached")
         second.endSheet(sheet)
         sheet.orderOut(nil)

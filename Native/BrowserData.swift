@@ -63,6 +63,11 @@ final class BrowserData {
         return domain
     }
 
+    func sites() async -> [String] {
+        let records = await persistent.dataRecords(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes())
+        return Set(records.map(\.displayName)).sorted()
+    }
+
     func clear(_ request: BrowserDataRequest, store: WKWebsiteDataStore,
                beforeSubmission: @MainActor () throws -> Void) async throws -> JSONValue {
         let identity = ObjectIdentifier(store)
@@ -72,7 +77,7 @@ final class BrowserData {
         try beforeSubmission()
         let types = WKWebsiteDataStore.allWebsiteDataTypes()
         if let host = request.host {
-            let domain = try await siteDomain(for: host)
+            let domain = request.kind == .storedSite ? host : try await siteDomain(for: host)
             let records = await store.dataRecords(ofTypes: types)
             try Task.checkCancellation()
             try beforeSubmission() // Fetching yielded: a pane/caller/guard may have retired.

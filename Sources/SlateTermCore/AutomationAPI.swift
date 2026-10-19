@@ -40,6 +40,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
     case webSelect = "web.select", webScroll = "web.scroll", webWait = "web.wait", webScreenshot = "web.screenshot"
     case webFocus = "web.focus", webKey = "web.key", webCheck = "web.check", webSetValue = "web.setValue"
     case browserClearData = "browser.clearData", browserClearSiteData = "browser.clearSiteData"
+    case browserListData = "browser.listData", browserRemoveSiteData = "browser.removeSiteData"
     case browserGet = "browser.get", browserNavigate = "browser.navigate", browserSnapshot = "browser.snapshot"
     case browserClick = "browser.click", browserFill = "browser.fill", browserSelect = "browser.select"
     case browserScroll = "browser.scroll", browserWait = "browser.wait", browserEval = "browser.eval", browserScreenshot = "browser.screenshot"
@@ -62,7 +63,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
         case .terminalOperations, .terminalOperationStatus, .terminalOperationResult, .terminalOperationWait: .terminalOperations
         case .pluginDataGet, .pluginDataPatch, .pluginDataReset, .panelStateGet, .panelStatePatch, .panelStateReset: .pluginPersistence
         case .browserGet, .browserNavigate, .browserSnapshot, .browserClick, .browserFill, .browserSelect,
-             .browserScroll, .browserWait, .browserEval, .browserScreenshot, .browserClearData, .browserClearSiteData: .browser
+             .browserScroll, .browserWait, .browserEval, .browserScreenshot, .browserClearData, .browserClearSiteData, .browserListData, .browserRemoveSiteData: .browser
         case .webGet, .webSnapshot, .webClick, .webFill, .webSelect, .webScroll, .webWait, .webFocus, .webKey, .webCheck, .webSetValue, .webScreenshot: .web
         case .eventsHead, .eventsPoll, .eventsEmit: .events
         case .pluginsRestart: .pluginRuntime
@@ -83,13 +84,13 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
              .paletteList, .appearanceGet, .welcomeGet, .skillsList, .pluginsList, .pluginsValidate, .pluginsStatus, .pluginsLogs, .pluginSettingsGet, .settingsGet, .pluginDataGet, .panelStateGet,
              .terminalOperations, .terminalOperationStatus, .terminalOperationResult, .terminalOperationWait,
              .terminalCapture, .terminalWait, .terminalHistory, .panesCapture, .eventsHead, .eventsPoll, .webGet, .webSnapshot, .webWait,
-             .browserGet, .browserSnapshot, .browserWait, .serviceList, .serviceStatus, .serviceLogs,
+             .browserGet, .browserSnapshot, .browserWait, .browserListData, .serviceList, .serviceStatus, .serviceLogs,
              .notificationsList, .notificationsStatus, .presenceList, .presenceHold, .presenceRelease, .updatesGet: .read
         case .layoutsCreate, .layoutsUpdate, .layoutsCapture, .layoutsOpen, .layoutsLauncher, .commandRun, .configReload, .configPatch, .paletteImport, .skillsInstall, .skillsUninstall, .pluginsRegister, .pluginsUnregister, .pluginsEnable, .pluginsDisable,
              .pluginsRestart, .pluginSettingsPatch, .pluginDataPatch, .pluginDataReset, .panelStatePatch, .panelStateReset, .paneTitle, .terminalSend,
              .terminalKey, .terminalRun, .terminalStart, .terminalHistoryExport, .terminalSearch, .panesSend, .eventsEmit, .webClick, .webFill, .webSelect, .webScroll,
              .webFocus, .webKey, .webCheck, .webSetValue, .webScreenshot, .browserNavigate, .browserClick, .browserFill, .browserSelect, .browserScroll,
-             .browserEval, .browserScreenshot, .browserClearData, .browserClearSiteData, .serviceStart,
+             .browserEval, .browserScreenshot, .browserClearData, .browserClearSiteData, .browserRemoveSiteData, .serviceStart,
              .notificationsPost, .notificationsDismiss, .presenceFocus,
              .updatesShow, .updatesCheck, .updatesDownload, .updatesCancel, .updatesInstall: .mutation
         }
@@ -134,7 +135,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
              .configGet, .configReload, .configValidate, .configPatch, .paletteList, .paletteImport, .appearanceGet, .welcomeGet,
              .skillsList, .skillsInstall, .skillsUninstall, .pluginsList, .pluginsRegister, .pluginsValidate, .pluginsUnregister, .pluginsEnable, .pluginsDisable, .pluginsStatus, .pluginsRestart, .pluginsLogs,
              .eventsHead, .eventsPoll, .eventsEmit, .serviceStart, .serviceStop, .serviceList, .serviceStatus,
-             .serviceLogs, .serviceReady, .shellUpdate, .shellRunInput, .browserClearData,
+             .serviceLogs, .serviceReady, .shellUpdate, .shellRunInput, .browserClearData, .browserListData, .browserRemoveSiteData,
              .notificationsList, .notificationsDismiss, .notificationsStatus, .presenceList, .presenceHold, .presenceRelease, .presenceFocus,
              .updatesGet, .updatesShow, .updatesCheck, .updatesDownload, .updatesCancel, .updatesInstall: break
         }

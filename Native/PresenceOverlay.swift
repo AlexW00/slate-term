@@ -117,7 +117,7 @@ final class PresenceOverlayView: NSView {
         }
         layoutItems(animated: true)
         for item in items where !previous.contains(item.id) || (pulses[item.id] ?? item.pulse) < item.pulse {
-            (item.element == nil ? paneRing : elementRings[item.id])?.pulse()
+            (item.element == nil ? paneRing : elementRings[item.element.map(NSStringFromRect) ?? ""])?.pulse()
         }
         pulses = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0.pulse) })
     }
@@ -127,32 +127,34 @@ final class PresenceOverlayView: NSView {
         withoutActions {
             paneRing.frame = bounds
             paneRing.update(path: CGPath(roundedRect: bounds.insetBy(dx: 1.5, dy: 1.5), cornerWidth: 7, cornerHeight: 7, transform: nil),
-                            colors: paneItems.map { NSColor(rgb: $0.rgb) })
+                            colors: paneItems.map { NSColor(rgb: $0.rgb) }, animated: animated)
         }
         paneRing.setVisible(!paneItems.isEmpty, animated: animated)
         // Only the highlight follows an element. Its pill stays in the pane corner.
-        let elementItems = items.filter { $0.element != nil }
-        for (id, ring) in elementRings where !elementItems.contains(where: { $0.id == id }) {
-            elementRings[id] = nil
+        // Bounds identify the visible target; overlapping but different elements stay separate.
+        let groups = Dictionary(grouping: items.filter { $0.element != nil }) { NSStringFromRect($0.element!) }
+        for (key, ring) in elementRings where groups[key] == nil {
+            elementRings[key] = nil
             ring.dismiss(animated: animated)
         }
-        for item in elementItems {
-            guard let element = item.element else { continue }
+        for (key, members) in groups {
+            guard let element = members.first?.element else { continue }
             let target = element.insetBy(dx: -4, dy: -4).intersection(bounds.insetBy(dx: 1, dy: 1))
             guard !target.isNull, target.width > 2, target.height > 2 else {
-                elementRings[item.id]?.dismiss(animated: animated)
-                elementRings[item.id] = nil
+                elementRings[key]?.dismiss(animated: animated)
+                elementRings[key] = nil
                 continue
             }
-            let ring = elementRings[item.id] ?? {
+            let ring = elementRings[key] ?? {
                 let created = PresenceRingLayer()
                 layer?.insertSublayer(created, above: paneRing)
-                elementRings[item.id] = created
+                elementRings[key] = created
                 return created
             }()
             withoutActions {
                 ring.frame = bounds
-                ring.update(path: CGPath(roundedRect: target, cornerWidth: 6, cornerHeight: 6, transform: nil), colors: [NSColor(rgb: item.rgb)])
+                ring.update(path: CGPath(roundedRect: target, cornerWidth: 6, cornerHeight: 6, transform: nil),
+                            colors: members.map { NSColor(rgb: $0.rgb) }, animated: animated)
             }
             ring.setVisible(true, animated: animated)
         }
@@ -248,6 +250,13 @@ final class PresenceOverlayView: NSView {
     var testingState: JSONValue {
         .array(items.map { item in
             var fields: [String: JSONValue] = ["id": .string(item.id), "label": .string(item.label), "target": .string(item.element == nil ? "pane" : "element")]
+            let ring = item.element.map { elementRings[NSStringFromRect($0)] } ?? paneRing
+            if let ring {
+                fields["ringID"] = .string(String(describing: ObjectIdentifier(ring)))
+                fields["ringColors"] = .number(Double(ring.agentColors.count))
+                fields["ringStops"] = .array((ring.gradient.locations ?? []).map { .number($0.doubleValue) })
+                fields["ringWidth"] = .number(ring.gradient.bounds.width)
+            }
             if let note = item.note { fields["note"] = .string(note) }
             if let element = item.element {
                 fields["element"] = .object(["x": .number(element.minX), "y": .number(element.minY),
@@ -280,7 +289,8 @@ final class PresenceOverlayView: NSView {
 /// A rounded ring in one color, or a gradient through several agents' colors, with a soft glow.
 @MainActor
 private final class PresenceRingLayer: CALayer {
-    private let gradient = CAGradientLayer()
+    let gradient = CAGradientLayer()
+    private(set) var agentColors: [NSColor] = []
     private let ringMask = CAShapeLayer()
     private let glow = CAShapeLayer()
 
@@ -305,17 +315,74 @@ private final class PresenceRingLayer: CALayer {
     required init?(coder: NSCoder) { nil }
 
     /// Call with implicit actions disabled.
-    func update(path: CGPath, colors: [NSColor]) {
-        gradient.frame = bounds
-        ringMask.frame = bounds
+    func update(path: CGPath, colors: [NSColor], animated: Bool) {
+        // Anchor the gradient to this target, not to the whole pane behind it.
+        let target = path.boundingBoxOfPath.insetBy(dx: -ringMask.lineWidth / 2, dy: -ringMask.lineWidth / 2)
+        gradient.frame = target
+        ringMask.frame = CGRect(origin: .zero, size: target.size)
+        var offset = CGAffineTransform(translationX: -target.minX, y: -target.minY)
+        ringMask.path = path.copy(using: &offset)
         glow.frame = bounds
-        ringMask.path = path
         glow.path = path
-        guard let last = colors.last else { return }
-        let resolved = colors.map(\.cgColor)
-        gradient.colors = resolved.count == 1 ? [resolved[0], resolved[0]] : resolved
-        glow.strokeColor = last.withAlphaComponent(0.6).cgColor
-        glow.shadowColor = last.cgColor
+        guard !colors.isEmpty, colors != agentColors else { return }
+        agentColors = colors
+
+        // Each agent owns an equal-width band, blending between adjacent band centers.
+        let stops = [0.0] + colors.indices.map { (Double($0) + 0.5) / Double(colors.count) } + [1.0]
+        let resolved = [colors[0]] + colors + [colors[colors.count - 1]]
+        let current = gradient.presentation() ?? gradient
+        let previousColors = (current.colors as? [CGColor])?.compactMap { NSColor(cgColor: $0)?.usingColorSpace(.deviceRGB) }
+        let previousStops = current.locations?.map(\.doubleValue)
+        gradient.removeAnimation(forKey: "colors")
+        gradient.removeAnimation(forKey: "locations")
+        gradient.colors = resolved.map(\.cgColor)
+        gradient.locations = stops.map { NSNumber(value: $0) }
+        if animated, !PresenceOverlayView.reduceMotion,
+           let previousColors, let previousStops, previousColors.count == previousStops.count, !previousColors.isEmpty {
+            // Shared stops keep color arrays compatible when agents join or leave.
+            // Start at the presentation values so rapid updates do not restart the fade.
+            let shared = Array(Set(stops + previousStops)).sorted()
+            let change = CABasicAnimation(keyPath: "colors")
+            change.fromValue = shared.map { Self.sample($0, colors: previousColors, stops: previousStops).cgColor }
+            change.toValue = shared.map { Self.sample($0, colors: resolved, stops: stops).cgColor }
+            change.duration = 0.25
+            change.timingFunction = CAMediaTimingFunction(controlPoints: 0.77, 0, 0.175, 1)
+            let locations = CABasicAnimation(keyPath: "locations")
+            locations.fromValue = shared.map { NSNumber(value: $0) }
+            locations.toValue = locations.fromValue
+            locations.duration = change.duration
+            gradient.add(change, forKey: "colors")
+            gradient.add(locations, forKey: "locations")
+        }
+        // Give the glow equal contributions too, rather than favoring the newest agent.
+        let rgb = colors.map { $0.usingColorSpace(.deviceRGB)! }
+        let count = CGFloat(rgb.count)
+        let blended = NSColor(deviceRed: rgb.reduce(0) { $0 + $1.redComponent } / count,
+                              green: rgb.reduce(0) { $0 + $1.greenComponent } / count,
+                              blue: rgb.reduce(0) { $0 + $1.blueComponent } / count, alpha: 1)
+        for (key, value) in [("strokeColor", blended.withAlphaComponent(0.6).cgColor), ("shadowColor", blended.cgColor)] {
+            let previous = (glow.presentation() ?? glow).value(forKey: key)
+            glow.setValue(value, forKey: key)
+            if animated, !PresenceOverlayView.reduceMotion, let previous {
+                let change = CABasicAnimation(keyPath: key)
+                change.fromValue = previous
+                change.toValue = value
+                change.duration = 0.25
+                change.timingFunction = CAMediaTimingFunction(controlPoints: 0.77, 0, 0.175, 1)
+                glow.add(change, forKey: key)
+            }
+        }
+    }
+
+    private static func sample(_ position: Double, colors: [NSColor], stops: [Double]) -> NSColor {
+        guard let upper = stops.firstIndex(where: { $0 > position }) else { return colors[colors.count - 1] }
+        guard upper > 0 else { return colors[0] }
+        let fraction = CGFloat((position - stops[upper - 1]) / (stops[upper] - stops[upper - 1]))
+        let left = colors[upper - 1].usingColorSpace(.deviceRGB)!
+        let right = colors[upper].usingColorSpace(.deviceRGB)!
+        return NSColor(deviceRed: left.redComponent + (right.redComponent - left.redComponent) * fraction,
+                       green: left.greenComponent + (right.greenComponent - left.greenComponent) * fraction,
+                       blue: left.blueComponent + (right.blueComponent - left.blueComponent) * fraction, alpha: 1)
     }
 
     func setVisible(_ visible: Bool, animated: Bool) {

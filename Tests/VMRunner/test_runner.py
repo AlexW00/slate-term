@@ -7,6 +7,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import signal
 import subprocess
@@ -371,6 +372,15 @@ class VMRunnerTests(unittest.TestCase):
             self.guest_started = launch.called
             return status, receipt, calls
 
+    def test_lock_is_taken_after_host_builds_and_records_the_guest_directory(self):
+        status, receipt, calls = self.check_host_result(0, 0)
+        self.assertEqual(status, 0)
+        commands = [command[-1] if command[0] != 'bash' else 'HOST BUILD' for command, _ in calls]
+        take = next(index for index, command in enumerate(commands) if command.startswith('mkdir ' + runner.LOCK))
+        self.assertLess(max(index for index, command in enumerate(commands) if command == 'HOST BUILD'), take)
+        recorded = next(command for command in commands if 'owner.json' in command and '/tmp/slate-ui.UnitTest' in command)
+        self.assertIn('"pid": ' + str(os.getpid()), recorded)
+
     def test_host_returns_guest_failure_and_retrieves_logs(self):
         status, receipt, calls = self.check_host_result(7, 7)
         self.assertEqual(status, 7)
@@ -405,6 +415,136 @@ class VMRunnerTests(unittest.TestCase):
         self.assertNotEqual(status, 0)
         self.assertTrue(receipt['artifactCopyFailed'])
         self.assertFalse(any(command[-1] == 'rm -rf /tmp/slate-ui.UnitTest' for command, _ in calls))
+
+
+class FakeGuestLock:
+    """The guest's lock directory, driven through the same shell commands the runner sends."""
+
+    def __init__(self, owner=None, legacy=None):
+        self.owner, self.legacy, self.commands = owner, legacy, []
+
+    def __call__(self, command, capture=False):
+        self.commands.append(command)
+        if command.startswith('mkdir ' + runner.LOCK):
+            if self.owner is not None or self.legacy is not None:
+                raise subprocess.CalledProcessError(1, command)
+            self.owner = json.loads(shlex.split(command.split('printf %s ')[-1].split(' > ')[0])[0])
+            return subprocess.CompletedProcess(command, 0, stdout='')
+        if command.startswith('cat ' + runner.LOCK):
+            if self.owner is None:
+                raise subprocess.CalledProcessError(1, command)
+            return subprocess.CompletedProcess(command, 0, stdout=json.dumps(self.owner))
+        if command.startswith('! [ "$(cat ' + runner.LOCK) and 'rm -rf' in command:
+            if self.owner is not None and shlex.quote(str(self.owner.get('runId'))) in command:
+                self.owner = None
+            return subprocess.CompletedProcess(command, 0, stdout='')
+        raise AssertionError('Unexpected guest command: ' + command)
+
+
+class VMLockTests(unittest.TestCase):
+    me = {'runId': 'new-run', 'host': 'this-mac', 'pid': 100, 'started': 'Fri Oct 17 10:00:00 2026'}
+
+    def dead(self, **extra):
+        return dict({'runId': 'old-run', 'host': 'this-mac', 'pid': 42, 'started': 'Fri Oct 17 09:00:00 2026'}, **extra)
+
+    def test_only_a_dead_owner_on_this_host_is_stale(self):
+        alive = lambda pid: 'Fri Oct 17 09:00:00 2026'
+        gone = lambda pid: None
+        reused = lambda pid: 'Fri Oct 17 11:00:00 2026'
+        unknown = lambda pid: ''
+        owner = self.dead()
+        self.assertTrue(runner.lock_owner_alive(owner, 'this-mac', alive))
+        self.assertFalse(runner.lock_owner_alive(owner, 'this-mac', gone))
+        self.assertFalse(runner.lock_owner_alive(owner, 'this-mac', reused), 'A reused PID is not the owner')
+        self.assertTrue(runner.lock_owner_alive(owner, 'this-mac', unknown), 'Unknown liveness is never broken')
+        self.assertTrue(runner.lock_owner_alive(owner, 'other-mac', gone), 'Another host cannot be checked')
+        self.assertTrue(runner.lock_owner_alive(None, 'this-mac', gone), 'Old-format locks are never broken')
+        self.assertTrue(runner.lock_owner_alive(dict(owner, started=''), 'this-mac', gone))
+
+    def test_process_start_distinguishes_live_and_ended_processes(self):
+        self.assertTrue(runner.process_start(os.getpid()))
+        child = subprocess.Popen([sys.executable, '-c', 'pass'])
+        child.wait()
+        self.assertIsNone(runner.process_start(child.pid))
+
+    def test_free_lock_is_taken_with_an_owner_record(self):
+        guest = FakeGuestLock()
+        self.assertEqual(runner.acquire_lock(guest, self.me, 0, recover=mock.Mock()), [])
+        self.assertEqual(guest.owner, self.me)
+
+    def test_dead_owner_is_cleaned_up_then_replaced(self):
+        guest = FakeGuestLock(owner=self.dead(remote='/tmp/slate-ui.AbCd1234'))
+        recover = mock.Mock()
+        with mock.patch.object(runner, 'lock_owner_alive', return_value=False), contextlib.redirect_stderr(io.StringIO()):
+            recovered = runner.acquire_lock(guest, self.me, 0, recover)
+        recover.assert_called_once()
+        self.assertEqual(recovered[0]['runId'], 'old-run')
+        self.assertEqual(guest.owner, self.me)
+
+    def test_failed_guest_cleanup_keeps_the_dead_runs_lock(self):
+        guest = FakeGuestLock(owner=self.dead())
+        recover = mock.Mock(side_effect=subprocess.CalledProcessError(1, 'cleanup'))
+        with mock.patch.object(runner, 'lock_owner_alive', return_value=False), self.assertRaises(subprocess.CalledProcessError):
+            runner.acquire_lock(guest, self.me, 0, recover)
+        self.assertEqual(guest.owner['runId'], 'old-run')
+
+    def test_live_owner_is_waited_for_then_reported(self):
+        guest = FakeGuestLock(owner=self.dead())
+        clock = iter(range(0, 1000, 15))
+        sleeps = []
+        with mock.patch.object(runner, 'lock_owner_alive', return_value=True), contextlib.redirect_stderr(io.StringIO()) as err, \
+                self.assertRaises(RuntimeError) as failure:
+            runner.acquire_lock(guest, self.me, 60, mock.Mock(), sleep=sleeps.append, clock=lambda: next(clock))
+        self.assertEqual(guest.owner['runId'], 'old-run', 'A live owner keeps its lock')
+        self.assertTrue(sleeps and 'old-run' in str(failure.exception))
+        self.assertEqual(err.getvalue().count('Waiting for VM lock'), 1, 'Announce each owner once')
+
+    def test_lock_released_while_waiting_is_taken(self):
+        guest = FakeGuestLock(owner=self.dead())
+        def release(_seconds):
+            guest.owner = None
+        with mock.patch.object(runner, 'lock_owner_alive', return_value=True), contextlib.redirect_stderr(io.StringIO()):
+            runner.acquire_lock(guest, self.me, 60, mock.Mock(), sleep=release, clock=lambda: 0)
+        self.assertEqual(guest.owner, self.me)
+
+    def test_lock_lifecycle_runs_in_a_real_shell(self):
+        """The guest commands themselves, run by /bin/sh against a temporary lock directory."""
+        def sh(command, capture=False):
+            return subprocess.run(['/bin/sh', '-c', command], check=True, capture_output=True, text=True)
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(runner, 'LOCK', temporary + '/lock'):
+            lock = Path(temporary) / 'lock'
+            me = dict(self.me, host='this-mac', pid=os.getpid(), started=runner.process_start(os.getpid()))
+            self.assertEqual(runner.acquire_lock(sh, me, 0, mock.Mock()), [])
+            self.assertEqual((lock / 'owner').read_text(), 'new-run')
+            runner.record_owner(sh, dict(me, remote='/tmp/slate-ui.AbCd1234'))
+            self.assertEqual(json.loads((lock / 'owner.json').read_text())['remote'], '/tmp/slate-ui.AbCd1234')
+            # A second runner waits for the live owner and never takes or breaks its lock.
+            other = dict(me, runId='other-run')
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(RuntimeError), \
+                    mock.patch.object(runner.socket, 'gethostname', return_value='this-mac'):
+                runner.acquire_lock(sh, other, 0, mock.Mock())
+            runner.release_lock(sh, 'other-run')
+            self.assertTrue(lock.is_dir(), 'Only the owner releases the lock')
+            # The owner process ends without releasing: the next runner recovers the lock.
+            child = subprocess.Popen([sys.executable, '-c', 'pass'])
+            child.wait()
+            dead = dict(me, pid=child.pid, started='Thu Jan  1 00:00:00 1970')
+            runner.record_owner(sh, dead)
+            recover = mock.Mock()
+            with contextlib.redirect_stderr(io.StringIO()):
+                recovered = runner.acquire_lock(sh, other, 0, recover)
+            recover.assert_called_once()
+            self.assertEqual([item['runId'] for item in recovered], ['new-run'])
+            self.assertEqual((lock / 'owner').read_text(), 'other-run')
+            runner.release_lock(sh, 'other-run')
+            self.assertFalse(lock.exists())
+
+    def test_old_format_lock_is_never_recovered(self):
+        guest = FakeGuestLock(legacy='20261017T015651Z-62f6aa4f')
+        recover = mock.Mock()
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(RuntimeError):
+            runner.acquire_lock(guest, self.me, 0, recover)
+        recover.assert_not_called()
 
 
 if __name__ == '__main__':

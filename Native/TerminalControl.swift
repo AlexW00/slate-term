@@ -79,6 +79,7 @@ final class TerminalControl {
     }
 
     func call(_ action: String, pane: PaneID, params: [String: JSONValue], startup: Bool = false,
+              onCompletion: (@MainActor (TerminalOperationStatus) -> Void)? = nil,
               validateCaller: @escaping @MainActor () throws -> Void = {}) async throws -> JSONValue {
         try validateCaller()
         let fields: Set<String>
@@ -198,7 +199,8 @@ final class TerminalControl {
             do {
                 if action == "start" {
                     let id = try runs.start(pane: pane, sessionID: target.sessionID, command: command,
-                        shell: report.shellKind, baseline: report.sequence, usingReservation: startup, validateCaller: validateCaller,
+                        shell: report.shellKind, baseline: report.sequence, usingReservation: startup,
+                        onCompletion: onCompletion, validateCaller: validateCaller,
                         send: { try target.view.send(target.runKey) })
                     return .object(["commandId": .string(id.uuidString), "paneId": .string(pane.description), "sessionId": .string(target.sessionID)])
                 }

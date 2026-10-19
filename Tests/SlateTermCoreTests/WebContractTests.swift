@@ -99,3 +99,23 @@ import SlateTermTestSupport
     #expect(schemaAccepts(definitions["WebSelect"]!, selected, definitions: definitions))
     #expect(!schemaAccepts(definitions["BrowserSelect"]!, selected, definitions: definitions))
 }
+
+@Test func storedSiteContractsMatchValidationWithoutPaneTargets() throws {
+    let list = AutomationContracts.web[.browserListData]!
+    let remove = AutomationContracts.web[.browserRemoveSiteData]!
+    #expect(schemaAccepts(list.input, .object([:])))
+    #expect(schemaAccepts(list.result, .object(["storage": .string("persistent"), "sites": .array([])]), definitions: AutomationContracts.webDefinitions))
+    #expect(!schemaAccepts(list.result, .object(["storage": .string("private"), "sites": .array([])]), definitions: AutomationContracts.webDefinitions))
+    for params: [String: JSONValue] in [[:], ["site": .string("Example.COM")], ["site": .string("bücher.example")],
+        ["site": .string("")], ["site": .null], ["site": .string("example.com\n")],
+        ["site": .string(String(repeating: "界", count: 5461) + "a")],
+        ["site": .string(String(repeating: "界", count: 5462))],
+        ["site": .string("example.com"), "pane": .string("p1")]] {
+        #expect(schemaAccepts(remove.input, .object(params)) == ((try? BrowserDataRequest(kind: .storedSite, params: params)) != nil))
+    }
+    for key in ["pane", "tab", "expectedAnchorSessionId", "expectedViewId", "expectedDocumentId"] {
+        #expect(!schemaAccepts(list.input, .object([key: .string("x")])))
+        #expect(!schemaAccepts(remove.input, .object(["site": .string("example.com"), key: .string("x")])))
+    }
+    #expect(schemaAccepts(remove.result, .object(["cleared": .bool(true), "scope": .string("site"), "storage": .string("persistent"), "host": .string("Example.COM")]), definitions: AutomationContracts.webDefinitions))
+}

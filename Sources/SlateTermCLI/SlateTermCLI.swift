@@ -175,7 +175,7 @@ struct TerminalCommand: ParsableCommand {
         if let text { params["text"] = .string(text) }
         if let command { params["command"] = .string(command) }
         if let shell {
-            guard action == .run else { throw ValidationError("--shell applies only to terminal run") }
+            guard action == .run || action == .start else { throw ValidationError("--shell applies only to terminal run or start") }
             params["shell"] = .string(shell.rawValue)
         }
         if let key { params["key"] = .string(key) }
@@ -407,7 +407,8 @@ struct ShellCommand: ParsableCommand {
               let state, let pid, let sequence, let cwd else { throw ValidationError("Shell reporting requires a Slate Terminal session and state, pid, sequence, cwd") }
         var params: [String: JSONValue] = ["pane": .string(pane), "token": .string(token), "state": .string(state.rawValue),
                                           "pid": .integer(pid), "sequence": .integer(sequence), "cwd": .string(cwd)]
-        if let command { params["command"] = .string(command) }
+        // A running report without text means the shell could not tell what started.
+        if let command { params["command"] = .string(command) } else if state == .running { params["command"] = .string("") }
         if let exitCode { params["exitCode"] = .integer(exitCode) }
         if let shell { params["shell"] = .string(shell.rawValue) }
         if let runInput { params["runInput"] = .bool(runInput) }
@@ -423,13 +424,15 @@ struct ShellCommand: ParsableCommand {
 }
 
 struct BrowserCommand: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "browser", abstract: "Control an embedded browser pane.")
+    static let configuration = CommandConfiguration(commandName: "browser", abstract: "Control browser panes and stored website data.")
     enum Action: String, CaseIterable, ExpressibleByArgument { case get, navigate, eval, screenshot, snapshot, click, fill, select, scroll, wait
-        case clearData = "clear-data", clearSiteData = "clear-site-data"
+        case clearData = "clear-data", clearSiteData = "clear-site-data", listData = "list-data", removeSiteData = "remove-site-data"
         var method: String {
             switch self {
             case .clearData: "browser.clearData"
             case .clearSiteData: "browser.clearSiteData"
+            case .listData: "browser.listData"
+            case .removeSiteData: "browser.removeSiteData"
             default: "browser.\(rawValue)"
             }
         }
@@ -438,6 +441,7 @@ struct BrowserCommand: ParsableCommand {
     @OptionGroup var connection: Connection
     @OptionGroup var target: Target
     @Option var url: String?
+    @Option(help: "An exact stored site name returned by browser list-data.") var site: String?
     @Option var script: String?
     @Option var path: String?
     @Option(help: "A unique main-document CSS selector.") var selector: String?
@@ -450,8 +454,9 @@ struct BrowserCommand: ParsableCommand {
     @Option(help: "Wait state: attached, detached, visible, or hidden.") var state: String?
     @Option var timeoutMilliseconds: Int?
     func run() throws {
-        var params = try target.params(connection: connection, inheritingTarget: action != .clearData)
+        var params = try target.params(connection: connection, inheritingTarget: ![.clearData, .listData, .removeSiteData].contains(action))
         if let url { params["url"] = .string(url) }
+        if let site { params["site"] = .string(site) }
         if let script { params["script"] = .string(script) }
         if let path { params["path"] = .string(path) }
         if let selector { params["selector"] = .string(selector) }
@@ -605,17 +610,21 @@ enum ShellReportDelivery {
 
     /// Runs in the detached copy. The host checks credentials when it accepts a connection, so
     /// the copy stays connected for the reply. A full listen queue refuses at once; retry until
-    /// the deadline rather than lose a report while the host is busy.
+    /// the deadline rather than lose a report while the host is busy. A missing socket, or a
+    /// reporting shell that has exited, means the app has quit, so the copy exits instead of
+    /// outliving it: a killed app leaves its socket file, which also refuses connections.
     static func deliver(connection: Connection) throws {
         let input = FileHandle.standardInput.readData(ofLength: maximumBytes + 1)
         guard input.count <= maximumBytes, case .object(let params) = try JSONDecoder().decode(JSONValue.self, from: input) else {
             throw ValidationError("Invalid shell report")
         }
         let deadline = Date().addingTimeInterval(timeoutSeconds)
+        let shell = params["pid"].flatMap { if case .integer(let value) = $0 { pid_t(exactly: value) } else { nil } }
+        func shellAlive() -> Bool { shell.map { kill($0, 0) == 0 || errno == EPERM } ?? true }
         while true {
             let remaining = Int(deadline.timeIntervalSinceNow.rounded(.up))
             do { return try connection.call("shell.update", params: params, timeoutSeconds: max(1, remaining)) }
-            catch SocketError.system("connect", let code) where [ECONNREFUSED, EAGAIN, ENOENT].contains(code) && Date() < deadline {
+            catch SocketError.system("connect", let code) where [ECONNREFUSED, EAGAIN].contains(code) && Date() < deadline && shellAlive() {
                 usleep(50_000)
             }
         }

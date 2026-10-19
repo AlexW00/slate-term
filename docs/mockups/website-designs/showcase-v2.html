@@ -1,0 +1,1795 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Showcase v2 exploration</title>
+<meta name="description" content="A native macOS terminal. Add your own panels, commands and layouts, or ask your agent to build them.">
+<link rel="canonical" href="https://slate.weichart.de/">
+<meta property="og:title" content="Slate Terminal — The terminal you can shape">
+<meta property="og:description" content="A native macOS terminal. Add your own panels, commands and layouts, or ask your agent to build them. For Apple silicon and macOS 27 or later.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://slate.weichart.de/">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" type="image/png" href="assets/app-icon.png">
+<link rel="apple-touch-icon" href="assets/app-icon.png">
+<style>
+/* ================================================================
+   Page tokens. Light by default; dark follows the system setting.
+   ?theme=dark or ?theme=light forces one for review screenshots.
+   ================================================================ */
+:root{
+  --bg:#fff; --bg-alt:#f5f5f7; --bento-bg:#f5f5f7; --tile:#fff;
+  --text:#1d1d1f; --text-2:#6e6e73; --text-3:#86868b;
+  --hair:rgba(0,0,0,.1); --hair-2:rgba(0,0,0,.06);
+  --blue:#0071e3; --blue-h:#0077ed; --link:#0071e3;
+  --nav-bg:rgba(255,255,255,.72);
+  --ctl:#e8e8ed; --ctl-h:#dcdce1;
+  --wall-1:#eef0f4; --wall-2:#dfe3ea;
+  --glow:96 150 225;
+  --wallpaper:radial-gradient(70% 60% at 18% 6%,#9cc1ec 0,transparent 62%),radial-gradient(60% 55% at 78% 100%,#f2d2aa 0,transparent 64%),linear-gradient(180deg,#b9d4f0 0,#dde8f2 55%,#efe5d6 100%);
+  --mbar:rgba(255,255,255,.5);
+  --code-bg:#fff;
+  --tile-dark:#1d1d1f; --card:#f5f5f7; --term-bg:#1d1d1f;
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Helvetica,Arial,sans-serif;
+  --font-display:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue",Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Monaco,monospace;
+  /* Apple-like easing: quick start, long gentle settle. */
+  --ease:cubic-bezier(.32,.72,0,1);
+  --ease-out:cubic-bezier(.22,1,.36,1);
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#000; --bg-alt:#161617; --bento-bg:#000; --tile:#1d1d1f;
+    --text:#f5f5f7; --text-2:#a1a1a6; --text-3:#86868b;
+    --hair:rgba(255,255,255,.14); --hair-2:rgba(255,255,255,.08);
+    --link:#2997ff;
+    --nav-bg:rgba(22,22,23,.72);
+    --ctl:#2c2c2e; --ctl-h:#3a3a3c;
+    --wall-1:#232428; --wall-2:#18191c;
+    --glow:30 92 170;
+    --wallpaper:radial-gradient(70% 65% at 16% 0,#1d4a86 0,transparent 62%),radial-gradient(80% 60% at 72% 108%,#17708a 0,transparent 62%),linear-gradient(180deg,#0b1830 0,#0a2036 55%,#0c3243 100%);
+    --mbar:rgba(30,30,32,.5);
+    --code-bg:#1d1d1f;
+    --tile-dark:#1d1d1f; --card:#1d1d1f; --term-bg:#0d1117;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#000; --bg-alt:#161617; --bento-bg:#000; --tile:#1d1d1f;
+  --text:#f5f5f7; --text-2:#a1a1a6; --text-3:#86868b;
+  --hair:rgba(255,255,255,.14); --hair-2:rgba(255,255,255,.08);
+  --link:#2997ff;
+  --nav-bg:rgba(22,22,23,.72);
+  --ctl:#2c2c2e; --ctl-h:#3a3a3c;
+  --wall-1:#232428; --wall-2:#18191c;
+  --glow:30 92 170;
+  --wallpaper:radial-gradient(70% 65% at 16% 0,#1d4a86 0,transparent 62%),radial-gradient(80% 60% at 72% 108%,#17708a 0,transparent 62%),linear-gradient(180deg,#0b1830 0,#0a2036 55%,#0c3243 100%);
+  --mbar:rgba(30,30,32,.5);
+  --code-bg:#1d1d1f;
+  --tile-dark:#1d1d1f; --card:#1d1d1f; --term-bg:#0d1117;
+  color-scheme:dark;
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);font:17px/1.47059 var(--font);letter-spacing:-.022em;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+a{color:var(--link);text-decoration:none}
+a:hover{text-decoration:underline}
+h1,h2,h3,p{margin:0}
+:focus{outline:none}
+:focus-visible{outline:2px solid var(--blue);outline-offset:3px;border-radius:8px}
+.wrap{max-width:1020px;margin:0 auto;padding:0 22px}
+.wrap-wide{max-width:1200px;margin:0 auto;padding:0 22px}
+@media (max-width:734px){.wrap,.wrap-wide{padding:0 16px}}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.mono{font-family:var(--mono)}
+.chev{display:inline-block;width:.5em;height:.75em;margin-left:.2em;vertical-align:-.04em}
+
+/* ---------- Local nav (Apple product sub-nav) ---------- */
+.lnav{position:sticky;top:0;z-index:50;height:52px;background:var(--nav-bg);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);border-bottom:1px solid var(--hair)}
+.lnav-in{max-width:1020px;margin:0 auto;padding:0 22px;height:100%;display:flex;align-items:center}
+.lnav-title{color:var(--text);font:600 21px/1 var(--font-display);letter-spacing:.011em;white-space:nowrap}
+.lnav-title:hover{text-decoration:none}
+.lnav-menu{margin-left:auto;display:flex;align-items:center;gap:24px;font-size:12px;letter-spacing:-.01em}
+.lnav-menu a:not(.pill){color:var(--text);opacity:.8}
+.lnav-menu a:not(.pill):hover{opacity:1;text-decoration:none;color:var(--link)}
+.lnav-menu a[aria-current="page"]{opacity:.56;cursor:default}
+.pill{display:inline-flex;align-items:center;height:24px;padding:0 11px;border-radius:980px;background:var(--blue);color:#fff;font:400 12px/1 var(--font);letter-spacing:-.01em}
+.pill:hover{background:var(--blue-h);text-decoration:none}
+.pill.gh{gap:4px;background:var(--ctl);color:var(--text)}
+.pill.gh:hover{background:var(--ctl-h)}
+.pill .star{width:11px;height:11px}
+.lnav-menu .pill.gh{margin-left:-16px}
+@media (max-width:734px){.lnav{height:48px}.lnav-in{padding:0 16px}.lnav-title{font-size:19px}.lnav-menu a:not(.pill){display:none}}
+
+/* ---------- Buttons ---------- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:44px;padding:0 22px;border-radius:980px;background:var(--blue);color:#fff;font:400 17px/1 var(--font);letter-spacing:-.022em;white-space:nowrap;transition:background-color .2s}
+.btn:hover{background:var(--blue-h);text-decoration:none}
+.btn .apple{width:15px;height:18px;margin-top:-3px;flex:none}
+.tlink{font-size:17px;letter-spacing:-.022em;white-space:nowrap}
+.ctas{display:flex;justify-content:center;align-items:center;gap:30px;flex-wrap:wrap}
+.req{font-size:12px;color:var(--text-2);letter-spacing:-.01em;margin-top:16px}
+
+/* ---------- Hero ---------- */
+.hero{padding:88px 0 0;text-align:center;background:var(--bg)}
+.hero .appicon{display:block;margin:0 auto 20px}
+.eyebrow{font:600 24px/1.17 var(--font-display);letter-spacing:.009em;color:var(--text)}
+h1{font-family:var(--font-display);font-weight:600;font-size:clamp(48px,8.4vw,96px);line-height:1.04;letter-spacing:-.022em;margin:10px auto 0;text-wrap:balance}
+.lede{font:400 clamp(19px,2.1vw,24px)/1.33 var(--font-display);color:var(--text-2);letter-spacing:.005em;max-width:28em;margin:22px auto 0;text-wrap:balance}
+.hero .ctas{margin-top:34px}
+@media (max-width:734px){.hero{padding-top:52px}.hero .appicon{width:72px;height:72px}.eyebrow{font-size:19px}.ctas{gap:20px}}
+
+/* ---------- Demo ---------- */
+.demo{position:relative;z-index:1;padding:40px 0 96px}
+/* Rise: the demo starts as a blurred backdrop behind the hero text.
+   Scrolling brings it forward until it lands in place. --r runs from 0 (back) to 1 (landed). */
+.hero>.wrap{position:relative;z-index:2}
+.rise{--r:0}
+.rise .screen{transform-origin:50% 0;will-change:transform,filter,opacity;
+  transform:perspective(1600px) translateY(var(--ry,0px)) rotateX(calc((1 - var(--r)) * 24deg)) scale(calc(.82 + var(--r) * .18));
+  filter:blur(calc((1 - var(--r)) * 10px));
+  opacity:calc(.62 + var(--r) * .38);
+  --edge:rgba(0,0,0,var(--r));
+  -webkit-mask-image:linear-gradient(180deg,var(--edge) 0,#000 calc(20% + var(--r) * 80%)),linear-gradient(90deg,var(--edge) 0,#000 calc(12% - var(--r) * 12%),#000 calc(88% + var(--r) * 12%),var(--edge) 100%);
+  -webkit-mask-composite:source-in;
+  mask-image:linear-gradient(180deg,var(--edge) 0,#000 calc(20% + var(--r) * 80%)),linear-gradient(90deg,var(--edge) 0,#000 calc(12% - var(--r) * 12%),#000 calc(88% + var(--r) * 12%),var(--edge) 100%);
+  mask-composite:intersect}
+.rise .capline,.rise .player,.rise .note{opacity:var(--ui,1)}
+/* Ambient light from the screen: a wide ellipse that eases out to nothing. It sits outside the screen because the screen's mask would clip it. */
+.demo .wrap-wide{position:relative}
+.glow{display:none}
+.rise .glow{display:block;position:absolute;left:0;right:0;top:0;aspect-ratio:1200/760;pointer-events:none;z-index:-1;
+  transform-origin:50% 45%;transform:translateY(var(--ry,0px)) scale(1.45,1.5);opacity:calc(.55 + (1 - var(--r)) * .45);
+  background:radial-gradient(closest-side,rgb(var(--glow) / .5) 0,rgb(var(--glow) / .3) 38%,rgb(var(--glow) / .14) 60%,rgb(var(--glow) / .05) 80%,rgb(var(--glow) / 0) 100%)}
+.screen{position:relative;border-radius:18px;overflow:hidden;aspect-ratio:1200/760;isolation:isolate;background:var(--wall-1);box-shadow:0 0 0 1px var(--hair-2)}
+@media (max-width:734px){.screen{border-radius:10px}}
+.stage{position:absolute;left:0;top:0;width:1200px;height:760px;transform-origin:0 0;transform:scale(var(--s,1));overflow:hidden}
+
+/* Caption line under the video, with a tiny status tag. */
+.capline{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;min-height:30px;margin-top:22px}
+.cap{grid-column:2;font:500 19px/1.3 var(--font-display);letter-spacing:.004em;text-align:center;color:var(--text);transition:opacity .35s ease}
+.cap.swap{opacity:0}
+.tag{grid-column:3;justify-self:start;display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 9px;border-radius:980px;font:500 12px/1 var(--font);letter-spacing:-.005em;color:var(--text-2);background:var(--bg-alt);box-shadow:inset 0 0 0 1px var(--hair-2);opacity:0;transition:opacity .5s ease}
+.tag.on{opacity:1}
+.tag svg{width:11px;height:9px;flex:none}
+@media (max-width:734px){
+  .capline{grid-template-columns:1fr;gap:8px;justify-items:center}
+  .cap{grid-column:1;font-size:17px}
+  .tag{grid-column:1;justify-self:center}
+}
+
+.player{display:flex;align-items:center;gap:14px;max-width:760px;margin:20px auto 0}
+.play{flex:none;width:36px;height:36px;border-radius:50%;border:0;background:var(--ctl);color:var(--text);display:grid;place-items:center;cursor:pointer;transition:background-color .2s}
+.play:hover{background:var(--ctl-h)}
+.play svg{width:12px;height:12px}
+.play svg[hidden]{display:none}
+.chaps{flex:1;display:flex;gap:5px;list-style:none;margin:0;padding:0;min-width:0}
+.chaps li{min-width:0}
+.chap{display:flex;flex-direction:column;gap:7px;width:100%;padding:6px 1px 3px;border:0;background:none;color:var(--text-3);font:400 12px/1.15 var(--font);letter-spacing:-.01em;text-align:left;cursor:pointer;border-radius:6px}
+.chap:hover{color:var(--text)}
+.chap .bar{position:relative;display:block;height:3px;border-radius:2px;background:var(--hair);overflow:hidden}
+.chap .bar i{position:absolute;inset:0;transform-origin:0 50%;transform:scaleX(var(--p,0));background:var(--text);border-radius:inherit}
+.chap .lab{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chap[aria-current="true"]{color:var(--text)}
+@media (max-width:734px){.chap .lab{display:none}.player{gap:10px}}
+.note{margin-top:18px;text-align:center;font-size:12px;color:var(--text-3);letter-spacing:-.01em}
+
+/* ================================================================
+   Inside the stage: a macOS desktop, the Slate window, and plugin
+   panels styled after Slate's plugin UI kit (slate.css tokens).
+   ================================================================ */
+.desk{position:absolute;inset:0;text-align:left;background:var(--wallpaper);font-family:var(--font);letter-spacing:0}
+.mbar{position:absolute;left:0;right:0;top:0;height:26px;display:flex;align-items:center;gap:18px;padding:0 14px;font-size:13px;color:var(--text);background:var(--mbar);backdrop-filter:blur(30px) saturate(180%);-webkit-backdrop-filter:blur(30px) saturate(180%)}
+.mbar b{font-weight:700}
+.mbar .r{margin-left:auto;display:flex;gap:16px;align-items:center;font-variant-numeric:tabular-nums}
+.mbar svg{display:block}
+.dim-ov{position:absolute;inset:0;background:rgba(0,0,0,.08);opacity:0;transition:opacity .5s ease;pointer-events:none;z-index:7}
+.dim-ov.on{opacity:1}
+
+/* Terminal palettes: theme inputs (--st-*), as in slate.css. */
+.pal-light{--st-bg:#ffffff;--st-fg:#1f2328;--st-sel:#b5d5ff;--st-ansi-1:#c72e2e;--st-ansi-2:#1f8a3c;--st-ansi-3:#a36a00;--st-ansi-4:#1a63d6;--st-ansi-5:#8a5a00;--st-ansi-6:#0f7f9a;--chrome:#ececf0;--divider:#d6d6db}
+.pal-sand{--st-bg:#fbfaf7;--st-fg:#2b2a27;--st-sel:#e6dfcf;--st-ansi-1:#b4412f;--st-ansi-2:#3f7d3a;--st-ansi-3:#b06d00;--st-ansi-4:#2f6f9f;--st-ansi-5:#8a6a2e;--st-ansi-6:#2c8287;--chrome:#efede7;--divider:#dcd8cd}
+.pal-solar{--st-bg:#fdf6e3;--st-fg:#586e75;--st-sel:#eee8d5;--st-ansi-1:#dc322f;--st-ansi-2:#859900;--st-ansi-3:#b58900;--st-ansi-4:#268bd2;--st-ansi-5:#d33682;--st-ansi-6:#2aa198;--chrome:#eee8d5;--divider:#ddd5bd}
+.pal-dark{--st-bg:#0d1117;--st-fg:#e6edf3;--st-sel:#264f78;--st-ansi-1:#ff7b72;--st-ansi-2:#3fb950;--st-ansi-3:#d29922;--st-ansi-4:#79c0ff;--st-ansi-5:#d2a8ff;--st-ansi-6:#39c5cf;--chrome:#262629;--divider:#313133}
+.pal-graphite{--st-bg:#1c1c1e;--st-fg:#e5e5ea;--st-sel:#3a3a3c;--st-ansi-1:#ff6961;--st-ansi-2:#63d17a;--st-ansi-3:#ffb340;--st-ansi-4:#5ab0ff;--st-ansi-5:#ffb340;--st-ansi-6:#5ac8d8;--chrome:#2a2a2d;--divider:#38383b}
+.pal-nord{--st-bg:#2e3440;--st-fg:#d8dee9;--st-sel:#434c5e;--st-ansi-1:#bf616a;--st-ansi-2:#a3be8c;--st-ansi-3:#ebcb8b;--st-ansi-4:#81a1c1;--st-ansi-5:#b48ead;--st-ansi-6:#88c0d0;--chrome:#3b4252;--divider:#4c566a}
+
+/* Semantic kit tokens derived from the palette (dark by default). */
+.kt{color:var(--text-k);
+  --head:color-mix(in oklab,var(--chrome) 76%,#000);
+  --track:color-mix(in oklab,var(--chrome) 88%,#fff);
+  --tab-on:color-mix(in oklab,var(--chrome) 82%,#fff);
+  --surface-k:color-mix(in oklab,var(--st-fg) 4%,var(--st-bg));
+  --fill:color-mix(in oklab,var(--st-fg) 8%,transparent);
+  --fill-active:color-mix(in oklab,var(--st-fg) 17%,transparent);
+  --sep:color-mix(in oklab,var(--st-fg) 11%,transparent);
+  --border-k:color-mix(in oklab,var(--st-fg) 17%,transparent);
+  --text-k:var(--st-fg);
+  --text-k2:color-mix(in oklab,var(--st-fg) 72%,var(--st-bg));
+  --text-k3:color-mix(in oklab,var(--st-fg) 50%,var(--st-bg));
+  --acc:oklch(from var(--st-ansi-4) clamp(.7,l,.82) min(c,.16) h);
+  --dng:oklch(from var(--st-ansi-1) clamp(.68,l,.8) min(c,.17) h);
+  --ok:oklch(from var(--st-ansi-2) clamp(.7,l,.84) min(c,.15) h);
+  --wrn:oklch(from var(--st-ansi-3) clamp(.74,l,.86) min(c,.15) h);
+  --inf:oklch(from var(--st-ansi-6) clamp(.7,l,.84) min(c,.13) h);
+  --on-acc:oklch(from var(--st-bg) min(l,.24) c h);
+  --ctl-sel:color-mix(in oklab,var(--st-fg) 30%,var(--st-bg));
+}
+.kt.lt{
+  --head:color-mix(in oklab,var(--chrome) 45%,var(--st-bg));
+  --track:color-mix(in oklab,var(--chrome) 94%,#000);
+  --tab-on:var(--st-bg);
+  --surface-k:color-mix(in oklab,var(--st-fg) 3%,var(--st-bg));
+  --fill:color-mix(in oklab,var(--st-fg) 6%,transparent);
+  --fill-active:color-mix(in oklab,var(--st-fg) 13%,transparent);
+  --sep:color-mix(in oklab,var(--st-fg) 10%,transparent);
+  --border-k:color-mix(in oklab,var(--st-fg) 16%,transparent);
+  --text-k2:color-mix(in oklab,var(--st-fg) 76%,var(--st-bg));
+  --text-k3:color-mix(in oklab,var(--st-fg) 56%,var(--st-bg));
+  --acc:oklch(from var(--st-ansi-4) clamp(.42,l,.56) clamp(.08,c,.18) h);
+  --dng:oklch(from var(--st-ansi-1) clamp(.4,l,.52) min(c,.19) h);
+  --ok:oklch(from var(--st-ansi-2) clamp(.42,l,.54) min(c,.15) h);
+  --wrn:oklch(from var(--st-ansi-3) clamp(.5,l,.62) min(c,.15) h);
+  --inf:oklch(from var(--st-ansi-6) clamp(.44,l,.56) min(c,.13) h);
+  --on-acc:#fff;
+  --ctl-sel:var(--st-bg);
+}
+.kt{--acc-t:color-mix(in oklab,var(--acc) 15%,transparent);--ok-t:color-mix(in oklab,var(--ok) 15%,transparent);--wrn-t:color-mix(in oklab,var(--wrn) 15%,transparent);--dng-t:color-mix(in oklab,var(--dng) 14%,transparent)}
+
+.win{position:absolute;display:flex;flex-direction:column;border-radius:14px;overflow:hidden;background:var(--chrome);font:13px/1.4 var(--font);letter-spacing:0;
+  box-shadow:0 0 0 .5px rgba(0,0,0,.22),0 20px 50px rgba(0,0,0,.18),0 3px 10px rgba(0,0,0,.08);
+  transition:background-color .9s ease,opacity .6s ease,transform .7s var(--ease)}
+.win.lt{box-shadow:0 0 0 .5px rgba(0,0,0,.16),0 20px 50px rgba(40,50,70,.16),0 3px 10px rgba(40,50,70,.06)}
+/* A hairline on the window edge, drawn above the flush panes. */
+.win::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--st-fg) 9%,transparent);pointer-events:none;z-index:10}
+/* Two rows, as in the app: lights and the window title, then a full-width tab track. */
+.titlebar{flex:none;height:30px;display:flex;align-items:center;gap:14px;padding:0 14px;background:var(--chrome);transition:background-color .9s ease}
+.wtitle{font:600 13px/1 var(--font);color:var(--text-k);opacity:.86;white-space:nowrap}
+.lights{display:flex;gap:8px}
+.lights i{width:12px;height:12px;border-radius:50%;display:block;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.18)}
+.lights i:nth-child(1){background:#ff5f57}.lights i:nth-child(2){background:#febc2e}.lights i:nth-child(3){background:#28c840}
+.wtabs{flex:none;display:flex;gap:2px;height:26px;margin:2px 7px 7px;padding:2px;border-radius:999px;background:var(--track);box-shadow:inset 0 0 0 .5px color-mix(in oklab,var(--st-fg) 7%,transparent);transition:background-color .9s}
+.wtab{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;padding:0 16px;border-radius:999px;font-size:12px;font-weight:500;color:var(--text-k3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:background-color .9s,color .9s}
+.wtab.on{background:var(--tab-on);color:var(--text-k);box-shadow:inset 0 .5px 0 color-mix(in oklab,#fff 12%,transparent),0 0 0 .5px color-mix(in oklab,var(--st-fg) 12%,transparent),0 1px 3px rgba(0,0,0,.22)}
+.lt .wtab.on{box-shadow:0 0 0 .5px var(--border-k),0 1px 2px rgba(0,0,0,.08)}
+.content{position:relative;flex:1;min-height:0}
+.scene{position:absolute;inset:0;opacity:0;visibility:hidden;transition:opacity .8s ease,visibility 0s linear .8s}
+.scene.on{opacity:1;visibility:visible;transition:opacity .8s ease}
+
+.pane{position:absolute;transition:left 1.1s var(--ease),top 1.1s var(--ease),width 1.1s var(--ease),height 1.1s var(--ease),opacity .9s ease}
+.pane.off{opacity:0;pointer-events:none}
+.pbox{position:absolute;inset:0;display:flex;flex-direction:column;overflow:hidden;background:var(--st-bg);box-shadow:-1px -1px 0 0 var(--divider);transition:background-color .9s ease,box-shadow .6s ease,transform 1.1s var(--ease)}
+.pane.off .pbox{transform:scale(.97)}
+.phd{flex:none;height:26px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px;padding:0 10px;background:var(--head);border-bottom:1px solid var(--divider);font-size:11.5px;color:var(--text-k3);transition:background-color .9s ease}
+.phd .ty{display:flex;align-items:center;gap:6px;min-width:0;white-space:nowrap;overflow:hidden}
+.grip{display:grid;grid-template-columns:repeat(2,2.5px);gap:2px;opacity:.7;flex:none}
+.grip i{width:2.5px;height:2.5px;border-radius:50%;background:currentColor;display:block}
+.phd .ty b{font-weight:600}
+.phd .ty svg{width:8px;height:8px;opacity:.7}
+.ptitle{font-weight:500;color:var(--text-k);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:2px 6px}
+.phd .x{justify-self:end;display:flex;align-items:center}
+.phd .x svg{width:10px;height:10px}
+.pbody{position:relative;flex:1;min-height:0;overflow:hidden}
+
+/* Terminal */
+.term{position:absolute;inset:0;padding:6px 8px;overflow:hidden;font:12px/1.45 var(--mono);color:var(--text-k);white-space:pre-wrap;word-break:break-word;display:flex;flex-direction:column;justify-content:flex-end}
+.term.top{justify-content:flex-start}
+.term .d{color:var(--text-k3)}.term .a{color:var(--acc)}.term .ok{color:var(--ok)}.term .e{color:var(--dng)}.term .w{color:var(--wrn)}
+.term .tool::before{content:"⏺ ";color:var(--ok)}
+.term .tool b{font-weight:600}
+.term .so{color:var(--text-k3);padding-left:14px}
+.term .box{border:1px solid color-mix(in oklab,var(--acc) 55%,transparent);border-radius:6px;padding:4px 10px;margin:2px 0 6px;width:max-content;max-width:100%}
+.term .ln{display:none}
+.term .ln.on{display:block;animation:lnIn .7s var(--ease-out) both}
+@keyframes lnIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+.term .gap{height:6px}
+.cur{display:inline-block;width:7px;height:14px;vertical-align:-3px;background:var(--text-k);animation:blink 1.1s steps(1) infinite}
+.cur.off{display:none}
+@keyframes blink{50%{opacity:0}}
+
+/* Agent presence follows the approved mockup: target rings and detached,
+   fully rounded pills at the bottom right of each pane. */
+.prs{position:absolute;inset:0;pointer-events:none;z-index:3}
+.prs .ring{position:absolute;inset:0;border-radius:0 0 var(--rbr,0) var(--rbl,0);border:1.5px solid var(--ag);box-shadow:inset 0 0 9px color-mix(in srgb,var(--ag) 55%,transparent);opacity:0;transition:opacity .45s ease-out}
+.prs .ring.multi{border-color:transparent}
+.prs .ring.multi::before{content:"";position:absolute;inset:-1.5px;border-radius:inherit;padding:1.5px;background:linear-gradient(90deg,var(--ag1),var(--ag2));-webkit-mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0);mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0)}
+.prs.on .ring{opacity:1}
+.prs .ring.pulse{animation:prsPulse 1.1s ease-out}
+@keyframes prsPulse{from{box-shadow:inset 0 0 18px var(--ag)}}
+.prs .tags{position:absolute;bottom:14px;right:14px;max-width:calc(100% - 28px);display:flex;flex-direction:row-reverse;gap:4px}
+.ptag{--bgw:var(--st-bg);display:flex;align-items:center;gap:5px;min-width:0;height:20px;padding:0 8px 0 7px;border:1px solid color-mix(in srgb,var(--ag) 50%,transparent);border-radius:999px;
+  background:color-mix(in srgb,var(--bgw) 78%,var(--ag));box-shadow:0 2px 5px rgba(0,0,0,.25);font:600 10.5px/1 var(--mono);letter-spacing:0;white-space:nowrap;opacity:0;transition:opacity .45s ease-out}
+.ptag.on{opacity:1}
+.ptag .st{display:flex;flex-shrink:0}
+.ptag .nm{color:var(--ag);flex-shrink:0}
+.lt .ptag .nm{color:color-mix(in srgb,var(--ag) 65%,#000)}
+.ptag .no{font-weight:400;color:var(--text-k);min-width:0;overflow:hidden;text-overflow:ellipsis}
+.ptag .dt{flex-shrink:0;font:500 10px/1 var(--mono);font-variant-numeric:tabular-nums;color:var(--text-k3)}
+.ptag .ic{font:700 9px/1 var(--font);color:var(--ag)}
+.ptag .ic.ok{color:#34c759}
+.ptag .psp{width:9px;height:9px;border-radius:50%;border:1.5px solid var(--ag);border-right-color:transparent;animation:prsSpin .8s linear infinite;flex:none}
+@keyframes prsSpin{to{transform:rotate(-360deg)}}
+@media (prefers-reduced-motion:reduce){.ptag .psp{animation-duration:2.4s}.prs .ring.pulse{animation:none}}
+
+/* Kit: toolbar, controls, rows (after slate.css + recipes) */
+.k{position:absolute;inset:0;display:flex;flex-direction:column;font-size:12px;color:var(--text-k)}
+.k-tb{flex:none;height:36px;display:flex;align-items:center;gap:8px;padding:0 8px;border-bottom:.5px solid var(--sep)}
+.k-main{flex:1;min-height:0;overflow:hidden;position:relative}
+.k-st{flex:none;height:24px;display:flex;align-items:center;gap:12px;padding:0 12px;border-top:.5px solid var(--sep);color:var(--text-k2);font-size:11px}
+.sp{flex:1}
+.k-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:24px;padding:0 10px;border-radius:6px;background:var(--fill);color:var(--text-k);font:500 12px/1 var(--font);white-space:nowrap;transition:background-color .2s,transform .2s var(--ease)}
+.k-btn.pri{background:var(--acc);color:var(--on-acc)}
+.k-btn.sm{height:20px;padding:0 8px;font-size:11px}
+.k-btn.press{transform:scale(.94);filter:brightness(.92)}
+.k-btn.icon{width:24px;padding:0;background:transparent;color:var(--text-k2)}
+.k-btn svg{width:13px;height:13px}
+.k-search{flex:1;max-width:200px;height:24px;border-radius:6px;background:var(--fill);display:flex;align-items:center;gap:6px;padding:0 8px;color:var(--text-k3);font-size:12px}
+.k-search svg{width:12px;height:12px}
+.k-seg{display:inline-flex;gap:2px;padding:2px;border-radius:7px;background:var(--fill)}
+.k-seg span{height:20px;display:flex;align-items:center;padding:0 9px;border-radius:5px;color:var(--text-k2);font:500 11px/1 var(--font)}
+.k-seg span.on{background:var(--ctl-sel);color:var(--text-k);box-shadow:0 0 0 .5px var(--border-k),0 1px 2px rgba(0,0,0,.12)}
+.k-badge{display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 6px;border-radius:4px;background:var(--fill);color:var(--text-k2);font:500 10px/1 var(--font);white-space:nowrap;transition:opacity .6s ease}
+.k-badge.acc{background:var(--acc-t);color:var(--acc)}.k-badge.ok{background:var(--ok-t);color:var(--ok)}.k-badge.wrn{background:var(--wrn-t);color:var(--wrn)}.k-badge.dng{background:var(--dng-t);color:var(--dng)}
+.k-badge.hid{opacity:0}
+.k-dot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--text-k3);transition:background-color .4s}
+.k-dot.ok{background:var(--ok)}.k-dot.acc{background:var(--acc)}.k-dot.wrn{background:var(--wrn)}.k-dot.dng{background:var(--dng)}
+.k-spin{width:12px;height:12px;flex:none;border:2px solid var(--fill-active);border-top-color:var(--text-k2);border-radius:50%;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.k-prog{height:4px;border-radius:2px;background:var(--fill);overflow:hidden;flex:none}
+.k-prog i{display:block;height:100%;background:var(--acc);border-radius:inherit;width:0}
+.k-kbd{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 4px;border-radius:4px;background:var(--fill);color:var(--text-k2);font:500 11px/1 var(--font)}
+.k-ghd{display:flex;align-items:center;gap:6px;height:26px;padding:0 10px;color:var(--text-k2);font:600 11px/1 var(--font)}
+.k-ghd em{font-style:normal;font-weight:400;color:var(--text-k3)}
+.k-ghd svg{width:9px;height:9px}
+.k-row{display:flex;align-items:center;gap:8px;height:28px;padding:0 10px;margin:0 4px;border-radius:6px;white-space:nowrap}
+.k-row.two{height:40px}
+.k-row.sel{background:var(--acc-t)}
+.k-row .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.k-row .nm small{display:block;color:var(--text-k3);font-size:10.5px;margin-top:1px}
+.k-row .tr{color:var(--text-k3);font-size:11px;font-variant-numeric:tabular-nums}
+.k-row .ck{width:14px;height:14px;display:grid;place-items:center;flex:none}
+.k-row .ck svg{width:14px;height:14px}
+.k-log{position:absolute;inset:0;padding:6px 10px;font:11px/1.65 var(--mono);display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden;white-space:nowrap}
+.k-log .t{color:var(--text-k3)}
+.k-log .ok{color:var(--ok)}
+.k-log .flag{display:inline-block;margin-right:6px;padding:0 5px;border-radius:3px;background:var(--dng-t);color:var(--dng);font:600 9.5px/15px var(--font)}
+.k-log .bad{color:var(--dng)}
+.k-metrics{display:flex;gap:18px;padding:10px 12px 4px;flex-wrap:wrap}
+.k-metric small{display:block;color:var(--text-k2);font-size:11px}
+.k-metric b{font-size:22px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.k-metric b em{font-style:normal;font-size:12px;font-weight:500;color:var(--text-k2);margin-left:2px}
+.k-chart{position:absolute;left:12px;right:12px;bottom:10px;top:72px}
+.k-chart svg{width:100%;height:100%;display:block;overflow:visible}
+.k-chart .gl{stroke:var(--sep);stroke-width:1;vector-effect:non-scaling-stroke}
+.k-chart path{fill:none;vector-effect:non-scaling-stroke;stroke-linejoin:round;stroke-linecap:round}
+.tip{position:absolute;padding:6px 9px;border-radius:8px;background:var(--st-bg);box-shadow:0 0 0 .5px var(--border-k),0 8px 24px rgba(0,0,0,.14);font-size:11px;white-space:nowrap;opacity:0;transition:opacity .4s ease;pointer-events:none}
+.tip.on{opacity:1}
+.tip b{font-variant-numeric:tabular-nums}
+.vline{position:absolute;top:0;bottom:0;width:1px;background:var(--border-k);opacity:0;transition:opacity .4s}
+.vline.on{opacity:1}
+.mk{position:absolute;width:9px;height:9px;margin:-4.5px 0 0 -4.5px;border-radius:50%;background:var(--acc);box-shadow:0 0 0 2px var(--st-bg);opacity:0;transition:opacity .4s}
+.mk.on{opacity:1}
+
+/* Overlays: ⌘K picker, toast, Spotlight */
+.glass-k{background:color-mix(in oklab,var(--st-bg) 78%,transparent);backdrop-filter:blur(28px) saturate(180%);-webkit-backdrop-filter:blur(28px) saturate(180%);box-shadow:inset 0 0 0 .5px color-mix(in oklab,var(--st-fg) 20%,transparent),0 24px 60px rgba(0,0,0,.22),0 4px 12px rgba(0,0,0,.06)}
+.ov{position:absolute;z-index:6;opacity:0;pointer-events:none;transform:translateY(-8px) scale(.98);transition:opacity .45s ease,transform .7s var(--ease)}
+.ov.on{opacity:1;transform:none}
+/* Liquid glass, as in the app: a clear sheet, a large rounded search row, two-line results. */
+.lglass{background:color-mix(in oklab,var(--st-bg) 58%,transparent);backdrop-filter:blur(26px) saturate(190%);-webkit-backdrop-filter:blur(26px) saturate(190%);
+  box-shadow:inset 0 1px 0 color-mix(in oklab,#fff 14%,transparent),inset 0 0 0 .5px color-mix(in oklab,var(--st-fg) 22%,transparent),0 30px 70px rgba(0,0,0,.32),0 4px 14px rgba(0,0,0,.12)}
+.kpal{left:50%;top:44px;width:560px;margin-left:-280px;border-radius:24px;overflow:hidden;color:var(--text-k);padding-bottom:4px}
+.kpal .q{display:flex;align-items:center;gap:12px;height:58px;padding:0 18px 0 20px;font-size:19px}
+.kpal .q>svg{width:21px;height:21px;color:var(--text-k2)}
+.kpal .q .ph{color:var(--text-k3)}
+.kpal .q .esc{margin-left:auto;padding:3px 7px;border-radius:6px;background:var(--fill);font:600 10.5px/1 var(--font);color:var(--text-k2)}
+.kpal .sec{display:flex;justify-content:space-between;padding:6px 20px 8px;font:600 11.5px/1 var(--font);color:var(--text-k2)}
+.kpal ul{list-style:none;margin:0;padding:0 10px}
+.kpal li{display:flex;align-items:center;gap:14px;height:46px;padding:0 14px 0 12px;border-radius:13px}
+.kpal li .gl{width:22px;height:22px;flex:none;color:var(--text-k2)}
+.kpal li .tt{display:flex;flex-direction:column;gap:2px;font:500 13.5px/1.1 var(--font)}
+.kpal li .tt small{font-size:11px;font-weight:400;color:var(--text-k2)}
+.kpal li .kb{margin-left:auto;font:500 12px/1 var(--font);color:var(--text-k2)}
+.kpal li.sel{background:var(--fill-active)}
+.kpal .ft{display:flex;align-items:center;justify-content:space-between;padding:12px 20px 10px;font:500 11.5px/1 var(--font);color:var(--text-k2)}
+.kpal .ft b{font-weight:600;color:var(--text-k)}
+.kpal .ft .ret{margin-left:8px;padding:2px 6px;border-radius:5px;background:var(--fill)}
+
+/* Create Spotlight Launcher sheet. */
+.shdim{position:absolute;inset:0;z-index:5;background:rgba(0,0,0,.22);opacity:0;transition:opacity .45s ease;pointer-events:none}
+.shdim.on{opacity:1}
+.sheet{left:50%;top:22px;width:500px;margin-left:-250px;border-radius:28px;padding:22px 22px 20px;color:var(--text-k);transform:translateY(-14px) scale(.97)}
+.sheet .pv{width:58px;height:58px;margin-bottom:14px}
+.sheet h5{margin:0;font:700 14px/1.2 var(--font)}
+.sheet p{margin:6px 0 12px;font-size:13px;line-height:1.35;color:var(--text-k)}
+.sheet label{display:block;margin:0 0 6px 2px;font-size:12.5px;color:var(--text-k2)}
+.sheet .nf{height:32px;display:flex;align-items:center;padding:0 10px;border-radius:9px;background:color-mix(in oklab,var(--st-bg) 70%,transparent);box-shadow:0 0 0 2.5px var(--acc);font-size:14px;margin-bottom:14px}
+.sheet .nf mark{background:var(--st-sel);color:inherit;border-radius:2px}
+.sheet .nf .cur{width:1.5px;height:16px;vertical-align:-3px}
+.sheet .ig{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.sheet .ig span{height:56px;border-radius:13px;background:var(--fill);display:grid;place-items:center;color:var(--text-k2);transition:box-shadow .25s ease,background-color .25s ease,transform .2s var(--ease)}
+.sheet .ig span svg{width:26px;height:26px}
+.sheet .ig span img{width:32px;height:32px}
+.sheet .ig span.sel{background:color-mix(in oklab,var(--acc) 20%,transparent);box-shadow:inset 0 0 0 2px var(--acc);color:var(--text-k)}
+.sheet .ig span.press{transform:scale(.94)}
+.sheet .bt{display:flex;justify-content:center;gap:10px;margin-top:18px}
+.sheet .bt span{width:150px;height:36px;border-radius:999px;display:grid;place-items:center;font:500 14px/1 var(--font);background:var(--fill-active);transition:transform .2s var(--ease),filter .2s}
+.sheet .bt span.pri{background:var(--acc);color:var(--on-acc)}
+.sheet .bt span.press{transform:scale(.95);filter:brightness(.9)}
+.toast{right:18px;bottom:18px;display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:14px;font-size:12.5px;color:var(--text-k)}
+.toast .ckc{width:22px;height:22px;border-radius:50%;background:var(--ok);color:#fff;display:grid;place-items:center}
+.toast .ckc svg{width:12px;height:12px}
+/* Spotlight, used to open launchers that are not in the Dock. */
+.spot{left:50%;top:200px;width:620px;margin-left:-310px;border-radius:28px;overflow:hidden;color:var(--text);background:color-mix(in srgb,var(--bg) 55%,transparent);backdrop-filter:blur(30px) saturate(190%);-webkit-backdrop-filter:blur(30px) saturate(190%);box-shadow:inset 0 1px 0 rgba(255,255,255,.18),inset 0 0 0 .5px var(--hair),0 30px 80px rgba(0,0,0,.28);z-index:8}
+.spot .q{display:flex;align-items:center;gap:12px;height:58px;padding:0 22px;font-size:22px;letter-spacing:-.01em}
+.spot .q svg{width:21px;height:21px;opacity:.55}
+.spot .q .ph{opacity:.4}
+.spot .q .cur{width:2px;height:24px;vertical-align:-5px;background:var(--text)}
+.spot .res{display:flex;align-items:center;gap:12px;margin:0 8px 8px;padding:8px 12px;border-radius:18px;background:color-mix(in srgb,var(--text) 12%,transparent);transition:transform .25s var(--ease),opacity .3s ease}
+.spot .res.hid{opacity:0}
+.spot .res.press{transform:scale(.98)}
+.spot .res .aico{width:32px;height:32px;border-radius:8px}
+.spot .res b{display:block;font-size:14px;font-weight:600}
+.spot .res small{font-size:11.5px;color:var(--text-2)}
+.spot .res .rk{margin-left:auto;font-size:12px;color:var(--text-2)}
+.done-tag{left:50%;top:14px;transform:translateX(-50%) translateY(-8px);padding:6px 12px;border-radius:999px;font-size:12px;font-weight:500;z-index:6}
+.ov.done-tag.on{transform:translateX(-50%)}
+.cursor{position:absolute;left:0;top:0;width:20px;height:24px;z-index:9;pointer-events:none;opacity:0;transition:opacity .4s ease;filter:drop-shadow(0 1px 1.5px rgba(0,0,0,.3))}
+.cursor.on{opacity:1}
+
+/* Example panels */
+.sess .k-row .tr{margin-left:auto}
+.rq .k-row code{font:11px var(--mono);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.add{color:var(--ok)}.del{color:var(--dng)}
+.k-form{display:flex;flex-direction:column;gap:14px;padding:14px 16px}
+.k-glabel{padding:0 8px 6px;font-size:11px;font-weight:600;color:var(--text-k2)}
+.k-group{border-radius:9px;background:var(--surface-k);box-shadow:inset 0 0 0 .5px var(--sep)}
+.k-grow{display:flex;align-items:center;gap:12px;min-height:36px;padding:6px 12px}
+.k-grow+.k-grow{border-top:.5px solid var(--sep)}
+.k-grow>label{flex:1}
+.k-field{width:min(260px,55%);height:24px;border-radius:6px;border:.5px solid var(--border-k);background:color-mix(in oklab,var(--st-fg) 3%,var(--st-bg));display:flex;align-items:center;padding:0 8px;font:11.5px var(--mono);color:var(--text-k)}
+.k-slider{position:relative;width:min(220px,50%);height:4px;border-radius:2px;background:var(--fill-active)}
+.k-slider i{position:absolute;left:0;top:0;bottom:0;width:72%;border-radius:2px;background:var(--acc)}
+.k-slider b{position:absolute;left:72%;top:50%;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;background:#fff;box-shadow:0 0 0 .5px rgba(0,0,0,.2),0 1px 3px rgba(0,0,0,.3)}
+.k-check{width:14px;height:14px;border-radius:4px;background:var(--acc);display:inline-grid;place-items:center;color:#fff;vertical-align:-2px;margin-right:5px}
+.k-check svg{width:10px;height:10px}
+.k-table{width:100%;border-collapse:collapse;font-size:11.5px}
+.k-table th{text-align:left;font-weight:500;color:var(--text-k2);font-size:11px;padding:0 10px;height:26px;border-bottom:.5px solid var(--sep);background:var(--st-bg)}
+.k-table td{padding:0 10px;height:26px;border-bottom:.5px solid var(--sep);white-space:nowrap;transition:opacity .5s ease}
+.k-table td.n,.k-table th.n{text-align:right;font-variant-numeric:tabular-nums}
+.k-table td.s{color:var(--ok)}
+.k-table tr.hide td{opacity:0}
+.k-table tr.sel td{background:var(--acc-t)}
+.bench{position:absolute;inset:0;display:grid;grid-template-columns:200px 1fr}
+.bench aside{border-right:.5px solid var(--sep);background:var(--surface-k);padding:8px 0;display:flex;flex-direction:column}
+.bench main{position:relative;display:flex;flex-direction:column;min-width:0}
+.bench .grid2{flex:1;min-height:0;display:grid;grid-template-columns:1.65fr 1fr;grid-template-rows:1fr auto}
+.bench .cbox{position:relative;padding:10px 14px;border-right:.5px solid var(--sep);border-bottom:.5px solid var(--sep);min-height:0}
+.bench .cbox:nth-child(2){border-right:0}
+.bench .cbox h6{margin:0;font:600 11px/1 var(--font);color:var(--text-k2);display:flex;justify-content:space-between}
+.bench .cbox h6 em{font-style:normal;font-weight:400;color:var(--text-k3)}
+.bench .plot{position:absolute;left:44px;right:14px;top:30px;bottom:26px}
+.bench .plot svg{width:100%;height:100%;display:block;overflow:visible}
+.bench .plot path{fill:none;stroke-width:2;vector-effect:non-scaling-stroke;stroke-linejoin:round;stroke-linecap:round}
+.bench .plot .gl{stroke:var(--sep);stroke-width:1;vector-effect:non-scaling-stroke}
+.bench .yl{position:absolute;left:10px;width:30px;text-align:right;font:10px var(--mono);color:var(--text-k3);transform:translateY(-50%)}
+.bench .xl{position:absolute;bottom:8px;font:10px var(--mono);color:var(--text-k3);transform:translateX(-50%)}
+.bench .bars{position:absolute;left:14px;right:14px;top:34px;bottom:12px;display:flex;flex-direction:column;justify-content:space-around;gap:6px}
+.bench .bars div{display:grid;grid-template-columns:76px 1fr 38px;align-items:center;gap:8px;font:10.5px var(--mono);color:var(--text-k2)}
+.bench .bars span.tr{height:10px;border-radius:3px;background:var(--fill);overflow:hidden;display:block}
+.bench .bars span.tr i{display:block;height:100%;border-radius:3px;width:0}
+.bench .bars b{font-weight:500;text-align:right;color:var(--text-k);font-variant-numeric:tabular-nums}
+.bench .tbl{grid-column:1/3;max-height:118px;overflow:hidden}
+.best{position:absolute;padding:3px 7px;border-radius:6px;font:600 10px/1 var(--font);background:var(--acc);color:var(--on-acc);transform:translate(-50%,-140%);white-space:nowrap;opacity:0;transition:opacity .6s ease}
+.best.on{opacity:1}
+
+/* Seeking: no transitions, so the frame lands at once. */
+.jump *,.jump *::before,.jump *::after{transition:none!important;animation:none!important}
+
+/* ================================================================
+   Sections
+   ================================================================ */
+section{scroll-margin-top:52px}
+.sec{padding:120px 0}
+.alt{background:var(--bg-alt)}
+.sec-head{text-align:center}
+h2{font-family:var(--font-display);font-weight:600;font-size:clamp(36px,5.6vw,64px);line-height:1.0625;letter-spacing:-.018em;text-wrap:balance}
+h2 .g{color:var(--text-3)}
+.sub{font:400 clamp(19px,1.9vw,21px)/1.38 var(--font-display);color:var(--text-2);letter-spacing:.011em;max-width:30em;margin:18px auto 0;text-wrap:balance}
+@media (max-width:734px){.sec{padding:80px 0}}
+.js .reveal{opacity:0;transform:translateY(28px);transition:opacity 1s var(--ease-out),transform 1.3s var(--ease-out)}
+.js .reveal.in{opacity:1;transform:none}
+.static .reveal{transition:none!important}
+
+/* ---------- Bento ---------- */
+.bento-sec{background:var(--bento-bg)}
+.bento{display:grid;grid-template-columns:repeat(6,1fr);gap:20px;margin-top:56px}
+.bento>*{min-width:0}
+.tile{position:relative;border-radius:28px;background:var(--tile);overflow:hidden;display:flex;flex-direction:column;padding:36px 36px 0}
+.tile.s6{grid-column:span 6}.tile.s3{grid-column:span 3}.tile.s2{grid-column:span 2}
+.tile .prop{display:block;font-size:12px;font-weight:600;letter-spacing:-.005em;color:var(--text-3);margin-bottom:8px}
+.tile h3{font-family:var(--font-display);font-weight:600;font-size:28px;line-height:1.14;letter-spacing:.004em;text-wrap:balance}
+.tile p{color:var(--text-2);font-size:17px;line-height:1.35;margin-top:8px;max-width:26em;letter-spacing:-.02em}
+.tile .vis{position:relative;margin-top:28px;flex:1;min-height:220px}
+.tile.pad-b{padding-bottom:36px}
+@media (max-width:1068px){.bento{grid-template-columns:repeat(2,1fr)}.tile.s6{grid-column:span 2}.tile.s3,.tile.s2{grid-column:span 1}.tile.wide-md{grid-column:span 2}}
+@media (max-width:734px){.bento{grid-template-columns:1fr;gap:16px}.tile.s6,.tile.s3,.tile.s2,.tile.wide-md{grid-column:span 1}.tile{padding:28px 24px 0;border-radius:22px}.tile.pad-b{padding-bottom:28px}.tile h3{font-size:24px}}
+
+/* Plugins: a manifest becomes a panel, a command and a service. */
+
+
+
+.pchips{list-style:none;margin:24px 0 0;padding:0;display:flex;flex-wrap:wrap;gap:8px}
+.pchips li{height:28px;display:inline-flex;align-items:center;padding:0 12px;border-radius:999px;background:var(--bg-alt);font-size:13px;color:var(--text-2);letter-spacing:-.005em}
+.pstage{display:grid;grid-template-columns:minmax(0,1.25fr) 24px minmax(0,1fr);align-items:center;gap:14px;min-width:0}
+.pman pre{font-size:11px;line-height:1.7;padding:14px 14px 16px;overflow:hidden}
+.pman .bar span{padding-right:34px}
+.pman .jkey{color:#9ecbff}.pman .jval{color:#f0b37e}.pman .jcom{color:#7c7c82}
+.parrow{width:28px;color:var(--text-3)}
+.presult{position:relative;padding:46px 0 40px}
+.ppane{border-radius:12px;overflow:hidden;background:var(--st-bg);box-shadow:0 0 0 .5px var(--border-k),0 18px 40px rgba(0,0,0,.12);font:12px/1.4 var(--font);letter-spacing:0}
+.ppane .phd .ty b{color:var(--text-k2)}
+.hbtn{display:grid;place-items:center;width:20px;height:18px;border-radius:5px;background:var(--fill);color:var(--text-k2)}
+.hbtn svg{width:11px;height:11px}
+.pbody{padding:12px 12px 14px;display:flex;flex-direction:column;gap:10px}
+.prow{display:flex;align-items:center;gap:8px;font:12px/1 var(--mono)}
+.prow .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--text-k3)}
+.dot.ok{background:var(--ok,#28a745)}
+.pbar{height:4px;border-radius:2px;background:var(--fill)}.pbar i{display:block;height:100%;border-radius:2px;background:var(--acc)}
+.pspark{width:100%;height:48px;display:block}
+.plog{font:10.5px/1.7 var(--mono);color:var(--text-k2);white-space:nowrap;overflow:hidden}
+.plog span{color:var(--text-k3)}
+.pfloat{position:absolute;display:flex;align-items:center;gap:8px;height:32px;padding:0 12px;border-radius:10px;background:color-mix(in srgb,var(--tile) 82%,transparent);-webkit-backdrop-filter:blur(18px) saturate(1.6);backdrop-filter:blur(18px) saturate(1.6);box-shadow:0 0 0 .5px var(--hair-2),0 10px 26px rgba(0,0,0,.14);font-size:12.5px;color:var(--text);white-space:nowrap;letter-spacing:-.005em}
+.pfloat small{color:var(--text-3);font-size:11px}
+.pfloat .kq{font-weight:600;color:var(--blue)}
+.pfloat.pk{top:0;right:0}
+.pfloat.ps{bottom:0;left:0}
+.pfloat .dot.ok{background:#28a745}
+
+@media (max-width:734px){.pstage{grid-template-columns:1fr}.parrow{transform:rotate(90deg);justify-self:center}.pfloat.pk{right:0}.pfloat.ps{left:0}}
+
+/* Wide tiles stack their text above the visual, like the other tiles. */
+.t-plug{padding-bottom:36px}
+.t-plug .pstage{margin-top:28px}
+.t-plug .pstage{flex:1}
+.t-plug .pchips{margin-top:16px}
+.t-plug .pchips li{height:24px;font-size:12px;padding:0 10px}
+
+/* Agents section: an agent session in a terminal window. */
+.agterm{max-width:860px;margin:56px auto 0}
+.agterm .bar{position:relative}
+.agterm .bar span{padding-right:0}
+.agterm .bar em{position:absolute;right:14px;font:500 11px/1 var(--font);font-style:normal;color:#7c7c82}
+.agterm pre{font-size:13px;line-height:1.75;padding:20px 24px 24px}
+.agterm .u{color:#f5f5f7}
+.agterm .o{color:#63d17a}
+.agterm .cmd{color:#9ecbff}
+.agterm .ok2{color:#63d17a}
+.tok{font:500 .92em var(--mono);letter-spacing:0}
+.agrow{display:grid;grid-template-columns:repeat(3,1fr);gap:32px;max-width:860px;margin:48px auto 0}
+.agrow h3{font-size:17px;font-weight:600;letter-spacing:-.022em}
+.agrow p{font-size:14px;line-height:1.43;color:var(--text-2);margin-top:4px;letter-spacing:-.01em}
+.agnames{max-width:860px;margin:64px auto 0;text-align:center}
+.agnames>p:first-child{font-size:14px;color:var(--text-2)}
+.agnames .names{justify-content:center;margin-top:12px;padding:0}
+.agnames .fine{font-size:12px;color:var(--text-3);margin-top:14px}
+.kick{font:600 17px/1.2 var(--font);letter-spacing:-.02em;color:var(--blue);margin-bottom:10px}
+.gkick{display:block;font:600 12px/1 var(--font);letter-spacing:-.005em;color:var(--text-3);margin-bottom:10px}
+.gal-sec{background:var(--bg-alt)}
+.gal-sec .gcard{background:var(--tile)}
+@media (max-width:734px){.agrow{grid-template-columns:1fr;gap:20px}.agterm pre{font-size:11px;padding:14px 14px 18px}}
+
+/* Solo kit panels inside tiles, shown at 1:1 and cropped by the tile. */
+.solo{position:absolute;left:0;right:-36px;top:0;bottom:-24px;border-radius:14px 0 0 0;background:var(--st-bg);color:var(--text-k);box-shadow:0 0 0 .5px var(--border-k),0 12px 30px rgba(0,0,0,.08);overflow:hidden;font:12px/1.4 var(--font);letter-spacing:0}
+.tile.s3 .vis{min-height:330px}
+.tile.s4{grid-column:span 4}
+@media (max-width:1068px){.tile.s4{grid-column:span 2}}
+@media (max-width:734px){.solo{right:-24px}.tile.s3 .vis{min-height:300px}.tile.s4{grid-column:span 1}}
+
+/* Terminal tile: tabs and nested splits */
+.t-term .mt{box-shadow:0 0 0 .5px rgba(0,0,0,.25),0 16px 36px rgba(0,0,0,.14)}
+.t-term .vis{min-height:300px}
+/* Matches the app's default dark look: graphite chrome, flush panes, GitHub-dark terminal. */
+.mt{position:absolute;left:0;right:-36px;top:0;bottom:-24px;display:flex;flex-direction:column;border-radius:14px 0 0 0;background:#262629;overflow:hidden;font:12px/1.45 var(--mono);color:#e6edf3;letter-spacing:0;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
+.mt-bar{flex:none;display:flex;align-items:center;gap:12px;height:30px;padding:0 12px}
+.mt-bar .l{display:flex;gap:7px}
+.mt-bar .l i{width:11px;height:11px;border-radius:50%;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.18)}
+.mt-bar .l i:nth-child(1){background:#ff5f57}.mt-bar .l i:nth-child(2){background:#febc2e}.mt-bar .l i:nth-child(3){background:#28c840}
+.mt-bar>b{font:600 12.5px/1 var(--font);color:#dcdcde}
+.mt-tabs{flex:none;display:flex;gap:2px;height:24px;margin:2px 7px 7px;padding:2px;border-radius:999px;background:#39393b;box-shadow:inset 0 0 0 .5px rgba(255,255,255,.06)}
+.mt-tabs span{flex:1;display:flex;align-items:center;justify-content:center;border-radius:999px;font:500 11.5px/1 var(--font);color:#8e8e93}
+.mt-tabs span.on{background:#454547;color:#f5f5f7;box-shadow:inset 0 .5px 0 rgba(255,255,255,.12),0 1px 3px rgba(0,0,0,.25)}
+.mt-grid{flex:1;min-height:0;display:grid;grid-template-columns:1.25fr 1fr;grid-template-rows:1fr 1fr;gap:1px;background:#313133;border-top:1px solid #313133}
+.mt-p{display:flex;flex-direction:column;min-width:0;min-height:0;background:#0d1117;overflow:hidden}
+.mt-p.a{grid-row:span 2}
+.mt-h{flex:none;display:flex;gap:10px;align-items:center;height:24px;padding:0 9px;background:#1e1e1e;border-bottom:1px solid #313133;font:600 10.5px/1 var(--font);color:#98989d}
+.mt-h .ty{display:flex;align-items:center;gap:6px}
+.mt-h .grip{opacity:.6}
+.mt-h b{flex:1;min-width:0;padding-right:40px;text-align:center;font-weight:500;font-size:11px;color:#e6edf3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mt-p pre{margin:0;padding:6px 9px;white-space:pre;overflow:hidden;font:inherit}
+.mt .d{color:#7d8590}.mt .g{color:#3fb950}.mt .b{color:#79c0ff}.mt .y{color:#d29922}
+@media (max-width:734px){.mt{right:-24px;font-size:11px}.mt-h b{padding-right:0}
+  .tile .vis.v-spot,.tile .vis.v-th,.tile .vis.v-br,.tile .vis.v-toml{min-height:0}}
+
+/* Move and retype tile */
+.v-mv .solo{display:flex;flex-direction:column}
+.v-mv .phd{height:30px;grid-template-columns:auto 1fr;gap:10px;color:var(--text-k2)}
+.v-mv .phd .ty{gap:7px}
+.v-mv .grip{color:var(--acc);opacity:1}
+.v-mv .tybtn{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:5px;background:var(--fill-active);color:var(--text-k);font-weight:500}
+.v-mv .tybtn svg{width:8px;height:8px}
+.v-mv .ptitle{justify-self:start}
+/* A native popup menu: grey glass, the current type checked and dimmed. */
+/* Opens under the header so the type label stays readable. The output behind it shows the glass. */
+.v-mv .menu{position:absolute;left:24px;top:34px;width:178px;padding:5px;border-radius:12px;z-index:2;background:rgba(120,120,128,.26);-webkit-backdrop-filter:blur(14px) saturate(170%) brightness(1.1);backdrop-filter:blur(14px) saturate(170%) brightness(1.1);box-shadow:inset 0 0 0 .5px rgba(255,255,255,.22),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 .5px rgba(0,0,0,.45),0 14px 34px rgba(0,0,0,.4)}
+.v-mv .lt .menu{background:rgba(250,250,252,.55);box-shadow:inset 0 0 0 .5px rgba(255,255,255,.6),0 0 0 .5px rgba(0,0,0,.14),0 12px 32px rgba(0,0,0,.16)}
+.v-mv .menu div{display:flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:5px;font:400 13px/1 var(--font);color:#f2f2f4}
+.v-mv .lt .menu div{color:#1d1d1f}
+.v-mv .menu div.now{color:rgba(242,242,244,.45)}
+.v-mv .lt .menu div.now{color:rgba(29,29,31,.4)}
+.v-mv .menu .ck{width:14px;display:grid;place-items:center}
+.v-mv .menu .ck svg{width:12px;height:12px}
+.v-mv .ghost{position:absolute;inset:30px 0 0;padding:10px 12px;font:11px/1.7 var(--mono);color:var(--text-k);white-space:pre}
+.v-mv .ghost .d{color:var(--text-k3)}.v-mv .ghost .g{color:var(--ok)}.v-mv .ghost .y{color:var(--wrn)}.v-mv .ghost .e{color:var(--dng)}.v-mv .ghost .a{color:var(--acc)}
+
+/* One pane with its agent ring and pill. The ring follows the frame's rounded corners. */
+.v-prs .solo{display:flex;flex-direction:column;right:0;bottom:auto;height:210px;border-radius:14px}
+.v-prs .mp{position:relative;flex:1;display:flex;flex-direction:column;min-height:0}
+.v-prs .prs .ring{border-radius:14px}
+.v-prs .phd{grid-template-columns:auto 1fr auto;color:var(--text-k2)}
+.v-prs .ptitle{justify-self:start}
+.v-prs pre{margin:0;padding:10px 12px 44px;flex:1;font:11px/1.7 var(--mono);color:var(--text-k)}
+.v-prs pre .g{color:var(--ok)}.v-prs pre .d{color:var(--text-k3)}
+.klist small{font-size:11px}
+
+/* Browser tile */
+.v-br{display:flex;flex-direction:column;gap:10px;justify-content:center;padding-bottom:36px}
+.bp{border-radius:12px;background:var(--bg-alt);box-shadow:inset 0 0 0 .5px var(--hair-2);overflow:hidden}
+.bp-h{display:flex;align-items:center;gap:8px;height:28px;padding:0 10px;border-bottom:.5px solid var(--hair-2);font:500 11px/1 var(--font);color:var(--text-2);white-space:nowrap}
+.bp-h b{font-weight:500;color:var(--text)}
+.bp-h .url{margin-left:auto;display:flex;align-items:center;gap:5px;height:18px;padding:0 8px;border-radius:5px;background:var(--tile);color:var(--text-2);font-size:10.5px;overflow:hidden;text-overflow:ellipsis}
+.bp-h svg{width:9px;height:9px;flex:none}
+.bp-b{padding:12px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.bp-b .hero{grid-column:1/4;height:42px;border-radius:7px;background:var(--hair-2);display:flex;align-items:center;padding:0 12px;font:600 13px/1 var(--font-display);color:var(--text)}
+.bp-b i{height:34px;border-radius:6px;background:var(--hair-2)}
+.bp.priv .bp-h{border-bottom:0}
+
+/* TOML tile */
+.v-toml{display:flex;flex-direction:column;justify-content:center;padding-bottom:36px}
+.toml{position:relative;margin:0;padding:16px 18px;border-radius:14px;background:var(--bg-alt);font:12px/1.75 var(--mono);color:var(--text);white-space:pre;overflow:hidden;letter-spacing:0}
+.toml .s{color:var(--text-3)}.toml .v{color:var(--link)}
+.toml .hl{display:inline-block;margin:0 -6px;padding:0 6px;border-radius:5px;background:color-mix(in srgb,var(--blue) 12%,transparent)}
+.reload{align-self:flex-start;display:inline-flex;align-items:center;gap:6px;margin-top:12px;height:24px;padding:0 10px;border-radius:999px;background:var(--bg-alt);font-size:12px;color:var(--text-2);letter-spacing:-.005em}
+.reload i{width:7px;height:7px;border-radius:50%;background:#28a745}
+
+/* CLI tile */
+
+
+
+.cliwin{border-radius:14px;background:var(--term-bg);overflow:hidden;box-shadow:0 0 0 .5px rgba(0,0,0,.2),0 18px 40px rgba(0,0,0,.12);min-width:0}
+.cliwin .bar{display:flex;align-items:center;gap:7px;height:34px;padding:0 13px;background:#262629;border-bottom:1px solid #313133}
+.cliwin .bar i{width:10px;height:10px;border-radius:50%;background:#4a4a4f}
+.cliwin .bar span{margin:0 auto;padding-right:44px;font:500 11.5px/1 var(--font);color:#a1a1a6}
+.cliwin pre{margin:0;padding:18px 20px 22px;font:13px/1.8 var(--mono);color:#e5e5ea;white-space:pre;overflow-x:auto;letter-spacing:0}
+.cliwin .p{color:#63d17a;user-select:none}.cliwin .c{color:#7c7c82}.cliwin .o{color:#a1a1a6}
+
+@media (max-width:734px){.cliwin pre{font-size:11px;padding:14px 14px 18px}}
+
+/* Plugins tile */
+.plg .k-ghd{height:30px;padding-top:4px}
+.plg .k-row .ic{width:22px;height:22px;border-radius:6px;display:grid;place-items:center;background:var(--fill-active);color:var(--text-k2);flex:none}
+.plg .k-row .ic svg{width:12px;height:12px}
+.plg .k-row .nm small{font-size:10.5px}
+.plg .ev{padding:2px 14px 0;font:11px/1.75 var(--mono);color:var(--text-k2);white-space:nowrap}
+.plg .ev span{color:var(--text-k3)}
+.plg .ev b{font-weight:500;color:var(--acc)}
+
+/* Themes tile */
+.v-th{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-content:center;padding-bottom:36px}
+.sw{border-radius:12px;padding:10px;background:var(--st-bg);box-shadow:0 0 0 .5px var(--border-k);display:flex;flex-direction:column;gap:8px;min-width:0}
+.sw .row{display:flex;align-items:center;gap:6px}
+.sw .nm{font:500 10.5px/1.2 var(--font);color:var(--text-k2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sw .ln2{height:4px;border-radius:2px;background:var(--fill-active)}
+.sw .ln2.s{width:60%}
+
+/* Spotlight tile */
+.v-spot{display:flex;flex-direction:column;gap:8px;justify-content:center;padding-bottom:36px}
+.sbar{display:flex;align-items:center;gap:10px;height:46px;padding:0 16px;border-radius:16px;background:var(--bg-alt);font-size:18px;color:var(--text);letter-spacing:-.01em}
+.sbar svg{width:17px;height:17px;opacity:.5;flex:none}
+.sres{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:14px;background:var(--blue);color:#fff}
+.sres b{display:block;font-size:14px;font-weight:600}
+.sres small{display:block;font-size:11.5px;opacity:.85}
+.sres svg{flex:none}
+
+/* Agents tile */
+.names{display:flex;flex-wrap:wrap;gap:4px 14px;font:600 clamp(24px,2.6vw,30px)/1.3 var(--font-display);letter-spacing:-.01em;color:var(--text);align-content:center;padding-bottom:12px}
+.names span{color:var(--text-3)}
+.names .you{font-style:normal;color:var(--text-2)}
+.tile .fine{font-size:12px;color:var(--text-3);margin-top:auto;padding:16px 0 30px;letter-spacing:-.005em}
+
+/* ---------- Examples gallery ---------- */
+.pnote{display:inline-flex;align-items:center;gap:6px;margin-top:22px;height:24px;padding:0 11px;border-radius:980px;font:500 12px/1 var(--font);letter-spacing:-.005em;color:var(--text-2);background:var(--bg-alt);box-shadow:inset 0 0 0 1px var(--hair-2)}
+.pnote svg{width:12px;height:12px;flex:none}
+.gallery{--gw:min(980px,calc(100vw - 140px));margin-top:56px}
+.gtrack{position:relative;display:flex;gap:20px;margin:0;padding:0 calc((100% - var(--gw)) / 2);list-style:none;overflow-x:auto;overscroll-behavior-x:contain;scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.gtrack::-webkit-scrollbar{display:none}
+.gtrack:focus-visible{outline:none}
+.gtrack:focus-visible .gcard.on{box-shadow:0 0 0 2px var(--blue)}
+.gcard{flex:none;width:var(--gw);scroll-snap-align:center;scroll-snap-stop:always;border-radius:28px;background:var(--card);overflow:hidden;display:flex;flex-direction:column;transition:opacity .6s ease}
+.gcard:not(.on){cursor:pointer}
+.gcap{padding:40px 48px 30px}
+.gcap h3{font-family:var(--font-display);font-weight:600;font-size:28px;line-height:1.14;letter-spacing:.004em;text-wrap:balance}
+.gcap p{color:var(--text-2);font-size:17px;line-height:1.35;margin-top:6px;letter-spacing:-.02em}
+.gshot{position:relative;margin:0 48px;aspect-ratio:1200/700;border-radius:14px 14px 0 0;overflow:hidden;box-shadow:0 0 0 .5px rgba(0,0,0,.14),0 -2px 30px rgba(0,0,0,.06)}
+.gshot .stage{width:1200px;height:700px}
+.gctl{display:flex;justify-content:center;align-items:center;gap:12px;margin-top:30px}
+.gdots{display:flex;align-items:center;height:44px;padding:0 12px;border-radius:980px;background:var(--ctl)}
+.gdot{display:grid;place-items:center;height:44px;padding:0 5px;border:0;background:none;cursor:pointer}
+.gdot span{position:relative;display:block;width:8px;height:8px;border-radius:4px;background:color-mix(in srgb,var(--text) 32%,transparent);overflow:hidden;transition:width .5s var(--ease),background-color .3s}
+.gdot:hover span{background:color-mix(in srgb,var(--text) 55%,transparent)}
+.gdot[aria-current="true"] span{width:34px}
+.gdot span i{position:absolute;inset:0;border-radius:inherit;background:var(--text);transform-origin:0 50%;transform:scaleX(0)}
+.gdot[aria-current="true"] span i{transform:scaleX(var(--p,1))}
+.gplay{width:44px;height:44px}
+.gplay svg{width:13px;height:13px}
+@media (max-width:734px){
+  .gallery{--gw:calc(100vw - 48px);margin-top:40px}
+  .gtrack{gap:12px}
+  .gcard{border-radius:22px}
+  .gcap{padding:26px 24px 20px}
+  .gcap h3{font-size:22px}
+  .gcap p{font-size:15px}
+  .gshot{margin:0 16px;aspect-ratio:700/600;border-radius:8px 8px 0 0}
+}
+
+/* Browser pane body in gallery mocks */
+.wb{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--st-bg)}
+.wb-url{flex:none;display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;border-bottom:.5px solid var(--sep);color:var(--text-k3)}
+.wb-url svg{width:12px;height:12px}
+.wb-url span{flex:1;height:22px;border-radius:6px;background:var(--fill);display:flex;align-items:center;padding:0 9px;font-size:11.5px;color:var(--text-k2)}
+.wb-pg{flex:1;min-height:0;padding:20px 22px;display:flex;flex-direction:column;gap:12px;overflow:hidden}
+.wb-pg h4{margin:0;font:700 22px/1.15 var(--font-display);letter-spacing:-.01em;color:var(--text-k)}
+.wb-pg p{margin:0;font-size:12px;line-height:1.55;color:var(--text-k2)}
+.wb-pg .ln3{height:7px;border-radius:4px;background:var(--fill-active)}
+.wb-pg .blk{border-radius:10px;background:var(--fill);min-height:70px}
+.wb-pg .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.wb-pg .stat{border-radius:9px;background:var(--fill);padding:10px 12px;font-size:11px;color:var(--text-k2)}
+.wb-pg .stat b{display:block;font-size:17px;color:var(--text-k);margin-top:2px}
+.pr .k-row .nm{font-size:12px}
+.pr .k-row .num{font:500 11px var(--mono);color:var(--text-k3);width:36px;flex:none}
+.pr .steps{display:flex;gap:8px;padding:4px 14px 10px;flex-wrap:wrap}
+.notes{position:absolute;inset:0;padding:14px 16px;font-size:12.5px;line-height:1.6;color:var(--text-k)}
+.notes h5{margin:0 0 6px;font:600 15px/1.3 var(--font)}
+.notes p{margin:0 0 10px;color:var(--text-k2)}
+.notes .li{display:flex;gap:8px;align-items:flex-start;margin-bottom:6px}
+.notes .li .k-check{margin-top:3px;flex:none}
+.notes .li .k-check.off{background:transparent;box-shadow:inset 0 0 0 1px var(--border-k)}
+.notes mark{background:var(--wrn-t);color:inherit;border-radius:3px;padding:0 2px}
+
+/* ---------- Terminal feature row ---------- */
+
+/* ---------- Agents / CLI ---------- */
+.code{position:relative;max-width:820px;margin:56px auto 0;border-radius:20px;background:var(--code-bg);overflow:hidden}
+.code .lab{position:absolute;right:18px;top:16px;font-size:12px;color:var(--text-3);letter-spacing:-.005em}
+.code pre{margin:0;padding:48px 32px 32px;font:14px/1.85 var(--mono);color:var(--text);overflow-x:auto;white-space:pre;letter-spacing:0}
+.code .pp{color:var(--text-3);user-select:none}
+.code .cm{color:var(--text-3)}
+.code.on-bg{background:var(--bg-alt)}
+@media (max-width:734px){.code pre{font-size:12px;padding:44px 18px 22px}}
+
+/* ---------- Close ---------- */
+.close{padding:140px 0 130px;text-align:center;border-top:1px solid var(--hair-2)}
+.close .appicon{display:block;margin:0 auto 28px}
+.close h2{font-size:clamp(40px,7vw,80px);line-height:1.05;letter-spacing:-.02em}
+.close h2 span{display:block}
+.close h2 .c3{color:var(--text-3)}
+.close .ctas{margin-top:40px}
+
+/* ---------- Footer ---------- */
+footer{background:var(--bg-alt);color:var(--text-2);font-size:12px;line-height:1.33;letter-spacing:-.01em;padding:18px 0 22px}
+footer .fnote{padding-bottom:14px;border-bottom:1px solid var(--hair)}
+footer .crumbs{display:flex;align-items:center;gap:8px;padding:14px 0;border-bottom:1px solid var(--hair);color:var(--text)}
+footer .crumbs img{width:14px;height:14px}
+footer .legal{display:flex;justify-content:space-between;gap:10px 24px;flex-wrap:wrap;padding-top:14px}
+footer nav{display:flex;flex-wrap:wrap}
+footer nav a{color:var(--text-2);padding:0 10px;border-left:1px solid var(--hair)}
+footer nav a:first-child{padding-left:0;border-left:0}
+footer a:hover{color:var(--text)}
+
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  .js .reveal{opacity:1;transform:none;transition:none}
+  .stage *,.stage *::before,.stage *::after{transition-duration:.01ms!important;animation:none!important}
+  .cap,.tag,.gdot span,.gcard{transition:none}
+}
+/* ================================================================
+   Showcase v2 exploration: Spaces, Dock, and the agents sidebar.
+   ================================================================ */
+.xp-head{padding:72px 0 0;text-align:center}
+.xp-head h1{font-size:clamp(36px,5vw,56px)}
+.xp-head .lede{max-width:34em}
+/* Each Space carries its own wallpaper, so the desktop slides as one piece. */
+.spaces{position:absolute;inset:0;will-change:transform}
+.space{position:absolute;top:0;width:1200px;height:760px;background:var(--wallpaper);overflow:hidden}
+.mbar{z-index:5}
+.dockw{position:absolute;left:0;right:0;bottom:8px;display:flex;justify-content:center;z-index:6;pointer-events:none}
+.dock{position:relative;display:flex;align-items:flex-end;gap:5px;padding:5px 6px;border-radius:18px;background:color-mix(in srgb,var(--bg) 34%,transparent);-webkit-backdrop-filter:blur(24px) saturate(170%);backdrop-filter:blur(24px) saturate(170%);box-shadow:inset 0 0 0 .5px rgba(255,255,255,.3),0 0 0 .5px rgba(0,0,0,.18),0 12px 30px rgba(0,0,0,.22)}
+.dsep{align-self:stretch;width:1px;margin:3px 3px;background:color-mix(in srgb,var(--text) 22%,transparent)}
+.dk{position:relative;width:38px;height:38px;flex:none;transition:width .5s var(--ease),margin .5s var(--ease),opacity .4s ease}
+.dk img,.dk>svg{display:block;width:38px;height:38px}
+.dk.hid{width:0;margin:0 -2.5px;opacity:0}
+.dk.hid .aico{transform:scale(.2)}
+.dk::after{content:"";position:absolute;left:50%;bottom:-4px;width:3px;height:3px;margin-left:-1.5px;border-radius:50%;background:var(--text);opacity:0;transition:opacity .3s}
+.dk.run::after{opacity:.6}
+.dk.bounce>img,.dk.bounce>.aico{animation:dkBounce .8s var(--ease-out)}
+@keyframes dkBounce{0%,100%{transform:none}35%{transform:translateY(-16px)}60%{transform:none}78%{transform:translateY(-5px)}}
+.dk .lb{position:absolute;left:50%;bottom:50px;transform:translateX(-50%);padding:4px 9px;border-radius:7px;background:color-mix(in srgb,var(--bg) 70%,transparent);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);box-shadow:0 0 0 .5px var(--hair),0 4px 12px rgba(0,0,0,.18);font:500 12px/1 var(--font);color:var(--text);white-space:nowrap;opacity:0;transition:opacity .2s}
+.dk.hov .lb{opacity:1}
+/* Launcher icons: a squircle with the glyph picked in the Create Launcher sheet. Each app gets its own colours so they read apart. */
+/* Launcher icons follow the Slate app icon: a black squircle, a frosted glass tile, a white glyph. A faint tint tells them apart. */
+.aico{position:relative;display:grid;place-items:center;width:38px;height:38px;border-radius:9px;background:linear-gradient(180deg,#1b1b1d,#0b0b0c);box-shadow:inset 0 0 0 .5px rgba(255,255,255,.12),0 2px 6px rgba(0,0,0,.25);transition:transform .5s var(--ease)}
+.aico::before{content:"";position:absolute;inset:18%;border-radius:24%;
+  background:linear-gradient(140deg,rgba(255,255,255,.88) 0,color-mix(in srgb,var(--tint) 30%,#8d939e) 42%,color-mix(in srgb,var(--tint) 18%,#5f6670) 70%,rgba(214,220,230,.85) 100%);
+  box-shadow:inset 0 0 0 .7px rgba(255,255,255,.9),inset 0 1.5px 2px rgba(255,255,255,.55),0 0 3px rgba(255,255,255,.18)}
+.aico svg{position:relative;width:42%;height:42%;color:#fff;stroke-width:2.6;filter:drop-shadow(0 0 1.2px rgba(255,255,255,.7))}
+.sheet .pv.aico{width:58px;height:58px;border-radius:14px}
+
+.sheet .pv img{width:58px;height:58px;display:block}
+/* Agents sidebar */
+.ags{display:flex;flex-direction:column;gap:6px;padding:8px}
+.agc{display:grid;grid-template-columns:26px minmax(0,1fr) auto;column-gap:9px;row-gap:1px;align-items:center;padding:8px 10px 9px;border-radius:9px;background:var(--surface-k);box-shadow:inset 0 0 0 .5px var(--sep);transition:box-shadow .5s ease,background-color .5s ease,transform .2s var(--ease)}
+/* No progress bars: an agent's run time is unknown. Show a spinner, the elapsed time and the current step. */
+.agc .rt{display:flex;align-items:center;gap:5px;font:500 10px/1 var(--mono);color:var(--text-k3);font-variant-numeric:tabular-nums}
+.agc .rt .k-spin{width:9px;height:9px;border-width:1.5px}
+.agc .who{color:var(--ag)}
+.lt .agc .who{color:color-mix(in srgb,var(--ag) 65%,#000)}
+.agc.ready{background:color-mix(in oklab,var(--acc) 8%,var(--surface-k));box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--acc) 55%,transparent)}
+.agc.flash{animation:agFlash 1.2s ease-out}
+@keyframes agFlash{from{box-shadow:inset 0 0 0 1px var(--acc),0 0 0 5px color-mix(in oklab,var(--acc) 30%,transparent)}}
+.agc.press{transform:scale(.98)}
+.agc .det{grid-column:1/4;display:grid;grid-template-rows:0fr;transition:grid-template-rows .6s var(--ease)}
+.agc.open .det{grid-template-rows:1fr}
+.agc .det>div{min-height:0;overflow:hidden}
+.agc .files{margin-top:9px;padding-top:7px;border-top:.5px solid var(--sep);font:10.5px/1.8 var(--mono);color:var(--text-k2)}
+.agc .files div{display:flex;gap:6px}
+.agc .files .n{margin-left:auto}
+.agc .files .ok{color:var(--ok)}
+.agc .acts{display:flex;gap:6px;margin-top:8px}
+.agc .acts>*{flex:1}
+.agc .av{grid-row:span 2;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font:700 11px/1 var(--font);color:#1a1a1a;background:var(--ag)}
+.agc b{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.agc .st{font:500 10px/1 var(--mono);color:var(--ag)}
+.lt .agc .st{color:color-mix(in srgb,var(--ag) 65%,#000)}
+.agc small{grid-column:2/4;font-size:10.5px;color:var(--text-k3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Deploy marker on the latency chart. */
+.dmk{position:absolute;top:-4px;bottom:0;width:0;border-left:1px dashed var(--acc);opacity:0;transition:opacity .5s ease}
+.dmk.on{opacity:1}
+.dmk em{position:absolute;top:-10px;right:5px;font:600 9.5px/1 var(--font);font-style:normal;color:var(--acc);white-space:nowrap}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="apple" viewBox="0 0 24 24"><path fill="currentColor" d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/></symbol>
+    <symbol id="chev" viewBox="0 0 8 12"><path d="M1.5 1.5 6 6l-4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  </defs>
+</svg>
+<main>
+  <section class="hero xp-head" aria-labelledby="xp-title">
+    <div class="wrap">
+      <p class="eyebrow">Exploration</p>
+      <h1 id="xp-title">Showcase v2</h1>
+      <p class="lede">Ask for a panel, use it, save the layout as an app, reopen it from the Dock, then tour other workspaces across Spaces.</p>
+    </div>
+    <div class="demo" id="demo">
+      <div class="wrap-wide">
+        <h2 class="sr-only" id="demo-title">Demo: build a workspace with your agent, save it as an app, and switch between workspaces</h2>
+        <div class="screen" id="screen" role="img" aria-labelledby="demo-title">
+          <div class="stage" id="stage" aria-hidden="true"></div>
+        </div>
+        <div class="capline" aria-hidden="true">
+          <p class="cap" id="cap"></p>
+          <span class="tag" id="tag"><svg id="tagIco" viewBox="0 0 11 9" fill="currentColor"><path d="M0 .8v7.4a.5.5 0 0 0 .8.4L5.4 5a.5.5 0 0 0 0-.9L.8.4A.5.5 0 0 0 0 .8zM5.5.8v7.4a.5.5 0 0 0 .8.4L10.9 5a.5.5 0 0 0 0-.9L6.3.4a.5.5 0 0 0-.8.4z"/></svg><span id="tagT">Time-lapse</span></span>
+        </div>
+        <div class="player">
+          <button class="play" id="play" type="button" aria-label="Pause demo">
+            <svg id="icPause" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><rect x="2.2" y="1" width="3.4" height="12" rx="1"/><rect x="8.4" y="1" width="3.4" height="12" rx="1"/></svg>
+            <svg id="icPlay" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true" hidden><path d="M3.5 1.6v10.8a.8.8 0 0 0 1.2.7l8.6-5.4a.8.8 0 0 0 0-1.4L4.7.9a.8.8 0 0 0-1.2.7z"/></svg>
+          </button>
+          <ol class="chaps" id="chaps" aria-label="Demo chapters"></ol>
+        </div>
+        <p class="note">An illustrated workflow. The tools and workspaces shown are examples you could build.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+(() => {
+"use strict";
+document.documentElement.classList.add("js");
+const qs = new URLSearchParams(location.search);
+if (qs.get("theme") === "dark" || qs.get("theme") === "light") document.documentElement.dataset.theme = qs.get("theme");
+
+const $ = (s, r = document) => r.querySelector(s);
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const ease = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+const rnd = i => { const x = Math.sin(i * 12.9898 + 78.233) * 43758.5453; return x - Math.floor(x); };
+const esc = s => s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const h = html => { const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstElementChild; };
+const on = (el, v) => el.classList.toggle("on", !!v);
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const darkMq = matchMedia("(prefers-color-scheme: dark)");
+const isDark = () => document.documentElement.dataset.theme ? document.documentElement.dataset.theme === "dark" : darkMq.matches;
+
+// Scale a fixed-size stage to its container width.
+function fit(box, stage, w) {
+  const set = () => stage.style.setProperty("--s", (box.clientWidth / w).toFixed(4));
+  set();
+  if ("ResizeObserver" in window) new ResizeObserver(set).observe(box); else addEventListener("resize", set);
+}
+
+const ICON = {
+  chev: `<svg viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.4"><path d="m1.5 3 2.5 2.5L6.5 3"/></svg>`,
+  x: `<svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="m2 2 6 6M8 2 2 8"/></svg>`,
+  search: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>`,
+  check: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3.5 8.5 3 3 6-7"/></svg>`,
+  circ: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="2 2.2"><circle cx="8" cy="8" r="6"/></svg>`,
+  refresh: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v3h-3"/></svg>`,
+  more: `<svg viewBox="0 0 16 16" fill="currentColor"><circle cx="4" cy="8" r="1.2"/><circle cx="8" cy="8" r="1.2"/><circle cx="12" cy="8" r="1.2"/></svg>`,
+  play: `<svg viewBox="0 0 12 12" fill="currentColor"><path d="M3 1.8v8.4L10 6z"/></svg>`,
+};
+const grip = `<span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span>`;
+// Line glyphs for the ⌘K palette and the launcher icon picker.
+const gsvg = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+const GLYPH = {
+  terminal: gsvg(`<rect x="3" y="5" width="18" height="14" rx="3"/><path d="m7 10 3 2-3 2M12.5 15h4.5"/>`),
+  folder: gsvg(`<path d="M3 7.5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>`),
+  hammer: gsvg(`<path d="m13 6 4.5-2.5 3 3L18 11zM15.2 8.8 5 19a1.5 1.5 0 0 1-2.1-2.1L13.1 6.7"/>`),
+  globe: gsvg(`<circle cx="12" cy="12" r="8.5"/><ellipse cx="12" cy="12" rx="3.6" ry="8.5"/><path d="M3.5 12h17"/>`),
+  code: gsvg(`<path d="M8.5 7.5 4 12l4.5 4.5M15.5 7.5 20 12l-4.5 4.5M13.5 5.5l-3 13"/>`),
+  list: gsvg(`<rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M3.5 9.7h17M3.5 14.3h17"/>`),
+  book: gsvg(`<path d="M12 6.5C10 5.2 7.3 4.8 4 5.2v12.6c3.3-.4 6 0 8 1.3 2-1.3 4.7-1.7 8-1.3V5.2c-3.3-.4-6 0-8 1.3zM12 6.5v12.6"/>`),
+  star: gsvg(`<path d="m12 3.8 2.5 5.2 5.7.8-4.1 4 1 5.7-5.1-2.7-5.1 2.7 1-5.7-4.1-4 5.7-.8z"/>`),
+  gear: gsvg(`<circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/>`),
+  down: gsvg(`<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v8M8.5 12.5 12 16l3.5-3.5"/>`),
+  grid: gsvg(`<rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M12 5v14M3.5 12h17"/>`),
+  plus: gsvg(`<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M12 8.5v7M8.5 12h7"/>`),
+};
+// The Dock keeps only Trash next to Slate and its launchers.
+const SYS = {
+  trash: `<svg viewBox="0 0 38 38"><path d="M9 8h20l-2 25H11z" fill="rgba(235,238,244,.75)" stroke="rgba(120,124,132,.6)" stroke-width=".8"/><path d="M14 12l1 18M19 12v18M24 12l-1 18" stroke="rgba(120,124,132,.45)" stroke-width=".8"/><rect x="7.5" y="6" width="23" height="3" rx="1.5" fill="rgba(210,214,222,.9)"/></svg>`,
+};
+
+function pane(type, title, body) {
+  return h(`<div class="pane"><div class="pbox">
+    <div class="phd"><span class="ty">${grip}<b>${type}</b>${ICON.chev}</span><span class="ptitle">${title}</span><span class="x">${ICON.x}</span></div>
+    <div class="pbody">${body}</div></div></div>`);
+}
+function place(el, r) {
+  el.style.left = r[0] + "%"; el.style.top = r[1] + "%"; el.style.width = r[2] + "%"; el.style.height = r[3] + "%";
+  // A pane in a bottom corner follows the window's rounded corner, so its agent ring is not clipped.
+  const bottom = r[1] + r[3] >= 99.9;
+  el.style.setProperty("--rbl", bottom && r[0] <= .1 ? "14px" : "0px");
+  el.style.setProperty("--rbr", bottom && r[0] + r[2] >= 99.9 ? "14px" : "0px");
+}
+function chartPath(vals, w, hgt, lo, hi) {
+  const n = vals.length - 1;
+  return vals.map((v, i) => `${i ? "L" : "M"}${(i / n * w).toFixed(1)} ${(hgt - (v - lo) / (hi - lo) * hgt).toFixed(1)}`).join("");
+}
+function stick(root) { root.querySelectorAll(".term").forEach(e => { e.scrollTop = e.scrollHeight; }); }
+function winShell(tabs, extra = "", title = "Slate Terminal") {
+  return h(`<div class="win kt">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><span class="wtitle">${title}</span></div>
+    ${tabs.length > 1 ? `<div class="wtabs">${tabs.map((t, i) => `<span class="wtab${i ? "" : " on"}">${t}</span>`).join("")}</div>` : ""}
+    <div class="content">${extra}</div></div>`);
+}
+// Window palettes follow the page's color scheme.
+const PALS = ["pal-light", "pal-sand", "pal-dark", "pal-graphite"];
+const PAL = () => isDark() ? { base: "pal-dark", alt: "pal-graphite", lt: false } : { base: "pal-light", alt: "pal-sand", lt: true };
+function setPal(el, which) {
+  const p = PAL();
+  if (el.classList.contains(p[which])) return;
+  el.classList.remove(...PALS);
+  el.classList.add(p[which]);
+  el.classList.toggle("lt", p.lt);
+}
+
+// ------------------------------------------------------------------
+// Proposed example panels. Each returns [element, update(progress)].
+// ------------------------------------------------------------------
+function agentsPanel() {
+  const sessions = [
+    ["acc", "auth-refactor", "claude", "12m", true],
+    ["wrn", "flaky-e2e", "codex", "review", false],
+    ["acc", "api-v2-migration", "claude", "4m", true],
+    ["ok", "docs-pass", "codex", "done", false],
+  ];
+  const el = pane("Agents", "Agent sessions", `<div class="k">
+    <div class="k-tb"><div class="k-search">${ICON.search}Filter</div><span class="sp"></span><span class="k-btn icon">${ICON.refresh}</span></div>
+    <div class="k-main">
+      <div class="k-ghd">${ICON.chev}Sessions <em>4</em></div>
+      <div class="sess">${sessions.map((s, i) => `<div class="k-row two${i === 1 ? " sel" : ""}">${s[4] ? '<span class="k-spin"></span>' : `<span class="k-dot ${s[0]}"></span>`}<span class="nm">${s[1]}<small>${s[2]}</small></span><span class="k-badge ${s[0] === "wrn" ? "wrn" : s[0] === "ok" ? "ok" : ""} tr">${s[3]}</span></div>`).join("")}</div>
+      <div class="k-ghd" style="margin-top:6px">${ICON.chev}Review queue <em class="rqn">3</em></div>
+      <div class="rq">
+        <div class="k-row"><code>auth/session.ts <span class="add">+214</span> <span class="del">−88</span></code><span class="k-btn sm" data-a>Approve</span></div>
+        <div class="k-row"><code>e2e/checkout.spec.ts <span class="add">+12</span> <span class="del">−30</span></code><span class="k-btn sm" data-a>Approve</span></div>
+        <div class="k-row"><code>docs/plugins.md <span class="add">+61</span> <span class="del">−9</span></code><span class="k-btn sm" data-a>Approve</span></div>
+      </div>
+    </div>
+    <div class="k-st"><span>2 running</span><span class="sp"></span><span class="rqs">3 to review</span></div></div>`);
+  const btns = [...el.querySelectorAll("[data-a]")];
+  return [el, p => {
+    let done = 0;
+    btns.forEach((b, i) => {
+      const d = p > .55 + i * .2;
+      if (d) done++;
+      const txt = d ? "Approved" : "Approve", cls = d ? "k-badge ok" : "k-btn sm";
+      if (b.textContent !== txt) { b.textContent = txt; b.className = cls; }
+    });
+    $(".rqn", el).textContent = 3 - done;
+    $(".rqs", el).textContent = (3 - done) + " to review";
+  }];
+}
+
+function scriptPanel() {
+  const files = [["hero@3x.png", "4.8 MB", "612 KB", "87%"], ["pricing-card.png", "1.9 MB", "214 KB", "89%"], ["og-image.png", "2.4 MB", "188 KB", "92%"], ["team-photo.png", "6.1 MB", "804 KB", "87%"], ["icon-set.png", "820 KB", "96 KB", "88%"], ["dashboard.png", "3.3 MB", "402 KB", "88%"]];
+  const el = pane("Asset Resizer", "resize-assets.sh", `<div class="k">
+    <div class="k-main">
+    <div class="k-form">
+      <div><div class="k-glabel">Input</div><div class="k-group">
+        <div class="k-grow"><label>Source folder</label><span class="k-field">~/design/exports</span></div>
+        <div class="k-grow"><label>Output</label><span class="k-field">./public/img</span></div></div></div>
+      <div><div class="k-glabel">Options</div><div class="k-group">
+        <div class="k-grow"><label>Format</label><span class="k-seg"><span class="on">WebP</span><span>AVIF</span><span>PNG</span></span></div>
+        <div class="k-grow"><label>Scales</label><span><span class="k-check">${ICON.check}</span>1×&nbsp;&nbsp; <span class="k-check">${ICON.check}</span>2×&nbsp;&nbsp; <span class="k-check">${ICON.check}</span>3×</span></div>
+        <div class="k-grow"><label>Quality</label><span class="k-slider"><i></i><b></b></span><span class="mono" style="width:22px;text-align:right">82</span></div></div></div>
+      <div style="display:flex;align-items:center;gap:10px"><span class="k-prog" style="flex:1"><i class="rp"></i></span><span class="pct mono" style="font-size:11px;color:var(--text-k2);width:34px;text-align:right">Ready</span><span class="k-btn pri rb">${ICON.play.replace("<svg", '<svg style="width:10px;height:10px"')}Run</span></div>
+      <table class="k-table"><thead><tr><th>File</th><th class="n">Before</th><th class="n">After</th><th class="n">Saved</th></tr></thead>
+      <tbody>${files.map(f => `<tr class="hide"><td class="mono">${f[0]}</td><td class="n">${f[1]}</td><td class="n">${f[2]}</td><td class="n s">${f[3]}</td></tr>`).join("")}</tbody></table>
+    </div></div>
+    <div class="k-st"><span class="cnt">6 files</span><span class="sp"></span><span>Runs scripts/resize-assets.sh</span></div></div>`);
+  const btn = $(".rb", el), bar = $(".rp", el), pct = $(".pct", el), rows = [...el.querySelectorAll("tbody tr")], cnt = $(".cnt", el);
+  return [el, p => {
+    btn.classList.toggle("press", p > .14 && p < .2);
+    const g = clamp((p - .2) / .6);
+    bar.style.width = (ease(g) * 100).toFixed(1) + "%";
+    pct.textContent = g <= 0 ? "Ready" : g >= 1 ? "Done" : Math.round(ease(g) * 100) + "%";
+    let n = 0;
+    rows.forEach((r, i) => { const hide = ease(g) < (i + 1) / rows.length - .001; r.classList.toggle("hide", hide); if (!hide) n++; });
+    cnt.textContent = g >= 1 ? "6 files · saved 14.1 MB" : n ? `${n} of 6 files` : "6 files";
+  }];
+}
+
+const CUTS = {
+  agents(root) {
+    const [side, upd] = agentsPanel();
+    place(side, [0, 0, 30, 100]); root.append(side);
+    side.classList.add("focus");
+    const feeds = [
+      ["claude — auth-refactor", ["⏺ Read(auth/session.ts)", "⏺ Update(auth/session.ts) +38 −12", "⏺ Bash(pnpm test auth)", "  ⎿ 48 passed", "⏺ Update(auth/refresh.ts) +22", "✻ Writing summary…"]],
+      ["codex — flaky-e2e", ["• Ran playwright test checkout --repeat 20", "  └ 3 failed / 20", "• Found race in cart hydration", "• Edited e2e/checkout.spec.ts", "  └ 20 passed", "▲ Ready for review"]],
+      ["claude — api-v2-migration", ["⏺ Grep(\"/api/v1/\") 34 files", "⏺ Update(server/routes.ts) +19 −19", "⏺ Update(client/fetch.ts) +7 −7", "⏺ Bash(pnpm test api)", "  ⎿ 112 passed", "✻ Thinking…"]],
+      ["zsh — ~/code/launchpad", ["❯ git switch -c review/auth", "Switched to a new branch", "❯ git diff --stat main", " auth/session.ts | 302 ++++---", " 2 files changed", "❯ "]],
+    ];
+    const rects = [[30, 0, 35, 50], [65, 0, 35, 50], [30, 50, 35, 50], [65, 50, 35, 50]];
+    const terms = feeds.map((f, i) => {
+      const p = pane("Terminal", f[0], `<div class="term" style="font-size:11px">${f[1].map(l => `<div class="ln ${/⎿|└|passed/.test(l) ? "ok" : /^[⏺•❯▲]/.test(l) ? "" : "d"}">${esc(l)}</div>`).join("")}</div>`);
+      place(p, rects[i]); root.append(p);
+      return [...p.querySelectorAll(".ln")];
+    });
+    return p => {
+      terms.forEach((lns, i) => {
+        const n = clamp(Math.floor(p * (lns.length + 1) + 2 + i * .5), 2, lns.length);
+        lns.forEach((l, j) => on(l, j < n));
+      });
+      upd(p);
+    };
+  },
+
+  script(root) {
+    const t = pane("Terminal", "zsh — design-assets", `<div class="term top" style="font-size:11px">
+<div><span class="d">❯</span> cat scripts/resize-assets.sh</div>
+<div class="d">#!/usr/bin/env bash</div>
+<div class="d">set -euo pipefail</div>
+<div class="d">src="\${1:?source dir}"; fmt="\${2:-webp}"</div>
+<div class="d">for f in "$src"/*.png; do</div>
+<div class="d">  for s in 1 2 3; do</div>
+<div class="d">    vips thumbnail "$f" …</div>
+<div class="d">  done</div>
+<div class="d">done</div>
+<div> </div>
+<div><span class="ok">❯</span> <span class="cur"></span></div></div>`);
+    place(t, [0, 0, 34, 100]); root.append(t);
+    const [pnl, upd] = scriptPanel();
+    place(pnl, [34, 0, 66, 100]); root.append(pnl);
+    pnl.classList.add("focus");
+    return upd;
+  },
+
+  bench(root, opts = {}) {
+    const colors = ["var(--acc)", "var(--inf)", "var(--wrn)", "var(--dng)"];
+    const runs = [["lr-3e-4", "0.412", .81], ["lr-1e-3", "0.447", .78], ["warmup-2k", "0.398", .84], ["no-dropout", "0.503", .71]];
+    const W = 600, H = 240, LO = .3, HI = 2.1;
+    const curve = k => Array.from({ length: 60 }, (_, i) => { const x = i / 59; return .38 + (k * .03) + (1.6 - k * .12) * Math.exp(-x * (3.2 + k * .6)) + (rnd(i + k * 50) - .5) * .045 + (k === 3 ? x * x * .16 : 0); });
+    const curves = runs.map((_, k) => curve(k));
+    const paths = curves.map((c, k) => `<path d="${chartPath(c, W, H, LO, HI)}" stroke="${colors[k]}" pathLength="1" stroke-dasharray="1" stroke-dashoffset="1"/>`).join("");
+    const yt = [2.0, 1.5, 1.0, 0.5];
+    const pnl = pane("Workbench", "Experiment workbench — sweep-14", `<div class="k">
+      <div class="k-tb"><span class="k-seg"><span class="on">Loss</span><span>Accuracy</span><span>Throughput</span></span><span class="sp"></span><span class="k-badge acc"><span class="k-dot acc"></span><span class="live">step 0</span></span><span class="k-btn icon">${ICON.refresh}</span><span class="k-btn">Compare</span></div>
+      <div class="k-main"><div class="bench">
+        <aside>
+          <div class="k-ghd">${ICON.chev}Runs <em>sweep-14</em></div>
+          ${runs.map((r, i) => `<div class="k-row${i === 2 ? " sel" : ""}"><span class="k-check" style="background:${colors[i]}${i === 3 ? ";opacity:.45" : ""}">${ICON.check}</span><span class="nm mono" style="font-size:11px">${r[0]}</span><span class="tr vl">—</span></div>`).join("")}
+          <div class="k-ghd" style="margin-top:8px">${ICON.chev}Dataset</div>
+          <div class="k-row"><span class="nm mono" style="font-size:11px">tickets-v7</span><span class="tr">412k</span></div>
+          <div class="k-row"><span class="nm mono" style="font-size:11px">base-410m</span><span class="tr">model</span></div>
+        </aside>
+        <main>
+          <div class="k-metrics" style="border-bottom:.5px solid var(--sep);padding-bottom:10px">
+            <div class="k-metric"><small>Best val loss</small><b class="m1">—</b></div>
+            <div class="k-metric"><small>Step</small><b class="m2">0</b><b><em>/ 12k</em></b></div>
+            <div class="k-metric"><small>Best run</small><b style="font-size:15px;font-weight:500" class="mono">warmup-2k</b></div>
+          </div>
+          <div class="grid2">
+            <div class="cbox"><h6>Validation loss <em>log steps</em></h6>
+              ${yt.map(v => `<span class="yl" style="top:calc(30px + (100% - 56px) * ${((HI - v) / (HI - LO)).toFixed(3)})">${v.toFixed(1)}</span>`).join("")}
+              <div class="plot"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><g>${yt.map(v => `<line class="gl" x1="0" x2="${W}" y1="${((HI - v) / (HI - LO) * H).toFixed(1)}" y2="${((HI - v) / (HI - LO) * H).toFixed(1)}"/>`).join("")}</g>${paths}</svg><span class="best">best 0.398</span></div>
+              ${["0", "3k", "6k", "9k", "12k"].map((l, i) => `<span class="xl" style="left:calc(44px + (100% - 58px) * ${i / 4})">${l}</span>`).join("")}
+            </div>
+            <div class="cbox"><h6>Eval accuracy <em>held-out</em></h6>
+              <div class="bars">${runs.map((r, i) => `<div><span>${r[0]}</span><span class="tr"><i style="background:${colors[i]}"></i></span><b class="av">—</b></div>`).join("")}</div>
+            </div>
+            <div class="tbl"><table class="k-table"><thead><tr><th>Run</th><th class="n">Best step</th><th class="n">Val loss</th><th class="n">Accuracy</th></tr></thead><tbody>
+              <tr class="sel"><td class="mono">warmup-2k</td><td class="n">11,400</td><td class="n">0.398</td><td class="n">84.0%</td></tr>
+              <tr><td class="mono">lr-3e-4</td><td class="n">10,800</td><td class="n">0.412</td><td class="n">81.0%</td></tr>
+              <tr><td class="mono">lr-1e-3</td><td class="n">7,200</td><td class="n">0.447</td><td class="n">78.0%</td></tr>
+            </tbody></table></div>
+          </div>
+        </main>
+      </div></div>
+      <div class="k-st"><span>4 runs · 3 shown</span><span class="sp"></span><span>Service: tracker running</span></div></div>`);
+    const tw = opts.termW ?? 24;
+    place(pnl, [0, 0, 100 - tw, 100]); root.append(pnl);
+    pnl.classList.add("focus");
+    const t = pane("Terminal", "train — warmup-2k", `<div class="term" style="font-size:11px"></div>`);
+    place(t, [100 - tw, 0, tw, 100]); root.append(t);
+    const pathEls = [...pnl.querySelectorAll(".plot path")], bars = [...pnl.querySelectorAll(".bars i")], avs = [...pnl.querySelectorAll(".av")], vls = [...pnl.querySelectorAll(".vl")];
+    const best = $(".best", pnl), live = $(".live", pnl), m1 = $(".m1", pnl), m2 = $(".m2", pnl), term = $(".term", t);
+    const bc = curves[2][59];
+    best.style.left = "100%"; best.style.top = ((HI - bc) / (HI - LO) * 100).toFixed(1) + "%";
+    let lastHTML = "";
+    return p => {
+      const g = ease(clamp(p * 1.15));
+      pathEls.forEach(e => e.setAttribute("stroke-dashoffset", (1 - g).toFixed(4)));
+      const bg = ease(clamp(p * 1.4 - .2));
+      bars.forEach((b, i) => b.style.width = (runs[i][2] * 100 * bg).toFixed(1) + "%");
+      avs.forEach((a, i) => a.textContent = p > .25 ? (runs[i][2] * 100 * bg).toFixed(1) : "—");
+      vls.forEach((v, i) => v.textContent = g > .3 ? (parseFloat(runs[i][1]) + (1 - g) * .9).toFixed(3) : "—");
+      const step = Math.round(g * 12000);
+      live.textContent = g >= 1 ? "done" : "step " + step.toLocaleString("en-US");
+      m2.textContent = step.toLocaleString("en-US");
+      m1.textContent = g > .3 ? (0.398 + (1 - g) * .9).toFixed(3) : "—";
+      on(best, g >= 1);
+      const lines = ["❯ python train.py \\", "   --run warmup-2k", "loading tickets-v7 …", "model base-410m · bs 128"];
+      for (let s = 1000; s <= step; s += 1000) lines.push(`step ${String(s).padStart(5)}  loss ${(0.4 + 1.5 * Math.exp(-s / 2600)).toFixed(3)}`);
+      if (g >= 1) lines.push("checkpoint saved ✓");
+      const html = lines.map((l, i) => `<div class="${i < 4 ? "d" : /✓/.test(l) ? "ok" : ""}">${esc(l)}</div>`).join("");
+      if (html !== lastHTML) { term.innerHTML = html; lastHTML = html; }
+    };
+  },
+};
+
+// ---------- Examples gallery ----------
+// Extra cuts for the gallery. Each builds into a scene and returns update(progress).
+const terminalPane = (title, lines) => pane("Terminal", title, `<div class="term" style="font-size:11px">${lines.map(l => `<div class="${/✓|passed|ready/.test(l) ? "ok" : /^[❯$]/.test(l) ? "" : "d"}">${esc(l)}</div>`).join("")}<div><span class="ok">❯</span> <span class="cur"></span></div></div>`);
+const browserPane = (title, url, page) => pane("Browser", title, `<div class="wb"><div class="wb-url">${ICON.chev.replace("<svg", '<svg style="transform:rotate(90deg)"')}${ICON.refresh}<span>${url}</span></div><div class="wb-pg">${page}</div></div>`);
+const GCUTS = {
+  bench: root => CUTS.bench(root, { termW: 22 }),
+  agents: root => CUTS.agents(root),
+  script: root => CUTS.script(root),
+
+  launch(root) {
+    const t = terminalPane("zsh — launchpad", ["❯ git tag v2.0.0 && git push --tags", "To launchpad.git", " * [new tag] v2.0.0 -> v2.0.0", "❯ pnpm release", "building web@4f2a91c", "  ✓ 214 modules", "uploading assets ✓", "invalidating cache", "rollout 25% → canary", "rollout 50% → canary", "  ✓ health checks passed", "watching rollout…", "❯ curl -s status.launchpad.dev/api", "{\"api\":\"ok\",\"hooks\":\"degraded\"}"]);
+    place(t, [0, 0, 28, 100]); root.append(t);
+    const MSG = ["GET /api/release 200 41ms", "build web@4f2a91c step 6/7", "canary health ok", "GET /api/status 200 18ms", "POST /hooks/deploy 502", "GET /changelog 200 64ms", "cache warm: 412 keys", "GET /api/release 200 37ms", "rollout 50% healthy", "GET /api/status 200 21ms", "GET /pricing 200 52ms", "canary health ok"];
+    const log = MSG.map((m, i) => { const sec = 9 * 3600 + 41 * 60 + 12 + i * 7; const st = [Math.floor(sec / 3600), Math.floor(sec / 60) % 60, sec % 60].map(n => String(n).padStart(2, "0")).join(":"); const bad = /502/.test(m); return `<div><span class="t">${st}</span> ${bad ? '<span class="flag">FAILED</span>' : ""}<span class="${bad ? "bad" : ""}">${m}</span></div>`; }).join("");
+    const d = pane("Deploys", "Deploys", `<div class="k">
+      <div class="k-tb"><span class="k-dot acc"></span><b class="mono" style="font-size:11.5px;font-weight:500">web@4f2a91c</b><span class="k-badge acc">rollout 50%</span><span class="sp"></span><span class="k-badge dng">1 failed hook</span></div>
+      <div class="k-main"><div class="k-log">${log}</div></div>
+      <div class="k-st"><span>12 events</span><span class="sp"></span><span>Following</span></div></div>`);
+    place(d, [28, 0, 38, 56]); root.append(d);
+    const v1 = [], v2 = [];
+    for (let i = 0; i < 40; i++) { v1.push(140 + 22 * Math.sin(i * .31) + 16 * rnd(i)); v2.push(155 + 10 * Math.sin(i * .17 + 1) + 8 * rnd(i + 99)); }
+    const m = pane("Latency", "p95 latency", `<div class="k">
+      <div class="k-tb"><span class="k-seg"><span class="on">1h</span><span>24h</span><span>7d</span></span><span class="sp"></span><span class="k-badge ok"><span class="k-dot ok"></span>live</span></div>
+      <div class="k-main"><div class="k-metrics"><div class="k-metric"><small>p95 · /api</small><b>${Math.round(v1[39])}<em>ms</em></b></div><div class="k-metric"><small>vs last deploy</small><b style="font-size:15px;color:var(--ok)">▼ 8%</b></div></div>
+      <div class="k-chart"><svg viewBox="0 0 200 90" preserveAspectRatio="none"><line class="gl" x1="0" x2="200" y1="22" y2="22"/><line class="gl" x1="0" x2="200" y1="45" y2="45"/><line class="gl" x1="0" x2="200" y1="68" y2="68"/><path d="${chartPath(v2, 200, 90, 100, 200)}" stroke="var(--text-k3)" stroke-dasharray="3 3" stroke-width="1.2"/><clipPath id="lpClip"><rect class="lp" x="-2" y="-10" width="0" height="110"/></clipPath><path d="${chartPath(v1, 200, 90, 100, 200)}" stroke="var(--acc)" stroke-width="2" clip-path="url(#lpClip)"/></svg></div></div></div>`);
+    place(m, [28, 56, 38, 44]); root.append(m);
+    const b = browserPane("Launchpad — Status", "status.launchpad.dev", `<h4>All systems operational</h4><p>Launchpad 2.0 is rolling out. Updated 09:42.</p>
+      <div class="row3"><div class="stat">API<b>99.98%</b></div><div class="stat">Web<b>100%</b></div><div class="stat">Hooks<b style="color:var(--wrn)">Degraded</b></div></div>
+      <div class="blk"></div><div class="ln3"></div><div class="ln3" style="width:70%"></div><div class="ln3" style="width:85%"></div>`);
+    place(b, [66, 0, 34, 100]); root.append(b);
+    d.classList.add("focus");
+    const lp = $(".lp", m);
+    // Reveal the line with a clip; dash offsets drift under non-scaling strokes.
+    return p => lp.setAttribute("width", (204 * ease(clamp(p * 1.2))).toFixed(1));
+  },
+
+  prs(root) {
+    const ok = `<span class="k-badge ok">${ICON.check.replace("<svg", '<svg style="width:9px;height:9px"')}checks passed</span>`;
+    const pnl = pane("Pull Requests", "Pull requests — launchpad", `<div class="k pr">
+      <div class="k-tb"><span class="k-seg"><span class="on">Mine</span><span>Team</span><span>All</span></span><div class="k-search">${ICON.search}Filter</div><span class="sp"></span><span class="k-btn icon">${ICON.refresh}</span></div>
+      <div class="k-main">
+        <div class="k-ghd">${ICON.chev}Needs your review <em>2</em></div>
+        <div class="k-row two sel"><span class="num">#482</span><span class="nm">Retry deploy hook on 502<small>claude · web</small></span>${ok}<span class="k-btn sm pri">Review</span></div>
+        <div class="k-row two"><span class="num">#479</span><span class="nm">Bump image pipeline<small>codex · images</small></span><span class="k-badge wrn ci">2 checks running</span><span class="k-btn sm">Review</span></div>
+        <div class="k-ghd">${ICON.chev}Checks failing <em>1</em></div>
+        <div class="k-row two"><span class="num">#476</span><span class="nm">Fix checkout race<small>you · e2e</small></span><span class="k-badge dng">1 failed</span><span class="k-btn sm">Logs</span></div>
+        <div class="k-ghd">${ICON.chev}Ready to merge <em>2</em></div>
+        <div class="k-row two"><span class="num">#471</span><span class="nm">Docs: plugin UI kit<small>claude · docs</small></span><span class="k-badge ok">approved</span><span class="k-btn sm pri">Merge</span></div>
+        <div class="k-row two"><span class="num">#468</span><span class="nm">Status page link<small>you · web</small></span><span class="k-badge ok">approved</span><span class="k-btn sm pri">Merge</span></div>
+        <div class="k-ghd" style="margin-top:4px">${ICON.chev}#479 checks</div>
+        <div class="steps"><span class="k-badge ok">lint</span><span class="k-badge ok">typecheck</span><span class="k-badge wrn st1">unit</span><span class="k-badge wrn st2">e2e</span><span class="k-badge">preview deploy</span></div>
+      </div>
+      <div class="k-st"><span>5 open · 2 need review</span><span class="sp"></span><span>Updated 09:42</span></div></div>`);
+    place(pnl, [0, 0, 62, 100]); root.append(pnl);
+    pnl.classList.add("focus");
+    const t = terminalPane("zsh — images", ["❯ gh pr checkout 479", "Switched to branch 'bump-image-pipeline'", "❯ pnpm test images", " ✓ 38 passed", "❯ git log --oneline -2", "9b07e3d Bump image pipeline", "2c4d1a8 Status page link"]);
+    place(t, [62, 0, 38, 100]); root.append(t);
+    const st1 = $(".st1", pnl), st2 = $(".st2", pnl), ci = $(".ci", pnl);
+    return p => {
+      const a = p > .45, b = p > .8;
+      st1.className = "k-badge " + (a ? "ok" : "wrn"); st2.className = "k-badge " + (b ? "ok" : "wrn");
+      ci.className = "k-badge ci " + (b ? "ok" : "wrn");
+      ci.textContent = b ? "checks passed" : a ? "1 check running" : "2 checks running";
+    };
+  },
+
+  reading(root) {
+    const items = [["Designing calm interfaces", "blog.example.dev · 8 min", true], ["Notes on spring animations", "notes.example.org · 12 min", true], ["A field guide to JSON-RPC", "docs.example.com · 6 min", false], ["Why terminals still matter", "essays.example.net · 15 min", false], ["Writing small tools", "blog.example.dev · 5 min", false]];
+    const list = pane("Reading", "Reading list", `<div class="k">
+      <div class="k-tb"><div class="k-search">${ICON.search}Search</div><span class="sp"></span><span class="k-btn sm">Add</span></div>
+      <div class="k-main"><div class="k-ghd">${ICON.chev}Unread <em>2</em></div>
+      ${items.map((it, i) => `${i === 2 ? `<div class="k-ghd">${ICON.chev}Read <em>3</em></div>` : ""}<div class="k-row two${i === 0 ? " sel" : ""}"><span class="k-dot ${it[2] ? "acc" : ""}"></span><span class="nm">${it[0]}<small>${it[1]}</small></span></div>`).join("")}</div>
+      <div class="k-st"><span>5 saved</span></div></div>`);
+    place(list, [0, 0, 27, 100]); root.append(list);
+    const page = browserPane("Designing calm interfaces", "blog.example.dev/calm-interfaces", `<h4>Designing calm interfaces</h4><p>Most tools ask for attention. The best ones give it back.</p>
+      <div class="ln3"></div><div class="ln3" style="width:92%"></div><div class="ln3" style="width:96%"></div><div class="ln3" style="width:60%"></div>
+      <div class="blk" style="min-height:140px"></div><div class="ln3"></div><div class="ln3" style="width:88%"></div><div class="ln3" style="width:74%"></div>`);
+    place(page, [27, 0, 43, 100]); root.append(page);
+    const notes = pane("Notes", "calm-interfaces.md", `<div class="notes"><h5>Designing calm interfaces</h5><p>Read on Fri 16 Oct.</p>
+      <div class="li"><span class="k-check">${ICON.check}</span><span>Show state once, <mark>in one place</mark>.</span></div>
+      <div class="li"><span class="k-check">${ICON.check}</span><span>Motion should explain, not decorate.</span></div>
+      <div class="li"><span class="k-check off"></span><span class="nt3">Try this on the deploys panel.</span></div></div>`);
+    place(notes, [70, 0, 30, 100]); root.append(notes);
+    notes.classList.add("focus");
+    const n3 = $(".nt3", notes), full = n3.textContent;
+    return p => { const v = full.slice(0, Math.round(full.length * clamp(p * 1.3))); if (n3.textContent !== v) n3.textContent = v; };
+  },
+};
+
+// ------------------------------------------------------------------
+// Showcase v2. Times are in seconds of playback.
+// ------------------------------------------------------------------
+const STW = 1200;
+const stage = $("#stage"), screen = $("#screen");
+const WIN = { left: 36, top: 40, width: 1128, height: 620 };
+const AG = { claude: "#ff9466", codex: "#b79cff" };
+
+// Each saved layout is an app in the Dock. The icon glyph sketches its panes.
+const APPS = [
+  { id: "launch", name: "Launch Day", g: "star", tint: "#ff9440", dock: true },
+  { id: "reviews", name: "Reviews", g: "code", tint: "#3fd17f", dock: true },
+  { id: "reading", name: "Reading", g: "book", tint: "#4c9dff" },
+  { id: "bench", name: "Experiments", g: "hammer", tint: "#a982ff" },
+];
+const appIco = (a, cls = "") => `<span class="aico ${cls}" style="--tint:${a.tint}">${GLYPH[a.g]}</span>`;
+
+stage.innerHTML = `<div class="desk">
+  <div class="spaces" id="spaces">${[0, 1, 2, 3].map(i => `<div class="space" style="left:${i * STW}px"></div>`).join("")}</div>
+  <div class="mbar"><svg width="14" height="16" aria-hidden="true"><use href="#apple"/></svg><b>Slate Terminal</b><span>Shell</span><span>Edit</span><span>View</span><span>Window</span><span>Help</span>
+    <span class="r"><svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="currentColor" stroke-width="1.4"><rect x=".7" y="1.7" width="12.6" height="8.6" rx="2"/><rect x="2.5" y="3.5" width="8" height="5" rx=".8" fill="currentColor"/><path d="M14.8 4.5v3" stroke-linecap="round"/></svg><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Fri 16 Oct 09:41</span></span></div>
+  <div class="dockw"><div class="dock" id="dock">
+    <div class="dk run" data-app="slate"><img src="assets/app-icon.png" width="38" height="38" alt=""><span class="lb">Slate Terminal</span></div>
+    ${[APPS[1], APPS[0], APPS[2], APPS[3]].map(a => `<div class="dk" data-app="${a.id}">${appIco(a)}<span class="lb">${a.name}</span></div>`).join("")}
+    <i class="dsep"></i>
+    <div class="dk">${SYS.trash}</div>
+  </div></div>
+</div>`;
+const desk = $(".desk", stage), spacesEl = $("#spaces"), spaceEls = [...spacesEl.children];
+desk.append(h(`<div class="ov spot" id="spot"><div class="q">${ICON.search}<span class="sq"></span></div><div class="res"><span class="ri"></span><span><b class="rn"></b><small>Spotlight Launcher</small></span><span class="rk">↵</span></div></div>`));
+const dockIcon = id => $(`.dk[data-app="${id}"]`, stage);
+
+// ---------- Main window: the workspace being built ----------
+const win = winShell(["launchpad"], `
+  <div class="scene on" id="sMain"></div>
+  <div class="ov kpal lglass" id="kpal"><div class="q"></div><div class="sec"><span>Commands</span><span class="kn">47</span></div><ul></ul>
+    <div class="ft"><span>↑↓ to navigate</span><span><b>Execute Command</b><span class="ret">↵</span></span></div></div>
+  <div class="shdim" id="shdim"></div>
+  <div class="ov sheet lglass" id="sheet"><div class="pv"></div><h5>Create Spotlight Launcher</h5>
+    <p>Open this layout from Spotlight. The launcher will be saved in ~/Applications.</p>
+    <label>Name</label><div class="nf"></div>
+    <label>Icon</label><div class="ig"><span><img src="assets/app-icon.png" alt=""></span>${["terminal", "folder", "hammer", "globe", "code", "list", "book", "star"].map(g => `<span>${GLYPH[g]}</span>`).join("")}</div>
+    <div class="bt"><span>Cancel</span><span class="pri">Create</span></div></div>
+  <div class="ov toast glass-k" id="toast"><span class="ckc">${ICON.check}</span><span>Launcher created · <b>Launch Day</b></span></div>`);
+win.style.cssText = `left:${WIN.left}px;top:${WIN.top}px;width:${WIN.width}px;height:${WIN.height}px`;
+spaceEls[0].append(win);
+desk.append(h(`<svg class="cursor" id="cursor" viewBox="0 0 20 24" aria-hidden="true"><path d="M2 1.5v18.2l4.6-4.4 3 6.9 3.1-1.3-3-6.8h6.5z" fill="#000" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg>`));
+fit(screen, stage, STW);
+
+// Agents sidebar: who is working and on what. Run time is unknown, so cards show elapsed time and the current step.
+// One agent finishes during "Use it": you open its card, merge, and the Deploys panel picks the change up.
+const AGT = { ready: 17.6, open: 19.3, close: 21.8, press: [19.05, 19.3], mergePress: [20.95, 21.2], merged: 21.2, live: 26.4 };
+function agentsSidebar() {
+  const runs = [
+    { name: "auth-refactor", ag: "claude", av: "C", el0: 724, steps: [[0, "Reading auth/session.ts"], [7, "Running auth tests"], [13, "Updating auth/refresh.ts"], [23, "Running auth tests"]] },
+    { name: "flaky-e2e", ag: "codex", av: "X", el0: 281, steps: [[0, "Repeating checkout test ×20"], [9, "Found a race in cart hydration"], [19, "Editing checkout.spec.ts"]] },
+    { name: "image-pipeline", ag: "claude", av: "C", el0: 438, steps: [[0, "Converting assets to WebP"], [8, "Updating picture tags"], [13, "Running visual tests"]], done: true },
+  ];
+  const det = `<div class="det"><div>
+    <div class="files"><div>public/img/*.webp<span class="n">12 files</span></div><div>components/Hero.tsx<span class="n"><span class="add">+31</span> <span class="del">−9</span></span></div><div>scripts/resize.ts<span class="n"><span class="add">+17</span> <span class="del">−3</span></span></div><div class="ok">✓ 64 tests passed</div></div>
+    <div class="acts"><span class="k-btn sm">View diff</span><span class="k-btn sm pri" data-merge>Merge</span></div></div></div>`;
+  const el = pane("Agents", "Agents", `<div class="k">
+    <div class="k-tb"><span class="k-badge acc"><span class="k-spin" style="width:9px;height:9px;border-width:1.5px"></span><span class="rn">3 running</span></span><span class="k-badge ok hid rv">1 to review</span><span class="sp"></span><span class="k-btn icon">${ICON.refresh}</span></div>
+    <div class="k-main">
+      <div class="ags">${runs.map(r => `<div class="agc" style="--ag:${AG[r.ag]}"><span class="av">${r.av}</span><b>${r.name}</b><span class="rt"></span><small><span class="who">${r.ag}</span> · <span class="doing"></span></small>${r.done ? det : ""}</div>`).join("")}</div>
+      <div class="k-ghd">${ICON.chev}Earlier today <em>2</em></div>
+      <div class="k-row two"><span class="k-dot ok"></span><span class="nm">docs-pass<small>codex · merged #479</small></span><span class="tr">2h</span></div>
+      <div class="k-row two"><span class="k-dot ok"></span><span class="nm">login-copy<small>claude · merged #476</small></span><span class="tr">4h</span></div>
+    </div>
+    <div class="k-st"><span class="rqs"></span></div></div>`);
+  const cards = [...el.querySelectorAll(".agc")], mergeBtn = $("[data-merge]", el);
+  const set = (node, v, html) => { if (html ? node.innerHTML !== v : node.textContent !== v) html ? node.innerHTML = v : node.textContent = v; };
+  const clock = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  return [el, t => {
+    const ready = t >= AGT.ready, merged = t >= AGT.merged;
+    runs.forEach((r, i) => {
+      // Coerce to booleans: classList.toggle flips the class when force is undefined.
+      const c = cards[i], done = !!r.done, fin = done && ready;
+      let step = r.steps[0][1];
+      for (const [a, s] of r.steps) if (t >= a) step = s;
+      if (fin && merged) step = t >= AGT.live ? "merged #482 · live" : "merged #482 · deploying";
+      else if (fin) step = "ready for review · +48 −12";
+      set($(".doing", c), step);
+      set($(".rt", c), fin ? merged ? '<span class="k-badge ok">Merged</span>' : '<span class="k-badge acc">Review</span>' : `<span class="k-spin"></span>${clock(r.el0 + Math.floor(t))}`, true);
+      c.classList.toggle("ready", fin && !merged);
+      c.classList.toggle("flash", done && t >= AGT.ready && t < AGT.ready + 1.2);
+      c.classList.toggle("open", done && t >= AGT.open && t < AGT.close);
+      c.classList.toggle("press", done && t >= AGT.press[0] && t < AGT.press[1]);
+    });
+    mergeBtn.className = merged ? "k-badge ok" : "k-btn sm pri" + (t >= AGT.mergePress[0] ? " press" : "");
+    set(mergeBtn, merged ? "✓ Merged" : "Merge");
+    set($(".rn", el), `${ready ? 2 : 3} running`);
+    $(".rv", el).classList.toggle("hid", !(ready && !merged));
+    set($(".rqs", el), !ready ? "3 agents working" : !merged ? "1 ready for review" : t < AGT.live ? "#482 deploying" : "#482 live");
+  }];
+}
+
+const [agentsEl, agentsUpd] = agentsSidebar();
+const P = {
+  term: pane("Terminal", "claude — launchpad", `<div class="term" id="tMain"></div>`),
+  agents: agentsEl,
+  deploy: pane("Deploys", "Deploys", `<div class="k">
+    <div class="k-tb"><span id="dHead" style="display:contents"></span><span class="sp"></span><span class="k-badge acc hid" id="dPr">#482 image-pipeline</span></div>
+    <div class="k-main"><div class="k-log" id="dLog"></div></div>
+    <div class="k-st"><span id="dCount">0 events</span><span>Following</span><span class="sp"></span></div></div>`),
+  metrics: pane("Latency", "p95 latency", `<div class="k">
+    <div class="k-tb"><span class="k-seg"><span class="on">1h</span><span>24h</span><span>7d</span></span><span class="sp"></span><span class="k-badge ok"><span class="k-dot ok"></span>live</span></div>
+    <div class="k-main">
+      <div class="k-metrics"><div class="k-metric"><small>p95 · /api</small><b><span id="mVal">142</span><em>ms</em></b></div><div class="k-metric"><small>vs last deploy</small><b id="mDelta" style="font-size:15px;color:var(--text-k2)">—</b></div></div>
+      <div class="k-chart" id="mChart"><svg viewBox="0 0 200 90" preserveAspectRatio="none"><line class="gl" x1="0" x2="200" y1="22" y2="22"/><line class="gl" x1="0" x2="200" y1="45" y2="45"/><line class="gl" x1="0" x2="200" y1="68" y2="68"/><path id="m2" stroke="var(--text-k3)" stroke-dasharray="3 3" stroke-width="1.2"/><path id="m1" stroke="var(--acc)" stroke-width="2"/></svg>
+        <span class="dmk" id="mD"><em>deploy #482</em></span><span class="vline" id="mV"></span><span class="mk" id="mK"></span><span class="tip" id="mTip"><b id="mTipV">139 ms</b> <span style="color:var(--text-k3)">· after #482</span></span></div>
+    </div></div>`),
+};
+const sMain = $("#sMain");
+for (const p of Object.values(P)) sMain.append(p);
+
+// Pane layout keyframes: [time, {pane: [x, y, w, h] in %}].
+const L = [
+  [0, { term: [0, 0, 100, 100] }],
+  [3.9, { agents: [0, 0, 27, 100], term: [27, 0, 73, 100] }],
+  [9.2, { agents: [0, 0, 25, 100], term: [25, 0, 40, 100], deploy: [65, 0, 35, 100] }],
+  [14.8, { agents: [0, 0, 25, 100], term: [25, 0, 40, 100], deploy: [65, 0, 35, 56], metrics: [65, 56, 35, 44] }],
+];
+const home = {};
+for (const [, lay] of L) for (const k in lay) if (!(k in home)) home[k] = lay[k];
+
+// Agent transcript: [time shown, html]. data-typ spans type out between data-a and data-b.
+const typ = (s, a, b) => `<span data-typ="${esc(s)}" data-a="${a}" data-b="${b}"></span>`;
+const cur = (a, b) => `<span class="cur" data-c="${a},${b}"></span>`;
+// Each panel gets its own request, so they arrive one at a time.
+const TR = [
+  [0, `<div class="box"><span class="a">✻</span> <b>Claude Code</b>\n<span class="d">  cwd: ~/code/launchpad</span></div>`],
+  [0, `<span class="d">&gt;</span> ${typ("Add a sidebar that shows my agents.", .3, 2.0)}${cur(0, 2.3)}`],
+  [2.5, `<div class="tool"><b>Write</b>(plugins/agents/index.html) <span class="ok">+186</span></div>`],
+  [3.1, `<div class="tool"><b>Bash</b>(slate-term plugins register --manifest …)</div><div class="so">⎿ registered agents</div>`],
+  [3.7, `<div class="tool"><b>Bash</b>(slate-term panes split --left --type agents)</div>`],
+  [5.4, `<div class="gap"></div><span class="ok">✓</span> Agents is open on the left.`],
+  [6.2, `<div class="gap"></div><span class="d">&gt;</span> ${typ("Now show my deploys.", 6.4, 7.6)}${cur(6.2, 7.9)}`],
+  [8.2, `<div class="tool"><b>Write</b>(plugins/deploys/index.html) <span class="ok">+142</span></div>`],
+  [8.8, `<div class="tool"><b>Bash</b>(slate-term panes split --right --type deploys)</div>`],
+  [10.0, `<div class="gap"></div><span class="ok">✓</span> Deploys is on the right, following production.`],
+  [11.6, `<div class="gap"></div><span class="d">&gt;</span> ${typ("Add a latency chart under it.", 11.8, 13.2)}${cur(11.6, 13.5)}`],
+  [13.8, `<div class="tool"><b>Write</b>(plugins/latency/index.html) <span class="ok">+96</span></div>`],
+  [14.4, `<div class="tool"><b>Bash</b>(slate-term panes split --down --type latency)</div>`],
+  [15.6, `<div class="gap"></div><span class="ok">✓</span> Three panels. Tell me what to change.`],
+  [16.0, `<span class="d">&gt;</span> ${cur(16.0, 999)}`],
+];
+const WORKING = [[2.3, 5.4], [7.9, 10.0], [13.5, 15.6]];
+const tMain = $("#tMain");
+tMain.innerHTML = TR.map(([t0, html]) => `<div class="ln" data-t="${t0}">${html}</div>`).join("") + `<div class="ln a" id="tWork">✻ Working… <span class="d">(esc to interrupt)</span></div>`;
+const trLines = [...tMain.querySelectorAll(".ln[data-t]")].map(el => [parseFloat(el.dataset.t), el]);
+const typEls = [...tMain.querySelectorAll("[data-typ]")].map(el => [el, el.dataset.typ, parseFloat(el.dataset.a), parseFloat(el.dataset.b)]);
+const curEls = [...tMain.querySelectorAll("[data-c]")].map(el => [el, ...el.dataset.c.split(",").map(Number)]);
+const tWork = $("#tWork");
+
+// Agent pills in pane corners.
+const PRES = [
+  { pane: "agents", ag: "claude", a: 4.3, b: 6.2, note: "checking the sidebar", ok: 5.4 },
+  { pane: "deploy", ag: "claude", a: 9.6, b: 11.4, note: "reading the log", ok: 10.0 },
+  { pane: "metrics", ag: "claude", a: 15.0, b: 16.9, note: "checking the chart", ok: 15.6 },
+  { pane: "deploy", ag: "claude", a: 21.8, b: 27.2, note: "watching the rollout", live: true, ok: 26.4 },
+];
+for (const k in P) $(".pbox", P[k]).append(h(`<div class="prs"><div class="ring"></div><div class="tags"></div></div>`));
+PRES.forEach(it => {
+  it.el = h(`<span class="ptag" style="--ag:${AG[it.ag]}"><span class="st"></span><span class="nm">${it.ag}</span><span class="no">${esc(it.note)}</span><span class="dt"></span></span>`);
+  $(".tags", P[it.pane]).append(it.el);
+});
+
+// ---------- Workspace windows, one per Space ----------
+const WS = [
+  { app: "reviews", tabs: ["reviews"], cut: GCUTS.prs, a: 45.3, b: 48.3 },
+  { app: "reading", tabs: ["reading"], cut: GCUTS.reading, a: 50.3, b: 53.3 },
+  { app: "bench", tabs: ["sweep-14"], cut: root => CUTS.bench(root, { termW: 27 }), a: 55.3, b: 59.3, pal: "alt" },
+];
+WS.forEach((w, i) => {
+  w.win = winShell(w.tabs, `<div class="scene on"></div>`, APPS.find(a => a.id === w.app).name);
+  w.win.style.cssText = `left:${WIN.left}px;top:${WIN.top}px;width:${WIN.width}px;height:${WIN.height}px`;
+  spaceEls[i + 1].append(w.win);
+  w.upd = w.cut($(".scene", w.win));
+});
+
+// ---------- Story ----------
+const CH = [
+  { id: "ask", label: "Ask", a: 0, b: 3.9 },
+  { id: "build", label: "Build", a: 3.9, b: 17, tl: true },
+  { id: "use", label: "Use it", a: 17, b: 31 },
+  { id: "save", label: "Save as app", a: 31, b: 38.8 },
+  { id: "reopen", label: "Reopen", a: 38.8, b: 43.6 },
+  { id: "spaces", label: "Workspaces", a: 43.6, b: 59.6, ex: true },
+];
+const TOTAL = CH[CH.length - 1].b;
+const CAPS = [
+  [0, "Ask your agent for a panel."],
+  [3.9, "It builds one in seconds."],
+  [6.2, "Ask for more, one at a time."],
+  [17, "An agent finishes while you work."],
+  [19.2, "Review it right in the panel."],
+  [21.2, "Merge it, and watch it ship."],
+  [27.0, "Check that it landed well."],
+  [31, "Save the layout as an app."],
+  [33.0, "Give it a name and an icon."],
+  [36.4, "Now it opens from Spotlight and the Dock."],
+  [39.0, "Open it again. Everything comes back."],
+  [43.6, "Give every project its own app."],
+  [44.6, "A review desk for pull requests."],
+  [49.6, "A reading room with notes."],
+  [54.6, "A workbench for experiments."],
+];
+const TIMELAPSE = [2.3, 16.0];
+
+// Space switches: [start, end, from, to].
+const SWITCH = [[44.6, 45.3, 0, 1], [49.6, 50.3, 1, 2], [54.6, 55.3, 2, 3]];
+// Dock clicks: [time, app]. The clicked app bounces and gets a running dot.
+const CLICKS = [[41.0, "launch"], [44.4, "reviews"]];
+// Spotlight opens: [open, type start, type end, press, close, app]. Each closes as its Space switch starts.
+const SPOT = [[48.4, 48.6, 49.1, 49.4, 49.6, "reading"], [53.4, 53.6, 54.2, 54.4, 54.6, "bench"]];
+// Save flow: ⌘K finds the command, then the Create Spotlight Launcher sheet.
+const SAVE = { kOn: 31.2, kType: [31.6, 32.3], kOff: 32.7, shOn: 32.8, name: [33.4, 34.4], pickPress: [34.85, 35.0], createPress: [35.9, 36.15], shOff: 36.3, toast: [36.4, 38.4], dock: 36.6 };
+// Deploy of the merged change: [time, sha, tone, stage].
+const DSTAGE = [[-99, "web@4f2a91c", "ok", "live"], [21.6, "web@7c1e0b2", "acc", "building"], [23.6, "web@7c1e0b2", "acc", "canary 10%"], [25.4, "web@7c1e0b2", "acc", "rolling out"], [26.4, "web@7c1e0b2", "ok", "live"]];
+const DEPLOY_AT = 21.6;
+// Deploy log events: background traffic plus the scripted rollout.
+const DLOG = (() => {
+  const bg = ["GET /api/release 200 41ms", "GET /api/status 200 18ms", "cache warm: 412 keys", "GET /changelog 200 64ms", "GET /pricing 200 52ms", "GET /api/release 200 37ms"];
+  const ev = [];
+  for (let i = 0, tt = 9.2 - 8 * 1.3; tt < 70; i++, tt += 1.3) if (!(tt > DEPLOY_AT - .3 && tt < 26.8)) ev.push([tt, bg[i % bg.length], ""]);
+  ev.push([21.6, "merge #482 image-pipeline", "a"], [22.3, "build web@7c1e0b2 started", ""], [23.6, "build ok · 214 modules", "ok"], [24.3, "canary 10% · health ok", "ok"], [25.4, "rollout 50% · health ok", "ok"], [26.4, "rollout 100% · web@7c1e0b2 live", "ok"]);
+  return ev.sort((a, b) => a[0] - b[0]);
+})();
+
+const kpal = $("#kpal"), toast = $("#toast"), cursor = $("#cursor");
+const capEl = $("#cap"), tag = $("#tag"), tagT = $("#tagT"), tagIco = $("#tagIco");
+const dLog = $("#dLog"), dCount = $("#dCount"), dHead = $("#dHead"), dPr = $("#dPr");
+const sheet = $("#sheet"), shdim = $("#shdim"), sheetIcons = [...sheet.querySelectorAll(".ig span")], sheetBtns = [...sheet.querySelectorAll(".bt span")];
+const typed = (s, t, t0, t1) => s.slice(0, Math.floor(s.length * clamp((t - t0) / (t1 - t0))));
+let cache = {};
+const setHTML = (el, key, html) => { if (cache[key] !== html) { el.innerHTML = html; cache[key] = html; } };
+
+// Offset of an element's centre inside the stage, unaffected by CSS transforms.
+function posIn(el) {
+  let x = el.offsetWidth / 2, y = el.offsetHeight / 2;
+  for (let n = el; n && n !== stage; n = n.offsetParent) { x += n.offsetLeft; y += n.offsetTop; }
+  return [x, y];
+}
+const lerp2 = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k];
+// The cursor rests on the chart marker, which sits just after the deploy line.
+const chartPt = () => posIn($("#mK"));
+const mergePt = () => posIn($("[data-merge]", agentsEl));
+const cardPt = () => { const c = agentsEl.querySelectorAll(".agc")[2], [x, y] = posIn(c); return [x + 20, y - c.offsetHeight / 2 + 18]; };
+const deployPt = () => posIn(dLog);
+const iconPt = () => posIn(sheetIcons[8]);
+const createPt = () => posIn(sheetBtns[1]);
+const dockPt = id => () => { const [x, y] = posIn(dockIcon(id)); return [x, y - 4]; };
+// The main window lives in Space 0, so its panes need no Space offset while it is visible.
+const CENTER = [600, 380];
+
+// Cursor segments: each is visible from a to b and moves through [time, target] points.
+const CURSOR = [
+  { a: 17.8, b: 31, path: [[17.8, CENTER], [18.5, cardPt], [19.3, cardPt], [20.0, mergePt], [21.3, mergePt], [21.9, deployPt], [26.6, deployPt], [27.3, chartPt]] },
+  { a: 33.6, b: 36.6, path: [[33.6, [600, 330]], [34.3, iconPt], [35.0, iconPt], [35.5, createPt]] },
+  { a: 39.4, b: 48.2, path: [[39.4, CENTER], [40.1, dockPt("launch")], [41.3, dockPt("launch")], [41.9, [640, 420]], [43.8, [640, 420]], [44.3, dockPt("reviews")], [44.7, dockPt("reviews")], [45.2, [700, 420]]] },
+];
+const resolve = p => typeof p === "function" ? p() : p;
+function renderCursor(t) {
+  const seg = CURSOR.find(s => t >= s.a && t < s.b);
+  on(cursor, !!seg);
+  if (!seg) return;
+  const path = seg.path;
+  let pos = resolve(path[path.length - 1][1]);
+  if (t < path[0][0]) pos = resolve(path[0][1]);
+  else for (let i = 0; i < path.length - 1; i++) if (t < path[i + 1][0]) { pos = lerp2(resolve(path[i][1]), resolve(path[i + 1][1]), ease(clamp((t - path[i][0]) / (path[i + 1][0] - path[i][0])))); break; }
+  cursor.style.transform = `translate(${(pos[0] - 2).toFixed(1)}px,${(pos[1] - 2).toFixed(1)}px)`;
+}
+
+function renderPresence(t) {
+  for (const k in P) {
+    const prs = $(".prs", P[k]), ring = $(".ring", prs);
+    const items = PRES.filter(it => it.pane === k);
+    const live = items.filter(it => t >= it.a && t < it.b);
+    prs.classList.toggle("on", live.length > 0);
+    if (live.length) {
+      ring.style.setProperty("--ag", AG[live[live.length - 1].ag]);
+      ring.classList.toggle("pulse", live.some(it => t - it.a < 1.1));
+    }
+    items.forEach(it => {
+      const shown = t >= it.a && t < it.b;
+      it.el.style.display = t >= it.a && t < it.b + .5 ? "" : "none";
+      it.el.classList.toggle("on", shown);
+      const done = it.ok !== undefined && t >= it.ok;
+      const running = it.live && !done && t - it.a >= .5;
+      setHTML($(".st", it.el), "st" + PRES.indexOf(it), done ? '<span class="ic ok">✓</span>' : running ? '<span class="psp"></span>' : '<span class="ic">●</span>');
+      const dt = running ? (t - it.a).toFixed(1) + "s" : "";
+      const dtEl = $(".dt", it.el);
+      if (dtEl.textContent !== dt) dtEl.textContent = dt;
+      dtEl.style.display = dt ? "" : "none";
+    });
+  }
+}
+
+// Chapters UI.
+const chapEl = $("#chaps");
+CH.forEach((c, i) => {
+  const li = document.createElement("li");
+  li.style.flex = String(Math.max(5, c.b - c.a));
+  li.innerHTML = `<button class="chap" type="button"><span class="bar"><i></i></span><span class="lab">${c.label}</span></button>`;
+  const b = li.firstElementChild;
+  b.setAttribute("aria-label", `Chapter ${i + 1}: ${c.label}${c.tl ? ", time-lapse" : c.ex ? ", proposed examples" : ""}`);
+  b.addEventListener("click", () => seek(c.a + .01));
+  chapEl.append(li);
+});
+const chapBtns = [...chapEl.querySelectorAll(".chap")];
+const chapBars = chapBtns.map(b => b.querySelector("i"));
+
+let capText = null, capTimer = null;
+function setCaption(text, instant) {
+  if (text === capText) return;
+  capText = text;
+  clearTimeout(capTimer);
+  if (instant || reduce) { capEl.textContent = text; capEl.classList.remove("swap"); return; }
+  capEl.classList.add("swap");
+  capTimer = setTimeout(() => { capEl.textContent = capText; capEl.classList.remove("swap"); }, 350);
+}
+
+function render(t, instant) {
+  const ch = CH.find(c => t >= c.a && t < c.b) || CH[CH.length - 1];
+  chapBtns.forEach((b, i) => {
+    const c = CH[i];
+    chapBars[i].style.setProperty("--p", clamp((t - c.a) / (c.b - c.a)).toFixed(3));
+    if (c === ch) b.setAttribute("aria-current", "true"); else b.removeAttribute("aria-current");
+  });
+  let cap = CAPS[0][1];
+  for (const [t0, s] of CAPS) if (t >= t0) cap = s;
+  setCaption(cap, instant);
+  const tl = t >= TIMELAPSE[0] && t < TIMELAPSE[1];
+  on(tag, tl || (ch.ex && t >= SWITCH[0][0]));
+  if (tl) { tagT.textContent = "Time-lapse"; tagIco.style.display = ""; }
+  else { tagT.textContent = "Proposed example"; tagIco.style.display = "none"; }
+
+  setPal(win, "base");
+  renderMain(t);
+  renderDock(t);
+  renderSpaces(t);
+  renderSpot(t);
+  renderCursor(t);
+  stick(sMain);
+}
+
+function renderMain(t) {
+  let lay = L[0][1];
+  for (const [t0, l] of L) if (t >= t0) lay = l;
+  for (const k in P) {
+    const el = P[k], r = lay[k];
+    el.classList.toggle("off", !r);
+    place(el, r || home[k]);
+  }
+  renderPresence(t);
+  agentsUpd(t);
+
+  trLines.forEach(([t0, el]) => on(el, t >= t0));
+  typEls.forEach(([el, s, a, b]) => { const v = typed(s, t, a, b); if (el.textContent !== v) el.textContent = v; });
+  curEls.forEach(([el, a, b]) => el.classList.toggle("off", !(t >= a && t < b)));
+  on(tWork, WORKING.some(([a, b]) => t >= a && t < b));
+
+  // Deploy log: calm traffic, then the merged change rolls out.
+  const ev = DLOG.filter(e => e[0] <= t), shown = ev.slice(-18);
+  setHTML(dLog, "dl", shown.map(([tt, m, c]) => {
+    const sec = 9 * 3600 + 41 * 60 + 12 + Math.round(tt * 6);
+    const stamp = [Math.floor(sec / 3600), Math.floor(sec / 60) % 60, sec % 60].map(v => String(v).padStart(2, "0")).join(":");
+    return `<div><span class="t">${stamp}</span> <span class="${c}">${m}</span></div>`;
+  }).join(""));
+  setHTML(dCount, "dc", `${ev.length + 40} events`);
+  let ds = DSTAGE[0];
+  for (const d of DSTAGE) if (t >= d[0]) ds = d;
+  setHTML(dHead, "dh", `<span class="k-dot ${ds[2]}"></span><b class="mono" style="font-size:11.5px;font-weight:500">${ds[1]}</b><span class="k-badge ${ds[2]}">${ds[2] === "acc" ? '<span class="k-spin" style="width:8px;height:8px;border-width:1.5px"></span>' : ""}${ds[3]}</span>`);
+  dPr.classList.toggle("hid", t < DEPLOY_AT);
+
+  // Latency chart: one point per 1.6 s. Points after the rollout sit lower.
+  const STEP = 1.6, base = Math.floor(t / STEP), vals1 = [], vals2 = [];
+  for (let i = 0; i < 40; i++) {
+    const k = base + i, after = (k - 39) * STEP >= 23.4;
+    vals1.push(140 + 22 * Math.sin(k * .31) + 16 * rnd(k) - (after ? 24 : 0));
+    vals2.push(155 + 10 * Math.sin(k * .17 + 1) + 8 * rnd(k + 99));
+  }
+  const d1 = chartPath(vals1, 200, 90, 100, 200);
+  if (cache.m1 !== d1) { $("#m1").setAttribute("d", d1); $("#m2").setAttribute("d", chartPath(vals2, 200, 90, 100, 200)); cache.m1 = d1; }
+  setHTML($("#mVal"), "mv", String(Math.round(vals1[39])));
+  const c = $("#mChart"), mIdx = Math.floor(DEPLOY_AT / STEP) + 39 - base;
+  on($("#mD"), t >= DEPLOY_AT && mIdx >= 0);
+  $("#mD").style.left = (c.offsetWidth * clamp(mIdx / 39)) + "px";
+  const live = t >= 26.4, dl = $("#mDelta");
+  setHTML(dl, "md", live ? "▼ 14%" : "—");
+  dl.style.color = live ? "var(--ok)" : "var(--text-k2)";
+  const hover = t >= 27.6 && t < 31;
+  const idx = 37, v = vals1[idx];
+  const x = c.offsetWidth * idx / 39, y = c.offsetHeight * (1 - (v - 100) / 100);
+  ["#mV", "#mK", "#mTip"].forEach(q => on($(q), hover));
+  $("#mV").style.left = x + "px"; $("#mK").style.left = x + "px"; $("#mK").style.top = y + "px";
+  const tip = $("#mTip"); tip.style.left = (x - 150) + "px"; tip.style.top = Math.max(-6, y - 36) + "px";
+  setHTML($("#mTipV"), "mtv", Math.round(v) + " ms");
+
+  // ⌘K finds "Create Spotlight Launcher…".
+  const k1 = t >= SAVE.kOn && t < SAVE.kOff;
+  on(kpal, k1);
+  if (k1 || !cache.pq) {
+    const q = typed("launcher", t, ...SAVE.kType);
+    setHTML($(".q", kpal), "pq", ICON.search.replace("<svg", "<svg") + (q ? esc(q) + '<span class="cur" style="width:1.5px;height:20px;vertical-align:-4px"></span>' : '<span class="ph">Search commands…</span>') + '<span class="esc">esc</span>');
+    const all = [["gear", "Open Settings", "Application", "⌘,"], ["down", "Check for Updates…", "Software Update", ""], ["grid", "Layout Settings…", "Saved Layouts", ""], ["grid", "Save a Window as a Layout…", "Saved Layouts", ""], ["plus", "New Tab", "Workspace", "⌘T"]];
+    const hit = [["grid", "Create Spotlight Launcher…", "Saved Layouts", ""], ["grid", "Layout Settings…", "Saved Layouts", ""]];
+    const list = q.length >= 3 ? hit : all;
+    setHTML($(".kn", kpal), "pn", String(q.length >= 3 ? hit.length : 47));
+    setHTML($("ul", kpal), "pu", list.map((it, i) => `<li class="${i ? "" : "sel"}"><span class="gl">${GLYPH[it[0]]}</span><span class="tt">${it[1]}<small>${it[2]}</small></span>${it[3] ? `<span class="kb">${it[3]}</span>` : ""}</li>`).join(""));
+  }
+
+  // The launcher sheet: name it, pick an icon, create.
+  const sh = t >= SAVE.shOn && t < SAVE.shOff;
+  on(sheet, sh); on(shdim, sh);
+  const nm = t < SAVE.name[0] ? '<mark>launchpad</mark>' : esc(typed("Launch Day", t, ...SAVE.name)) + '<span class="cur"></span>';
+  setHTML($(".nf", sheet), "nf", nm);
+  const picked = t >= SAVE.pickPress[1];
+  sheetIcons.forEach((el, i) => { el.classList.toggle("sel", picked ? i === 8 : i === 0); el.classList.toggle("press", i === 8 && t >= SAVE.pickPress[0] && t < SAVE.pickPress[1]); });
+  setHTML($(".pv", sheet), "pv", picked ? appIco(APPS[0], "pv") : '<img src="assets/app-icon.png" alt="">');
+  $(".pv", sheet).className = picked ? "pv aico" : "pv";
+  $(".pv", sheet).style.cssText = picked ? `--tint:${APPS[0].tint}` : "";
+  sheetBtns[1].classList.toggle("press", t >= SAVE.createPress[0] && t < SAVE.createPress[1]);
+  on(toast, t >= SAVE.toast[0] && t < SAVE.toast[1]);
+
+  // Reopened from its launcher, the window carries the launcher's name.
+  setHTML($(".wtitle", win), "wt", t >= 41.4 ? "Launch Day" : "Slate Terminal");
+
+  // Minimise into the new Dock icon, then come back from it.
+  const away = t >= 39.2 && t < 41.4;
+  if (away) {
+    const [ix, iy] = posIn(dockIcon("launch"));
+    const dx = ix - (WIN.left + WIN.width / 2), dy = iy - (WIN.top + WIN.height / 2);
+    win.style.transform = `translate(${dx.toFixed(0)}px,${dy.toFixed(0)}px) scale(.04)`;
+    win.style.opacity = 0;
+  } else { win.style.transform = "none"; win.style.opacity = 1; }
+}
+
+// Launchers opened from Spotlight join the Dock while they run, like any app.
+function renderDock(t) {
+  for (const a of APPS) {
+    const el = dockIcon(a.id);
+    const spot = SPOT.find(x => x[5] === a.id);
+    const added = a.id === "launch" ? SAVE.dock : spot ? spot[3] : null;
+    const opens = CLICKS.filter(c => c[1] === a.id).map(c => c[0]).concat(added ?? []);
+    el.classList.toggle("hid", added !== null && t < added);
+    el.classList.toggle("bounce", opens.some(c => t >= c && t < c + .8));
+    el.classList.toggle("run", opens.some(c => t >= c));
+    el.classList.toggle("hov", CLICKS.some(([c, id]) => id === a.id && t >= c - .9 && t < c + .3));
+  }
+}
+
+function renderSpot(t) {
+  const sp = SPOT.find(x => t >= x[0] && t < x[4]), el = $("#spot", stage);
+  on(el, sp);
+  if (!sp) return;
+  const app = APPS.find(a => a.id === sp[5]), q = typed(app.name, t, sp[1], sp[2]);
+  setHTML($(".sq", el), "sq", q ? esc(q) + '<span class="cur"></span>' : '<span class="ph">Spotlight Search</span>');
+  $(".res", el).classList.toggle("hid", q.length < 3);
+  $(".res", el).classList.toggle("press", t >= sp[3] - .2 && t < sp[3]);
+  setHTML($(".ri", el), "ri", appIco(app));
+  setHTML($(".rn", el), "rn", app.name);
+}
+
+function renderSpaces(t) {
+  let x = 0, active = 0;
+  for (const [a, b, from, to] of SWITCH) {
+    if (t >= b) { x = to; active = to; }
+    else if (t >= a) { x = from + (to - from) * ease(clamp((t - a) / (b - a))); active = to; }
+  }
+  spacesEl.style.transform = `translateX(${(-x * STW).toFixed(1)}px)`;
+  WS.forEach((w, i) => {
+    setPal(w.win, w.pal || "base");
+    if (Math.abs(x - (i + 1)) < 1) { w.upd(clamp((t - w.a) / (w.b - w.a))); stick(w.win); }
+  });
+}
+
+// ---------- Playback ----------
+const STATIC_T = 20.4;
+let t = 0, playing = !reduce, last = null, visible = true;
+if (reduce) t = STATIC_T;
+const playBtn = $("#play");
+function setPlaying(v) {
+  playing = v;
+  playBtn.setAttribute("aria-label", v ? "Pause demo" : "Play demo");
+  $("#icPause").toggleAttribute("hidden", !v); $("#icPlay").toggleAttribute("hidden", v);
+  last = null;
+}
+function jumpRender(nt) {
+  stage.classList.add("jump");
+  render(nt, true);
+  void stage.offsetWidth;
+  stage.classList.remove("jump");
+}
+function seek(nt) {
+  t = clamp(nt, 0, TOTAL - .01);
+  cache = {};
+  jumpRender(t);
+}
+playBtn.addEventListener("click", () => setPlaying(!playing));
+function frame(nowMs) {
+  if (playing && visible && !document.hidden) {
+    if (last != null) {
+      const nt = t + Math.min(.1, (nowMs - last) / 1000);
+      if (nt >= TOTAL) { t = 0; cache = {}; jumpRender(0); }
+      else { t = nt; render(t); }
+    }
+    last = nowMs;
+  } else last = null;
+  requestAnimationFrame(frame);
+}
+if ("IntersectionObserver" in window) new IntersectionObserver(es => { visible = es[0].isIntersecting; }, { threshold: .15 }).observe(screen);
+setPlaying(playing);
+const qt = qs.get("t");
+if (qt !== null) { setPlaying(false); seek(parseFloat(qt) || 0); } else seek(t);
+requestAnimationFrame(frame);
+darkMq.addEventListener?.("change", () => { cache = {}; render(t, true); });
+})();
+</script>
+</body>
+</html>

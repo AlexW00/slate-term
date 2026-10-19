@@ -30,7 +30,7 @@ import Testing
         #expect(noop.revisions.revision == transition.revisions.revision)
         let clear = try WorkspaceTransition.command("tab.title.clear", parameters: ["tab": .string("t1")], workspace: workspace, revisions: transition.revisions)
         #expect(clear.workspace.tabs[0].manualTitle == nil)
-        #expect(clear.workspace.tabs[0].title == "Slate Terminal")
+        #expect(clear.workspace.tabs[0].title == "New Tab")
         #expect(clear.changes[0].payload["hasManualTitle"] == .bool(false))
     }
 
@@ -90,7 +90,7 @@ import Testing
             object["tabs"] = tabs
             #expect(throws: (any Error).self) { try Workspace.restore(JSONSerialization.data(withJSONObject: object)) }
         }
-        #expect(try Workspace.restore(data).tabs[0].title == "Slate Terminal")
+        #expect(try Workspace.restore(data).tabs[0].title == "New Tab")
     }
 
     @Test func recipesPreserveLiteralTitlesWithoutReinterpretingEditorLabels() throws {

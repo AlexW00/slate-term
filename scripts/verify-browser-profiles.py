@@ -46,6 +46,7 @@ with http.server.ThreadingHTTPServer(('127.0.0.1', 0), Page) as server:
     other = f'http://localhost:{server.server_port}/'
     try:
         with AppFixture('browser-profiles') as app:
+            app.capture_contracts()
             def command(id, **params):
                 return app.rpc('command.run', id=id, **params)
 
@@ -148,30 +149,29 @@ with http.server.ThreadingHTTPServer(('127.0.0.1', 0), Page) as server:
             eventually('native private site clear completed', lambda: value(p2)['saved'] is None)
             assert value('p1')['saved'] == 'not-target', 'Modal focus changes redirected clearing'
 
-            # Settings uses the same consent and store guards, with explicit pane and URL selection.
-            state = app.rpc('debug.settings', section='Browser', browserPane=p2)
-            assert set(state['browserPanes']) == {'p1', p2, p3}
-            assert state['browserSiteURL'] == url and state['canClearBrowserSite']
-            state = app.rpc('debug.settings', browserSiteURL='not-a-url')
-            assert not state['canClearBrowserSite'] and not state['dirty']
-            app.rpc('debug.settings', browserSiteURL=url)
-            seed(p2, 'settings-private'); seed('p1', 'settings-shared')
-            shown = app.rpc('debug.browserDataConfirmation', settings=True, id='browser.clearSiteData', answer='cancel')
-            assert shown['warning'] and value(p2)['saved'] == 'settings-private'
-            assert not app.rpc('debug.settings')['clearingBrowserData']
-            app.rpc('debug.browserDataConfirmation', settings=True, id='browser.clearSiteData', answer='clear', focusPane='p1')
-            eventually('settings private clear', lambda: value(p2)['saved'] is None)
-            assert value('p1')['saved'] == 'settings-shared'
-            eventually('settings completion feedback', lambda: app.rpc('debug.settings')['browserDataMessage'] == 'Site data cleared.')
-
-            # A custom URL selects data independently of the pane's current page.
+            # Stored-site selection works with no browser panes, and freezes its target before consent.
+            seed('p1', 'settings-shared')
             navigate('p1', other); seed('p1', 'settings-other')
-            app.rpc('debug.settings', browserPane='p1', browserSiteURL=url)
-            app.rpc('debug.browserDataConfirmation', settings=True, id='browser.clearSiteData', answer='clear')
-            eventually('settings site clear finished', lambda: not app.rpc('debug.settings')['clearingBrowserData'])
-            assert value('p1')['saved'] == 'settings-other'
-            navigate('p1'); assert value('p1')['saved'] is None
-            seed('p1', 'settings-all'); seed(p2, 'keep-private')
+            for pane in ['p1', p2, p3]:
+                command('pane.type', pane=pane, type='terminal', force=True)
+            sites = app.rpc('browser.listData')
+            assert sites['storage'] == 'persistent' and {'127.0.0.1', 'localhost'}.issubset(sites['sites']), sites
+            app.rpc('debug.settings', section='Browser')
+            eventually('stored sites loaded without panes', lambda: not app.rpc('debug.settings')['loadingBrowserSites'])
+            state = app.rpc('debug.settings', browserSite='127.0.0.1')
+            assert state['canClearBrowserSite'] and not state['dirty'], state
+            shown = app.rpc('debug.browserDataConfirmation', settings=True, id='browser.clearSiteData', answer='cancel')
+            assert shown['warning'] and '127.0.0.1' in shown['explanation']
+            assert '127.0.0.1' in app.rpc('browser.listData')['sites']
+            app.rpc('debug.browserDataConfirmation', settings=True, id='browser.clearSiteData', answer='clear', focusPane=p2)
+            eventually('stored site removed', lambda: '127.0.0.1' not in app.rpc('browser.listData')['sites'])
+            eventually('settings list refreshed after removal', lambda: '127.0.0.1' not in app.rpc('debug.settings')['browserSites'])
+            assert 'localhost' in app.rpc('browser.listData')['sites']
+            assert app.rpc('debug.settings')['browserDataMessage'] == 'Site data cleared.'
+            switch('p1', 'browser'); assert value('p1')['saved'] is None
+            navigate('p1', other); assert value('p1')['saved'] == 'settings-other'
+            switch(p2, 'private-browser'); seed(p2, 'keep-private')
+            navigate('p1'); seed('p1', 'settings-all')
             app.rpc('debug.browserDataConfirmation', settings=True, answer='cancel')
             assert value('p1')['saved'] == 'settings-all'
             app.rpc('debug.browserDataConfirmation', settings=True, answer='clear')
@@ -179,15 +179,8 @@ with http.server.ThreadingHTTPServer(('127.0.0.1', 0), Page) as server:
             assert value(p2)['saved'] == 'keep-private'
             state = app.rpc('debug.settings')
             assert not state['dirty'] and state['browserDataError'] is None
-            # Replacing the selected pane during confirmation must fail without clearing another profile.
-            seed('p1', 'survives-replacement')
-            app.rpc('debug.settings', browserPane=p3, browserSiteURL=url)
-            app.rpc('debug.browserDataConfirmation', settings=True, id='browser.clearSiteData', answer='clear', replacePane=p3)
-            eventually('settings stale-pane failure', lambda: app.rpc('debug.settings')['browserDataError'] is not None)
-            assert 'closed or replaced' in app.rpc('debug.settings')['browserDataError']
-            assert value('p1')['saved'] == 'survives-replacement' and value(p2)['saved'] == 'keep-private'
             switch(p3, 'private-browser')
-            print('PASS Settings browser clearing: selection, explicit URL, cancellation, shared/private isolation and completion', flush=True)
+            print('PASS Settings stored sites: no open browser panes, cancellation, targeted removal, automatic refresh and private isolation', flush=True)
 
             # Both commands are available in the bar with Private Browser focus.
             command('pane.focus', pane=p2)
@@ -217,11 +210,18 @@ with http.server.ThreadingHTTPServer(('127.0.0.1', 0), Page) as server:
             service_call(context, 'service.ready', {'version': 1})
 
             def bridge(method, params):
-                return app.rpc('debug.pluginEval', pane=p3, script='await workspace.call(' + json.dumps(method) + ',' + json.dumps(params) + ')')
+                result = app.rpc('debug.pluginEval', pane=p3, script='await workspace.call(' + json.dumps(method) + ',' + json.dumps(params) + ')')
+                app.contract_capture.record(method, params, result, client='registered-page')
+                return result
 
             for call in [bridge, lambda method, params: service_call(context, method, params)]:
                 assert call('api.describe', {})['browserData']['persistentProfile'] == 'appWide'
                 seed('p1', 'trusted'); seed(p2, 'trusted-private')
+                assert '127.0.0.1' in call('browser.listData', {})['sites']
+                call('browser.removeSiteData', {'site': '127.0.0.1'})
+                eventually('trusted stored-site clear', lambda: value('p1')['saved'] is None)
+                assert value(p2)['saved'] == 'trusted-private'
+                seed('p1', 'trusted')
                 call('browser.clearSiteData', {'pane': p2, 'url': url})
                 assert value(p2)['saved'] is None and value('p1')['saved'] == 'trusted'
                 seed(p2, 'all-clear-preserves-private')
@@ -231,6 +231,10 @@ with http.server.ThreadingHTTPServer(('127.0.0.1', 0), Page) as server:
                 eventually('trusted all-data clear reaches live page', lambda: value('p1')['saved'] is None)
                 private = value(p2)
                 assert private['saved'] == 'all-clear-preserves-private', private
+            seed('p1', 'cli-stored')
+            assert '127.0.0.1' in app.cli('browser', 'list-data')['sites']
+            app.cli('browser', 'remove-site-data', '--site', '127.0.0.1')
+            eventually('CLI stored-site removal', lambda: value('p1')['saved'] is None)
             app.cli('browser', 'clear-data')
             print('PASS browser profiles: shared persistence across restart, private isolation, explicit-site selection, native consent/cancel, CLI/page/service clearing and bridge isolation')
     finally:

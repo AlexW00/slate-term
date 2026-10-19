@@ -2,7 +2,7 @@ import Foundation
 
 /// Live tab names and saved overrides share limits; recipe editor labels remain separate.
 public enum TabTitle {
-    public static let defaultTitle = "Slate Terminal"
+    public static let defaultTitle = "New Tab"
     public static let maximumCharacters = 100
     public static let maximumBytes = 1024
 

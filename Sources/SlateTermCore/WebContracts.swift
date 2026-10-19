@@ -63,6 +63,7 @@ extension AutomationContracts {
         definitions["BrowserScreenshot"] = complete(["path": S.string()])
         definitions["WebScreenshot"] = complete(["path": S.string(), "paneId": S.paneID, "viewId": identity,
             "documentId": S.nullable(identity), "sampledAt": S.number])
+        definitions["BrowserStoredSites"] = complete(["storage": S.constant(.string("persistent")), "sites": S.array(S.string(minimumLength: 1))])
         definitions["BrowserClearAll"] = complete(["cleared": S.constant(.bool(true)), "scope": S.constant(.string("all")),
             "storage": S.constant(.string("persistent")), "host": S.null])
         definitions["BrowserClearSite"] = complete(["cleared": S.constant(.bool(true)), "scope": S.constant(.string("site")),
@@ -188,6 +189,15 @@ extension AutomationContracts {
                 result: result, guards: targetGuards, additionalParameters: true, conditions: conditions,
                 routing: "paneOrTabFocus", errors: errors, constraints: targetConstraints, semantics: semantics)
         }
+        methods[.browserListData] = AutomationContract(parameters: [:], result: S.reference("BrowserStoredSites"), guards: unanchoredGuards,
+            routing: "applicationPersistentBrowserProfile", semantics: ["includesPrivateOrPluginStores": .bool(false),
+                "sites": .string("sortedUniqueWebKitRecordDisplayNames")])
+        methods[.browserRemoveSiteData] = AutomationContract(parameters: [
+            "site": S.annotated(S.string(minimumLength: 1, maximumUTF8Bytes: 16_384), ["x-noControls": .bool(true)])
+        ], required: ["site"], result: S.reference("BrowserClearSite"), guards: unanchoredGuards,
+            conditions: [requires("noOtherClearOfSameDataStoreInProgress")], routing: "applicationPersistentBrowserProfile", errors: [-32020],
+            semantics: ["selection": .string("exactWebKitRecordDisplayName"), "storage": .string("persistent"),
+                "includesPrivateOrPluginStores": .bool(false), "confirmationDialog": .bool(false), "cancellationRollsBackRemoval": .bool(false)])
         methods[.browserClearData] = AutomationContract(parameters: [:], result: S.reference("BrowserClearAll"), guards: unanchoredGuards,
             conditions: [requires("noOtherClearOfSameDataStoreInProgress")], routing: "applicationPersistentBrowserProfile", errors: [-32020],
             semantics: ["includesPrivateOrPluginStores": .bool(false), "confirmationDialog": .bool(false), "cancellationRollsBackRemoval": .bool(false)])
