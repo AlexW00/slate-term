@@ -59,3 +59,40 @@ public struct WebAction: Sendable {
         }
     }
 }
+
+public struct WebFileChooserRequest: Sendable {
+    public let chooserID: String?
+    public let paths: [String]
+
+    public init(method: String, params: [String: JSONValue]) throws {
+        let selecting = method == "web.chooseFiles"
+        let reading = method == "web.fileChooser"
+        guard reading || selecting || method == "web.cancelFileChooser" else {
+            throw RPCFailure(code: -32601, message: "Unknown file chooser method")
+        }
+        var allowed: Set<String> = ["pane", "tab"]
+        if !reading { allowed.insert("chooserId") }
+        if selecting { allowed.insert("paths") }
+        guard Set(params.keys).isSubset(of: allowed) else {
+            throw RPCFailure(code: -32602, message: "Unknown file chooser parameter")
+        }
+        chooserID = params["chooserId"]?.string
+        if !reading {
+            guard let chooserID, !chooserID.isEmpty, chooserID.utf8.count <= 128,
+                  chooserID.utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || $0 == 45 || $0 == 95 }) else {
+                throw RPCFailure(code: -32602, message: "A pending chooserId is required")
+            }
+        }
+        if selecting {
+            guard let values = params["paths"]?.array, !values.isEmpty, values.count <= 128 else {
+                throw RPCFailure(code: -32602, message: "Choose between 1 and 128 absolute paths")
+            }
+            paths = try values.map { value in
+                guard let path = value.string, path.hasPrefix("/"), path.utf8.count <= 4096, !path.contains("\0") else {
+                    throw RPCFailure(code: -32602, message: "Each path must be absolute and at most 4096 bytes")
+                }
+                return path
+            }
+        } else { paths = [] }
+    }
+}

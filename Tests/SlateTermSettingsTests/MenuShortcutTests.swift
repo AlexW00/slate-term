@@ -15,6 +15,8 @@ import SlateTermCore
     #expect(bindings[try KeyChord.parse("cmd+alt+up")] == "focus.up")
     #expect(bindings[try KeyChord.parse("cmd+alt+down")] == "focus.down")
     #expect(bindings[try KeyChord.parse("cmd+shift+e")] == "layout.equalize")
+    #expect(bindings[try KeyChord.parse("cmd+r")] == "browser.reload")
+    #expect(bindings[try KeyChord.parse("cmd+k")] == "command.picker")
     #expect(bindings[try KeyChord.parse("cmd+shift+r")] == "config.reload")
     #expect(bindings[try KeyChord.parse("ctrl+cmd+n")] == "tab.detachCurrent")
     let noDetachShortcut = try AppConfiguration.parse("[keybind]\n'ctrl+cmd+n' = 'unbound'")

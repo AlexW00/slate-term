@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""VM-only terminal shutdown, previous-output recovery, privacy controls and native viewer."""
+"""VM-only terminal shutdown, previous-output recovery, retention controls and inline display."""
 import json
 import os
 from pathlib import Path
@@ -21,10 +21,6 @@ READY_MARKER = 'RECOVERY_FOREGROUND_READY'
 def prompt(app, pane='p1'):
     eventually('authenticated prompt ' + pane,
                lambda: app.rpc('context.get', pane=pane, scope='pane')['terminal']['state'] == 'prompt')
-
-
-def previous(app, pane='p1', **limits):
-    return app.rpc('terminal.history', pane=pane, source='previous', **limits)
 
 
 def snapshot(app):
@@ -144,11 +140,11 @@ while True: time.sleep(0.1)
         for iteration in range(2):
             with AppFixture(f'terminal-recovery-listing-load-{iteration}', workspace_source=listing_source) as app:
                 prompt(app)
+                assert app.rpc('debug.paneHeader', pane='p1')['headerActions'] == []
                 screen = app.rpc('terminal.capture', pane='p1')['text']
                 assert 'restored-alpha.txt' in screen and 'restored-beta.txt' in screen
                 assert 'New terminal session' in screen and screen.rstrip().endswith('API_TEST>')
-                history = app.rpc('terminal.history', pane='p1')['text']
-                assert history.count('restored-alpha.txt') == 1, 'Restart duplicated restored output'
+                assert screen.count('restored-alpha.txt') == 1, 'Restart duplicated restored output'
                 app.rpc('terminal.search', pane='p1', action='set', query='restored-beta.txt')
                 eventually('restored output searchable', lambda: (app.rpc('terminal.search', pane='p1', action='get')['total'] or 0) >= 1)
                 app.rpc('terminal.search', pane='p1', action='end')
@@ -170,8 +166,9 @@ while True: time.sleep(0.1)
                     command="printf 'before-full-clear\\n\\033[H\\033[2Jafter-full-clear\\n'")
             eventually('full clear saves new output', lambda: 'after-full-clear' in (saved_output(app) or {}).get('text', ''))
             assert saved_output(app)['text'].count('restored-before-clear-000') == 1
-            app.rpc('command.run', id='terminal.previousOutput.clear', pane='p1')
-            eventually('cleared restored scrollback stays forgotten', lambda: 'restored-before-clear-' not in (saved_output(app) or {}).get('text', ''))
+            set_limit(app, 0)
+            set_limit(app, 10000)
+            eventually('disabled restored scrollback stays forgotten', lambda: 'restored-before-clear-' not in (saved_output(app) or {}).get('text', ''))
             assert 'after-full-clear' in saved_output(app)['text']
         print('PASS cursor rewrite and full-screen clear: separate capture prevents duplication and re-saving forgotten output', flush=True)
 
@@ -209,7 +206,7 @@ while True: time.sleep(0.1)
             app.rpc('debug.key', settings=True, chord='cmd+w')
             original_session = app.rpc('pane.inspect', pane='p1')['sessionId']
             foreground = start_worker(app, 'p1', script, 'foreground', directory)
-            eventually('foreground output rendered', lambda: READY_MARKER in app.rpc('terminal.history', pane='p1', maxBytes=4000)['text'])
+            eventually('foreground output rendered', lambda: READY_MARKER in app.rpc('terminal.capture', pane='p1')['text'])
             eventually('owned background and detached processes', lambda: (directory / 'background.pid').exists() and (directory / 'detached.pid').exists())
             background = int((directory / 'background.pid').read_text())
             detached = int((directory / 'detached.pid').read_text())
@@ -251,8 +248,8 @@ while True: time.sleep(0.1)
             app.capture_contracts()
             prompt(app)
             assert app.rpc('pane.inspect', pane='p1')['sessionId'] != original_session
-            old = previous(app)
-            assert old['source'] == 'previous' and old['available'] and old['capturedAt'] is not None
+            old = saved_output(app)
+            assert old is not None and old['capturedAt'] is not None
             assert isinstance(old['ended'], bool)
             assert FINAL_MARKER in old['text'] and READY_MARKER in old['text']
             # Once unchanged output has been saved, periodic capture must not
@@ -261,49 +258,10 @@ while True: time.sleep(0.1)
             saved_at = (app.root / 'state/workspace.json').stat().st_mtime_ns
             time.sleep(6)
             assert (app.root / 'state/workspace.json').stat().st_mtime_ns == saved_at
-            current = app.rpc('terminal.history', pane='p1')
-            assert current['source'] == 'current' and FINAL_MARKER in current['text']
-            assert current['text'].count(FINAL_MARKER) == 1
             assert saved_output(app)['text'].count(FINAL_MARKER) == 1
             assert not replay.exists(), 'Restoration executed printed output'
-            assert previous(app, maxLines=4)['lineCount'] <= 4
-            bounded = previous(app, maxBytes=61)
-            assert bounded['byteCount'] <= 61 and '\ufffd' not in bounded['text']
-            assert app.cli('terminal', 'history', '--pane', 'p1', '--source', 'previous', '--max-bytes', '61') == bounded
-
-            app.rpc('command.run', id='terminal.previousOutput', pane='p1')
-            viewer = app.rpc('debug.previousOutput', pane='p1')
-            assert viewer['visible'] and viewer['readOnly'] and FINAL_MARKER in viewer['text']
-            assert viewer['horizontalOffset'] == 0, 'Initial history view hid line beginnings'
-            assert app.rpc('debug.previousOutput', pane='p1', horizontalEnd=True)['horizontalOffset'] > 0
-            assert app.rpc('debug.previousOutput', pane='p1', horizontalEnd=False)['horizontalOffset'] == 0
-            app.rpc('debug.previousOutput', pane='p1', find=True)
-            assert app.rpc('debug.previousOutput', pane='p1')['findVisible']
-            for width, height, name in [(860, 620, 'regular'), (480, 360, 'compact')]:
-                app.rpc('debug.previousOutput', pane='p1', width=width, height=height)
-                path = ROOT / f'artifacts/terminal-previous-output-{name}.png'
-                app.rpc('debug.screenshot', pane='p1', previousOutput=True, path=str(path))
-                assert path.stat().st_size > 1000
-
             set_limit(app, 5)
-            eventually('lower line cap trims retained output', lambda: previous(app)['lineCount'] <= 5)
             eventually('lower cap persisted', lambda: saved_output(app) is not None and len(saved_output(app)['text'].splitlines()) <= 5)
-            app.rpc('command.run', id='terminal.previousOutput.clear', pane='p1')
-            assert not previous(app)['available'] and previous(app)['text'] == ''
-            eventually('clear purges historical text', lambda: FINAL_MARKER not in (saved_output(app) or {}).get('text', '') and READY_MARKER not in (saved_output(app) or {}).get('text', ''))
-            assert not app.rpc('debug.previousOutput', pane='p1')['visible']
-            assert not replay.exists()
-
-        with AppFixture('terminal-recovery-native-clear', workspace_source=source) as app:
-            app.capture_contracts()
-            prompt(app)
-            app.rpc('command.run', id='terminal.previousOutput', pane='p1')
-            assert app.rpc('debug.previousOutput', pane='p1')['visible']
-            app.rpc('debug.previousOutput', pane='p1', clear=True)
-            assert not previous(app)['available']
-            assert not app.rpc('debug.previousOutput', pane='p1')['visible']
-            eventually('native clear removes historical marker', lambda: FINAL_MARKER not in (saved_output(app) or {}).get('text', ''))
-
         # A loaded snapshot near the byte cap exercises UTF-8 storage independently
         # of the engine's separate scrollback-cell budget and terminal wrapping.
         unicode_source = json.loads(source)
@@ -316,17 +274,15 @@ while True: time.sleep(0.1)
                         workspace_source=json.dumps(unicode_source, ensure_ascii=False)) as app:
             app.capture_contracts()
             prompt(app)
-            tail = previous(app, maxBytes=113)
-            assert tail['available'] and tail['byteCount'] <= 113 and '\ufffd' not in tail['text']
-            assert 'UNICODE_RECOVERY_TAIL' in tail['text']
+            screen = app.rpc('terminal.capture', pane='p1')['text']
+            assert '\ufffd' not in screen and 'UNICODE_RECOVERY_TAIL' in screen
             assert not app.rpc('config.get')['workspace']['savingSuspended']
             assert len(saved_output(app)['text'].encode()) <= MAXIMUM_BYTES
             assert not replay.exists()
             set_limit(app, 0)
-            assert not previous(app)['available']
             eventually('zero removes all stored output', lambda: not snapshot(app).get('restoration', {}).get('terminalOutput'))
             app.rpc('terminal.run', pane='p1', command="printf 'DISABLED_%s\\n' OUTPUT")
-            assert 'DISABLED_OUTPUT' in app.rpc('terminal.history', pane='p1')['text']
+            assert 'DISABLED_OUTPUT' in app.rpc('terminal.capture', pane='p1')['text']
             quit_normally(app)
             zero_source = (app.root / 'state/workspace.json').read_text()
             assert not json.loads(zero_source)['restoration'].get('terminalOutput')
@@ -335,8 +291,7 @@ while True: time.sleep(0.1)
                         workspace_source=zero_source) as app:
             app.capture_contracts()
             prompt(app)
-            assert not previous(app)['available']
-            assert 'DISABLED_OUTPUT' not in app.rpc('terminal.history', pane='p1')['text']
+            assert 'DISABLED_OUTPUT' not in app.rpc('terminal.capture', pane='p1')['text']
             assert not replay.exists()
         with AppFixture('terminal-recovery-alternate') as app:
             prompt(app)
@@ -356,4 +311,4 @@ while True: time.sleep(0.1)
     finally:
         cleanup_owned(directory, script)
 
-print('PASS terminal recovery: bounded shutdown, final output, detached/sibling isolation, fresh-shell history, native viewer, Unicode caps, lower/zero/clear purge and no replay')
+print('PASS terminal recovery: bounded shutdown, final output, detached/sibling isolation, fresh-shell history, inline display, Unicode caps, lower/zero retention and no replay')

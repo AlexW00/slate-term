@@ -54,7 +54,7 @@ with tempfile.TemporaryDirectory(prefix='slate-restoration-', dir='/tmp') as tem
         eventually('restored cwd in a fresh authenticated shell', lambda: context()['state'] == 'prompt' and context()['workingDirectory'] == str(directory))
         assert app.rpc('pane.inspect', pane='p1')['sessionId'] != original_session
         assert marker.read_text() == 'once', 'A command was replayed'
-        assert 'RESTORATION_OUTPUT_SENTINEL' not in app.rpc('terminal.history', pane='p1')['text']
+        assert 'RESTORATION_OUTPUT_SENTINEL' not in app.rpc('terminal.capture', pane='p1')['text']
         eventually('normal browser starting location', lambda: app.rpc('browser.get', pane=normal)['url'] == page_url)
         assert app.rpc('browser.get', pane=private)['url'] == 'about:blank'
         restored_frame = app.rpc('window.list')['windows'][0]['frame']

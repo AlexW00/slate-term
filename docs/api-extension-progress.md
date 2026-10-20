@@ -1,5 +1,14 @@
 # API extension implementation progress
 
+## Previous-output simplification
+
+Removed the separate viewer, pane-header action, Show/Clear commands, and
+`terminal.history` / `terminal.historyExport` across the shared catalog, CLI,
+plugin bridge, and service dispatch. Saved output remains internal to restoration;
+normal capture and Find/search remain available. Historical entries below describe
+the earlier API. Current verification is recorded in `terminal-recovery-implementation.md`.
+
+
 ## Public release 0.2.1 — published; production upgrade verified
 
 The public release branch combines product changes from local main `11861a7`
@@ -746,3 +755,47 @@ See [implementation scope and verification boundaries](layout-apps-implementatio
 ### Original layout restoration — implemented, native verification pending
 
 `layouts.restoreOriginal` restores all windows in a layout app from its current parent recipe. Native menu/picker/shortcuts, CLI, registered-page helper and service APIs reuse the guarded preparation/commit path. Standard Slate omits the command and reports the operation unavailable. Running-process consent and frozen workspace/recipe checks protect teardown; settings, browser profile and shared plugin data are retained. Focused model/schema tests cover replacement identity and contracts; the layout-app lifecycle gate contains runtime coverage, pending the coordinator's changed-source VM run.
+
+## Browser file chooser follow-up
+
+Implemented native upload panels and shared `web.fileChooser`, `web.chooseFiles`,
+`web.cancelFileChooser` operations with CLI/generated-page parity. Select/cancel
+use a single-use chooser ID; navigation/closure retire it. Invalid selections are
+atomic. Native upload controls and API completion share one WebKit callback.
+The web gate covers returned file bytes, invalid paths, stale IDs, multiple and
+directory selection, cancellation and navigation. Verification results are recorded
+in the selected VM runner receipt; release installation remains separate.
+
+## Browser integration completion — implementation verified
+
+Outcome: browser and private-browser panes support upload selection, downloads,
+JavaScript dialogs and independent popup/login windows. Trusted automation and
+native controls share each operation, including resource identity and cancellation.
+Refresh Browser remains available through Cmd-R and the command picker.
+
+Acceptance: controlled VM fixtures prove transferred bytes, alert/confirm/prompt
+results, popup opener messaging and session isolation, stale identity rejection,
+and closure cleanup. Native panels/windows receive rendered review. Release QA
+covers the signed DMG and the previous-version update path separately.
+
+Non-goals: bypassing identity-provider restrictions or adding passkeys, camera,
+microphone, extension support, or a complete browser tab manager.
+
+Implementation and shared API/CLI integration are complete. Final isolated-source
+checks passed: 547 package tests, 72 VM-runner tests, the web gate including native
+Save confirmation and popup login input, plus browser and command-picker gates.
+The shared catalog audit accepted 2,486 responses across 31 methods and eight
+command IDs. Independent source review found no actionable issues. Independent
+rendered review found no defects in the native save/dialog/download UI and popup
+chrome. Receipts: `20261020T161205Z-9c0760f2`,
+`20261020T161934Z-87305e9d`, and `20261020T162040Z-25f1361e`.
+
+The macOS 27.0.1 VM still has its previously diagnosed WebKit IOSurface display
+failure: native page content is blank while WebKit snapshots and input work.
+This also occurs in unchanged signed Slate and an independent WKWebView probe.
+The popup page snapshot is not a native compositor pass. No private WebKit API
+or persistent graphics workaround was added to the app.
+
+Remaining release milestones: integrate the committed change into the maintained
+public release checkout, verify the signed DMG, publish, and verify the real
+previous-version update path. Commit and publication are user-authorized.

@@ -29,7 +29,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
     case panelStateGet = "plugins.panelState.get", panelStatePatch = "plugins.panelState.patch", panelStateReset = "plugins.panelState.reset"
     case paneTitle = "pane.title"
     case terminalSend = "terminal.send", terminalKey = "terminal.key", terminalCapture = "terminal.capture"
-    case terminalHistory = "terminal.history", terminalHistoryExport = "terminal.historyExport", terminalSearch = "terminal.search"
+    case terminalSearch = "terminal.search"
     case terminalRun = "terminal.run", terminalWait = "terminal.wait", terminalStart = "terminal.start"
     case terminalOperations = "terminal.operations", terminalOperationStatus = "terminal.operationStatus"
     case terminalOperationResult = "terminal.operationResult", terminalOperationWait = "terminal.operationWait"
@@ -40,6 +40,12 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
     case webGet = "web.get", webSnapshot = "web.snapshot", webClick = "web.click", webFill = "web.fill"
     case webSelect = "web.select", webScroll = "web.scroll", webWait = "web.wait", webScreenshot = "web.screenshot"
     case webFocus = "web.focus", webKey = "web.key", webCheck = "web.check", webSetValue = "web.setValue"
+    case webFileChooser = "web.fileChooser", webChooseFiles = "web.chooseFiles", webCancelFileChooser = "web.cancelFileChooser"
+    case webDialog = "web.dialog", webRespondDialog = "web.respondDialog"
+    case browserShowDownloads = "browser.showDownloads"
+    case browserDownloads = "browser.downloads", browserDownload = "browser.download"
+    case browserSaveDownload = "browser.saveDownload", browserCancelDownload = "browser.cancelDownload"
+    case browserPopups = "browser.popups", browserClosePopup = "browser.closePopup"
     case browserClearData = "browser.clearData", browserClearSiteData = "browser.clearSiteData"
     case browserListData = "browser.listData", browserRemoveSiteData = "browser.removeSiteData"
     case browserGet = "browser.get", browserNavigate = "browser.navigate", browserSnapshot = "browser.snapshot"
@@ -60,12 +66,12 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
              .updatesGet, .updatesShow, .updatesCheck, .updatesDownload, .updatesCancel, .updatesInstall, .updatesOpenParent: .synchronous
         case .notificationsPost, .notificationsList, .notificationsDismiss, .notificationsStatus: .notifications
         case .layoutConfiguration, .contextInspect, .settingsGet, .paneTitle: .contextual
-        case .terminalSend, .terminalKey, .terminalCapture, .terminalRun, .terminalWait, .terminalStart, .terminalHistory, .terminalHistoryExport, .terminalSearch: .terminal
+        case .terminalSend, .terminalKey, .terminalCapture, .terminalRun, .terminalWait, .terminalStart, .terminalSearch: .terminal
         case .terminalOperations, .terminalOperationStatus, .terminalOperationResult, .terminalOperationWait: .terminalOperations
         case .pluginDataGet, .pluginDataPatch, .pluginDataReset, .panelStateGet, .panelStatePatch, .panelStateReset: .pluginPersistence
-        case .browserGet, .browserNavigate, .browserSnapshot, .browserClick, .browserFill, .browserSelect,
+        case .browserShowDownloads, .browserDownloads, .browserDownload, .browserSaveDownload, .browserCancelDownload, .browserPopups, .browserClosePopup, .browserGet, .browserNavigate, .browserSnapshot, .browserClick, .browserFill, .browserSelect,
              .browserScroll, .browserWait, .browserEval, .browserScreenshot, .browserClearData, .browserClearSiteData, .browserListData, .browserRemoveSiteData: .browser
-        case .webGet, .webSnapshot, .webClick, .webFill, .webSelect, .webScroll, .webWait, .webFocus, .webKey, .webCheck, .webSetValue, .webScreenshot: .web
+        case .webGet, .webSnapshot, .webClick, .webFill, .webSelect, .webScroll, .webWait, .webFocus, .webKey, .webCheck, .webSetValue, .webDialog, .webRespondDialog, .webFileChooser, .webChooseFiles, .webCancelFileChooser, .webScreenshot: .web
         case .eventsHead, .eventsPoll, .eventsEmit: .events
         case .pluginsRestart: .pluginRuntime
         case .serviceStart, .serviceStop, .serviceList, .serviceStatus, .serviceLogs, .serviceReady: .services
@@ -84,14 +90,14 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
              .tabsList, .panesList, .paneInspect, .commandList, .windowList, .windowGet, .configGet, .configValidate,
              .paletteList, .appearanceGet, .welcomeGet, .skillsList, .pluginsList, .pluginsValidate, .pluginsStatus, .pluginsLogs, .pluginSettingsGet, .settingsGet, .pluginDataGet, .panelStateGet,
              .terminalOperations, .terminalOperationStatus, .terminalOperationResult, .terminalOperationWait,
-             .terminalCapture, .terminalWait, .terminalHistory, .panesCapture, .eventsHead, .eventsPoll, .webGet, .webSnapshot, .webWait,
-             .browserGet, .browserSnapshot, .browserWait, .browserListData, .serviceList, .serviceStatus, .serviceLogs,
+             .terminalCapture, .terminalWait, .panesCapture, .eventsHead, .eventsPoll, .webDialog, .webFileChooser, .webGet, .webSnapshot, .webWait,
+             .browserDownloads, .browserDownload, .browserPopups, .browserGet, .browserSnapshot, .browserWait, .browserListData, .serviceList, .serviceStatus, .serviceLogs,
              .notificationsList, .notificationsStatus, .presenceList, .presenceHold, .presenceRelease, .updatesGet: .read
         case .layoutAppsRefresh, .layoutsCreate, .layoutsUpdate, .layoutsCapture, .layoutsOpen, .layoutsRestoreOriginal, .layoutsLauncher, .commandRun, .configReload, .configPatch, .configResetOverrides, .paletteImport, .skillsInstall, .skillsUninstall, .pluginsRegister, .pluginsUnregister, .pluginsEnable, .pluginsDisable,
              .pluginsRestart, .pluginSettingsPatch, .pluginDataPatch, .pluginDataReset, .panelStatePatch, .panelStateReset, .paneTitle, .terminalSend,
-             .terminalKey, .terminalRun, .terminalStart, .terminalHistoryExport, .terminalSearch, .panesSend, .eventsEmit, .webClick, .webFill, .webSelect, .webScroll,
-             .webFocus, .webKey, .webCheck, .webSetValue, .webScreenshot, .browserNavigate, .browserClick, .browserFill, .browserSelect, .browserScroll,
-             .browserEval, .browserScreenshot, .browserClearData, .browserClearSiteData, .browserRemoveSiteData, .serviceStart,
+             .terminalKey, .terminalRun, .terminalStart, .terminalSearch, .panesSend, .eventsEmit, .webClick, .webFill, .webSelect, .webScroll,
+             .webFocus, .webKey, .webCheck, .webSetValue, .webRespondDialog, .webChooseFiles, .webCancelFileChooser, .webScreenshot, .browserNavigate, .browserClick, .browserFill, .browserSelect, .browserScroll,
+             .browserShowDownloads, .browserSaveDownload, .browserCancelDownload, .browserClosePopup, .browserEval, .browserScreenshot, .browserClearData, .browserClearSiteData, .browserRemoveSiteData, .serviceStart,
              .notificationsPost, .notificationsDismiss, .presenceFocus, .updatesShow, .updatesCheck, .updatesDownload, .updatesCancel, .updatesInstall, .updatesOpenParent: .mutation
         }
     }
@@ -116,11 +122,11 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
         case .notificationsPost:
             if params["active"] != .bool(true) { inheritPane() }
         case .panelStateGet, .panelStatePatch, .panelStateReset, .layoutConfiguration, .contextInspect, .layoutGet, .paneInspect, .paneTitle,
-             .webGet, .webSnapshot, .webClick, .webFill, .webSelect, .webScroll, .webWait, .webFocus, .webKey, .webCheck, .webSetValue, .webScreenshot,
-             .browserGet, .browserNavigate, .browserSnapshot, .browserClick, .browserFill, .browserSelect,
+             .webGet, .webSnapshot, .webClick, .webFill, .webSelect, .webScroll, .webWait, .webFocus, .webKey, .webCheck, .webSetValue, .webDialog, .webRespondDialog, .webFileChooser, .webChooseFiles, .webCancelFileChooser, .webScreenshot,
+             .browserShowDownloads, .browserDownloads, .browserDownload, .browserSaveDownload, .browserCancelDownload, .browserPopups, .browserClosePopup, .browserGet, .browserNavigate, .browserSnapshot, .browserClick, .browserFill, .browserSelect,
              .browserScroll, .browserWait, .browserEval, .browserScreenshot, .browserClearSiteData, .panesSend, .panesCapture:
             inheritPane()
-        case .terminalSend, .terminalKey, .terminalCapture, .terminalRun, .terminalWait, .terminalStart, .terminalHistory, .terminalHistoryExport, .terminalSearch:
+        case .terminalSend, .terminalKey, .terminalCapture, .terminalRun, .terminalWait, .terminalStart, .terminalSearch:
             inheritPane(); inheritScope()
         case .commandRun:
             if let id = input["id"]?.string {

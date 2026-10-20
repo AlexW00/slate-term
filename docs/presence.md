@@ -46,7 +46,7 @@ An agent that runs a plugin command through `command run` shows on that command'
 
 | Call | Frame and tag on |
 | --- | --- |
-| `terminal capture/history/historyExport/search/send/key/run/start/wait`, `panes send/capture` | The pane |
+| `terminal capture/search/send/key/run/start/wait`, `panes send/capture` | The pane |
 | `pane.title`, `plugins.panelState.patch/reset`, `browser.clearSiteData` | The pane |
 | `web snapshot/screenshot`, `browser snapshot/screenshot/navigate/eval`, `web scroll` without a target, an unmatched `web wait` | The pane |
 | `web click/fill/select/check/set-value/focus/key`, `web scroll` with a target, matched `web wait`, `browser click/fill/select/scroll/wait` | The element, using the action's returned `rect` |

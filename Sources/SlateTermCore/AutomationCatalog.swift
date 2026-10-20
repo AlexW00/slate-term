@@ -19,7 +19,7 @@ public enum AutomationCatalog {
         var methods: [AutomationMethod: AutomationContract] = [:]
         for slice in [AutomationContracts.terminal, AutomationContracts.workspace, AutomationContracts.events, AutomationContracts.notifications,
                       AutomationContracts.updates, AutomationContracts.services, AutomationContracts.settings, AutomationContracts.contextual, AutomationContracts.skills,
-                      AutomationContracts.plugins, AutomationContracts.pluginPersistence, AutomationContracts.presence, AutomationContracts.savedLayouts, AutomationContracts.web, AutomationContracts.discovery] {
+                      AutomationContracts.plugins, AutomationContracts.pluginPersistence, AutomationContracts.presence, AutomationContracts.savedLayouts, AutomationContracts.web, AutomationContracts.webDialogs, AutomationContracts.browserDownloads, AutomationContracts.browserPopups, AutomationContracts.discovery] {
             methods.merge(slice) { _, _ in preconditionFailure("Duplicate method contract") }
         }
         precondition(Set(methods.keys) == Set(AutomationMethod.publicMethods), "Incomplete public method catalog")
@@ -30,7 +30,7 @@ public enum AutomationCatalog {
         var definitions: [String: JSONValue] = [:]
         for slice in [AutomationContracts.workspaceDefinitions, AutomationContracts.eventDefinitions, AutomationContracts.notificationDefinitions,
                       AutomationContracts.updateDefinitions, AutomationContracts.serviceDefinitions, AutomationContracts.settingsDefinitions, AutomationContracts.skillDefinitions,
-                      AutomationContracts.pluginDefinitions, AutomationContracts.pluginPersistenceDefinitions, AutomationContracts.presenceDefinitions, AutomationContracts.savedLayoutDefinitions, AutomationContracts.webDefinitions,
+                      AutomationContracts.pluginDefinitions, AutomationContracts.pluginPersistenceDefinitions, AutomationContracts.presenceDefinitions, AutomationContracts.savedLayoutDefinitions, AutomationContracts.webDefinitions, AutomationContracts.webDialogDefinitions, AutomationContracts.browserDownloadDefinitions, AutomationContracts.browserPopupDefinitions,
                       AutomationContracts.commandDefinitions, AutomationContracts.applicationCommandDefinitions,
                       AutomationContracts.contributedCommandDefinitions, AutomationContracts.discoveryDefinitions] {
             definitions.merge(slice) { _, _ in preconditionFailure("Duplicate schema definition") }

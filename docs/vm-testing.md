@@ -128,6 +128,15 @@ Behavior-changing upgrade baselines may include `fixture-source-variant.json` be
 
 ## Native Create App save-panel input
 
+For file upload panels, run `python3 scripts/verify-vm.py web --external-file-input`.
+The web fixture prints `FILE_CHOOSER_NATIVE_CANCEL_READY`, waits up to 120 seconds
+for native cancellation, then prints `FILE_CHOOSER_NATIVE_SELECT_READY` with its
+owned local file path and waits for native selection. Use VMPal keyboard/pointer
+input; macOS hosts the dialog in another process, so app-injected key events do
+not establish native interaction. The gate verifies the selected file and its
+contents. Default runs capture the native sheet and complete it through the public
+API. The runner retains its normal lease, source receipts and cleanup in both modes.
+
 The default `layout-apps-ui` gate captures and cancels the real save panel, then
 creates its child-app fixture through the public API. macOS hosts save panels in
 a separate process and does not allow the app to invoke their OK action.
@@ -139,3 +148,8 @@ stale-source rejection, destination collision, and successful chosen-name/locati
 creation. The runner retains the ordinary VM lease, provenance, and cleanup, and
 records this external-input mode in its receipt. A timeout fails the check; it
 never substitutes a successful save response.
+
+Use `--external-browser-input` with the web gate for real VMPal input at the
+download Save panel and popup login button. The fixture prints
+`DOWNLOAD_NATIVE_SAVE_READY <path>` and `POPUP_NATIVE_LOGIN_READY`, then waits
+for native completion. It validates the saved bytes and opener message itself.

@@ -138,7 +138,7 @@ struct Target: ParsableArguments {
 struct TerminalCommand: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "terminal", abstract: "Generic terminal I/O and authenticated shell run/wait operations.")
     enum Action: String, CaseIterable, ExpressibleByArgument {
-        case send, key, capture, run, wait, start, history, historyExport, search
+        case send, key, capture, run, wait, start, search
         case operations, operationStatus, operationResult, operationWait
     }
     @Argument var action: Action
@@ -153,18 +153,11 @@ struct TerminalCommand: ParsableCommand {
     @Option(help: "Logical key, e.g. ctrl+c, alt+left, shift+tab; text entry uses send.") var key: String?
     @Option(help: "Wait for this literal screen text instead of a shell prompt.") var contains: String?
     @Option(help: "Require a later authenticated prompt sequence.") var afterSequence: Int?
-    @Option(help: "History source: current terminal or previous saved output; default current.") var source: TerminalHistoryRequest.Source?
-    @Option(help: "History tail byte limit, 1...131072.") var maxBytes: Int?
-    @Option(help: "History tail line limit, 1...10000.") var maxLines: Int?
-    @Option(help: "New absolute local file for historyExport; never overwrites.") var path: String?
     @Option(help: "Search action: get, set, next, previous, end.") var searchAction: String?
     @Option(help: "Literal search query for search --search-action set.") var query: String?
     @Option(help: "Run/wait deadline in milliseconds, 1...295000; default 30000. Expiry does not stop the process.") var timeoutMilliseconds: Int?
 
     func run() throws {
-        if source != nil, action != .history && action != .historyExport {
-            throw ValidationError("--source applies only to terminal history or historyExport")
-        }
         let handleLookup = AutomationMethod(rawValue: "terminal.\(action.rawValue)")?.family == .terminalOperations
         if handleLookup {
             guard target.pane == nil, target.tab == nil, !target.force, !target.active,
@@ -185,10 +178,6 @@ struct TerminalCommand: ParsableCommand {
         if let key { params["key"] = .string(key) }
         if let contains { params["contains"] = .string(contains) }
         if let afterSequence { params["afterSequence"] = .integer(afterSequence) }
-        if let source { params["source"] = .string(source.rawValue) }
-        if let maxBytes { params["maxBytes"] = .integer(maxBytes) }
-        if let maxLines { params["maxLines"] = .integer(maxLines) }
-        if let path { params["path"] = .string(path) }
         if let searchAction { params["action"] = .string(searchAction) }
         if let query { params["query"] = .string(query) }
         let timeout = timeoutMilliseconds ?? 30_000
@@ -431,9 +420,16 @@ struct ShellCommand: ParsableCommand {
 struct BrowserCommand: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "browser", abstract: "Control browser panes and stored website data.")
     enum Action: String, CaseIterable, ExpressibleByArgument { case get, navigate, eval, screenshot, snapshot, click, fill, select, scroll, wait
+        case showDownloads = "show-downloads"
+        case downloads, download, popups
+        case saveDownload = "save-download", cancelDownload = "cancel-download", closePopup = "close-popup"
         case clearData = "clear-data", clearSiteData = "clear-site-data", listData = "list-data", removeSiteData = "remove-site-data"
         var method: String {
             switch self {
+            case .showDownloads: "browser.showDownloads"
+            case .saveDownload: "browser.saveDownload"
+            case .cancelDownload: "browser.cancelDownload"
+            case .closePopup: "browser.closePopup"
             case .clearData: "browser.clearData"
             case .clearSiteData: "browser.clearSiteData"
             case .listData: "browser.listData"
@@ -445,6 +441,10 @@ struct BrowserCommand: ParsableCommand {
     @Argument var action: Action
     @OptionGroup var connection: Connection
     @OptionGroup var target: Target
+    @Option var expectedViewId: String?
+    @Option var expectedDocumentId: String?
+    @Option var popupId: String?
+    @Option var downloadId: String?
     @Option var url: String?
     @Option(help: "An exact stored site name returned by browser list-data.") var site: String?
     @Option var script: String?
@@ -460,6 +460,10 @@ struct BrowserCommand: ParsableCommand {
     @Option var timeoutMilliseconds: Int?
     func run() throws {
         var params = try target.params(connection: connection, inheritingTarget: ![.clearData, .listData, .removeSiteData].contains(action))
+        if let expectedViewId { params["expectedViewId"] = .string(expectedViewId) }
+        if let expectedDocumentId { params["expectedDocumentId"] = .string(expectedDocumentId) }
+        if let popupId { params["popupId"] = .string(popupId) }
+        if let downloadId { params["downloadId"] = .string(downloadId) }
         if let url { params["url"] = .string(url) }
         if let site { params["site"] = .string(site) }
         if let script { params["script"] = .string(script) }
@@ -581,7 +585,6 @@ struct Version: ParsableCommand {
 }
 
 extension ShellKind: ExpressibleByArgument {}
-extension TerminalHistoryRequest.Source: ExpressibleByArgument {}
 
 /// Detached delivery for shell reports. posix_spawn, not fork: a forked Swift process must
 /// not run Foundation or Dispatch code. The copy starts its own session with no terminal, so

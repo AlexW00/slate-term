@@ -147,29 +147,15 @@ claimed; manual release QA and remaining coverage limits are listed at the end.
   operations. Queries are literal, at most 4096 UTF-8 bytes without NUL. Search is
   asynchronous: count/selection can be null until the engine reports them. Selected
   indices are zero-based. Empty query clears matches while keeping Find open.
-- `terminal.history` returns a tail of retained text including the active screen,
-  limited to 128 KiB and 10,000 newline-delimited logical lines (default 2,000).
-  Results include text, byteCount, lineCount, truncated, paneId and sessionId.
-  This is neither a stable paginated snapshot nor command stdout. History lost to
-  engine eviction, clearing, or session replacement cannot be recovered. The active
-  alternate screen is read when a TUI uses it; no hidden primary-screen archive is promised.
-- The pinned embedding API allocates its retained-text dump before Slate clips the
-  returned UTF-8 tail. Response limits are not a promise that the engine allocation
-  is that small; retention remains bounded by the engine's existing memory policy.
-- `terminal.historyExport` accepts the same limits plus an explicit absolute path.
-  It creates a private mode-0600 file without overwriting existing paths or following
-  a final symlink. Failure during writing can leave a partial newly-created file.
-  No implicit logging or transcript persistence is enabled.
 - `terminal.capture` now actually reads the active screen, independently of the
   user's scroll position. The old implementation used Ghostty's `SCREEN` coordinate
   tag, which means **all retained rows**, contrary to Slate's documented contract.
-  The explicit history API replaces that accidental behavior.
+  Saved output is displayed inline on restoration; separate history read/export
+  APIs and the previous-output viewer have been removed.
 
 Examples:
 
 ```sh
-slate-term terminal history --pane p1 --max-lines 1000 --max-bytes 65536
-slate-term terminal historyExport --pane p1 --path /absolute/new-output.txt
 slate-term terminal search --pane p1 --search-action set --query 'error'
 slate-term terminal search --pane p1 --search-action next
 slate-term terminal search --pane p1 --search-action get
@@ -177,19 +163,16 @@ slate-term terminal search --pane p1 --search-action end
 slate-term command run terminal.find --pane p1
 ```
 
-Registered pages have `workspace.terminal.history`, `.historyExport` and `.search`;
-services use the same catalog and methods. All accept explicit pane/session routing
-and normal host guards. Export is a trusted local-file operation. Discovery is under
-`api.describe.terminalHistory` and `.terminalSearch`; see the API contracts section
-below for the later complete-catalog implementation and its verification status.
+Registered pages have `workspace.terminal.search`; services use the same catalog
+and method. It accepts explicit pane/session routing and normal host guards.
+Discovery is under `api.describe.terminalSearch`.
 
 ## Verification
 
-New package tests cover line/byte-limit validation and search-request invariants.
-`scripts/verify-terminal-history.py` is registered in the shared VM gate inventory
-for real engine history/active-screen separation, search, native commands, CLI/page
-parity, safe export and replacement guards. The three-client service fixture also
-covers history/search discovery and routing.
+Package tests cover search-request invariants and rejection of removed history
+commands. `scripts/verify-terminal-history.py` covers active-screen capture,
+retained-history search, native Find, CLI/page parity, and session guards. The
+three-client service fixture covers capture/search discovery and routing.
 
 ## Plugin compatibility slice — implemented, selected verification passed
 

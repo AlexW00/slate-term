@@ -147,10 +147,8 @@ def verify_trusted_api(app, service_call):
                 expectedViewId=web['viewId'], expectedDocumentId=web['documentId']))
             assert app.rpc('browser.eval', pane=browser, script="document.querySelector('#value').value") == name
             call('terminal.capture', {'pane': 'p1'})
-            tail = call('terminal.history', {'pane': 'p1', 'maxBytes': 1024, 'maxLines': 5})
-            assert tail['byteCount'] <= 1024 and tail['lineCount'] <= 5
             assert call('terminal.search', {'pane': 'p1', 'action': 'get'})['paneId'] == 'p1'
-            call('terminal.history', {'pane': 'p1', 'sessionId': 'stale'}, error=-32022)
+            call('terminal.capture', {'pane': 'p1', 'sessionId': 'stale'}, error=-32022)
         # Existing zoom must still withhold hidden document actions without retiring it.
         before = app.rpc('web.get', pane=panel)
         service_call('command.run', dict(id='pane.zoom', pane='p1'))

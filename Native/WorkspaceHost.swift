@@ -61,7 +61,6 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }, retireOwned: { [weak self] owner in
             self?.pluginCommands.cancelOwned(by: owner) ?? Task { false }
         })
-    private let previousOutputActionRevision = UUID()
     private var headerActionRevisions: [String: UUID] = [:]
     private let runtime: GhosttyRuntime
     private var server: UnixServer?
@@ -85,7 +84,6 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     private var persistedTerminalOutput: [String: SavedTerminalOutput] = [:]
     private(set) var isTerminating = false
     private var retiringTerminals: [UUID: TerminalView] = [:]
-    private var previousOutputWindows: [PaneID: PreviousOutputWindowController] = [:]
     private var processNames: [PaneID: String] = [:]
     private var shellNames: [PaneID: String] = [:]
     var terminals: [PaneID: TerminalView] = [:]
@@ -469,7 +467,6 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         testPasteboard = nil
         titleTimer?.cancel(); titleTimer = nil
         outputTimer?.cancel(); outputTimer = nil
-        previousOutputWindows.values.forEach { $0.close() }; previousOutputWindows.removeAll()
         configurationWatcher?.close()
         configurationWatcher = nil
         parentConfigurationWatcher?.close(); parentConfigurationWatcher = nil
@@ -1144,18 +1141,43 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }
         if contract?.family == .web { return try await callWeb(method, params: params, operation: operation) }
         guard contract?.family == .browser else { return try call(method, params: params, operation: operation) }
+        let strictBrowserMethods = ["browser.popups", "browser.closePopup", "browser.downloads", "browser.download",
+                                    "browser.saveDownload", "browser.cancelDownload", "browser.showDownloads"]
+        if strictBrowserMethods.contains(method), params["pane"]?.string == nil {
+            throw RPCFailure(code: -32602, message: "This browser method requires an explicit pane")
+        }
+        if method == "browser.popups" || method == "browser.closePopup" {
+            let allowed: Set<String> = method == "browser.popups" ? ["pane", "tab"] : ["pane", "tab", "popupId"]
+            guard Set(withoutAPIGuards(params).keys).isSubset(of: allowed) else {
+                throw RPCFailure(code: -32602, message: "Unknown popup parameter")
+            }
+        }
         let pane = try targetPaneID(params)
-        guard let browser = leaves[pane] as? BrowserPane else { throw RPCFailure(code: -32602, message: "Target pane is not a browser") }
+        guard let rootBrowser = leaves[pane] as? BrowserPane else { throw RPCFailure(code: -32602, message: "Target pane is not a browser") }
+        let popupID = params["popupId"]?.string
+        if params["popupId"] != nil && (popupID == nil || popupID!.isEmpty) {
+            throw RPCFailure(code: -32602, message: "popupId must be a nonempty string")
+        }
+        let browser = try popupID.map { try rootBrowser.popup(id: $0) } ?? rootBrowser
         params["pane"] = .string(pane.description)
         params["tab"] = .string(try targetTab(params).id.description)
         let captured = params
-        let precondition: @MainActor () throws -> Void = { [weak self, weak browser] in
-            guard let self, let browser, self.leaves[pane] === browser else { throw RPCFailure(code: -32022, message: "Browser pane was replaced") }
+        let precondition: @MainActor () throws -> Void = { [weak self, weak browser, weak rootBrowser] in
+            guard let self, let browser, let rootBrowser, self.leaves[pane] === rootBrowser,
+                  try (popupID.map { try rootBrowser.popup(id: $0) } ?? rootBrowser) === browser else { throw RPCFailure(code: -32022, message: "Browser pane was replaced") }
             try operation.validateCaller()
             try self.validateAPIGuards(captured, method: method)
         }
         params = withoutAPIGuards(params)
+        try precondition()
+        if method != "browser.closePopup" { params.removeValue(forKey: "popupId") }
         switch method {
+        case "browser.popups": return rootBrowser.popupInfo
+        case "browser.closePopup":
+            guard let popupID else { throw RPCFailure(code: -32602, message: "popupId is required") }
+            return try rootBrowser.closePopup(id: popupID, expected: WebIdentity.expected(in: captured))
+        case "browser.downloads", "browser.download", "browser.saveDownload", "browser.cancelDownload", "browser.showDownloads":
+            return try browser.downloads.operation(BrowserDownloadRequest(method: method, params: params))
         case "browser.get": return browser.info
         case "browser.snapshot", "browser.click", "browser.fill", "browser.select", "browser.scroll", "browser.wait":
             return try await browser.automate(BrowserAction(kind: String(method.dropFirst("browser.".count)), params: params), beforeSubmission: precondition)
@@ -1486,28 +1508,6 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 container.showMoveMenu()
                 return .object(["paneId": .string(pane.description)])
             }
-            if id == "terminal.previousOutput" || id == "terminal.previousOutput.clear" {
-                guard Set(withoutAPIGuards(params).keys).isSubset(of: ["id", "pane", "tab"]) else {
-                    throw RPCFailure(code: -32602, message: "Unknown previous output parameter")
-                }
-                let pane = try targetPaneID(params)
-                guard let terminal = terminals[pane], let output = terminal.previousOutput else {
-                    throw RPCFailure(code: APIError.unavailable, message: "This terminal has no previous output")
-                }
-                if id == "terminal.previousOutput.clear" {
-                    terminal.clearPreviousOutput()
-                    persistWorkspace()
-                } else {
-                    let viewer = previousOutputWindows[pane] ?? PreviousOutputWindowController(output: output)
-                    viewer.onClear = { [weak self, weak terminal] in
-                        guard let self, let terminal, self.terminals[pane] === terminal else { return }
-                        self.runUserCommand("terminal.previousOutput.clear", params: ["pane": .string(pane.description)])
-                    }
-                    previousOutputWindows[pane] = viewer
-                    viewer.show()
-                }
-                return .object(["paneId": .string(pane.description)])
-            }
             if id == "terminal.find" || id.hasPrefix("terminal.find.") {
                 guard Set(withoutAPIGuards(params).keys).isSubset(of: ["id", "pane", "tab"]) else {
                     throw RPCFailure(code: -32602, message: "Unknown terminal Find parameter")
@@ -1620,11 +1620,11 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         case .notificationsPost, .notificationsList, .notificationsDismiss, .notificationsStatus,
              .layoutConfiguration, .contextInspect, .settingsGet, .pluginDataGet, .pluginDataPatch, .pluginDataReset,
              .panelStateGet, .panelStatePatch, .panelStateReset, .paneTitle,
-             .terminalSend, .terminalKey, .terminalCapture, .terminalRun, .terminalWait, .terminalStart, .terminalHistory, .terminalHistoryExport, .terminalSearch,
+             .terminalSend, .terminalKey, .terminalCapture, .terminalRun, .terminalWait, .terminalStart, .terminalSearch,
              .terminalOperations, .terminalOperationStatus, .terminalOperationResult, .terminalOperationWait,
              .eventsHead, .eventsPoll, .eventsEmit, .pluginsRestart,
-             .webGet, .webSnapshot, .webClick, .webFill, .webSelect, .webScroll, .webWait, .webFocus, .webKey, .webCheck, .webSetValue, .webScreenshot,
-             .browserGet, .browserNavigate, .browserSnapshot, .browserClick, .browserFill, .browserSelect,
+             .webGet, .webSnapshot, .webClick, .webFill, .webSelect, .webScroll, .webWait, .webFocus, .webKey, .webCheck, .webSetValue, .webDialog, .webRespondDialog, .webFileChooser, .webChooseFiles, .webCancelFileChooser, .webScreenshot,
+             .browserShowDownloads, .browserDownloads, .browserDownload, .browserSaveDownload, .browserCancelDownload, .browserPopups, .browserClosePopup, .browserGet, .browserNavigate, .browserSnapshot, .browserClick, .browserFill, .browserSelect,
              .browserScroll, .browserWait, .browserEval, .browserScreenshot, .browserClearData, .browserClearSiteData, .browserListData, .browserRemoveSiteData,
              .serviceStart, .serviceStop, .serviceList, .serviceStatus, .serviceLogs, .serviceReady:
             throw RPCFailure(code: -32603, message: "This API operation requires the shared asynchronous entry")
@@ -1750,19 +1750,6 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 self?.testConfirmationHandler = nil
             }
             return .object([:])
-        case "debug.previousOutput" where integration:
-            let pane = try targetPaneID(params)
-            guard let viewer = previousOutputWindows[pane] else { return .object(["visible": .bool(false)]) }
-            if case .integer(let width) = params["width"], case .integer(let height) = params["height"],
-               (420...1600).contains(width), (300...1000).contains(height) {
-                viewer.window?.setContentSize(NSSize(width: CGFloat(width), height: CGFloat(height)))
-            }
-            if params["find"] == .bool(true) { viewer.pressFindShortcut() }
-            if case .bool(let end) = params["horizontalEnd"] { viewer.scrollHorizontally(toEnd: end) }
-            if params["clear"] == .bool(true) { viewer.clickClear() }
-            return .object(["visible": .bool(viewer.window?.isVisible == true), "title": .string(viewer.window?.title ?? ""),
-                "text": .string(viewer.savedText), "readOnly": .bool(viewer.isReadOnly), "findVisible": .bool(viewer.findVisible),
-                "horizontalOffset": .number(viewer.horizontalOffset)])
         case "debug.inspect" where integration: return inspect()
         case "debug.presence" where integration: return presence.testingState()
         case "debug.presenceClick" where integration:
@@ -2266,6 +2253,50 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             if case .integer(let row) = params["clickRow"] { try commandPicker?.clickRowForTesting(row, clickCount: params["doubleClick"] == .bool(true) ? 2 : 1) }
             if params["dismiss"] == .bool(true) { commandPicker?.dismiss(restoreFocus: true) }
             return commandPicker?.info ?? .object(["visible": .bool(false)])
+        case "debug.browserDownload" where integration:
+            guard let root = leaves[try targetPaneID(params)] as? BrowserPane,
+                  let id = params["downloadId"]?.string, params["action"] == .string("cancel") else {
+                throw RPCFailure(code: -32602, message: "Browser pane, downloadId and cancel action are required")
+            }
+            let browser = try params["popupId"]?.string.map { try root.popup(id: $0) } ?? root
+            try browser.downloads.cancelNativelyForTesting(id)
+            return .object([:])
+        case "debug.webDialog" where integration:
+            let pane = try targetPaneID(params)
+            guard let automation = try resolvedWebAutomation(for: pane, popupID: params["popupId"]?.string),
+                  let action = params["action"]?.string else {
+                throw RPCFailure(code: -32602, message: "Web pane and dialog action are required")
+            }
+            try automation.dialogs.respondNativelyForTesting(action: action, text: params["text"]?.string)
+            return .object([:])
+        case "debug.browserClick" where integration:
+            let pane = try targetPaneID(params)
+            guard let automation = try resolvedWebAutomation(for: pane, popupID: params["popupId"]?.string),
+                  let window = automation.web.window else {
+                throw RPCFailure(code: -32602, message: "Attached browser view is required")
+            }
+            if params["closeButton"] == .bool(true) {
+                window.standardWindowButton(.closeButton)?.performClick(nil)
+                return .object([:])
+            }
+            func coordinate(_ key: String) -> Double? {
+                switch params[key] { case .number(let value): value; case .integer(let value): Double(value); default: nil }
+            }
+            guard let x = coordinate("x"), let y = coordinate("y") else {
+                throw RPCFailure(code: -32602, message: "x and y are required")
+            }
+            let web = automation.web
+            let local = NSPoint(x: x, y: web.isFlipped ? y : web.bounds.height - y)
+            guard web.bounds.contains(local) else { throw RPCFailure(code: -32602, message: "Click lies outside web viewport") }
+            window.makeKeyAndOrderFront(nil)
+            window.makeFirstResponder(web)
+            let point = web.convert(local, to: nil)
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                if let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: 0, clickCount: 1, pressure: 1) { window.sendEvent(event) }
+            }
+            return .object([:])
         case "debug.key" where integration:
             let chord = try KeyChord.parse(params["chord"]?.string ?? "cmd+d")
             let key = chord.modifiers.contains(.shift) ? (["1": "!", "=": "+"][chord.key] ?? chord.nativeKey.uppercased()) : chord.nativeKey
@@ -2273,7 +2304,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             let controlLetter = chord.modifiers.contains(.ctrl) && !chord.modifiers.contains(.cmd) && (97...122).contains(scalar)
             let text = controlLetter ? String(UnicodeScalar(scalar & 0x1f)!) : key
             let menuOnly = params["menu"] == .bool(true)
-            let window = menuOnly ? nil : (params["tabOverview"] == .bool(true) ? NSApp.keyWindow : (params["tabRename"] == .bool(true) ? tabRename?.window : (params["layouts"] == .bool(true) ? settingsWindow?.window : (params["picker"] == .bool(true) ? commandPicker?.window : (params["settings"] == .bool(true) ? settingsWindow?.window : windows[try targetTab(params).id])))))
+            let popupWindow = try params["popupId"]?.string.flatMap {
+                try resolvedWebAutomation(for: targetPaneID(params), popupID: $0)?.web.window
+            }
+            let window = try menuOnly ? nil : (popupWindow ?? (params["tabOverview"] == .bool(true) ? NSApp.keyWindow : (params["tabRename"] == .bool(true) ? tabRename?.window : (params["layouts"] == .bool(true) ? settingsWindow?.window : (params["picker"] == .bool(true) ? commandPicker?.window : (params["settings"] == .bool(true) ? settingsWindow?.window : windows[try targetTab(params).id]))))))
             guard let code = ["d": UInt16(2), "j": UInt16(38), "h": 4, "k": 40, "l": 37, "1": 18, "2": 19, "=": 24, "left": 123, "right": 124, "up": 126, "down": 125, "e": 14, "r": 15, "return": 36, "t": 17, "n": 45, "w": 13, "[": 33, "]": 30, ",": 43, "q": 12, "s": 1, "escape": 53, "delete": 51][chord.key],
                   let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: chord.nativeModifiers, timestamp: ProcessInfo.processInfo.systemUptime,
                                                windowNumber: window?.windowNumber ?? 0, context: nil, characters: text,
@@ -2290,6 +2324,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                     ? (window as? WorkspaceWindow)?.keybindingHandler?(event)
                     : (menuOnly ? NSApp.mainMenu?.performKeyEquivalent(with: event) : window?.performKeyEquivalent(with: event))
                 if handled != true { throw RPCFailure(code: -32000, message: "Key was not handled") }
+            }
+            if let browser = popupWindow?.contentViewController as? BrowserPane {
+                return .object(["browserFocus": browser.focusInfo])
             }
             return .object([:])
         case "debug.screenshot" where integration:
@@ -2315,8 +2352,17 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 guard process.terminationStatus == 0 else { throw RPCFailure(code: -32000, message: "Picker context capture failed") }
                 return .object([:])
             }
-            let previousWindow = params["previousOutput"] == .bool(true) ? previousOutputWindows[try targetPaneID(params)]?.window : nil
-            guard let path = params["path"]?.string, let window = previousWindow ?? (params["layouts"] == .bool(true) ? settingsWindow?.window : (params["picker"] == .bool(true) ? commandPicker?.window : (params["settings"] == .bool(true) ? settingsWindow?.window : windows[workspace.keyTabID ?? TabID(1)]))) else {
+            let downloadWindow: NSWindow?
+            if params["downloads"] == .bool(true), let root = leaves[try targetPaneID(params)] as? BrowserPane {
+                let browser = try params["popupId"]?.string.map { try root.popup(id: $0) } ?? root
+                downloadWindow = browser.downloads.presentationWindow
+            } else { downloadWindow = nil }
+            let popupWindow: NSWindow?
+            if let popupID = params["popupId"]?.string {
+                popupWindow = try resolvedWebAutomation(for: targetPaneID(params), popupID: popupID)?.web.window
+            } else { popupWindow = nil }
+            let sheetWindow = params["sheet"] == .bool(true) ? (try (popupWindow ?? windows[targetTab(params).id]))?.attachedSheet : nil
+            guard let path = params["path"]?.string, let window = (params["sheet"] == .bool(true) ? sheetWindow : (downloadWindow ?? popupWindow ?? (params["layouts"] == .bool(true) ? settingsWindow?.window : (params["picker"] == .bool(true) ? commandPicker?.window : (params["settings"] == .bool(true) ? settingsWindow?.window : windows[workspace.keyTabID ?? TabID(1)]))))) else {
                 throw RPCFailure(code: -32602, message: "path and key window are required")
             }
             if params["renderContent"] == .bool(true), let view = window.contentView?.superview {
@@ -2777,7 +2823,6 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             leaves[id]?.removeFromParent()
             (leaves[id] as? BrowserPane)?.close()
             (leaves[id] as? PluginPane)?.close()
-            previousOutputWindows.removeValue(forKey: id)?.close()
             if let terminal = terminals.removeValue(forKey: id) { retireTerminal(terminal) }
             leaves.removeValue(forKey: id)
         }
@@ -2793,13 +2838,6 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 self.runUserCommand("pane.close", params: ["pane": .string(id.description), "force": .bool(!processAlive)])
             }
             terminals[id] = terminal
-            terminal.onPreviousOutputChanged = { [weak self, weak terminal] in
-                guard let self, let terminal, self.terminals[id] === terminal else { return }
-                if let output = terminal.previousOutput { self.previousOutputWindows[id]?.update(output) }
-                else { self.previousOutputWindows.removeValue(forKey: id)?.close() }
-                self.refreshHeaderActions()
-                self.refreshCommandPicker()
-            }
             shellNames[id] = integration && ProcessInfo.processInfo.environment["SLATE_TERM_TEST_REAL_SHELL"] != "1" ? "sh" : URL(fileURLWithPath: settings.current.terminal.shell).lastPathComponent
             terminal.onDesktopNotification = { [weak self, weak terminal] title, body in
                 guard let self, let terminal, self.terminals[id] === terminal else { return }
@@ -2848,7 +2886,6 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             container?.view.removeFromSuperview(); container?.removeFromParent()
             leaves[id]?.view.removeFromSuperview()
             leaves[id]?.removeFromParent()
-            previousOutputWindows.removeValue(forKey: id)?.close()
             if let terminal = terminals.removeValue(forKey: id) { retireTerminal(terminal) }
             (leaves[id] as? BrowserPane)?.close()
             (leaves[id] as? PluginPane)?.close()
@@ -3528,7 +3565,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         workspaceMenu.addItem(.separator())
         for (title, commands) in [
             ("Tabs", ["tab.new", "tab.showAll", "tab.rename", "tab.title.clear", "tab.close", "tab.previous", "tab.next"]),
-            ("Browser", ["browser.back", "browser.forward", "browser.focusAddress", "browser.reload", "browser.clearSiteData", "browser.clearData"]),
+            ("Browser", ["browser.back", "browser.forward", "browser.focusAddress", "browser.reload", "browser.showDownloads", "browser.clearSiteData", "browser.clearData"]),
             ("Split Pane", ["split.left", "split.right", "split.up", "split.down"]),
             ("Focus Pane", ["focus.left", "focus.right", "focus.up", "focus.down"]),
             ("Layout", ["pane.zoom", "layout.equalize"]),
@@ -3569,7 +3606,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             editMenu.addItem(withTitle: title, action: action, keyEquivalent: key)
         }
         editMenu.addItem(.separator())
-        addCommands(["terminal.find", "terminal.find.next", "terminal.find.previous", "terminal.find.end", "terminal.previousOutput", "terminal.previousOutput.clear"], to: editMenu)
+        addCommands(["terminal.find", "terminal.find.next", "terminal.find.previous", "terminal.find.end"], to: editMenu)
         let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
         editItem.submenu = editMenu
         menu.insertItem(editItem, at: 1)
@@ -3613,7 +3650,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         try synchronizeNativeGroups()
         pickerReturnPane = NSApp.keyWindow is WorkspaceWindow ? workspace.tabs.first(where: { $0.id == workspace.keyTabID })?.focusedPane : nil
         pickerTarget = [:]
-        if params["pane"] != nil || params["tab"] != nil || workspace.keyTabID != nil {
+        // Auxiliary browser windows must not inherit the last workspace pane.
+        let popupIsKey = NSApp.keyWindow?.contentViewController is BrowserPane
+        if params["pane"] != nil || params["tab"] != nil || (workspace.keyTabID != nil && !popupIsKey) {
             let pane = try targetPaneID(params)
             let tab = workspace.tabs.first { $0.layout.paneIDs.contains(pane) }!.id
             if params["tab"] != nil, try targetTab(params).id != tab { throw RPCFailure(code: -32602, message: "Pane does not belong to the requested tab") }
@@ -3667,7 +3706,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             case .privateBrowser: type = "private-browser"
             case .registered(let id): type = id
             }
-            var actions = pluginCatalog.activeRegistrations.flatMap { registration in
+            let actions = pluginCatalog.activeRegistrations.flatMap { registration in
                 registration.headerButtons.filter { $0.matches(paneType: type) }.map { button in
                     let command = "plugin.\(registration.id).\(button.command)"
                     return PaneHeaderAction(id: button.namespacedID(plugin: registration.id), title: "\(registration.title): \(button.title)",
@@ -3678,14 +3717,6 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                             self.runUserCommand(command, params: ["pane": .string(pane.id.description), "tab": .string(tab.id.description)])
                         })
                 }
-            }
-            if let terminal = terminals[pane.id], terminal.previousOutput != nil {
-                actions.insert(PaneHeaderAction(id: "terminal.previousOutput", title: "Show Previous Terminal Output",
-                    symbol: "clock.arrow.circlepath", enabled: true, revision: previousOutputActionRevision,
-                    perform: { [weak self, weak terminal] in
-                        guard let self, let terminal, self.terminals[pane.id] === terminal else { return }
-                        self.runUserCommand("terminal.previousOutput", params: ["pane": .string(pane.id.description)])
-                    }), at: 0)
             }
             containers[pane.id]?.setHeaderActions(actions)
         }
@@ -3776,7 +3807,6 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 if !command.contract.workspaceIndependent {
                     if missingTarget { unavailable = "The original workspace target was closed" }
                     else if tab == nil && command.id != "tab.new" { unavailable = "Open a workspace to use this command" }
-                    else if command.id.hasPrefix("terminal.previousOutput"), pane.flatMap({ terminals[$0.id] })?.previousOutput == nil { unavailable = "This terminal has no previous output" }
                     else if command.id.hasPrefix("terminal.find"), pane?.type != .terminal { unavailable = "Focus a terminal pane to search" }
                     else if command.id.hasPrefix("terminal.find."), pane.flatMap({ terminals[$0.id] })?.findState.active != true { unavailable = "Start a terminal search first" }
                     else if command.id == "plugins.panelState.reset", pane?.pluginPanel == nil { unavailable = "Focus a plugin panel to reset its view" }
@@ -4267,10 +4297,6 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             return TabRenameController.unavailableReason(window: editor.owner, editor: editor) == nil
         }
         guard NSApp.keyWindow is WorkspaceWindow else { return false }
-        if let id, id.hasPrefix("terminal.previousOutput") {
-            guard let pane = try? targetPaneID([:]) else { return false }
-            return terminals[pane]?.previousOutput != nil
-        }
         if let id, id.hasPrefix("terminal.find") {
             guard let pane = try? targetPaneID([:]), let terminal = terminals[pane] else { return false }
             return id == "terminal.find" || terminal.findState.active

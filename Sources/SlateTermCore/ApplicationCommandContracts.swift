@@ -137,15 +137,12 @@ extension AutomationContracts {
                 errors: [APIError.unavailable], semantics: ["revealsZoomHiddenSource": .bool(true), "deminimizesAndActivates": .bool(true),
                     "dismissesOpenedRecord": .bool(true), "nextSelection": .string("firstOutstandingRecord")])
         }
-        for id in ["terminal.previousOutput", "terminal.previousOutput.clear", "plugins.reload", "terminal.find", "terminal.find.next", "terminal.find.previous", "terminal.find.end",
+        for id in ["plugins.reload", "terminal.find", "terminal.find.next", "terminal.find.previous", "terminal.find.end",
                    "pane.move.chooseDestination", "tab.rename", "tab.showAll"] {
             var fields: [String: JSONValue] = ["paneId": S.paneID]
             var conditions: [JSONValue]
             var semantics: [String: JSONValue] = [:]
             switch id {
-            case "terminal.previousOutput", "terminal.previousOutput.clear":
-                conditions = [requires("terminalWithPreviousOutput")]
-                semantics["historicalTextOnly"] = .bool(true)
             case "plugins.reload":
                 fields["reloading"] = S.constant(.bool(true)); conditions = [requires("registeredPluginPane")]
                 semantics["resultMeans"] = .string("reloadRequestedNotReadiness")
@@ -173,7 +170,7 @@ extension AutomationContracts {
             conditions: [requires("visiblePaneBarInNonMinimizedWindow")], semantics: ["resultMeans": .string("editorOpenedNotTitleChanged")])
         commands["pane.copyID"] = legacy("pane.copyID", result: S.object(["paneId": S.paneID], required: ["paneId"]), errors: [-32000],
             semantics: ["replacesClipboardText": .bool(true)])
-        for id in ["browser.back", "browser.forward", "browser.focusAddress", "browser.reload"] {
+        for id in ["browser.back", "browser.forward", "browser.focusAddress", "browser.reload", "browser.showDownloads"] {
             commands[id] = legacy(id, conditions: [requires("browserPane")], semantics: [
                 "resultMeans": .string("nativeActionRequestedNotNavigationCompletion"), "mayChangeNativeFocus": .bool(true)])
         }

@@ -41,7 +41,7 @@ private func requestBytes(metadata: JSONValue) throws -> Data {
     #expect(PresenceAction.forMethod("terminal.run") == .run)
     #expect(PresenceAction.forMethod("terminal.start") == .run)
     for method in ["terminal.history", "terminal.historyExport"] {
-        #expect(PresenceAction.forMethod(method) == .read)
+        #expect(PresenceAction.forMethod(method) == nil)
     }
     for method in ["terminal.search", "pane.title", "plugins.panelState.patch", "plugins.panelState.reset", "browser.clearSiteData"] {
         #expect(PresenceAction.forMethod(method) == .write)

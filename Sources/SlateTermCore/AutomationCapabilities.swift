@@ -173,18 +173,6 @@ public enum AutomationCapabilities {
                 "errors": .object(["invalid": .integer(-32602), "unavailableHandle": .integer(APIError.unavailable),
                     "waitTimeout": .integer(-32024), "notReadyOrFailed": .integer(-32042)])
             ]),
-            "terminalHistory": .object([
-                "version": .integer(2), "maximumBytes": .integer(TerminalHistoryRequest.maximumBytes),
-                "maximumLines": .integer(TerminalHistoryRequest.maximumLines), "defaultLines": .integer(2_000),
-                "range": .string("retained-tail-including-active-screen"), "commandStdout": .bool(false),
-                "exportOverwrites": .bool(false), "persistentTranscripts": .bool(true),
-                "savedOutput": .string("boundedDisplayTextNotRawStream"),
-                "sources": .array(TerminalHistoryRequest.Source.allCases.map { .string($0.rawValue) }),
-                "defaultSource": .string("current"), "previousOutput": .bool(true),
-                "savedOutputSetting": .string("terminal.saved_output_lines"),
-                "capturedAt": .string("unixSecondsForPreviousOtherwiseNull"),
-                "previousUnavailable": .string("readReturnsAvailableFalseExportFails")
-            ]),
             "terminalSearch": .object([
                 "version": .integer(1), "method": .string("terminal.search"),
                 "actions": .array(["get", "set", "next", "previous", "end"].map(JSONValue.string)),
@@ -197,10 +185,22 @@ public enum AutomationCapabilities {
                 "selectorMutationGuardsRequired": .bool(true), "mainDocumentOnly": .bool(true),
                 "pendingActionsPerView": .integer(32), "pendingWebKitOperationsPerView": .integer(32), "resultByteLimit": .integer(900_000),
                 "actions": .array(["focus", "key", "check", "setValue"].map(JSONValue.string)),
+                "dialogs": .bool(true), "popupTarget": .string("optionalPopupIdWithOwningPane"),
+                "fileChooser": .bool(true), "fileChooserMaximumPaths": .integer(128),
+                "fileChooserSelection": .string("pendingChooserIdBoundToViewAndDocument"),
                 "keyEvents": .string("syntheticWithLimitedDefaults"), "typedInputs": .array(["number", "date", "time", "datetime-local", "range"].map(JSONValue.string)),
                 "screenshot": .bool(true), "screenshotInactiveTabs": .bool(true),
                 "screenshotRequiresAttachedLayout": .bool(true), "screenshotViewportOnly": .bool(true),
                 "domRequiresVisiblePane": .bool(true), "pluginEvaluation": .bool(false)
+            ]),
+            "browserDownloads": .object([
+                "nativeSavePanel": .bool(true), "progressAndCancellation": .bool(true),
+                "maximumActivePerView": .integer(8), "maximumRetainedStatusesPerView": .integer(64),
+                "destinationNeverOverwrites": .bool(true), "ownerCloseCancels": .bool(true)
+            ]),
+            "browserPopups": .object([
+                "maximumLivePerPane": .integer(8), "openerPreserved": .bool(true),
+                "inheritsPrivateSession": .bool(true), "automaticPopupsRequireUserGesture": .bool(true)
             ]),
             "browserData": .object([
                 "version": .integer(1), "persistentProfile": .string("appWide"), "privateProfile": .string("perPaneEphemeral"),

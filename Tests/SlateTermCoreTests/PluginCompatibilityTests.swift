@@ -11,7 +11,7 @@ private func plugin(_ fields: [String: JSONValue] = [:]) throws -> PluginRegistr
 @Test func pluginRequirementsUseTheSamePublicCatalogAndSurviveEncoding() throws {
     let registration = try plugin(["manifestVersion": .integer(1), "version": .string("1.2.0-beta.1"),
         "compatibility": .object(["minimumAPIVersion": .integer(1), "maximumAPIVersion": .integer(1),
-            "requiredMethods": .array([.string("terminal.history")]),
+            "requiredMethods": .array([.string("terminal.capture")]),
             "requiredCommands": .array([.string("terminal.find")])])])
     try registration.requireCompatibility()
     #expect(registration.version == "1.2.0-beta.1")

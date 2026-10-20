@@ -105,3 +105,12 @@ slate-term skill reveal        # command.run skills.reveal; shows the managed co
 
 `skills.list`, `skills.install {agents: [ID]}` and `skills.uninstall {agents: [ID]}` are shared API methods, so plugins and services can call them too. The command picker offers **Install Agent Skill…** (`skills.settings`) and **Open Agent Skill Folder** (`skills.reveal`). Integration runs link into `SLATE_TERM_AGENT_HOME`, or `agent-home` in the state folder, never the real home folder.
 
+
+File upload panels expose shared `web.fileChooser`, `web.chooseFiles` and `web.cancelFileChooser` operations; see [file uploads](automation.md#file-uploads) for chooser identity, path validation and completion semantics.
+
+Browser integrations also expose `web.dialog` / `web.respondDialog`,
+`browser.downloads` / `browser.download` / `browser.saveDownload` /
+`browser.cancelDownload` / `browser.showDownloads`, and `browser.popups` /
+`browser.closePopup`. The generated trusted page aliases and service/CLI clients
+use the same catalog. Add `popupId` beside the owning `pane` to address a popup
+through web or browser operations; closed IDs never fall back to the root view.

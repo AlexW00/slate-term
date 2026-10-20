@@ -52,14 +52,13 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
     private var leadSurrogate: UInt16?
     private var isClosed = false
     private(set) var isShuttingDown = false
-    private(set) var previousOutput: SavedTerminalOutput?
+    private var previousOutput: SavedTerminalOutput?
     private var completedOutput: SavedTerminalOutput?
     private var capturedOutput: SavedTerminalOutput?
     private var lastSessionOutput = ""
     private var reportedCaptureFailure = false
     private let sessionStartedAt = Date()
     private var shutdownCompletions: [@MainActor () -> Void] = []
-    var onPreviousOutputChanged: (() -> Void)?
     var hasSelection: Bool { surface.map { ghostty_surface_has_selection($0) } ?? false }
     private let runtime: GhosttyRuntime
     let startingDirectory: String?
@@ -165,7 +164,6 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
             SavedTerminalOutput(text: SavedTerminalOutput.boundedText($0.text, lineLimit: lineLimit),
                                 capturedAt: $0.capturedAt, ended: $0.ended)
         }.flatMap { $0.text.isEmpty ? nil : $0 }
-        onPreviousOutputChanged?()
     }
 
     func updateOutputLimit(_ lineLimit: Int) {
@@ -175,12 +173,6 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
             output.text = SavedTerminalOutput.boundedText(output.text, lineLimit: lineLimit)
             completedOutput = output.text.isEmpty ? nil : output
         }
-    }
-
-    func clearPreviousOutput() {
-        capturedOutput = nil
-        previousOutput = nil
-        onPreviousOutputChanged?()
     }
 
     func savedOutput(lineLimit: Int) -> SavedTerminalOutput? {
@@ -891,11 +883,6 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
     }
 
     func capture() -> String { readText(history: false, maximumBytes: Int.max).text }
-
-    func retainedText(maximumBytes: Int) -> (text: String, truncated: Bool) {
-        let result = readText(history: true, maximumBytes: maximumBytes)
-        return (result.text, result.truncated)
-    }
 
     private func readText(history: Bool, maximumBytes: Int, currentSession: Bool = false) -> (text: String, truncated: Bool, available: Bool) {
         guard let surface else { return ("", false, false) }

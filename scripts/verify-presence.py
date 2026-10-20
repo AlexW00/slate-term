@@ -180,8 +180,7 @@ with AppFixture('presence') as app:
     # Previously omitted pane reads and edits use the same actor metadata.
     metadata = {'version': 1, 'actor': {'name': 'claude', 'home': 'p1'}}
     for method, params, action in [
-        ('terminal.history', {}, 'read'),
-        ('terminal.historyExport', {'path': str(app.root / 'history.txt')}, 'read'),
+        ('terminal.capture', {}, 'read'),
         ('terminal.search', {'action': 'set', 'query': 'sleep'}, 'write'),
         ('terminal.search', {'action': 'end'}, 'write'),
     ]:

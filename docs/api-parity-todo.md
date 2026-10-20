@@ -7,9 +7,8 @@ with focused VM verification. See [contracts](api-parity-first-pass.md) and
 Workflow-dependent next additions remain pending; this is not a full-suite certification.
 
 Terminal mouse/selection/clipboard API additions were declined and are not part
-of this backlog. Bounded scrollback retrieval/export was subsequently approved in
-the separate [MVP foundations scope](mvp-foundations.md); it does not authorize
-mouse/selection/clipboard expansion. Keep terminal clipboard consent and macOS
+of this backlog. Separate scrollback retrieval/export has also been removed;
+restored output remains available in normal terminal scrollback. Keep terminal clipboard consent and macOS
 notification authorization boundaries unchanged.
 
 ## 1. Native window controls
@@ -83,8 +82,9 @@ adding a separate browser-only automation path.
 - Preserve browser/plugin origins, data-store separation, and bridge binding.
   Do not introduce arbitrary plugin evaluation or automatic permission approval.
 
-File upload/native chooser control and canvas-coordinate automation are not
-first-pass requirements; scope them separately if a real workflow justifies them.
+File upload/native chooser control is covered by [file uploads](automation.md#file-uploads).
+Canvas-coordinate automation is not a first-pass requirement; scope it separately
+if a real workflow justifies it.
 
 **Starting points:** [automation contracts](automation.md),
 [`BrowserAutomation.swift`](../Native/BrowserAutomation.swift),

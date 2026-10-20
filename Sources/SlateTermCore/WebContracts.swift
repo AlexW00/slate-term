@@ -63,11 +63,24 @@ extension AutomationContracts {
         definitions["BrowserScreenshot"] = complete(["path": S.string()])
         definitions["WebScreenshot"] = complete(["path": S.string(), "paneId": S.paneID, "viewId": identity,
             "documentId": S.nullable(identity), "sampledAt": S.number])
+        let chooser = complete(["chooserId": identity, "allowsMultipleSelection": S.boolean, "allowsDirectories": S.boolean])
+        let chooserIdentity: [String: JSONValue] = ["paneId": S.paneID, "viewId": identity,
+            "documentId": S.nullable(identity), "sampledAt": S.number]
+        definitions["WebFileChooser"] = complete(chooserIdentity.merging(["chooser": S.nullable(chooser)]) { _, v in v })
+        definitions["WebFileChooserCompletion"] = complete(chooserIdentity.merging([
+            "chooserId": identity, "selectedCount": S.integer(minimum: 0, maximum: 128), "cancelled": S.boolean
+        ]) { _, v in v })
         definitions["BrowserStoredSites"] = complete(["storage": S.constant(.string("persistent")), "sites": S.array(S.string(minimumLength: 1))])
         definitions["BrowserClearAll"] = complete(["cleared": S.constant(.bool(true)), "scope": S.constant(.string("all")),
             "storage": S.constant(.string("persistent")), "host": S.null])
         definitions["BrowserClearSite"] = complete(["cleared": S.constant(.bool(true)), "scope": S.constant(.string("site")),
             "storage": S.strings(["persistent", "private"]), "host": S.string(minimumLength: 1)])
+        for key in Array(definitions.keys) where key.hasPrefix("Web") {
+            guard var schema = definitions[key]?.object, var properties = schema["properties"]?.object else { continue }
+            properties["popupId"] = identity
+            schema["properties"] = .object(properties)
+            definitions[key] = .object(schema)
+        }
         return definitions
     }()
 
@@ -75,7 +88,7 @@ extension AutomationContracts {
         typealias S = APISchema
         func requires(_ condition: String) -> JSONValue { .object(["requires": .string(condition)]) }
         let pair = ["expectedViewId", "expectedDocumentId"]
-        let strictTarget: [String: JSONValue] = ["pane": S.paneID, "tab": S.tabID]
+        let strictTarget: [String: JSONValue] = ["pane": S.paneID, "tab": S.tabID, "popupId": S.string(minimumLength: 1, maximumUTF8Bytes: 128)]
         let errors = [APIError.unavailable, -32023, -32024, -32025]
         let domSemantics: [String: JSONValue] = ["world": .string("isolatedMainDocumentNotSubframesOrShadowTrees"),
             "maximumPendingActionsPerView": .integer(32), "maximumPendingPlatformSubmissionsPerView": .integer(32),
@@ -88,7 +101,7 @@ extension AutomationContracts {
         for (webMethod, browserMethod, name) in actions {
             for canonical in [false, true] {
                 let method = canonical ? webMethod : browserMethod
-                var parameters = canonical ? strictTarget : paneTarget
+                var parameters = canonical ? strictTarget : paneTarget.merging(["popupId": S.string(minimumLength: 1, maximumUTF8Bytes: 128)]) { _, v in v }
                 var required = canonical ? ["pane"] : []
                 var constraints = canonical ? webIdentityConstraints : targetConstraints
                 var semantics = domSemantics
@@ -158,6 +171,31 @@ extension AutomationContracts {
             routing: "explicitOrCallerPaneNeverFocus", errors: errors, constraints: webIdentityConstraints,
             semantics: ["unreadyWithoutExpectedIdentity": .string("readyFalseAndNullDocumentId"), "urlAndTitleClippingUnits": .string("unicodeScalars"),
                 "identityIsCredential": .bool(false), "sampledAtUnits": .string("unixSeconds")])
+        for method in [AutomationMethod.webFileChooser, .webChooseFiles, .webCancelFileChooser] {
+            var parameters = strictTarget
+            var required = ["pane"]
+            if method != .webFileChooser {
+                parameters["chooserId"] = S.string(minimumLength: 1, maximumUTF8Bytes: 128, pattern: "^[A-Za-z0-9_-]+(?![\\s\\S])")
+                required.append("chooserId")
+            }
+            if method == .webChooseFiles {
+                parameters["paths"] = S.array(S.string(maximumUTF8Bytes: 4096, pattern: "^/[^\\u0000]*(?![\\s\\S])"), minimum: 1, maximum: 128)
+                required.append("paths")
+            }
+            methods[method] = AutomationContract(parameters: parameters, required: required,
+                result: S.reference(method == .webFileChooser ? "WebFileChooser" : "WebFileChooserCompletion"),
+                guards: targetGuards + pair, conditions: [requires("browserOrRegisteredPluginPane"),
+                    requires(method == .webFileChooser ? "none" : "matchingPendingChooser")],
+                routing: "explicitOrCallerPaneNeverFocus", errors: [APIError.unavailable],
+                constraints: webIdentityConstraints, semantics: [
+                    "chooserIdentity": .string("singleUseBoundToViewAndDocumentLifetime"),
+                    "paths": .string("existingReadableLocalFilesOrDirectoriesForDirectoryInputs"),
+                    "completion": .string("sameWebKitCallbackAsNativeSheet"),
+                    "selectionMayTriggerPageUpload": .bool(true),
+                    "navigationAndCloseCancel": .bool(true),
+                    "doesNotRequireDOMRenderability": .bool(true)
+                ])
+        }
         methods[.webScreenshot] = AutomationContract(parameters: strictTarget.merging([
             "path": S.string(maximumUTF8Bytes: 4096, pattern: "^/[^\\u0000]*(?![\\s\\S])")
         ]) { _, value in value }, required: ["pane", "path"], result: S.reference("WebScreenshot"), guards: targetGuards + pair,
@@ -185,7 +223,7 @@ extension AutomationContracts {
                 semantics["write"] = .string("atomicMayReplaceExistingFile"); semantics["format"] = .string("png")
                 semantics["canonicalWebScreenshotEligibilityAndFinalDocumentCheck"] = .bool(false)
             }
-            methods[method] = AutomationContract(parameters: paneTarget.merging(parameters) { _, value in value }, required: required,
+            methods[method] = AutomationContract(parameters: paneTarget.merging(["popupId": S.string(minimumLength: 1, maximumUTF8Bytes: 128)]) { _, v in v }.merging(parameters) { _, value in value }, required: required,
                 result: result, guards: targetGuards, additionalParameters: true, conditions: conditions,
                 routing: "paneOrTabFocus", errors: errors, constraints: targetConstraints, semantics: semantics)
         }
@@ -201,7 +239,7 @@ extension AutomationContracts {
         methods[.browserClearData] = AutomationContract(parameters: [:], result: S.reference("BrowserClearAll"), guards: unanchoredGuards,
             conditions: [requires("noOtherClearOfSameDataStoreInProgress")], routing: "applicationPersistentBrowserProfile", errors: [-32020],
             semantics: ["includesPrivateOrPluginStores": .bool(false), "confirmationDialog": .bool(false), "cancellationRollsBackRemoval": .bool(false)])
-        methods[.browserClearSiteData] = AutomationContract(parameters: strictTarget.merging([
+        methods[.browserClearSiteData] = AutomationContract(parameters: ["pane": S.paneID, "tab": S.tabID].merging([
             "url": S.string(maximumUTF8Bytes: 16_384, format: "slate-browser-data-site-url")
         ]) { _, value in value }, required: ["pane", "url"], result: S.reference("BrowserClearSite"), guards: targetGuards,
             conditions: [requires("browserPane"), requires("webKitCanClassifySiteAndNoOtherClearOfSameDataStoreInProgress")],

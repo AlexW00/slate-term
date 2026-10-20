@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """One owned app/two native tabs: shared web capture, automation and lifecycle guards."""
+import argparse
 import concurrent.futures
 import functools
 import http.server
@@ -9,14 +10,28 @@ import subprocess
 import threading
 from api_fixture import AppFixture, ROOT, eventually
 from plugin_package_fixture import package_fixture
+from browser_dialog_checks import check_browser_dialogs
+from browser_popup_checks import run_popup_checks
+from browser_download_checks import check_browser_downloads
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--external-file-input', action='store_true')
+parser.add_argument('--external-browser-input', action='store_true')
+args = parser.parse_args()
 
 HTML = '''<!doctype html><title>Shared web fixture</title>
 <input id="name" value="before"><input id="password" type="password" value="PASSWORD_SENTINEL">
 <button id="apply" onclick="document.querySelector('#result').textContent=document.querySelector('#name').value">Apply</button>
 <button id="disabled" disabled>Disabled</button><p id="result">ready</p>
 <select id="choice"><option value="a">A</option><option value="b">B</option></select>
+<input type="file" id="upload"><input type="file" id="uploads" multiple>
+<input type="file" id="directory" webkitdirectory><p id="files">no files</p>
 <iframe src="child.html"></iframe><div style="height:1800px">scroll</div>
-<script>addEventListener('pageshow', e=>window.restored=e.persisted);</script>'''
+<script>addEventListener('pageshow', e=>window.restored=e.persisted);
+for (const id of ['upload','uploads','directory']) document.getElementById(id).onchange = async e => {
+  document.getElementById('files').textContent = (await Promise.all(Array.from(e.target.files, async f => f.name+':'+await f.text()))).join('|');
+};
+</script>'''
 
 navigation_gates = {path: (threading.Event(), threading.Event()) for path in ['/held-a', '/held-b']}
 
@@ -108,6 +123,104 @@ with AppFixture('web-conformance') as app:
         assert all(exposure['webAutomation'][key] for key in ['screenshotInactiveTabs', 'screenshotRequiresAttachedLayout', 'screenshotViewportOnly', 'domRequiresVisiblePane'])
         assert js('workspace.call("web.eval",{script:"1"}).then(()=>null,e=>e.code)') == -32601
         assert js('workspace.browser.eval({pane:"p1",script:"1"})') == 1
+
+        # Real WebKit chooser callbacks, shared by native UI, socket, CLI and page bridge.
+        upload_a, upload_b = app.root / 'upload-a.txt', app.root / 'upload-b.txt'
+        upload_a.write_text('first-file-bytes')
+        upload_b.write_text('second-file-bytes')
+        upload_dir = app.root / 'upload-directory'
+        upload_dir.mkdir()
+        (upload_dir / 'nested.txt').write_text('directory-bytes')
+        assert exposure['webAutomation']['fileChooser']
+
+        def open_chooser(pane, selector='#upload'):
+            info = app.rpc('web.get', pane=pane)
+            app.rpc('web.click', pane=pane, selector=selector,
+                    expectedViewId=info['viewId'], expectedDocumentId=info['documentId'])
+            eventually('pending native file chooser', lambda: app.rpc('web.fileChooser', pane=pane)['chooser'] is not None)
+            return app.rpc('web.fileChooser', pane=pane)['chooser']
+
+        for pane in ['p1', p2]:
+            tab = app.rpc('pane.inspect', pane=pane)['tabId']
+            app.rpc('debug.activate', tab=tab)
+            eventually('active app for native chooser', lambda: app.rpc('debug.inspect')['applicationActive'])
+            assert app.rpc('web.fileChooser', pane=pane)['chooser'] is None
+            chooser = open_chooser(pane)
+            cid = chooser['chooserId']
+            assert not chooser['allowsMultipleSelection'] and not chooser['allowsDirectories']
+            assert app.cli('web', 'file-chooser', '--pane', pane)['chooser']['chooserId'] == cid
+            app.rpc('web.chooseFiles', pane=pane, chooserId='stale', paths=[str(upload_a)], error=-32050)
+            app.rpc('web.chooseFiles', pane=pane, chooserId=cid, paths=[str(upload_a), str(upload_b)], error=-32602)
+            app.rpc('web.chooseFiles', pane=pane, chooserId=cid, paths=[str(upload_dir)], error=-32602)
+            app.rpc('web.chooseFiles', pane=pane, chooserId=cid, paths=[str(app.root / 'missing')], error=-32602)
+            app.rpc('web.chooseFiles', pane=pane, chooserId=cid, paths=[str(upload_a)],
+                    expectedViewId='stale', expectedDocumentId='stale', error=-32050)
+            assert app.rpc('web.fileChooser', pane=pane)['chooser']['chooserId'] == cid
+            selected = app.cli('web', 'choose-files', '--pane', pane, '--chooser-id', cid, '--file', str(upload_a))
+            assert selected['selectedCount'] == 1 and not selected['cancelled']
+            eventually('file bytes available in page', lambda: 'upload-a.txt:first-file-bytes' in app.rpc('web.snapshot', pane=pane)['text'])
+            app.rpc('web.cancelFileChooser', pane=pane, chooserId=cid, error=-32050)
+
+            chooser = open_chooser(pane, '#uploads')
+            assert chooser['allowsMultipleSelection']
+            app.rpc('web.chooseFiles', pane=pane, chooserId=chooser['chooserId'],
+                    paths=[str(upload_a), str(app.root / 'missing')], error=-32602)
+            assert app.rpc('web.fileChooser', pane=pane)['chooser']['chooserId'] == chooser['chooserId']
+            params = dict(pane=pane, chooserId=chooser['chooserId'], paths=[str(upload_a), str(upload_b)])
+            assert js('workspace.web.chooseFiles(' + json.dumps(params) + ')')['selectedCount'] == 2
+            eventually('multiple file bytes available', lambda: 'upload-b.txt:second-file-bytes' in app.rpc('web.snapshot', pane=pane)['text'])
+            chooser = open_chooser(pane)
+            cancelled = app.cli('web', 'cancel-file-chooser', '--pane', pane, '--chooser-id', chooser['chooserId'])
+            assert cancelled['cancelled'] and cancelled['selectedCount'] == 0
+            assert app.rpc('web.fileChooser', pane=pane)['chooser'] is None
+            chooser = open_chooser(pane)
+            app.rpc('debug.screenshot', tab=tab, sheet=True, path=str(ROOT / f'artifacts/web-file-chooser-{pane}.png'))
+            if args.external_file_input and pane == 'p1':
+                print('FILE_CHOOSER_NATIVE_CANCEL_READY', flush=True)
+                eventually('external native chooser cancellation', lambda: app.rpc('web.fileChooser', pane=pane)['chooser'] is None, timeout=120)
+                app.rpc('web.chooseFiles', pane=pane, chooserId=chooser['chooserId'], paths=[str(upload_a)], error=-32050)
+                chooser = open_chooser(pane)
+                print('FILE_CHOOSER_NATIVE_SELECT_READY ' + str(upload_b), flush=True)
+                eventually('external native file selection', lambda: app.rpc('web.fileChooser', pane=pane)['chooser'] is None, timeout=120)
+                eventually('native selection file bytes', lambda: app.rpc('browser.eval', pane=pane,
+                           script="document.querySelector('#upload').files[0]?.name") == upload_b.name)
+                assert 'upload-b.txt:second-file-bytes' in app.rpc('web.snapshot', pane=pane)['text']
+                print('PASS native picker cancellation and confirmation through external input', flush=True)
+            else:
+                app.rpc('web.cancelFileChooser', pane=pane, chooserId=chooser['chooserId'])
+
+        chooser = open_chooser('p1', '#directory')
+        assert chooser['allowsDirectories']
+        app.rpc('web.chooseFiles', pane='p1', chooserId=chooser['chooserId'], paths=[str(upload_a)], error=-32602)
+        app.rpc('web.chooseFiles', pane='p1', chooserId=chooser['chooserId'], paths=[str(upload_dir)])
+        eventually('directory file bytes available', lambda: 'nested.txt:directory-bytes' in app.rpc('web.snapshot', pane='p1')['text'])
+
+        # Navigation retires the pending chooser; its ID cannot select into a new one.
+        chooser = open_chooser('p1')
+        app.rpc('browser.navigate', pane='p1', url=base + '/index.html')
+        assert app.rpc('web.fileChooser', pane='p1')['chooser'] is None
+        newer = open_chooser('p1')
+        app.rpc('web.chooseFiles', pane='p1', chooserId=chooser['chooserId'], paths=[str(upload_a)], error=-32050)
+        app.rpc('web.cancelFileChooser', pane='p1', chooserId=newer['chooserId'])
+
+        private_tab = app.rpc('command.run', id='tab.new', focus='new')
+        private_pane = app.rpc('context.inspect')['focusedPaneId']
+        app.rpc('command.run', id='pane.type', pane=private_pane, type='private-browser', force=True)
+        app.rpc('browser.navigate', pane=private_pane, url=base + '/index.html')
+        chooser = open_chooser(private_pane)
+        app.rpc('web.chooseFiles', pane=private_pane, chooserId=chooser['chooserId'], paths=[str(upload_a)])
+        eventually('private file bytes available', lambda: 'upload-a.txt:first-file-bytes' in app.rpc('web.snapshot', pane=private_pane)['text'])
+        chooser = open_chooser(private_pane)
+        app.rpc('command.run', id='tab.close', tab=private_tab['tabId'], force=True)
+        # The retired private chooser cannot complete a new request in the surviving view.
+        chooser_main = open_chooser('p1')
+        app.rpc('web.chooseFiles', pane='p1', chooserId=chooser['chooserId'], paths=[str(upload_a)], error=-32050)
+        app.rpc('web.cancelFileChooser', pane='p1', chooserId=chooser_main['chooserId'])
+        print('PASS native file choosers, file bytes, CLI/page parity, invalid selection and navigation lifetime')
+        check_browser_downloads(app, p2, external_input=args.external_browser_input)
+        check_browser_dialogs(app, 'p1', p2, base)
+        run_popup_checks(app, assets, base, controller_pane=p2, external_input=args.external_browser_input)
+
         output = app.root / 'plugin-bridge.png'
         js('workspace.web.screenshot({path:' + json.dumps(str(output)) + '})')
         assert output.read_bytes().startswith(b'\x89PNG\r\n\x1a\n')

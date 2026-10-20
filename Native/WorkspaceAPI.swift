@@ -76,7 +76,7 @@ extension WorkspaceHost {
             // This document guard is checked by SavedLayoutStore at atomic publication, not against TOML.
         }
         if params["expectedViewId"] != nil || params["expectedDocumentId"] != nil {
-            guard Self.webMethods.contains(method) || method == "pane.title" else {
+            guard Self.webMethods.contains(method) || method == "pane.title" || method == "browser.closePopup" else {
                 throw RPCFailure(code: -32602, message: "Automation identity guards are supported by web methods and pane.title")
             }
             _ = try WebIdentity.expected(in: params)
@@ -271,7 +271,7 @@ extension WorkspaceHost {
             // Known only after the shell's first authenticated report.
             result["shell"] = session.report.map { .string($0.shellKind.rawValue) } ?? .null
             result["runAvailable"] = session.report.map { .bool($0.acceptsRunInput) } ?? .null
-            result["contentOperations"] = .array(["terminal.capture", "terminal.send", "terminal.key", "terminal.run", "terminal.start", "terminal.wait", "terminal.history", "terminal.historyExport", "terminal.search"].map(JSONValue.string))
+            result["contentOperations"] = .array(["terminal.capture", "terminal.send", "terminal.key", "terminal.run", "terminal.start", "terminal.wait", "terminal.search"].map(JSONValue.string))
         } else if let plugin = leaves[id] as? PluginPane {
             result["pluginInstanceId"] = .string(plugin.instance.id)
             result["viewId"] = .string(plugin.viewID)

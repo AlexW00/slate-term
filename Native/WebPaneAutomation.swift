@@ -7,6 +7,7 @@ import SlateTermCore
 @MainActor
 final class WebPaneAutomation {
     let web: WKWebView
+    lazy var dialogs = WebDialogs(web: web)
     let viewID: String
     let world = WKContentWorld.world(name: "SlateAutomation")
     private(set) var documentID: String?
@@ -14,6 +15,13 @@ final class WebPaneAutomation {
     private var generation = UUID()
     private var closed = false
     private var initialization: Task<Void, Never>?
+    private struct FileChooser {
+        let id = UUID().uuidString
+        let generation: UUID
+        let panel: NSOpenPanel
+        let completion: ([URL]?) -> Void
+    }
+    private var fileChooser: FileChooser?
     private struct Operation {
         let continuation: CheckedContinuation<JSONValue, any Error>
         let deadline: Task<Void, Never>
@@ -32,13 +40,77 @@ final class WebPaneAutomation {
     }
 
     func invalidate(except preserved: UUID? = nil) {
+        dialogs.cancelPending()
         generation = UUID()
         ready = false
         documentID = nil
+        if let chooser = fileChooser { finishFileChooser(chooser.id, urls: nil) }
         initialization?.cancel(); initialization = nil
         for id in Array(operations.keys) where id != preserved {
             finish(id, .failure(RPCFailure(code: -32022, message: "Web document changed during the operation")))
         }
+    }
+
+    /// Native UI and trusted clients complete the same WebKit request exactly once.
+    func openFileChooser(parameters: WKOpenPanelParameters, completion: @escaping ([URL]?) -> Void) {
+        guard !closed, let window = web.window, window.attachedSheet == nil else {
+            completion(nil)
+            return
+        }
+        guard fileChooser == nil else { completion(nil); return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = !parameters.allowsDirectories
+        panel.canChooseDirectories = parameters.allowsDirectories
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        panel.canCreateDirectories = false
+        let chooser = FileChooser(generation: generation, panel: panel, completion: completion)
+        fileChooser = chooser
+        panel.beginSheetModal(for: window) { [weak self] response in
+            self?.finishFileChooser(chooser.id, urls: response == .OK ? panel.urls : nil)
+        }
+    }
+
+    private func finishFileChooser(_ id: String, urls: [URL]?) {
+        guard let chooser = fileChooser, chooser.id == id else { return }
+        fileChooser = nil
+        if let parent = chooser.panel.sheetParent { parent.endSheet(chooser.panel, returnCode: .cancel) }
+        chooser.panel.orderOut(nil)
+        chooser.completion(chooser.generation == generation && !closed ? urls : nil)
+    }
+
+    func fileChooserOperation(_ request: WebFileChooserRequest, expected: WebIdentity?) throws -> JSONValue {
+        if let expected {
+            guard expected.viewID == viewID, expected.documentID == documentID, ready, !closed else {
+                throw RPCFailure(code: APIError.conflict, message: "Web view or document changed; inspect again")
+            }
+        }
+        let document = documentID.map(JSONValue.string) ?? .null
+        guard let id = request.chooserID else {
+            let value: JSONValue = fileChooser.map { chooser in
+                .object(["chooserId": .string(chooser.id),
+                         "allowsMultipleSelection": .bool(chooser.panel.allowsMultipleSelection),
+                         "allowsDirectories": .bool(chooser.panel.canChooseDirectories)])
+            } ?? .null
+            return .object(["chooser": value, "documentId": document])
+        }
+        guard let chooser = fileChooser, chooser.id == id, chooser.generation == generation, !closed else {
+            throw RPCFailure(code: APIError.conflict, message: "File chooser is no longer pending; inspect again")
+        }
+        guard chooser.panel.allowsMultipleSelection || request.paths.count <= 1 else {
+            throw RPCFailure(code: -32602, message: "This file input accepts only one selection")
+        }
+        let urls = try request.paths.map { path -> URL in
+            let url = URL(fileURLWithPath: path)
+            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey, .isReadableKey]),
+                  values.isReadable == true,
+                  chooser.panel.canChooseDirectories ? values.isDirectory == true : values.isRegularFile == true else {
+                throw RPCFailure(code: -32602, message: "Choose existing readable files, or directories for a directory input")
+            }
+            return url
+        }
+        finishFileChooser(id, urls: urls.isEmpty ? nil : urls)
+        return .object(["chooserId": .string(id), "selectedCount": .integer(urls.count),
+                        "cancelled": .bool(urls.isEmpty), "documentId": document])
     }
 
     func documentFinished() {
@@ -55,6 +127,7 @@ final class WebPaneAutomation {
     func close() {
         guard !closed else { return }
         closed = true
+        dialogs.close()
         invalidate()
         submissions.removeAll() // Closed views cannot admit more work.
     }

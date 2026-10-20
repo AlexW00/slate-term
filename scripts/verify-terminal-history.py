@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Owned VM app: retained history, active screen, native Find and trusted adapters."""
+"""Owned VM app: active screen, native Find, removed history APIs and trusted adapters."""
 from plugin_package_fixture import package_fixture
 import json
-import stat
 from api_fixture import ROOT, AppFixture, eventually
 
 with AppFixture('terminal-history') as app:
@@ -18,34 +17,12 @@ with AppFixture('terminal-history') as app:
     session = app.rpc('pane.inspect', pane='p1')['sessionId']
     # The echoed command deliberately does not contain the complete search needle.
     app.rpc('terminal.run', pane='p1', command="printf 'HISTORY_%s\\n' ONLY; for i in {1..400}; do printf 'line-%04d 日本語\\n' $i; done; printf 'TAIL_%s\\n' READY")
-    def history(**params):
-        return app.rpc('terminal.history', pane='p1', **params)
-    eventually('rendered retained output', lambda: 'TAIL_READY' in history()['text'])
-    captured = app.rpc('terminal.capture', pane='p1')
-    assert 'HISTORY_ONLY' not in captured['text'], 'Screen capture leaked scrollback'
-    assert 'HISTORY_ONLY' in history()['text']
-    assert history()['sessionId'] == session
-    tail = history(maxLines=4)
-    assert tail['truncated'] and tail['lineCount'] <= 4 and 'HISTORY_ONLY' not in tail['text']
-    bounded = history(maxBytes=61)
-    assert bounded['truncated'] and bounded['byteCount'] <= 61 and '\ufffd' not in bounded['text']
-    assert app.cli('terminal', 'history', '--pane', 'p1', '--max-lines', '4') == tail
-    app.rpc('terminal.history', pane='p1', maxBytes=0, error=-32602)
-    app.rpc('terminal.history', pane='p1', maxLines=True, error=-32602)
-    app.rpc('terminal.history', pane='p1', sessionId='stale', error=-32022)
+    eventually('rendered output', lambda: 'TAIL_READY' in app.rpc('terminal.capture', pane='p1')['text'])
+    assert 'HISTORY_ONLY' not in app.rpc('terminal.capture', pane='p1')['text']
+    for method in ['terminal.history', 'terminal.historyExport']:
+        app.rpc(method, pane='p1', error=-32601)
     app.rpc('terminal.search', pane='p1', action='get', query='ignored', error=-32602)
-
-    path = app.root / 'history.txt'
-    exported = app.rpc('terminal.historyExport', pane='p1', path=str(path), maxLines=4)
-    assert path.read_text() == tail['text']
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
-    assert exported['path'] == str(path) and exported['truncated']
-    app.rpc('terminal.historyExport', pane='p1', path=str(path), error=-32020)
-    assert path.read_text() == tail['text']
-    link = app.root / 'export-link'
-    link.symlink_to(path)
-    app.rpc('terminal.historyExport', pane='p1', path=str(link), error=-32020)
-    app.rpc('terminal.historyExport', pane='p1', path='relative.txt', error=-32602)
+    app.rpc('terminal.search', pane='p1', sessionId='stale', error=-32022)
 
     def search(**params):
         return app.rpc('terminal.search', pane='p1', **params)
@@ -99,7 +76,8 @@ with AppFixture('terminal-history') as app:
     def js(script):
         return app.rpc('debug.pluginEval', pane=panel, script=script)
     eventually('plugin bridge', lambda: js('typeof workspace') == 'object')
-    assert js('await workspace.terminal.history({pane:"p1",maxLines:4})') == history(maxLines=4)
+    assert js('typeof workspace.terminal.history') == 'undefined'
+    assert js('typeof workspace.terminal.historyExport') == 'undefined'
     assert js('await workspace.terminal.search({pane:"p1",action:"set",query:"HISTORY_ONLY"})')['active']
     eventually('bridge search', lambda: (search()['total'] or 0) >= 1)
     assert app.cli('terminal', 'search', '--pane', 'p1', '--search-action', 'end')['active'] is False
@@ -108,10 +86,11 @@ with AppFixture('terminal-history') as app:
     app.rpc('command.run', id='pane.type', pane='p1', type='browser', force=True)
     app.rpc('command.run', id='pane.type', pane='p1', type='terminal', force=True)
     assert app.rpc('pane.inspect', pane='p1')['sessionId'] != before
-    app.rpc('terminal.history', pane='p1', sessionId=before, error=-32022)
-    assert not search()['active'] and 'HISTORY_ONLY' not in history()['text']
+    app.rpc('terminal.capture', pane='p1', sessionId=before, error=-32022)
+    assert not search()['active'] and 'HISTORY_ONLY' not in app.rpc('terminal.capture', pane='p1')['text']
+
     eventually('replacement authenticated prompt', lambda: app.rpc('context.get', pane='p1')['terminal']['state'] == 'prompt')
     tab = app.rpc('pane.inspect', pane='p1')['tabId']
     app.rpc('command.run', id='tab.close', tab=tab, force=True)
 
-print('PASS bounded history/export, active screen, engine Find, native commands, CLI/page parity, stale sessions')
+print('PASS removed history APIs, active screen, engine Find, native commands, CLI/page parity, stale sessions')

@@ -12,6 +12,31 @@ Detailed change record for agents and maintainers. Public release notes live in 
 
 ### Internal
 
+## 0.8.0 — Pending publication
+
+### Added
+
+- Browser downloads use native save panels with progress and cancellation, a Downloads toolbar control and command, and shared trusted API/CLI operations. Transfers retain WebKit session handling and never overwrite existing destinations.
+- Browser and registered-plugin pages support native JavaScript alert, confirm and prompt dialogs. Shared dialog inspection and single-use response APIs complete the same native requests.
+- Browser popup windows preserve their opener and WebKit configuration, including private sessions. Trusted clients list, inspect, operate and close popup views using an owning pane and explicit popup ID; closure cleans up descendants.
+
+- Native file upload pickers in browser and registered-plugin panes, with shared inspect/select/cancel APIs and CLI helpers.
+
+### Changed
+
+
+- Name the Cmd-R browser action “Refresh Browser” so it is discoverable by refresh in Cmd-K.
+
+- Keep previous terminal output in restored scrollback; remove its separate viewer, pane-header button, Show/Clear commands, and history-read/export APIs.
+
+### Fixed
+
+### Internal
+
+- Browser integration passed 547 package tests, 72 VM-runner tests, selected native VM gates, and a 2,486-response shared API audit. Native input verified upload selection/cancellation, download saving and popup login completion. Independent source and native-control visual reviews found no actionable issues. The VM's pre-existing WebKit IOSurface issue still prevents default native page-content visual verification; CPU snapshots are separate evidence.
+- Integrated development through `6deac80`, including removal of the separate previous-output viewer. Preserved public updater, signing and release tooling. Candidate DMG installation and production upgrade verification remain separate release steps.
+- The integrated public candidate passed 548 package tests, release preflight (120 release-tooling tests, four optional tool tests skipped), 72 VM-runner tests, the history secret scan and workflow validation. A process-only software drawing diagnostic restored visible popup content in the affected VM; native mouse completion and independent rendered review passed without changing application source or persistent preferences.
+
 ## 0.7.0 — 2026-10-20
 
 ### Added

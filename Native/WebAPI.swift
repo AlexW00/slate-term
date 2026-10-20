@@ -11,7 +11,24 @@ extension WorkspaceHost {
         return nil
     }
 
+    func resolvedWebAutomation(for pane: PaneID, popupID: String?) throws -> WebPaneAutomation? {
+        if let popupID {
+            guard let browser = leaves[pane] as? BrowserPane else {
+                throw RPCFailure(code: APIError.unavailable, message: "Popups require a browser pane")
+            }
+            return try browser.popup(id: popupID).automation
+        }
+        return webAutomation(for: pane)
+    }
+
+    private func popupRenderable(_ automation: WebPaneAutomation) -> Bool {
+        guard let window = automation.web.window else { return false }
+        return window.isVisible && !window.isMiniaturized && !automation.web.isHiddenOrHasHiddenAncestor
+            && automation.web.bounds.width > 0 && automation.web.bounds.height > 0
+    }
+
     func webRenderable(_ pane: PaneID, automation: WebPaneAutomation) throws -> Bool {
+        if webAutomation(for: pane) !== automation { return popupRenderable(automation) }
         let info = try inspectPane(pane).object!
         if let plugin = leaves[pane] as? PluginPane,
            !plugin.instance.isReady || plugin.web.url.map({ plugin.instance.origin.matches($0) }) != true { return false }
@@ -23,6 +40,10 @@ extension WorkspaceHost {
     /// Capture eligibility is not on-screen visibility. Native tab selection may
     /// hide an otherwise attached, laid-out WKWebView; zoom-detached panes remain unavailable.
     func webScreenshotReady(_ pane: PaneID, automation: WebPaneAutomation) -> Bool {
+        if webAutomation(for: pane) !== automation {
+            return automation.ready && automation.documentID != nil && popupRenderable(automation)
+                && !automation.web.needsLayout && automation.web.window?.contentView?.needsLayout == false
+        }
         guard automation.ready, automation.documentID != nil,
               let tab = workspace.tabs.first(where: { $0.layout.paneIDs.contains(pane) }),
               let window = windows[tab.id], let root = window.contentView, let container = containers[pane]?.view,
@@ -50,7 +71,11 @@ extension WorkspaceHost {
         }
         guard params["pane"]?.string != nil else { throw RPCFailure(code: -32602, message: "Web methods require an explicit pane") }
         let pane = try targetPaneID(params)
-        guard let controller = leaves[pane], let automation = webAutomation(for: pane) else {
+        let popupID = params["popupId"]?.string
+        if params["popupId"] != nil && (popupID == nil || popupID!.isEmpty) {
+            throw RPCFailure(code: -32602, message: "popupId must be a nonempty string")
+        }
+        guard let controller = leaves[pane], let automation = try resolvedWebAutomation(for: pane, popupID: popupID) else {
             throw RPCFailure(code: APIError.unavailable, message: "Target pane does not support web automation")
         }
         let tab = try workspace.resolvedTab(pane: pane).id
@@ -61,7 +86,7 @@ extension WorkspaceHost {
         let validate: @MainActor () throws -> Void = { [weak self, weak controller, weak automation] in
             try Task.checkCancellation()
             guard let self, let controller, let automation, self.leaves[pane] === controller,
-                  self.webAutomation(for: pane) === automation else {
+                  try self.resolvedWebAutomation(for: pane, popupID: popupID) === automation else {
                 throw RPCFailure(code: APIError.conflict, message: "Web pane was replaced")
             }
             try operation.validateCaller()
@@ -73,7 +98,7 @@ extension WorkspaceHost {
                 guard automation.web.bounds == captureBounds, self.revisions.layoutRevision(tab) == captureLayoutRevision else {
                     throw RPCFailure(code: APIError.conflict, message: "Web screenshot layout changed; inspect again")
                 }
-            } else if method != "web.get" {
+            } else if !["web.get", "web.dialog", "web.respondDialog", "web.fileChooser", "web.chooseFiles", "web.cancelFileChooser"].contains(method) {
                 guard automation.ready, automation.documentID != nil, try self.webRenderable(pane, automation: automation) else {
                     throw RPCFailure(code: APIError.unavailable, message: "Web document is not ready and renderable")
                 }
@@ -81,9 +106,24 @@ extension WorkspaceHost {
         }
         try validate()
         var input = withoutAPIGuards(params)
+        input.removeValue(forKey: "popupId")
         let expected = try WebIdentity.expected(in: params)
         let result: JSONValue
         switch method {
+        case "web.dialog", "web.respondDialog":
+            if let expected {
+                guard expected.viewID == automation.viewID, expected.documentID == automation.documentID else {
+                    throw RPCFailure(code: APIError.conflict, message: "Web view or document changed; inspect again")
+                }
+            }
+            if method == "web.dialog" {
+                guard Set(input.keys).isSubset(of: ["pane", "tab"]) else {
+                    throw RPCFailure(code: -32602, message: "Unknown web.dialog parameter")
+                }
+                result = automation.dialogs.inspect()
+            } else { result = try automation.dialogs.respond(WebDialogRequest(params: input)) }
+        case "web.fileChooser", "web.chooseFiles", "web.cancelFileChooser":
+            result = try automation.fileChooserOperation(WebFileChooserRequest(method: method, params: input), expected: expected)
         case "web.get":
             guard Set(input.keys).isSubset(of: ["pane", "tab"]) else { throw RPCFailure(code: -32602, message: "Unknown web.get parameter") }
             var info = try await automation.inspect(expected: expected, beforeSubmission: validate).object!
@@ -113,6 +153,10 @@ extension WorkspaceHost {
             result = try await automation.automate(action.action, expected: action.identity, requireReady: true, beforeSubmission: validate)
         }
         var value = result.object ?? [:]
+        if let popupID { value["popupId"] = .string(popupID) }
+        if method == "web.dialog" || method == "web.respondDialog" {
+            value["documentId"] = automation.documentID.map(JSONValue.string) ?? .null
+        }
         value["paneId"] = .string(pane.description)
         value["viewId"] = .string(automation.viewID)
         if method == "web.screenshot" { value["documentId"] = automation.documentID.map(JSONValue.string) ?? .null }

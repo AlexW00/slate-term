@@ -7,6 +7,22 @@ import SlateTermSettings
 
 @MainActor
 final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandlerWithReply {
+    func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
+        automation.dialogs.alert(message, frame: frame, completion: completionHandler)
+    }
+    func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+        automation.dialogs.confirm(message, frame: frame, completion: completionHandler)
+    }
+    func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
+        automation.dialogs.prompt(prompt, defaultText: defaultText, frame: frame, completion: completionHandler)
+    }
+    func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
+        automation.openFileChooser(parameters: parameters, completion: completionHandler)
+    }
     let instance: PluginInstance
     let paneID: PaneID
     let viewID = UUID().uuidString
@@ -484,8 +500,6 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
             start:(command,params={},options={})=>call('terminal.start',{...params,command},options),
             send:(text,params={},options={})=>call('terminal.send',{...params,text},options),
             capture:(params={})=>call('terminal.capture',params),
-            history:(params={},options={})=>call('terminal.history',params,options),
-            historyExport:(params={},options={})=>call('terminal.historyExport',params,options),
             search:(params={},options={})=>call('terminal.search',params,options),
             key:(key,params={},options={})=>call('terminal.key',{...params,key},options),
             run:(command,params={},options={})=>call('terminal.run',{...params,command},options),

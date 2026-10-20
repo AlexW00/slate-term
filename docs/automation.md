@@ -54,21 +54,15 @@ See [API extension progress](api-extension-progress.md) for what is verified on 
 
 ## Terminals
 
-Terminal Find and bounded history reads/exports are documented in [MVP foundations](mvp-foundations.md#terminal-findhistory-slice--implemented-selected-verification-passed). `terminal.capture` reads the active screen; use `terminal.history` for retained output. Native Find and `terminal.search` share the engine's retained-history search.
+Terminal Find and `terminal.search` share the engine’s retained-history search.
+`terminal.capture` reads the active screen. There is no separate history viewer,
+history-read API, or export API.
 
-`terminal.history` and `terminal.historyExport` accept `source: "current"` (default) or `"previous"`. Previous output is the saved text restored for that pane, separate from its fresh shell. Both sources respect `maxBytes` (1–131,072, default 131,072) and `maxLines` (1–10,000, default 2,000). The response includes `source`, `available`, `capturedAt` (Unix seconds for previous output, otherwise null), and `ended` (whether process exit was observed for previous output, otherwise null). Existing `paneId` and `sessionId` identify the current target; `sessionId` never identifies or resumes an old process. Missing previous output returns empty text with `available: false`. Exporting missing previous output fails without creating a file. Exports require an absolute path, create a private file, and never overwrite an existing file.
-
-```sh
-slate-term terminal history --pane p1 --source previous --max-lines 500
-slate-term terminal historyExport --pane p1 --source previous --path /tmp/previous-terminal.txt
-```
-
-Configure saved retention with `terminal.saved_output_lines` (default 10,000; 0 disables it; maximum 100,000). Saved text is also capped at 4 MiB per terminal and 32 MiB per workspace. This records display text for reference, without replaying commands or resuming programs.
+`terminal.saved_output_lines` controls retention (default 10,000; 0 disables it; maximum 100,000). Saved text is also capped at 4 MiB per terminal and 32 MiB per workspace. This records display text for reference, without replaying commands or resuming programs.
 
 Restoration displays saved text in the pane before the new shell starts. It is
-included in current retained history and normal terminal search; `source: "previous"`
-still reads the saved snapshot separately. `api.describe.workspaceRestoration.savedOutputDisplay`
-advertises this behavior. Clearing the saved snapshot does not erase existing live
+available through normal scrolling, selection, and terminal search. `api.describe.workspaceRestoration.savedOutputDisplay`
+advertises this behavior. Setting retention to zero removes saved output without erasing live
 scrollback. In Settings, General shows retention only when workspace restoration is on.
 
 ```sh
@@ -122,6 +116,49 @@ const retained = await workspace.terminal.operationResult({ commandId: handle.co
 ```
 
 A plugin defaults to its declared context. Explicit terminal IDs override its terminal history. Aborting or replacing the plugin document releases its waits; an already adopted operation remains claimable by its authenticated shell and continues to be tracked. Tool-specific protocols and enriched context, including tmux integration, belong in extensions.
+
+## File uploads
+
+Browser, Private Browser and registered-plugin file inputs open the native macOS
+file picker. This uses WebKit's upload-panel delegate; it does not implement the
+separate JavaScript File System Access API. `browser.reload` refreshes a browser
+through the same operation as **Refresh Browser** in Cmd-K and the default Cmd-R shortcut.
+
+All trusted clients can complete the same pending picker:
+
+```sh
+export SLATE_TERM_ACTOR=codex
+slate-term web file-chooser --pane p2
+slate-term web choose-files --pane p2 --chooser-id CHOOSER_ID --file /absolute/file.pdf
+slate-term web cancel-file-chooser --pane p2 --chooser-id CHOOSER_ID
+```
+
+Open the page's upload control first, manually or with guarded `web.click`.
+`web.fileChooser` returns `{chooser:null}` when none is pending; otherwise `chooser`
+contains `chooserId`, `allowsMultipleSelection` and `allowsDirectories`.
+`web.chooseFiles {pane,chooserId,paths}` selects 1–128 existing readable absolute
+paths (at most 4096 UTF-8 bytes each). Repeat `--file` for multiple selections.
+Directory inputs require directories; ordinary inputs require regular files.
+The input's multiple-selection restriction applies to API callers too. WebKit's
+public panel parameters do not expose `accept` filters, so the native picker
+cannot filter by the page's accepted extensions; the page still validates its input.
+
+`web.cancelFileChooser {pane,chooserId}` cancels. Both completion methods return
+`chooserId`, `selectedCount`, `cancelled` and the usual pane/view/document/sample
+metadata. Selection may immediately trigger the website's upload handler.
+Invalid paths leave the picker open. A consumed, superseded or foreign chooser ID
+fails with conflict (`-32050`); it never targets the next picker. Navigation,
+process termination and pane closure cancel pending selection. A second sheet
+request while that window already has a sheet is cancelled.
+
+The chooser ID binds the operation to its original view and document lifetime.
+Optional paired `expectedViewId` / `expectedDocumentId` guards and standard target
+guards also apply. These native-dialog operations do not require DOM renderability,
+so a pending picker can still be cancelled after its pane becomes inactive.
+`workspace.web.fileChooser`, `.chooseFiles` and `.cancelFileChooser` are generated
+from the shared catalog, also available through services and the socket. Ordinary
+web pages receive no bridge. Discovery advertises `webAutomation.fileChooser`.
+These parameterized operations have no standalone command-picker entry or shortcut.
 
 ## Shared web panes
 
@@ -236,3 +273,36 @@ Wait states: `attached`, `detached`, `visible` (default), `hidden`. Timeout is 0
 - `browser.eval --script ...` remains available for explicit page-world JavaScript. It must return a JSON-representable value; screenshots capture the web-view viewport, not an entire scrolling document.
 
 `api.describe` and `context.get` distinguish `mode: standard|layoutApp` and the persistent nullable `layoutAppID` from the per-launch instance identifier. Discovery also reports `runtimeAvailability` by method. Parent-only management remains in every trusted client's catalog and returns the same typed error when called from a layout app.
+
+### Dialogs, downloads and popup windows
+
+`web.dialog` returns the current native JavaScript dialog or null. Complete it
+with `web.respondDialog`, its `dialogId`, and `action: accept|dismiss`. Prompt
+responses may include `text`; an empty string differs from dismissal. Navigation,
+view closure and process replacement retire pending dialogs. Conflicting sheets
+cancel a new dialog without accepting it. These operations work while page script
+is paused and do not require DOM readiness.
+
+`browser.downloads` lists up to 64 retained statuses per view. `browser.download`
+reads one `downloadId`; `browser.saveDownload` supplies an absolute destination
+while it awaits selection; `browser.cancelDownload` cancels an active transfer.
+The same operations back native save panels and the Downloads window. Eight
+active transfers are allowed per view. Selection times out after five minutes.
+Destinations must be new files in writable directories; racing files are never
+replaced. Private staging is removed on completion, cancellation or failure.
+WebKit performs transfers with the original session, including private browsing.
+`browser.showDownloads` and Show Browser Downloads in Cmd-K present progress.
+
+`browser.popups` lists up to eight live descendant windows owned by a browser pane.
+Pass `pane` and `popupId` to browser/web operations or `browser.closePopup`.
+Each popup has its own view/document identity; stale IDs fail without retargeting.
+Popup windows retain the configuration supplied by WebKit, so opener messaging
+and the original private or persistent session remain available. Closing an
+ancestor closes its descendants. WebKit blocks automatic popups without a user
+gesture. Ordinary popup pages never receive the registered-plugin bridge.
+
+CLI equivalents include `web dialog`, `web respond-dialog --dialog-id ID
+--response accept --text TEXT`, `browser downloads`, `browser save-download
+--download-id ID --path /absolute/new-file`, `browser cancel-download`,
+`browser show-downloads`, `browser popups`, and `browser close-popup --popup-id ID`.
+All require the owning `--pane`; optional `--popup-id` selects a descendant view.

@@ -11,7 +11,7 @@ with AppFixture('plugin-compatibility') as app:
     marker = app.root / 'executed'
     manifest = dict(id='compatible.fixture', title='Compatibility fixture', manifestVersion=1, version='1.2.0',
         compatibility=dict(minimumAPIVersion=1, maximumAPIVersion=1,
-            requiredMethods=['terminal.history'], requiredCommands=['terminal.find']),
+            requiredMethods=['terminal.capture'], requiredCommands=['terminal.find']),
         commands=[dict(id='run', title='Run', executable='/usr/bin/touch', arguments=[str(marker)])])
     registered = app.rpc('plugins.register', packagePath=package_fixture(manifest, app.root))
     assert registered['version'] == '1.2.0'

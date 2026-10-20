@@ -10,6 +10,7 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
     let web: WKWebView
     let mode: PaneType
     private var newPageTitle: String { mode == .privateBrowser ? "New Private Browser" : "New Browser" }
+    lazy var downloads = BrowserDownloads(window: { [weak self] in self?.web.window })
     lazy var automation = WebPaneAutomation(web: web)
     var onFocus: (() -> Void)?
     var onTitleChange: (() -> Void)?
@@ -21,18 +22,32 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
     private var observations: [NSKeyValueObservation] = []
     private var navigationOperation: UUID?
     private var currentNavigation: WKNavigation?
+    private var downloadNavigation: WKNavigation?
     private var trackedNavigations: [ObjectIdentifier: (navigation: WKNavigation, operation: UUID)] = [:]
     // WebKit may omit terminal callbacks for loads replaced before they start.
     // Remember their identities without retaining every native/welcome load forever.
     private let submittedNavigations = NSHashTable<WKNavigation>.weakObjects()
     private var closed = false
     private var resumeAddressEditing = false
+    private let popupID: String?
+    private weak var popupOwner: BrowserPopups?
+    private lazy var ownedPopups = BrowserPopups(root: self)
+    private var popupRegistry: BrowserPopups { popupOwner ?? ownedPopups }
 
-    init(mode: PaneType, dataStore: WKWebsiteDataStore) {
-        precondition(mode.isBrowser && dataStore.isPersistent == (mode == .browser))
-        self.mode = mode
+    convenience init(mode: PaneType, dataStore: WKWebsiteDataStore) {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = dataStore
+        // WebKit admits script-created windows only during a user gesture.
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+        self.init(mode: mode, configuration: configuration)
+    }
+
+    init(mode: PaneType, configuration: WKWebViewConfiguration,
+         popupOwner: BrowserPopups? = nil, popupID: String? = nil) {
+        precondition(mode.isBrowser && configuration.websiteDataStore.isPersistent == (mode == .browser))
+        self.mode = mode
+        self.popupOwner = popupOwner
+        self.popupID = popupID
         web = WKWebView(frame: .zero, configuration: configuration)
         super.init(nibName: nil, bundle: nil)
         web.navigationDelegate = self
@@ -61,7 +76,12 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
         address.delegate = self
         address.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         address.setAccessibilityLabel("Browser address")
-        let toolbar = NSStackView(views: [back, forward, address, reload])
+        let downloadButton = NSButton(image: NSImage(systemSymbolName: "arrow.down.circle", accessibilityDescription: "Downloads")!,
+                                      target: self, action: #selector(showDownloads))
+        downloadButton.toolTip = "Downloads"
+        downloadButton.setAccessibilityLabel("Downloads")
+        downloadButton.setContentHuggingPriority(.required, for: .horizontal)
+        let toolbar = NSStackView(views: [back, forward, address, reload, downloadButton])
         toolbar.spacing = 6
         toolbar.distribution = .fill
         toolbar.setHuggingPriority(.fittingSizeCompression, for: .horizontal)
@@ -87,8 +107,10 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
                         } },
                         web.observe(\.isLoading) { [weak self] _, _ in MainActor.assumeIsolated { self?.updateControls() } }]
         updateControls()
-        startNavigation {
-            web.loadHTMLString("<!doctype html><meta name='color-scheme' content='light dark'><title>\(newPageTitle)</title><style>body{font:16px system-ui;padding:48px;max-width:600px;margin:auto}h1{font-size:26px}</style><h1>\(newPageTitle)</h1><p>Search or enter a URL in the address bar to browse.</p>", baseURL: nil)
+        if popupID == nil {
+            startNavigation {
+                web.loadHTMLString("<!doctype html><meta name='color-scheme' content='light dark'><title>\(newPageTitle)</title><style>body{font:16px system-ui;padding:48px;max-width:600px;margin:auto}h1{font-size:26px}</style><h1>\(newPageTitle)</h1><p>Search or enter a URL in the address bar to browse.</p>", baseURL: nil)
+            }
         }
     }
 
@@ -117,6 +139,9 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
     func close() {
         guard !closed else { return }
         closed = true
+        if let popupID { popupOwner?.closeDescendants(of: popupID) }
+        else { ownedPopups.closeAll() }
+        downloads.close()
         automation.close()
         trackedNavigations.removeAll(); submittedNavigations.removeAllObjects(); currentNavigation = nil
         observations.removeAll()
@@ -147,9 +172,12 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
         case "browser.forward": goForward()
         case "browser.focusAddress": focusAddress()
         case "browser.reload": reloadPage()
+        case "browser.showDownloads": downloads.showDownloads()
         default: throw RPCFailure(code: -32601, message: "Unknown browser command: \(command)")
         }
     }
+
+    @objc private func showDownloads() { downloads.showDownloads() }
 
     func focusAddress() { resumeAddressEditing = true; address.selectText(nil) }
     var focusInfo: JSONValue {
@@ -168,6 +196,7 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
     }
     private func trackNavigation(_ navigation: WKNavigation) {
         currentNavigation = navigation
+        downloadNavigation = nil
         submittedNavigations.add(navigation)
     }
     @objc private func goBack() { startNavigation { web.goBack() } }
@@ -179,7 +208,7 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
         catch { status.stringValue = String(describing: error) }
     }
     private func updateControls() {
-        if let url = web.url, url.absoluteString != "about:blank" { address.stringValue = url.absoluteString }
+        if let url = web.url { address.stringValue = url.absoluteString == "about:blank" && popupID == nil ? "" : url.absoluteString }
         back.isEnabled = web.canGoBack
         forward.isEnabled = web.canGoForward
         status.stringValue = web.isLoading ? "Loading…" : (web.url?.host ?? "")
@@ -203,21 +232,78 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
         return web.load(URLRequest(url: url))
     }
     static func url(_ text: String) throws -> URL { try BrowserURL.parse(text, assumingHTTPS: true) }
+    func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
+        automation.dialogs.alert(message, frame: frame, completion: completionHandler)
+    }
+    func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+        automation.dialogs.confirm(message, frame: frame, completion: completionHandler)
+    }
+    func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
+        automation.dialogs.prompt(prompt, defaultText: defaultText, frame: frame, completion: completionHandler)
+    }
+    func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
+        automation.openFileChooser(parameters: parameters, completion: completionHandler)
+    }
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        if navigationAction.shouldPerformDownload, let url = navigationAction.request.url,
+           BrowserURL.allows(url) || url.scheme?.lowercased() == "blob" {
+            decisionHandler(.download)
+            return
+        }
         guard let url = navigationAction.request.url, BrowserURL.allows(url) else {
             decisionHandler(.cancel)
             status.stringValue = "Navigation scheme is not allowed"
             return
         }
-        decisionHandler(.allow)
+        decisionHandler(navigationAction.shouldPerformDownload ? .download : .allow)
+    }
+    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
+                 decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        let disposition = (navigationResponse.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition") ?? ""
+        let attachment = disposition.split(separator: ";", maxSplits: 1).first?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "attachment"
+        let isDownload = !navigationResponse.canShowMIMEType || attachment
+        if isDownload { downloadNavigation = currentNavigation }
+        decisionHandler(isDownload ? .download : .allow)
+    }
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        downloads.receive(download)
+    }
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+        downloads.receive(download)
     }
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if let url = navigationAction.request.url, BrowserURL.allows(url),
-           !url.isFileURL || navigationAction.sourceFrame.request.url?.isFileURL == true {
-            // Page popups reuse WebKit's existing read grant, never acquire a new one.
-            startNavigation { web.load(navigationAction.request) }
+        guard !closed, navigationAction.targetFrame == nil,
+              let url = navigationAction.request.url, BrowserURL.allows(url),
+              !url.isFileURL || navigationAction.sourceFrame.request.url?.isFileURL == true else { return nil }
+        return popupRegistry.open(configuration: configuration, opener: self, openerID: popupID,
+                                  sourceFrame: navigationAction.sourceFrame, features: windowFeatures)
+    }
+    func webViewDidClose(_ webView: WKWebView) {
+        guard let popupID else { return }
+        popupOwner?.close(id: popupID)
+    }
+
+    var popupInfo: JSONValue { closed ? .array([]) : popupRegistry.info }
+
+    func popup(id: String) throws -> BrowserPane {
+        guard !closed else { throw RPCFailure(code: APIError.conflict, message: "Browser pane is closed") }
+        return try popupRegistry.pane(id: id)
+    }
+
+    func closePopup(id: String, expected: WebIdentity? = nil) throws -> JSONValue {
+        let pane = try popup(id: id)
+        if let expected {
+            guard pane.automation.viewID == expected.viewID,
+                  pane.automation.documentID == expected.documentID, pane.automation.ready else {
+                throw RPCFailure(code: APIError.conflict, message: "Popup view or document changed; inspect again")
+            }
         }
-        return nil
+        popupRegistry.close(id: id)
+        return .object(["popupId": .string(id), "closed": .bool(true)])
     }
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         guard let navigation else { return }
@@ -285,7 +371,12 @@ final class BrowserPane: NSViewController, WKNavigationDelegate, WKUIDelegate, N
     }
     private func navigationFailed(_ navigation: WKNavigation?, error: any Error) {
         guard let navigation else { return }
-        if navigation === currentNavigation { status.stringValue = error.localizedDescription }
+        let failure = error as NSError
+        let becameDownload = navigation === downloadNavigation && failure.domain == "WebKitErrorDomain" && failure.code == 102
+        if becameDownload {
+            downloadNavigation = nil
+            updateControls()
+        } else if navigation === currentNavigation { status.stringValue = error.localizedDescription }
         if let tracked = trackedNavigations.removeValue(forKey: ObjectIdentifier(navigation)) {
             if navigationOperation == tracked.operation { navigationOperation = nil }
             automation.complete(tracked.operation, .failure(error))

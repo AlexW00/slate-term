@@ -1,7 +1,5 @@
 import Foundation
-import Darwin
 import SlateTermCore
-import SlateTermSettings
 
 /// Generic terminal I/O and authenticated shell completion. Tool-specific protocols live in extensions.
 @MainActor
@@ -88,8 +86,6 @@ final class TerminalControl {
         case "send": fields = ["text"]
         case "key": fields = ["key"]
         case "capture": fields = []
-        case "history": fields = ["maxBytes", "maxLines", "source"]
-        case "historyExport": fields = ["maxBytes", "maxLines", "path", "source"]
         case "search": fields = ["action", "query"]
         case "run": fields = ["command", "timeoutMilliseconds", "shell"]
         case "start": fields = ["command", "shell"]
@@ -135,50 +131,6 @@ final class TerminalControl {
                 "active": .bool(state.active), "query": .string(state.query),
                 "total": state.total.map(JSONValue.integer) ?? .null,
                 "selected": state.selected.map(JSONValue.integer) ?? .null])
-        }
-        if action == "history" || action == "historyExport" {
-            let request = try TerminalHistoryRequest(params)
-            let path: String?
-            if action == "historyExport" {
-                guard let value = params["path"]?.string, value.hasPrefix("/"), !value.utf8.contains(0) else {
-                    throw RPCFailure(code: -32602, message: "Export requires an absolute local path")
-                }
-                path = value
-            } else { path = nil }
-            let previous = request.source == .previous ? target.view.previousOutput : nil
-            if path != nil, request.source == .previous, previous == nil {
-                throw RPCFailure(code: APIError.unavailable, message: "No previous terminal output is available")
-            }
-            let tail = request.source == .current
-                ? target.view.retainedText(maximumBytes: request.maxBytes)
-                : (text: previous?.text ?? "", truncated: false)
-            let result = request.result(text: tail.text, byteTruncated: tail.truncated)
-            var response: [String: JSONValue] = ["paneId": .string(pane.description), "sessionId": .string(target.sessionID),
-                "truncated": .bool(result.truncated), "lineCount": .integer(result.lineCount),
-                "byteCount": .integer(result.text.utf8.count), "source": .string(request.source.rawValue),
-                "available": .bool(request.source == .current || previous != nil),
-                "capturedAt": previous.map { .number($0.capturedAt.timeIntervalSince1970) } ?? .null,
-                "ended": previous.map { .bool($0.ended) } ?? .null]
-            if let path {
-                try validateCaller()
-                // Never replace a file or follow an existing final symlink. Export
-                // is an explicit trusted-client write, not automatic transcript logging.
-                let fd = Darwin.open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
-                guard fd >= 0 else { throw RPCFailure(code: -32020, message: "Could not create export file (it may already exist)") }
-                defer { Darwin.close(fd) }
-                let data = Data(result.text.utf8)
-                try data.withUnsafeBytes { bytes in
-                    var written = 0
-                    while written < bytes.count {
-                        let count = Darwin.write(fd, bytes.baseAddress!.advanced(by: written), bytes.count - written)
-                        if count < 0 && errno == EINTR { continue }
-                        guard count > 0 else { throw RPCFailure(code: -32020, message: "Export write failed; the new file may be partial") }
-                        written += count
-                    }
-                }
-                response["path"] = .string(path)
-            } else { response["text"] = .string(result.text) }
-            return .object(response)
         }
         let timeout: Int
         if let value = params["timeoutMilliseconds"] {

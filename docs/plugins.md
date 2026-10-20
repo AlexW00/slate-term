@@ -159,7 +159,7 @@ Manifests may declare:
   "compatibility": {
     "minimumAPIVersion": 1,
     "maximumAPIVersion": 1,
-    "requiredMethods": ["terminal.history"],
+    "requiredMethods": ["terminal.capture"],
     "requiredCommands": ["terminal.find"]
   }
 }
@@ -379,3 +379,12 @@ Backend stdout/stderr are bounded, with a retained 64 KiB log tail. Crashes use 
 The reported PID is the bundled supervisor/group leader. Actual service exit codes are recorded in logs; the supervisor deliberately kills its own group to remove remaining descendants. It watches GUI death, including SIGKILL. Processes that deliberately daemonize into another group/session escape this containment; plugins must not do so.
 
 The bridge bounds requests and responses. Shared plugin values are limited to 256 KiB/1,024 keys, panel state to 32 KiB/128 keys; additional per-value/patch/configuration/aggregate bounds are advertised by `api.describe.pluginPersistence`. Files are private and atomically replaced under the app's state directory. Atomic replacement is not a power-loss durability guarantee. The old instance-scoped storage API/files are not migrated; see [development format changes](plugin-persistence.md#breaking-development-formats).
+
+Registered-plugin file inputs use the same native upload picker as browser panes. Generated `workspace.web.fileChooser/chooseFiles/cancelFileChooser` helpers control a pending picker through the shared API. See [file uploads](automation.md#file-uploads).
+
+Browser integrations also expose `web.dialog` / `web.respondDialog`,
+`browser.downloads` / `browser.download` / `browser.saveDownload` /
+`browser.cancelDownload` / `browser.showDownloads`, and `browser.popups` /
+`browser.closePopup`. The generated trusted page aliases and service/CLI clients
+use the same catalog. Add `popupId` beside the owning `pane` to address a popup
+through web or browser operations; closed IDs never fall back to the root view.

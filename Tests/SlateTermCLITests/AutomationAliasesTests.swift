@@ -169,14 +169,10 @@ import SlateTermCore
     }
 }
 
-@Test func terminalHistoryCLIParsesSourcesAndRejectsThemForOtherActions() throws {
-    for action in ["history", "historyExport"] {
-        let command = try TerminalCommand.parse([action, "--source", "previous", "--max-lines", "100", "--max-bytes", "2048"])
-        #expect(command.source == .previous && command.maxLines == 100 && command.maxBytes == 2048)
+@Test func terminalCLIRejectsRemovedHistoryActionsAndOptions() {
+    for args in [["history"], ["historyExport"], ["capture", "--source", "previous"],
+                 ["capture", "--max-lines", "10"], ["capture", "--max-bytes", "100"],
+                 ["capture", "--path", "/tmp/history.txt"]] {
+        #expect(throws: (any Error).self) { try TerminalCommand.parse(args) }
     }
-    #expect(try TerminalCommand.parse(["history"]).source == nil)
-    #expect(try TerminalCommand.parse(["history", "--source", "current"]).source == .current)
-    #expect(throws: (any Error).self) { try TerminalCommand.parse(["history", "--source", "all"]) }
-    let command = try TerminalCommand.parse(["capture", "--source", "previous", "--socket", "/tmp/slate-must-not-connect.sock"])
-    #expect(throws: ValidationError.self) { try command.run() }
 }

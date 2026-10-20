@@ -300,12 +300,11 @@ has a 32 MiB text limit; exceptionally long lines may be shortened.
 When workspace restoration is enabled, Slate takes periodic snapshots and saves
 again after orderly process shutdown. Restored text appears in the terminal pane,
 above a new-session separator and the fresh shell prompt. It supports normal
-scrolling, selection, and terminal search. **Show Previous Terminal Output** opens
-saved text in a read-only, searchable window. Its pane-header clock button and
-**Clear Previous Terminal Output** command operate on the same stored text.
+scrolling, selection, and terminal search. There is no separate viewer or pane-header
+button for saved output.
 The current terminal starts a fresh shell in its restored directory. Saved text
 is rendered as plain text before that shell starts, without interpreting terminal
-escape sequences or sending it to the shell. Clearing saved output does not erase
+escape sequences or sending it to the shell. Disabling retention does not erase
 text already displayed in a live terminal's scrollback.
 
 Output can contain sensitive text. It is stored with the private workspace

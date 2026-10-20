@@ -3,6 +3,31 @@ import Testing
 @testable import SlateTermCore
 import SlateTermTestSupport
 
+@Test func fileChooserContractsRejectMalformedAndUnboundedSelections() throws {
+    let samples: [[String: JSONValue]] = [
+        [:], ["chooserId": .string("chooser")], ["chooserId": .string("")], ["chooserId": .integer(2)],
+        ["chooserId": .string("chooser"), "paths": .array([])],
+        ["chooserId": .string("chooser"), "paths": .array([.string("/tmp/file")])],
+        ["chooserId": .string("chooser"), "paths": .array([.string("relative")])],
+        ["chooserId": .string("chooser"), "paths": .array([.string("/tmp/\0file")])],
+        ["chooserId": .string("chooser"), "paths": .array([.null])],
+        ["chooserId": .string("chooser"), "paths": .array(Array(repeating: .string("/tmp/file"), count: 129))],
+        ["chooserId": .string("chooser"), "paths": .array([.string("/" + String(repeating: "a", count: 4096))])],
+        ["chooserId": .string("chooser"), "unexpected": .bool(true)]
+    ]
+    for method in [AutomationMethod.webFileChooser, .webChooseFiles, .webCancelFileChooser] {
+        #expect(method.family == .web && method.isPublic)
+        #expect(method.admission == (method == .webFileChooser ? .read : .mutation))
+        for sample in samples {
+            let params = sample.merging(["pane": .string("p1")]) { _, v in v }
+            #expect(schemaAccepts(AutomationContracts.web[method]!.input, .object(params))
+                == ((try? WebFileChooserRequest(method: method.rawValue, params: params)) != nil))
+        }
+        let resolved = method.resolving([:], defaults: .init(pane: PaneID(2), tab: TabID(3)))
+        #expect(resolved["pane"] == .string("p2"))
+    }
+}
+
 @Test func webActionContractsMatchPairedIdentityRefsAndLegacyDOMInputs() throws {
     let definitions = AutomationContracts.webDefinitions
     let samples: [(String, [String: JSONValue])] = [
@@ -37,7 +62,7 @@ import SlateTermTestSupport
 }
 
 @Test func webContractsKeepLegacyFallbackAndScreenshotBoundariesDistinct() {
-    let methods = AutomationContracts.web
+    let methods = AutomationCatalog.methods.filter { $0.key.family == .web || $0.key.family == .browser }
     #expect(Set(methods.keys) == Set(AutomationMethod.publicMethods.filter { $0.rawValue.hasPrefix("web.") || $0.rawValue.hasPrefix("browser.") }))
     #expect(schemaAccepts(methods[.browserGet]!.input, .object(["ignored": .bool(true)])))
     #expect(!schemaAccepts(methods[.webGet]!.input, .object([:])))

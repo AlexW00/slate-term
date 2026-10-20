@@ -106,6 +106,26 @@ try:
                 url = f"http://127.0.0.1:{server.server_port}/"
                 loaded = rpc("browser.navigate", pane="p1", url=url)
                 assert loaded["title"] == "Slate Browser Fixture", {"response": loaded, "document": evaluate("document.documentElement.outerHTML"), "current": rpc("browser.get", pane="p1")}
+                # Observe a real document reload from each native entry point.
+                def expect_refresh(action):
+                    evaluate("document.title='Before Refresh'; true")
+                    action()
+                    eventually("browser refresh loads a new document",
+                               lambda: not rpc("browser.get", pane="p1")["loading"]
+                               and rpc("browser.get", pane="p1")["title"] == "Slate Browser Fixture")
+
+                rpc("debug.activate", tab="t1")
+                evaluate("document.querySelector('#name').focus(); true")
+                expect_refresh(lambda: rpc("debug.key", chord="cmd+r", dispatch=True))
+                rpc("debug.browserAddress", pane="p1")
+                expect_refresh(lambda: rpc("debug.key", chord="cmd+r", dispatch=True))
+                rpc("debug.key", chord="cmd+k", dispatch=True)
+                picker = rpc("debug.commandPicker", query="refresh browser")
+                assert picker["visible"] and picker["selected"] == "browser.reload", picker
+                assert picker["results"][0]["title"] == "Refresh Browser", picker
+                expect_refresh(lambda: rpc("debug.key", chord="return", picker=True, dispatch=True))
+                assert not rpc("debug.commandPicker")["visible"]
+                expect_refresh(lambda: cli("command", "run", "browser.reload", "--pane", "p1"))
                 with_frame = rpc("browser.navigate", pane="p1", url=url + "with-frame")
                 assert with_frame["title"] == "Slate Browser Fixture", "Blocked subframe failed the main navigation"
                 evaluate("document.querySelector('#name').focus(); true")

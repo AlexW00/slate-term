@@ -496,6 +496,12 @@ def host_main(args):
     external_save_input = getattr(args, 'external_save_input', False)
     if external_save_input and 'layout-apps-ui' not in vm_names:
         raise SystemExit('--external-save-input requires the layout-apps-ui gate')
+    external_browser_input = getattr(args, 'external_browser_input', False)
+    if external_browser_input and 'web' not in vm_names:
+        raise SystemExit('--external-browser-input requires the web gate')
+    external_file_input = getattr(args, 'external_file_input', False)
+    if external_file_input and 'web' not in vm_names:
+        raise SystemExit('--external-file-input requires the web gate')
     if (args.timeout + 30) * len(vm_gates) + 60 > 86400:
         raise SystemExit('Selection exceeds VMPal\'s 24-hour command limit; select fewer tests or a shorter timeout')
     if sys.platform != 'darwin' or platform.machine() != 'arm64':
@@ -509,6 +515,7 @@ def host_main(args):
     output.mkdir(parents=True)
     receipt = {'vm': args.vm, 'tests': selected, 'fullSuite': getattr(args, 'all', False),
                'externalSaveInput': external_save_input,
+               'externalFileInput': external_file_input, 'externalBrowserInput': external_browser_input,
                'sourceHashes': {}, 'binaryHashes': {}, 'hostBinaryHashes': {},
                'hostResults': {}, 'guestResults': {}, 'preparations': [],
                'completed': False, 'exitCode': 1}
@@ -641,6 +648,10 @@ def host_main(args):
                 plan = {'tests': {gate.name: list(gate.command) for gate in vm_gates}, 'timeout': args.timeout}
                 if external_save_input:
                     plan['tests']['layout-apps-ui'].append('--external-save-input')
+                if external_browser_input:
+                    plan['tests']['web'].append('--external-browser-input')
+                if external_file_input:
+                    plan['tests']['web'].append('--external-file-input')
                 (bundle / '.vm-plan.json').write_text(json.dumps(plan) + '\n')
                 (bundle / '.vm-receipt.json').write_text(json.dumps(receipt) + '\n')
                 archive = Path(temporary) / 'bundle.tar.gz'
@@ -792,6 +803,9 @@ def main():
     parser.add_argument('--keep-guest', action='store_true', help='Keep the isolated guest run directory for debugging')
     parser.add_argument('--external-save-input', action='store_true',
                         help='Wait for VMPal input to confirm native save panels in layout-apps-ui')
+    parser.add_argument('--external-browser-input', action='store_true', help='Wait for VMPal native download Save and popup login input in web')
+    parser.add_argument('--external-file-input', action='store_true',
+                        help='Wait for VMPal input to cancel and confirm native file pickers in web')
     parser.add_argument('--lock-wait', type=int, default=1800, metavar='SECONDS',
                         help='Wait this long for another run to release the VM (default: 1800)')
     parser.add_argument('--guest', help=argparse.SUPPRESS)

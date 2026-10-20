@@ -60,33 +60,6 @@ extension AutomationContracts {
                 constraints: [.object(["not": .object(["required": .array([.string("contains"), .string("afterSequence")])])])],
                 semantics: ["outputCondition": .string("literalActiveScreenMayMatchExistingText"), "timeoutStopsExecution": .bool(false)])
         ]
-        let historySource = S.strings(TerminalHistoryRequest.Source.allCases.map(\.rawValue))
-        let historyInput = [
-            "source": S.defaulted(historySource, .string("current")),
-            "maxBytes": S.defaulted(S.integer(minimum: 1, maximum: TerminalHistoryRequest.maximumBytes), .integer(TerminalHistoryRequest.maximumBytes)),
-            "maxLines": S.defaulted(S.integer(minimum: 1, maximum: TerminalHistoryRequest.maximumLines), .integer(2_000))
-        ]
-        let historyResult = identity.merging([
-            "source": historySource, "available": S.boolean,
-            "capturedAt": S.nullable(S.annotated(S.number, ["minimum": .integer(-62_135_596_800), "maximum": .integer(253_402_300_799)])),
-            "ended": S.nullable(S.boolean),
-            "truncated": S.boolean, "lineCount": S.integer(minimum: 0, maximum: TerminalHistoryRequest.maximumLines),
-            "byteCount": S.integer(minimum: 0, maximum: TerminalHistoryRequest.maximumBytes)
-        ]) { _, value in value }
-        methods[.terminalHistory] = terminal(historyInput,
-            result: S.object(historyResult.merging(["text": output["text"]!]) { _, value in value }, required: Array(historyResult.keys) + ["text"]),
-            semantics: ["output": .string("tailOfSelectedHistoryNotIsolatedStdout"),
-                "defaultSource": .string("current"), "previousUnavailable": .string("emptyTextWithAvailableFalse"),
-                "sessionId": .string("currentPaneSessionGuardNotHistoricalSession"),
-                "capturedAt": .string("unixSecondsForPreviousOtherwiseNull"), "ended": .string("previousProcessExitObservedOtherwiseNull")])
-        let absolutePath = S.string(pattern: "^/[^\\u0000]*(?![\\s\\S])")
-        methods[.terminalHistoryExport] = terminal(historyInput.merging(["path": absolutePath]) { _, value in value }, required: ["path"],
-            result: S.object(historyResult.merging(["path": absolutePath]) { _, value in value }, required: Array(historyResult.keys) + ["path"]),
-            errors: [-32020, APIError.unavailable], semantics: ["overwrites": .bool(false), "followsFinalSymlink": .bool(false),
-                "newFileMode": .string("0600"), "failedWriteMayLeavePartialFile": .bool(true), "output": .string("tailOfSelectedHistoryNotIsolatedStdout"),
-                "defaultSource": .string("current"), "previousUnavailable": .string("errorWithoutCreatingFile"),
-                "sessionId": .string("currentPaneSessionGuardNotHistoricalSession"),
-                "capturedAt": .string("unixSecondsForPreviousOtherwiseNull"), "ended": .string("previousProcessExitObservedOtherwiseNull")])
         methods[.terminalSearch] = terminal([
             "action": S.defaulted(S.strings(TerminalSearchRequest.Action.allCases.map(\.rawValue)), .string("get")),
             "query": S.string(maximumUTF8Bytes: 4_096, pattern: "^[^\\u0000]*(?![\\s\\S])")
