@@ -796,6 +796,12 @@ This also occurs in unchanged signed Slate and an independent WKWebView probe.
 The popup page snapshot is not a native compositor pass. No private WebKit API
 or persistent graphics workaround was added to the app.
 
-Remaining release milestones: integrate the committed change into the maintained
-public release checkout, verify the signed DMG, publish, and verify the real
-previous-version update path. Commit and publication are user-authorized.
+Release completed as 0.8.0 build 9 from public commit `f25b00c`. The signed DMG
+passed web, browser and command-picker VM gates, plus an 826-response catalog
+audit. Artifact signatures, matching source and anonymous public delivery passed.
+A real production Sparkle upgrade from 0.7.0 accepted native download/install
+input, relaunched the exact signed candidate and preserved workspace structure,
+configuration bytes and saved terminal output. Test launch settings were restored
+and the owned fixture cleaned up. Retained evidence is in the public release
+checkout at `artifacts/release-0.8.0/native/verification.md`. This selected
+verification retains the VM page-content limitation described above.

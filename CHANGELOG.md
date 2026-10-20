@@ -12,7 +12,7 @@ Detailed change record for agents and maintainers. Public release notes live in 
 
 ### Internal
 
-## 0.8.0 — Pending publication
+## 0.8.0 — 2026-10-20
 
 ### Added
 
@@ -24,7 +24,6 @@ Detailed change record for agents and maintainers. Public release notes live in 
 
 ### Changed
 
-
 - Name the Cmd-R browser action “Refresh Browser” so it is discoverable by refresh in Cmd-K.
 
 - Keep previous terminal output in restored scrollback; remove its separate viewer, pane-header button, Show/Clear commands, and history-read/export APIs.
@@ -34,8 +33,10 @@ Detailed change record for agents and maintainers. Public release notes live in 
 ### Internal
 
 - Browser integration passed 547 package tests, 72 VM-runner tests, selected native VM gates, and a 2,486-response shared API audit. Native input verified upload selection/cancellation, download saving and popup login completion. Independent source and native-control visual reviews found no actionable issues. The VM's pre-existing WebKit IOSurface issue still prevents default native page-content visual verification; CPU snapshots are separate evidence.
-- Integrated development through `6deac80`, including removal of the separate previous-output viewer. Preserved public updater, signing and release tooling. Candidate DMG installation and production upgrade verification remain separate release steps.
+- Integrated development through `6deac80`, including removal of the separate previous-output viewer. Preserved public updater, signing and release tooling. Candidate DMG installation and production upgrade verification are recorded separately below.
 - The integrated public candidate passed 548 package tests, release preflight (120 release-tooling tests, four optional tool tests skipped), 72 VM-runner tests, the history secret scan and workflow validation. A process-only software drawing diagnostic restored visible popup content in the affected VM; native mouse completion and independent rendered review passed without changing application source or persistent preferences.
+
+- Published build 9 from `f25b00c` after successful tag CI and Release workflows. Signed artifact and anonymous public checks passed for source, checksums, feed/archive/notes signatures, Apple signatures, notarization and installer alias equality. The actual DMG-installed app passed web, browser and command-picker gates; its 826 captured responses passed the shared catalog audit. Independent native-control visual review found no defects within the documented VM rendering limitation. A real 0.7.0 production Sparkle upgrade accepted native download/install clicks, relaunched the exact signed 0.8.0 app, and preserved workspace structure, configuration and saved terminal output. Temporary VM launch settings were restored and the owned fixture cleaned up.
 
 ## 0.7.0 — 2026-10-20
 
