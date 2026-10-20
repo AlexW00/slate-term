@@ -10,6 +10,8 @@ Detailed change record for agents and maintainers. Public release notes live in 
 
 ### Fixed
 
+- Prevent sideways page scrolling on the website by clipping the scaled hero glow at its section. WebKit checks passed at nine widths from 320 to 1440 pixels in both themes and five scroll positions; sticky navigation and gallery scrolling remain functional. Physical mobile touch behavior was not tested.
+
 - Release finalization discovers draft candidates through authenticated release listings, including later pages, because GitHub’s tag endpoint excludes drafts. Verified by 23 helper tests and the completed 0.6.0 publication.
 
 ### Internal

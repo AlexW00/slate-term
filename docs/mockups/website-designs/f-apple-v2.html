@@ -113,7 +113,8 @@ h1,h2,h3,p{margin:0}
 .req{font-size:12px;color:var(--text-2);letter-spacing:-.01em;margin-top:16px}
 
 /* ---------- Hero ---------- */
-.hero{padding:88px 0 0;text-align:center;background:var(--bg)}
+/* Keep the scaled ambient glow inside the page without creating a scroll container. */
+.hero{padding:88px 0 0;text-align:center;background:var(--bg);overflow-x:clip}
 .hero .appicon{display:block;margin:0 auto 20px}
 .eyebrow{font:600 24px/1.17 var(--font-display);letter-spacing:.009em;color:var(--text)}
 h1{font-family:var(--font-display);font-weight:600;font-size:clamp(48px,8.4vw,96px);line-height:1.04;letter-spacing:-.022em;margin:10px auto 0;text-wrap:balance}
