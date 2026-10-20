@@ -12,7 +12,7 @@ Detailed change record for agents and maintainers. Public release notes live in 
 
 ### Internal
 
-## 0.7.0 — Pending publication
+## 0.7.0 — 2026-10-20
 
 ### Added
 
@@ -42,6 +42,8 @@ Detailed change record for agents and maintainers. Public release notes live in 
 
 - Integrated committed development through `4ba65db`, including inline terminal-output restoration and layout-app polish. Preserved public updater, signing, source-packaging and release tooling. Selected development native checks are recorded separately from candidate installation and production upgrade checks.
 - The integrated public candidate passed 541 package tests, a native build, the full-history secret scan, workflow validation, and 72 VM-runner tests. Release preflight ran 120 tooling tests with four optional official-tool tests skipped; actual artifact signing and verification remain pipeline checks.
+
+- Published build 8 from `7b9ac7a` after successful tag CI and Release workflows. Downloaded and anonymous public verification passed checksums, matching source, signed feed/archive/notes, Apple signatures, notarization tickets, and installer alias equality. The actual DMG-installed app passed the native layout-app UI gate. A real production Sparkle upgrade from 0.6.0 displayed the signed notes, accepted native download/install actions, relaunched as 0.7.0, and preserved workspace structure and saved terminal output. Evidence is retained in the release finalizer receipts and native release artifacts; this is selected verification, not a full native-suite certificate.
 
 ## 0.6.0 — 2026-10-20
 
