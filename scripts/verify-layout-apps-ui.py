@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Capture owned native layout-app UI states in the VM for independent review."""
+import argparse
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import importlib.util
 import json
+import plistlib
 from pathlib import Path
 import struct
 import subprocess
@@ -29,10 +32,14 @@ def png_evidence(path):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--external-save-input', action='store_true',
+                        help='Wait for real external native Create clicks in three save panels (30 seconds each).')
+    args = parser.parse_args()
     fixture.require_vm()
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
     evidence = {'captures': [], 'observations': {}, 'visualReview': 'pending-independent-review',
-                'interactionLimitations': ['Icon selection is set through the existing dialog test hook.',
+                'interactionLimitations': ['Icon buttons and save-panel cancellation use integration hooks; save confirmation requires external native input.',
                     'Override reset uses the production API; the Reset button hit target is not exercised.']}
 
     def capture(app, name, section, width=1060, height=720):
@@ -67,10 +74,105 @@ def main():
         before = parent.rpc('layoutApps.list')
         details = parent.rpc('debug.layoutDialogs', launcher=True, name='Research', icon=icon,
                              confirm=False, screenshot=str(path))
-        assert details['message'] == 'Create Layout App', details
+        assert details['message'] == 'Create App', details
+        assert details['editableFields'] == 0 and details['previewPresent'], details
+        assert details['previewChanged'] == (icon != 'slate'), details
         assert parent.rpc('layoutApps.list') == before, 'Cancelling the dialog created an app'
-        evidence['captures'].append(dict(png_evidence(path), section='Create Layout App', selectedIcon=icon))
+        evidence['captures'].append(dict(png_evidence(path), section='Create App', selectedIcon=icon))
         evidence['observations'][name] = {'dialog': details, 'cancelPreservedAppCatalog': True}
+
+    def native_creation(parent, layout_id):
+        before = parent.rpc('layoutApps.list')
+        destination = parent.root / 'Chosen Location' / 'Custom App Name.app'
+        destination.parent.mkdir()
+        common = dict(launcher=True, layoutID=layout_id, icon='folder', destination=str(destination),
+                      timeoutScreenshot=str(ARTIFACTS / 'create-app-save-timeout.png'),
+                      externalInput=args.external_save_input)
+        options_cancel = parent.rpc('debug.layoutDialogs', **common, confirm=False)
+        assert 'savePanel' not in options_cancel and not destination.exists(), options_cancel
+        save_path = ARTIFACTS / 'create-app-save-panel.png'
+        save_cancel = parent.rpc('debug.layoutDialogs', **common, confirm=True,
+                                 saveConfirm=False, saveScreenshot=str(save_path))
+        assert not save_cancel['savePanel']['accepted'] and not save_cancel['savePanel']['timedOut'], save_cancel
+        assert save_cancel['savePanel']['action'] == 'cancel' and not destination.exists(), save_cancel
+        assert parent.rpc('layoutApps.list') == before, 'Cancelling creation changed the app catalog'
+        evidence['captures'].append(dict(png_evidence(save_path), section='Create App save panel'))
+        if not args.external_save_input:
+            record = parent.rpc('layouts.launcher', id=layout_id, path=str(destination),
+                                name='Custom App Name', icon='folder')
+            evidence['observations']['creation'] = {
+                'optionsCancelPreservedCatalog': True, 'saveCancelPreservedCatalog': True,
+                'fixtureCreation': 'production layouts.launcher API',
+                'nativeSaveConfirmation': 'not exercised; run --external-save-input with real native input'}
+            return record
+        def external_confirmation(step, purpose, **params):
+            ready = parent.root / f'native-save-{step}.ready'
+            screenshot = ARTIFACTS / f'create-app-external-save-{step}.png'
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                request = pool.submit(parent.rpc, 'debug.layoutDialogs', **common, confirm=True,
+                                      saveConfirm=True, readyPath=str(ready), saveScreenshot=str(screenshot), **params)
+                eventually('native save panel ready', lambda: ready.exists() or request.done(), timeout=10)
+                if not ready.exists():
+                    result = request.result()
+                    raise AssertionError(('Save panel did not become ready', result))
+                print(f'EXTERNAL SAVE INPUT READY {step}/3: {purpose}; click Create now (30-second watchdog).', flush=True)
+                result = request.result(timeout=35)
+            evidence['captures'].append(dict(png_evidence(screenshot), section=f'External native save: {purpose}'))
+            return result
+
+        original = parent.rpc('layouts.get', id=layout_id)
+        external_confirmation(1, 'stale source', staleDuringSave=True, error=-32050)
+        assert not destination.exists() and parent.rpc('layoutApps.list') == before
+        changed = parent.rpc('layouts.get', id=layout_id)
+        parent.rpc('layouts.update', definition=original['definition'], expectedSavedLayoutRevision=changed['revision'])
+        external_confirmation(2, 'destination collision', occupyDestination=True, error=-32602)
+        marker = destination / 'collision-marker'
+        assert marker.read_text() == 'Keep existing destination'
+        assert parent.rpc('layoutApps.list') == before
+        marker.unlink()
+        destination.rmdir()
+        result = external_confirmation(3, 'create Custom App Name.app')
+        assert result['savePanel']['accepted'] and not result['savePanel']['timedOut'], result
+        assert result['savePanel']['action'] == 'externalInput' and result['savePanel']['prepared'], result
+        assert result['savePanel']['path'] == str(destination), result
+        info = plistlib.loads((destination / 'Contents/Info.plist').read_bytes())
+        assert info['CFBundleDisplayName'] == 'Custom App Name' and info['SlateLauncherIcon'] == 'folder', info
+        record = next(row for row in parent.rpc('layoutApps.list') if row['path'] == str(destination))
+        evidence['observations']['nativeCreation'] = {
+            'optionsCancelPreservedCatalog': True, 'saveCancelPreservedCatalog': True,
+            'staleSourceRejected': True, 'destinationCollisionPreserved': True,
+            'chosenName': info['CFBundleDisplayName'], 'chosenPath': record['path'], 'icon': info['SlateLauncherIcon'],
+            'savePanel': result['savePanel'], 'confirmation': 'external native input'}
+        return record
+
+    def readonly_layout(parent, child):
+        definition = {'version': 1, 'id': str(uuid.uuid4()), 'name': 'Read-only layout', 'tabs': [
+            {'name': 'Research', 'layout': {'kind': 'pane', 'pane': 'p1'},
+             'panes': [{'id': 'p1', 'type': 'terminal', 'configuration': {'directory': str(parent.root)}}]},
+            {'name': 'Reference', 'layout': {'kind': 'pane', 'pane': 'p2'},
+             'panes': [{'id': 'p2', 'type': 'browser', 'configuration': {'url': 'https://example.com'}}]}]}
+        entry = child.rpc('layouts.create', definition=definition)
+        state = child.rpc('debug.savedLayouts', file=entry['file'])
+        baseline = state['definition']
+        attempts = [dict(name='Changed'), dict(type='browser'), dict(title='Changed'),
+                    dict(configuration={'directory': '/'}), dict(headerVisible=False),
+                    dict(split='right'), dict(remove=True), dict(addTab=True), dict(removeTab=0),
+                    dict(moveTab=0, toTab=1), dict(dropTab=state['tabDragID'], toTab=1),
+                    dict(create=True), dict(save=True)]
+        for attempt in attempts:
+            state = child.rpc('debug.savedLayouts', **attempt)
+            assert state['definition'] == baseline and not state['dirty'], (attempt, state)
+            assert state['file'] == entry['file'], (attempt, state)
+        assert len(child.rpc('layouts.list')) == 1
+        assert child.rpc('layouts.get', id=definition['id'])['revision'] == entry['revision']
+        state = child.rpc('debug.savedLayouts', selectTab=1)
+        assert state['selectedTab'] == 1 and state['definition'] == baseline, state
+        capture(child, 'child-layouts-readonly-browser', 'Layouts', width=1000, height=560)
+        child.rpc('debug.savedLayouts', selectTab=0)
+        capture(child, 'child-layouts-readonly-terminal', 'Layouts', width=1000, height=560)
+        evidence['observations']['childLayoutEditing'] = {
+            'mutationAttemptsIgnored': len(attempts), 'definitionUnchanged': True,
+            'savedRevisionUnchanged': True, 'tabBrowsingAvailable': True}
 
     configuration = '[appearance]\ntheme = "light"\n[terminal]\nshell = "/bin/zsh"\nfont_size = 14\n'
     with AppFixture('layout-apps-ui', configuration, startup_timeout=40) as parent:
@@ -85,8 +187,7 @@ def main():
                 'commands': [{'id': 'open', 'title': 'Open Notes', 'executable': '/usr/bin/true'}]}, parent.root)
             parent.rpc('plugins.register', packagePath=str(package))
             parent.rpc('debug.settings', section='Layouts')
-            first = parent.rpc('layouts.launcher', id=layout_id, path=str(parent.root / 'Research.app'),
-                               name='Research', icon='book', copyPluginData=True)
+            first = native_creation(parent, layout_id)
             parent.rpc('layouts.launcher', id=layout_id, path=str(parent.root / 'Writing.app'),
                        name='Writing', icon='folder', copyPluginData=False)
             eventually('created apps appear in Settings', lambda: len(
@@ -118,7 +219,25 @@ def main():
             state = capture(child, 'child-plugins-managed', 'Plugins')
             assert 'layout-ui-notes' in state['pluginEnabled'], state
             capture(child, 'child-plugins-managed-compact', 'Plugins', width=1000, height=560)
-            capture(child, 'child-layouts-managed', 'Layouts', width=1000, height=560)
+            parent_plugins = (parent.root / 'plugins/registry.json').read_bytes()
+            initial_plugin = next(row for row in child.rpc('plugins.list') if row['id'] == 'layout-ui-notes')
+            assert initial_plugin['enabled'] and initial_plugin['enabledOverride'] is None, initial_plugin
+            state = child.rpc('debug.settings', section='Plugins', changePlugin='layout-ui-notes',
+                              pluginAction='disable', confirmPluginChange=True)
+            assert not state['pluginEnabled']['layout-ui-notes'] and state['error'] is None, state
+            disabled_plugin = next(row for row in child.rpc('plugins.list') if row['id'] == 'layout-ui-notes')
+            assert not disabled_plugin['enabled'] and disabled_plugin['enabledOverride'] is False, disabled_plugin
+            capture(child, 'child-plugins-local-disabled', 'Plugins', width=1000, height=560)
+            state = child.rpc('debug.settings', section='Plugins', changePlugin='layout-ui-notes', pluginAction='enable')
+            assert state['pluginEnabled']['layout-ui-notes'] and state['error'] is None, state
+            enabled_plugin = next(row for row in child.rpc('plugins.list') if row['id'] == 'layout-ui-notes')
+            assert enabled_plugin['enabled'] and enabled_plugin['enabledOverride'] is True, enabled_plugin
+            assert (parent.root / 'plugins/registry.json').read_bytes() == parent_plugins
+            capture(child, 'child-plugins-local-enabled', 'Plugins', width=1000, height=560)
+            evidence['observations']['childPluginToggle'] = {
+                'nativeDisableCreatedPrivateOverride': True, 'nativeEnableCreatedPrivateOverride': True,
+                'parentRegistryUnchanged': True}
+            readonly_layout(parent, child)
             current = parent.rpc('config.get')
             parent.rpc('config.patch', expectedSourceRevision=current['sourceRevision'], values={'appearance.theme': 'dark'})
             eventually('child inherits parent dark theme',

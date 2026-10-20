@@ -741,3 +741,8 @@ The original Settings focus-stealing bug was reproduced in the VM before the fix
 The `feature/stable-layout-apps` worktree extracts the private signed runtime, creates independent apps, keeps shared configuration with local overrides and private plugin copies/data, and refreshes stopped apps without re-signing their outer shell. Native creation and management reuse `layouts.launcher`, `layoutApps.list`, `layoutApps.refresh`, and `config.resetOverrides`; trusted CLI, registered-page and service clients use the same catalog and guards. Parent-only operations expose runtime availability and a consistent error in layout-app mode.
 
 See [implementation scope and verification boundaries](layout-apps-implementation.md). Actual changed-source VM results, signature/upgrade evidence and independent rendered review belong to `artifacts/layout-apps-verification.md`; a build or parser test alone does not verify those behaviors.
+
+
+### Original layout restoration — implemented, native verification pending
+
+`layouts.restoreOriginal` restores all windows in a layout app from its current parent recipe. Native menu/picker/shortcuts, CLI, registered-page helper and service APIs reuse the guarded preparation/commit path. Standard Slate omits the command and reports the operation unavailable. Running-process consent and frozen workspace/recipe checks protect teardown; settings, browser profile and shared plugin data are retained. Focused model/schema tests cover replacement identity and contracts; the layout-app lifecycle gate contains runtime coverage, pending the coordinator's changed-source VM run.

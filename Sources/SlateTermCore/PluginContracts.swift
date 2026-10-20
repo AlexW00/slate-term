@@ -27,6 +27,7 @@ extension AutomationContracts {
         ])
         let installed: [String: JSONValue] = [
             "id": pluginNamespace, "title": S.string(), "enabled": S.boolean, "installationID": S.uuid,
+            "enabledOverride": S.nullable(S.boolean),
             "available": S.boolean, "diagnostic": S.nullable(S.string()), "packageRoot": PluginContractSchemas.absolutePath,
             "compatibilityStatus": S.nullable(S.reference("PluginCompatibilityReport"))
         ]
@@ -117,10 +118,14 @@ extension AutomationContracts {
         for method in [AutomationMethod.pluginsEnable, .pluginsDisable, .pluginsUnregister] {
             methods[method] = AutomationContract(parameters: ["id": pluginNamespace, "force": S.defaulted(S.boolean, .bool(false))], required: ["id"],
                 result: S.reference("PluginLifecycleResult"), guards: unanchoredGuards,
-                conditions: [.object(["requires": .string("standardSlateRuntime")]), .object(["requires": .string("registeredPlugin")]),
+                conditions: (method == .pluginsUnregister ? [.object(["requires": .string("standardSlateRuntime")])] : [])
+                    + [.object(["requires": .string("registeredPlugin")]),
                     .object(["requires": .string(method == .pluginsEnable ? "compatibleManifest" : "forceWhenPanesUsePlugin")])],
-                routing: "pluginID", errors: [APIError.unavailable, APIError.settingsWriteFailed, APIError.layoutAppManagementUnavailable] + (method == .pluginsEnable ? [APIError.incompatible] : [-32010]),
+                routing: "pluginID", errors: [APIError.unavailable, APIError.settingsWriteFailed]
+                    + (method == .pluginsUnregister ? [APIError.layoutAppManagementUnavailable] : [])
+                    + (method == .pluginsEnable ? [APIError.incompatible] : [-32010]),
                 semantics: ["preservesSavedPluginData": .bool(true), "forceClosesUsingPanes": .bool(method != .pluginsEnable),
+                    "layoutAppEnabledChoice": .string("privateOverridePreservedAcrossParentSynchronization"),
                     "modelAcceptanceIsDiskDurability": .bool(false), "retirementOnDisableOrRemoval": .string("viewsPanelInstancesCommandsAndBackgroundServices")])
         }
         return methods

@@ -13,11 +13,37 @@ Slate Terminal is a native macOS terminal workspace built on the Ghostty engine.
 
 All three see the same methods and commands. Differences are transport, caller defaults and lifetime, not permissions.
 
+## Identify the agent and keep pane work visible
+
+Every Slate CLI invocation by an AI agent must identify the agent. With fresh-shell execution tools, begin **every command block** with `export SLATE_TERM_ACTOR=codex` (or your agent name). An export in an earlier tool call does not persist. An inline assignment covers only that one command.
+
+Alternatively, put `--actor codex` **after the subcommand**, for example `slate-term web snapshot --pane p66 --actor codex`. `slate-term --actor codex web snapshot …` is rejected before reaching the app. The same placement applies to `--note`.
+
+Identity alone does not keep an indicator visible throughout a task. Content reads such as `web.snapshot` show brief activity (currently at least five seconds). Metadata reads such as `panes inspect`, `web get`, and `plugins.panelState.get` do not create activity. Discovery, settings, and event reads do not either.
+
+For multi-step work on another pane, **hold presence before the first inspection**, including when reading a note through panel state. Keep the hold through the pane work and release it when done:
+
+```sh
+export SLATE_TERM_ACTOR=codex
+slate-term presence hold --pane p66 --note "Reading the requested notes" --ttl 120 --json
+slate-term presence list --json
+slate-term web snapshot --pane p66 --json
+# Perform the remaining pane reads or actions.
+slate-term presence release --pane p66 --json
+```
+
+Check that `presence list` reports `visible: true` and your actor on the intended pane with `leased: true`. Renew the hold before its TTL expires if pane work continues; release it on completion or interruption. Do not leave a hold on a reference pane while doing unrelated repository work.
+
+If activity is missing, check command errors, actor identity, target, and `presence list` before proceeding. A successful content read alone does not verify presence. Respect disabled activity indicators; do not change the user's settings to make a check pass. Your own launching pane never shows your presence, and holding it is rejected. Do not alter inherited pane/session identity to bypass this rule. These checks verify host activity state, not rendered pixels.
+
+For consistent identity across fresh tool shells, launch the agent with the variable already set, for example `SLATE_TERM_ACTOR=codex codex`. This only works when the execution tool preserves the parent environment; keep exporting it per command block otherwise. Do not set agent identity globally for ordinary interactive shells or unrelated agents. See `api.describe.presence` for current behavior and bounds.
+
 ## Discover capabilities at runtime
 
 The API grows often. Ask the running app instead of relying on memory or on this file.
 
 ```sh
+export SLATE_TERM_ACTOR=codex
 slate-term --help                    # subcommand list
 slate-term <subcommand> --help       # actions and flags, e.g. panes, terminal, plugins, events
 slate-term api describe --json       # api.describe: methods, commands, guards, bounds, feature flags
@@ -60,15 +86,12 @@ Use another browser only when the user explicitly requests it, a higher-priority
 - **Window presentation.** Discover `windowControls`. `windows frame|minimize|restore|fullscreen` targets explicit stable `windowId`, never inherited pane/focus. Only selected group members may change; frames must fit one visible screen. Fullscreen acceptance is asynchronous: poll `windows get` for settled state. No implicit app activation.
 - **Web input.** Discover `webAutomation.actions`. Guarded `web focus|key|check|set-value` works for browser and registered-plugin panes. `key` dispatches synthetic events with limited Tab/activation/form defaults, not native editor typing or trusted user gestures. `check` uses a Boolean desired state; `set-value` uses canonical strings for supported typed inputs. Use fresh refs or paired view/document guards.
 - **Warning preferences.** `warnings close|type --suppressed true|false` changes native prompt preferences only, not API `force` requirements or clipboard/OS consent.
-- **Agent presence.** Every Slate CLI invocation by an AI agent must identify the agent with `SLATE_TERM_ACTOR` or `--actor` (for example `codex` or `claude`). With fresh-shell execution tools, begin **every command block** with `export SLATE_TERM_ACTOR=codex`; an export in an earlier tool call does not persist. An inline assignment such as `SLATE_TERM_ACTOR=codex slate-term …` covers only that one command. Alternatively, pass `--actor codex` on every invocation. Slate then shows the user a frame and tag on panes you touch. Add `--note "short reason"` (at most 80 characters) to calls where the why is useful, and use `presence hold --pane P --note ...` / `presence release --pane P` for multi-step work on one pane. Your own pane is never highlighted. See `api.describe.presence`.
 - **Revisions and guards.** Mutations can carry `expectedWorkspaceRevision`, `expectedLayoutRevision` and other guards. On a conflict, read state again; do not replay blindly.
 - **Unknown outcomes.** After a timeout or disconnect, a mutation may already have happened. Inspect state before retrying.
 - **Terminals.** `terminal send` writes literal bytes. `terminal run` runs a command at an idle authenticated prompt, written in the pane's shell language: read `shell` from `context get` or `panes inspect` (zsh, bash or fish) and pass `--shell` so a different shell refuses instead of misreading it. Apple's bash 3.2 reports state but cannot run. `capture` is the current screen, not command stdout.
 - **Plugins.** A manifest can add commands (executables), a panel (a web UI in a pane) and a manual background service. Registration trusts that code fully; it is not a sandbox. Discover `pluginPersistence`: `workspace.pluginData` saves durable shared data; `workspace.panelState` saves one panel’s restoration context independently of runtime scope. Preferences stay in TOML; layouts capture starting configuration, not live state. Save explicitly during editing, handle revision conflicts/save errors, and never rely on ephemeral `localStorage`. Read the authoring reference before choosing a store.
 - **Events.** A bounded, resumable journal with cursors and topics (`host.*` for native facts). Treat events as invalidations and re-read state.
 - **Configuration.** TOML at `~/.config/slate-term/config.toml` with live reload. Write through `config patch` or `plugins settings patch` with the revision you read.
-
-For consistent identity across fresh tool shells, launch the agent with the variable already set, for example `SLATE_TERM_ACTOR=codex codex`. Child processes inherit it when the execution tool preserves the parent environment. This does not retrofit an already running agent: continue exporting it in every tool call, or pass `--actor` on each invocation. Do not set an agent identity globally for ordinary interactive shells or unrelated agents.
 
 ## References
 

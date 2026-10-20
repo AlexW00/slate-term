@@ -2,6 +2,39 @@
 
 Status: implemented and qualified by the selected VM gates below.
 
+## Inline restoration follow-up
+
+Implemented: saved display text appears in the pane before its fresh shell starts,
+with normal scrolling, selection and terminal search. Retention is in General,
+visible only while workspace restoration is enabled.
+
+Acceptance: saved `ls`-style output appears above the new prompt after relaunch;
+printed commands and terminal controls have no side effects; repeated relaunches
+do not duplicate saved text; retention and clearing still affect saved history;
+General shows the field only with restoration enabled.
+Live processes, terminal colors from earlier sessions, and command replay remain
+outside this change. The existing history API and optional viewer remain available.
+
+The engine inserts plain text before I/O begins, bypassing both shell input and
+escape-sequence handling. Restored panes capture fresh PTY output in a separate
+terminal model, with no effect callbacks, file-based image loading, or image storage.
+Its scrollback is bounded to the configured engine limit or 32 MiB, whichever is
+smaller. This adds parsing and bounded memory use for restored panes. Resize and
+native clear operations update both models. Failed reads preserve the last successful
+capture. The visible session separator is presentation, not a persistence boundary.
+
+Follow-up verification: `artifacts/vm/20261020T093001Z-f8355474/receipt.json` reports
+`completed: true`, `exitCode: 0`; `terminal-recovery`, `terminal-history`, and
+`workspace-restoration` passed. The regression fixture covers visible `ls` output,
+search, two relaunches without duplication, partial cursor rewrites, full-screen
+clears, and forgetting saved output without re-saving the restored scrollback.
+The final six pane/Settings screenshots passed fresh independent visual review.
+Code review found no remaining concrete issues after the capture-failure fix.
+All 536 package tests passed; 81 release-tooling tests passed, followed by 29
+source-packaging tests after the final engine patch. The final native response
+audit passed for 6 files, 102 responses, 12 methods and 12 command IDs.
+These are selected development checks, not release or updater qualification.
+
 ## Scope
 
 Preserve bounded terminal output across restart, including output received during orderly shutdown. Use generic terminal/session ownership for clean stopping. No command replay, shell-history replacement, per-application adapters, conversation tracking, tmux integration or daemon management.
@@ -24,7 +57,7 @@ Preserve bounded terminal output across restart, including output received durin
 - Native controls and trusted CLI/plugin/service access share operations and reject stale targets.
 - Verification uses owned processes and apps inside VMPal, never Alex's working Slate instance.
 
-## Verification
+## Original 0.6.0 verification
 
 Final VM run: `artifacts/vm/20261020T014717Z-b7f7ac38/receipt.json` reports `completed: true`, `exitCode: 0`. All four selected gates passed: `terminal-recovery`, `terminal-history`, `workspace-restoration`, and `terminal`.
 

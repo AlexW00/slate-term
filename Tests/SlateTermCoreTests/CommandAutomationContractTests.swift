@@ -6,11 +6,7 @@ import SlateTermTestSupport
 private let builtinContracts = AutomationContracts.workspaceCommands.merging(AutomationContracts.applicationCommands) { _, _ in
     preconditionFailure("Command described twice")
 }
-private let commandSchemaDefinitions = [AutomationContracts.commandDefinitions, AutomationContracts.applicationCommandDefinitions,
-    AutomationContracts.workspaceDefinitions, AutomationContracts.settingsDefinitions, AutomationContracts.notificationDefinitions,
-    AutomationContracts.webDefinitions, AutomationContracts.pluginPersistenceDefinitions, AutomationContracts.updateDefinitions].reduce(into: [String: JSONValue]()) { all, definitions in
-        all.merge(definitions) { _, _ in preconditionFailure("Duplicate definition") }
-    }
+private let commandSchemaDefinitions = AutomationCatalog.definitions
 
 @Test func commandSchemasCoverEveryBuiltinWithSelfIdentifyingInputsAndClosedReferences() {
     #expect(Set(builtinContracts.keys) == Set(CommandRegistry.commands.map(\.id)))

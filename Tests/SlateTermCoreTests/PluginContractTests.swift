@@ -21,7 +21,7 @@ import SlateTermTestSupport
         let encoded = try JSONValue.encoding(registration)
         #expect(schemaAccepts(output, encoded, definitions: definitions))
         var listed = encoded.object!
-        listed.merge(["enabled": .bool(false), "installationID": .string(UUID().uuidString), "available": .bool(true),
+        listed.merge(["enabled": .bool(false), "enabledOverride": .null, "installationID": .string(UUID().uuidString), "available": .bool(true),
             "diagnostic": .null, "packageRoot": .string("/tmp/managed/contents"), "cleanupPending": .bool(false)]) { _, v in v }
         listed["compatibilityStatus"] = try .encoding(registration.compatibilityReport())
         #expect(schemaAccepts(definitions["ListedPlugin"]!, .object(listed), definitions: definitions))

@@ -156,7 +156,7 @@ class LayoutApp:
             self.contract_capture = ContractCapture(ROOT / f'artifacts/layout-apps-{self.number}-contracts.jsonl', description)
         return self
 
-    def stop(self):
+    def stop(self, *, confirm_running=False):
         if self.pid is None:
             # A failed completion readback may still have launched this exact owned app.
             lookup = r"""ObjC.import('AppKit'); function run(args) {
@@ -170,7 +170,21 @@ class LayoutApp:
             if not matches:
                 return
             self.pid = matches[0]
-        jxa(TERMINATE, self.pid, self.bundle.resolve())
+        quit_requested = False
+        if confirm_running and self.path:
+            try:
+                description = self.rpc('api.describe')
+            except (OSError, ValueError):
+                description = None
+            if description is not None:
+                assert description['layoutAppID'] == self.record['layoutAppID'], description
+                instance = getattr(self, 'instance', description['appInstanceId'])
+                assert description['appInstanceId'] == instance, 'Owned app instance changed before cleanup'
+                # Integration cleanup confirms native quit, including an owned running terminal.
+                self.rpc('debug.quit', expectedInstanceId=instance)
+                quit_requested = True
+        if not quit_requested:
+            jxa(TERMINATE, self.pid, self.bundle.resolve())
         def stopped():
             try:
                 os.kill(self.pid, 0)
@@ -188,7 +202,7 @@ class LayoutApp:
         subprocess.run(['/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister', '-f', str(destination)], check=True)
 
     def cleanup(self):
-        self.stop()
+        self.stop(confirm_running=True)
         if (self.root / 'state/browser-profile.json').exists():
             environment = dict(self.env)
             environment.pop('SLATE_TERM_SOCKET', None)
@@ -278,7 +292,8 @@ while True: time.sleep(1)
 
     def close():
         app.rpc('plugins.service.stop', id='layout-control')
-        app.rpc('command.run', id='pane.close', pane=panel, force=True)
+        if any(row['id'] == panel for row in app.rpc('workspace.get')['panes']):
+            app.rpc('command.run', id='pane.close', pane=panel, force=True)
 
     return {'bridge': bridge, 'service': managed_service}, close
 
@@ -467,7 +482,8 @@ def main():
                         assert description['savedLayouts']['layoutAppFreshOpeningSource'] == 'parentSourceRecipe'
                         assert app.rpc('layouts.list') == []
                         app.rpc('workspace.snapshot', expectedShellCodeHash='unsupported', error=-32602)
-                        for method in ['layouts.launcher', 'layoutApps.list', 'layoutApps.refresh', 'plugins.register', 'plugins.unregister', 'plugins.enable', 'plugins.disable', 'skills.install', 'skills.uninstall', 'palette.import']:
+                        assert availability['plugins.enable'] and availability['plugins.disable']
+                        for method in ['layouts.launcher', 'layoutApps.list', 'layoutApps.refresh', 'plugins.register', 'plugins.unregister', 'skills.install', 'skills.uninstall', 'palette.import']:
                             assert not availability[method], method
                         assert len(app.rpc('window.list')['windows']) == 1
                         pane = app.pane('terminal')
@@ -576,6 +592,59 @@ def main():
                                     assert call(method, params, error=-32060)['message'] == 'Manage layout apps from Slate Terminal'
                         finally:
                             close_child_clients()
+                    # Restore is child-only and replaces all current windows from the latest parent recipe.
+                    parent.rpc('layouts.restoreOriginal', error=-32051)
+                    parent.rpc('command.run', id='layouts.restoreOriginal', error=-32051)
+                    assert not parent.rpc('api.describe')['runtimeAvailability']['layouts.restoreOriginal']
+                    assert 'layouts.restoreOriginal' not in {row['id'] for row in parent.rpc('command.list')}
+                    app = apps[0]
+                    assert app.rpc('api.describe')['runtimeAvailability']['layouts.restoreOriginal']
+                    assert 'layouts.restoreOriginal' in {row['id'] for row in app.rpc('command.list')}
+                    config_before = app.rpc('config.get')['sourceRevision']
+                    data_before = app.rpc('plugins.data.get', id='layout-fixture')
+                    app.rpc('command.run', id='window.new')
+                    pane = app.pane('terminal')
+                    eventually('restore process terminal ready', lambda: app.rpc('context.get', pane=pane, scope='pane')['terminal']['isAtPrompt'], timeout=40)
+                    app.rpc('terminal.start', pane=pane, command='sleep 120')
+                    eventually('restore sees running process', lambda: not app.rpc('context.get', pane=pane, scope='pane')['terminal']['isAtPrompt'])
+                    before = {row['id'] for row in app.panes()}
+                    app.rpc('layouts.restoreOriginal', error=-32010)
+                    canceled = app.rpc('debug.restoreOriginalLayout', confirm=False)
+                    assert len(canceled['prompts']) == 1 and not canceled['failures'], canceled
+                    assert {row['id'] for row in app.panes()} == before
+                    stale = app.rpc('debug.restoreOriginalLayout', confirm=True, changeWhileConfirming=True)
+                    assert len(stale['prompts']) == 1 and stale['failures'] == [-32050], stale
+                    assert {row['id'] for row in app.panes()} == before
+                    app.rpc('layouts.restoreOriginal', force=True, expectedWorkspaceRevision='stale', error=-32050)
+                    # Dependency failure must leave every existing session in place.
+                    source = parent.rpc('layouts.get', id=layout_id)
+                    invalid = json.loads(json.dumps(source['definition']))
+                    invalid['tabs'][0]['panes'][0]['configuration']['directory'] = str(parent.root / 'missing-restore-directory')
+                    updated = parent.rpc('layouts.update', definition=invalid, expectedSavedLayoutRevision=source['revision'])
+                    app.rpc('layouts.restoreOriginal', force=True, error=-32602)
+                    assert {row['id'] for row in app.panes()} == before
+                    parent.rpc('layouts.update', definition=source['definition'], expectedSavedLayoutRevision=updated['revision'])
+                    restore_clients, close_restore_clients = management_clients(app, parent.root)
+                    try:
+                        for call in restore_clients.values():
+                            call('layouts.restoreOriginal', {}, error=-32010)
+                            call('layouts.restoreOriginal', {'force': True, 'expectedWorkspaceRevision': 'stale'}, error=-32050)
+                        service_restore = restore_clients['service']('layouts.restoreOriginal', {'force': True})
+                        assert service_restore['outcome'] == 'committed'
+                    finally:
+                        close_restore_clients()
+                    eventually('service restore starts configured command', lambda: len(marker.read_text().splitlines()) == 4, timeout=40)
+                    restored = app.cli('layouts', 'restore-original', '--force')
+                    assert restored['outcome'] == 'committed'
+                    assert before.isdisjoint({row['id'] for row in app.panes()})
+                    assert len(app.panes()) == 2 and len(app.rpc('window.list')['windows']) == 1
+                    assert next(row for row in app.panes() if 'terminal' in row['type'])['manualTitle'] == 'Fresh recipe'
+                    assert app.rpc('config.get')['sourceRevision'] == config_before
+                    assert app.rpc('plugins.data.get', id='layout-fixture') == data_before
+                    eventually('restored browser ready after explicit restore', restored_browser_ready)
+                    assert app.rpc('browser.eval', pane=app.pane('browser'), script='localStorage.getItem("owner")') == 'app-1'
+                    eventually('explicit restore starts configured command', lambda: len(marker.read_text().splitlines()) == 5, timeout=40)
+                    print('PASS original layout restore: child-only discovery, process refusal/cancel, stale confirmation, CLI commit and private data preservation', flush=True)
                     apps[0].stop()
                     original_path = apps[0].bundle
                     moved_path = original_path.with_name('Moved First.app')

@@ -78,7 +78,7 @@ import SlateTermTestSupport
 }
 
 @Test func parentManagedResourcesAdvertiseTheSameRestrictionForAllTrustedClients() throws {
-    for method in [AutomationMethod.pluginsRegister, .pluginsUnregister, .pluginsEnable, .pluginsDisable,
+    for method in [AutomationMethod.pluginsRegister, .pluginsUnregister,
                    .skillsInstall, .skillsUninstall, .paletteImport, .layoutsLauncher, .layoutAppsList, .layoutAppsRefresh] {
         let contract = try #require(AutomationCatalog.methods[method])
         #expect(contract.errors.contains(APIError.layoutAppManagementUnavailable))
@@ -104,8 +104,27 @@ import SlateTermTestSupport
         #expect(standard[method.rawValue] == .bool(true))
         #expect(layoutApp[method.rawValue] == .bool(false))
     }
-    for method in [AutomationMethod.updatesGet, .updatesCheck, .updatesInstall, .layoutsList, .layoutsCreate] {
+    for method in [AutomationMethod.updatesGet, .updatesCheck, .updatesInstall, .layoutsList, .layoutsCreate, .pluginsEnable, .pluginsDisable] {
         #expect(standard[method.rawValue] == .bool(true))
         #expect(layoutApp[method.rawValue] == .bool(true))
     }
+}
+
+@Test func restoreOriginalLayoutIsGuardedAndAvailableOnlyInLayoutApps() throws {
+    let contract = try #require(AutomationCatalog.methods[.layoutsRestoreOriginal])
+    #expect(schemaAccepts(contract.input, .object([:])))
+    #expect(schemaAccepts(contract.input, .object(["force": .bool(true), "expectedWorkspaceRevision": .string("revision")])))
+    for invalid: [String: JSONValue] in [["force": .string("true")], ["pane": .string("p1")], ["id": .string(UUID().uuidString)], ["expectedLayoutRevision": .string("revision")]] {
+        #expect(!schemaAccepts(contract.input, .object(invalid)))
+    }
+    #expect(contract.errors.contains(-32010))
+    #expect(contract.errors.contains(APIError.unavailable))
+    #expect(contract.availability.array!.contains(.object(["requires": .string("layoutAppRuntime")])))
+    #expect(AutomationMethod.layoutsRestoreOriginal.resolving([:], defaults: .init(pane: PaneID(1), tab: TabID(1))) == [:])
+    #expect(AutomationCatalog.runtimeAvailability(layoutApp: false).object?["layouts.restoreOriginal"] == .bool(false))
+    #expect(AutomationCatalog.runtimeAvailability(layoutApp: true).object?["layouts.restoreOriginal"] == .bool(true))
+    let command = try #require(AutomationCatalog.commands["layouts.restoreOriginal"])
+    #expect(command.result == contract.result)
+    #expect(command.guards == contract.guards)
+    #expect(schemaAccepts(command.input, .object(["id": .string("layouts.restoreOriginal"), "force": .bool(true)])))
 }

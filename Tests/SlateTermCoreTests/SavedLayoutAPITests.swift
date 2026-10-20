@@ -52,3 +52,32 @@ import Testing
     try before.setManualTitle("Changed during preparation", for: PaneID(1))
     #expect(throws: RPCFailure.self) { try transition.requireCurrentBase(workspace: before, revisions: revisions) }
 }
+
+@Test func restoringOriginalLayoutReplacesAllGroupsWithoutReusingIdentities() throws {
+    var before = Workspace()
+    _ = try before.split(PaneID(1), direction: .right)
+    _ = try before.newTab()
+    try before.setDefaultTabTitle("Project App")
+    let revisions = WorkspaceRevisions(epoch: "restore", workspace: before)
+    var definition = SavedLayoutDefinition.blank()
+    definition.tabs.append(SavedLayoutTab(name: "Browser", layout: .pane(PaneID(2)), panes: [SavedLayoutPane(id: PaneID(2), type: "browser")]))
+    let restored = try definition.restoring(in: before)
+    #expect(restored.workspace.groups.count == 1)
+    #expect(restored.workspace.tabs.count == definition.tabs.count)
+    #expect(restored.workspace.defaultTabTitle == "Project App")
+    #expect(Set(restored.workspace.panes.map(\.id)).isDisjoint(with: before.panes.map(\.id)))
+    #expect(Set(restored.workspace.tabs.map(\.id)).isDisjoint(with: before.tabs.map(\.id)))
+    var roundTrip = try Workspace.restore(restored.workspace.encoded())
+    try roundTrip.setDefaultTabTitle("Project App")
+    #expect(roundTrip == restored.workspace)
+    let transition = try WorkspaceTransition(observing: restored.workspace, from: before, revisions: revisions, action: .savedLayoutRestoreOriginal)
+    #expect(transition.changes.filter { $0.topic == "host.pane.closed" }.count == before.panes.count)
+    #expect(transition.changes.filter { $0.topic == "host.pane.created" }.count == restored.workspace.panes.count)
+    #expect(transition.changes.allSatisfy { $0.payload["actionKind"] == .string("layouts.restoreOriginal") })
+    try transition.requireCurrentBase(workspace: before, revisions: revisions)
+    try before.setManualTitle("Changed", for: PaneID(1))
+    #expect(throws: RPCFailure.self) { try transition.requireCurrentBase(workspace: before, revisions: revisions) }
+    var invalid = definition
+    invalid.tabs[0].layout = .pane(PaneID(999))
+    #expect(throws: RPCFailure.self) { try invalid.restoring(in: before) }
+}

@@ -5,8 +5,9 @@ import SlateTermCore
 struct SavedLayoutsCommand: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "layouts", abstract: "Inspect, edit, capture and open file-backed saved layouts.")
     enum Action: String, CaseIterable, ExpressibleByArgument {
-        case list, get, fields, validate, create, update, windows, capture, open, launcher, configuration, startupStatus = "startup-status"
+        case list, get, fields, validate, create, update, windows, capture, open, launcher, configuration, startupStatus = "startup-status", restoreOriginal = "restore-original"
         var method: String {
+            if self == .restoreOriginal { return "layouts.restoreOriginal" }
             if self == .configuration { return "layout.configuration" }
             return "layouts." + (self == .startupStatus ? "startupStatus" : rawValue)
         }
@@ -25,12 +26,18 @@ struct SavedLayoutsCommand: ParsableCommand {
     @Option(help: "New absolute .app destination for launcher creation; never overwritten.") var path: String?
     @Option(help: "Launcher icon from api.describe savedLayouts.launcherIcons.") var icon: String?
     @Flag(inversion: .prefixedNo, help: "Copy plugin data once into the new app (launcher only; defaults on).") var copyPluginData = true
+    @Flag(help: "Terminate running processes when restoring the layout app’s original layout.") var force = false
     @Flag(help: "Include previously configured startup commands, not running shell commands.") var includeCommands = false
     @Flag(help: "Omit current terminal directories from capture.") var omitDirectories = false
     @Flag(help: "Omit current browser URLs from capture.") var omitUrls = false
 
+    func validate() throws {
+        if force && action != .restoreOriginal { throw ValidationError("--force requires restore-original") }
+    }
+
     func run() throws {
         var params: [String: JSONValue] = [:]
+        if force { params["force"] = .bool(true) }
         if let id { params["id"] = .string(id) }
         if let focusPolicy {
             guard action == .open else { throw ValidationError("--focus-policy requires open") }

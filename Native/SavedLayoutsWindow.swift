@@ -27,7 +27,7 @@ final class SavedLayoutsModel: ObservableObject {
     var parentManaged = false
 
     func makeLauncher() {
-        guard let definition else { return }
+        guard !parentManaged, let definition else { return }
         do { try createLauncher?(definition.id); error = nil }
         catch { self.error = layoutErrorText(error) }
     }
@@ -69,7 +69,7 @@ final class SavedLayoutsModel: ObservableObject {
         if tab?.panes.contains(where: { $0.id == selectedPane }) != true { selectedPane = tab?.layout.paneIDs.first }
     }
     func change(_ operation: (inout SavedLayoutDefinition) -> Void) {
-        guard let selection, var draft = drafts[selection] else { return }
+        guard !parentManaged, let selection, var draft = drafts[selection] else { return }
         operation(&draft.definition); drafts[selection] = draft; error = nil
     }
     func changePane(_ operation: (inout SavedLayoutPane) -> Void) {
@@ -81,14 +81,14 @@ final class SavedLayoutsModel: ObservableObject {
         changePane { $0.type = type; $0.configuration = types.first { $0.id == type }?.defaults ?? [:] }
     }
     func split(_ axis: SlateTermCore.Axis) {
-        guard var definition, let selectedPane else { return }
+        guard !parentManaged, var definition, let selectedPane else { return }
         do {
             let next = try definition.splitPane(selectedPane, axis: axis)
             change { $0 = definition }; self.selectedPane = next
         } catch { self.error = layoutErrorText(error) }
     }
     func removePane() {
-        guard var definition, let selectedPane else { return }
+        guard !parentManaged, var definition, let selectedPane else { return }
         do {
             let next = try definition.removePane(selectedPane)
             change { $0 = definition }; self.selectedPane = next
@@ -98,7 +98,7 @@ final class SavedLayoutsModel: ObservableObject {
         selectedTab = index; selectedPane = nil; normalizeSelection()
     }
     func addTab() {
-        guard var definition else { return }
+        guard !parentManaged, var definition else { return }
         do {
             let id = try definition.addTab()
             change { $0 = definition }
@@ -106,7 +106,7 @@ final class SavedLayoutsModel: ObservableObject {
         } catch { self.error = layoutErrorText(error) }
     }
     func removeTab(at index: Int) {
-        guard var definition else { return }
+        guard !parentManaged, var definition else { return }
         do {
             try definition.removeTab(at: index)
             change { $0 = definition }
@@ -116,7 +116,7 @@ final class SavedLayoutsModel: ObservableObject {
         } catch { self.error = layoutErrorText(error) }
     }
     func moveTab(from source: Int, to destination: Int) {
-        guard var definition else { return }
+        guard !parentManaged, var definition else { return }
         do {
             try definition.moveTab(from: source, to: destination)
             change { $0 = definition }
@@ -131,19 +131,20 @@ final class SavedLayoutsModel: ObservableObject {
         return "slate-layout-tab:\(definition.id):\(definition.tabs[index].layout.paneIDs[0])"
     }
     func dropTab(_ value: String, at destination: Int) -> Bool {
-        guard let definition, let source = definition.tabs.indices.first(where: { tabDragID(at: $0) == value }),
+        guard !parentManaged, let definition, let source = definition.tabs.indices.first(where: { tabDragID(at: $0) == value }),
               source != destination else { return false }
         moveTab(from: source, to: destination)
         return error == nil
     }
     func create() {
+        guard !parentManaged else { return }
         do {
             let entry = try saveDefinition(.blank(), nil)
             refresh(); select(entry.file); didSave?()
         } catch { self.error = layoutErrorText(error) }
     }
     func save() {
-        guard let draft else { return }
+        guard !parentManaged, let draft else { return }
         do {
             let entry = try saveDefinition(draft.definition, draft.revision)
             drafts.removeValue(forKey: entry.file)
@@ -151,6 +152,7 @@ final class SavedLayoutsModel: ObservableObject {
         } catch { self.error = layoutErrorText(error); refresh() }
     }
     func saveAll() throws {
+        guard !parentManaged else { return }
         for file in drafts.keys.sorted() {
             guard let draft = drafts[file], draft.dirty else { continue }
             do {
@@ -190,7 +192,7 @@ struct SavedLayoutsView: View {
                             .tag(Optional(entry.file))
                     }
                 }
-                Button(action: model.create) { Label("New Layout", systemImage: "plus") }
+                Button(action: model.create) { Label("New Layout", systemImage: "plus") }.disabled(model.parentManaged)
             }.padding(.horizontal, 24).padding(.vertical, 16)
             Divider()
             VStack(spacing: 0) {
@@ -235,13 +237,14 @@ struct SavedLayoutsView: View {
                     .opacity(model.conflict || model.isDirty ? 1 : 0)
                     .accessibilityHidden(!model.conflict && !model.isDirty)
                 HStack {
-                    Button("Create Layout App…", action: model.makeLauncher)
+                    Button("Create App…", action: model.makeLauncher)
                         .disabled(model.parentManaged || model.definition == nil || model.isDirty || model.conflict || model.launcherUnavailable != nil)
                         .help(model.launcherUnavailable ?? "Create an independent app from the saved layout. Save changes first.")
                     Spacer()
-                    Button("Revert", action: model.revert).disabled(!model.isDirty && !model.conflict)
+                    Button("Revert", action: model.revert).disabled(model.parentManaged || (!model.isDirty && !model.conflict))
                     Button("Save Changes", action: model.save).keyboardShortcut("s", modifiers: .command)
-                        .buttonStyle(.borderedProminent).disabled(!model.isDirty)
+                        .buttonStyle(.borderedProminent).disabled(model.parentManaged || !model.isDirty)
+                        .saturation(model.parentManaged ? 0 : 1)
                 }.padding(16)
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -251,7 +254,7 @@ struct SavedLayoutsView: View {
         VStack(alignment: .leading, spacing: 0) {
             TextField("Layout Name", text: Binding(get: { model.definition?.name ?? "" }, set: { value in model.change { $0.name = value } }))
                 .font(.title2.weight(.semibold)).textFieldStyle(.plain).padding(24)
-                .accessibilityLabel("Layout Name")
+                .accessibilityLabel("Layout Name").disabled(model.parentManaged)
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 16) {
                     tabStrip(definition)
@@ -261,13 +264,13 @@ struct SavedLayoutsView: View {
                             .onGeometryChange(for: CGSize.self, of: { $0.size }) { previewSize = $0 }
                         HStack(spacing: 8) {
                             splitButtons
-                            Button("Remove Pane", action: model.removePane).disabled(tab.panes.count <= 1)
+                            Button("Remove Pane", action: model.removePane).disabled(model.parentManaged || tab.panes.count <= 1)
                         }.labelStyle(.titleOnly).fixedSize(horizontal: true, vertical: false)
                     }
                 }.padding(.horizontal, 24).padding(.bottom, 24)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 Divider()
-                inspector.frame(width: 280)
+                inspector.frame(width: 280).disabled(model.parentManaged)
             }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -287,25 +290,14 @@ struct SavedLayoutsView: View {
                             Button { model.removeTab(at: index) } label: {
                                 Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
                                     .frame(width: 22, height: 26).contentShape(Rectangle())
-                            }.buttonStyle(.plain).disabled(definition.tabs.count <= 1)
+                            }.buttonStyle(.plain).disabled(model.parentManaged || definition.tabs.count <= 1)
                                 .help("Remove \(definition.tabs[index].name)")
                                 .accessibilityLabel("Remove \(definition.tabs[index].name)")
                         }
                         .foregroundStyle(model.selectedTab == index ? Color.primary : Color.secondary)
                         .background(model.selectedTab == index ? Color(nsColor: .selectedControlColor) : Color(nsColor: .quaternarySystemFill), in: RoundedRectangle(cornerRadius: 6))
                         .id(index)
-                        .draggable(model.tabDragID(at: index))
-                        .dropDestination(for: String.self, action: { (items: [String], _: CGPoint) -> Bool in
-                            items.first.map { model.dropTab($0, at: index) } ?? false
-                        })
-                        .contextMenu {
-                            Button("Move Left") { model.moveTab(from: index, to: index - 1) }.disabled(index == 0)
-                            Button("Move Right") { model.moveTab(from: index, to: index + 1) }.disabled(index == definition.tabs.count - 1)
-                            Divider()
-                            Button("Remove Tab") { model.removeTab(at: index) }.disabled(definition.tabs.count <= 1)
-                        }
-                        .accessibilityAction(named: "Move Left") { if index > 0 { model.moveTab(from: index, to: index - 1) } }
-                        .accessibilityAction(named: "Move Right") { if index + 1 < definition.tabs.count { model.moveTab(from: index, to: index + 1) } }
+                        .modifier(SavedLayoutTabEditing(model: model, index: index, count: definition.tabs.count))
                     }
                 }
               }.scrollIndicators(.hidden)
@@ -313,7 +305,7 @@ struct SavedLayoutsView: View {
                 .onChange(of: definition.tabs.count) { proxy.scrollTo(model.selectedTab, anchor: .center) }
             }
             Button(action: model.addTab) { Image(systemName: "plus").frame(width: 24, height: 24) }
-                .buttonStyle(.borderless).disabled(definition.tabs.count >= 8)
+                .buttonStyle(.borderless).disabled(model.parentManaged || definition.tabs.count >= 8)
                 .help("Add Tab").accessibilityLabel("Add Tab")
         }
     }
@@ -324,7 +316,7 @@ struct SavedLayoutsView: View {
             .disabled(!canSplit(.vertical))
     }
     private func canSplit(_ axis: SlateTermCore.Axis) -> Bool {
-        guard let tab = model.tab, let selected = model.selectedPane, tab.panes.count < 8 else { return false }
+        guard !model.parentManaged, let tab = model.tab, let selected = model.selectedPane, tab.panes.count < 8 else { return false }
         func size(_ tree: SlateTermCore.Layout, in available: CGSize) -> CGSize? {
             switch tree {
             case .pane(let id): return id == selected ? available : nil
@@ -346,6 +338,7 @@ struct SavedLayoutsView: View {
                     Toggle("Show pane bar", isOn: Binding(get: { model.pane?.headerVisible ?? true },
                                                           set: { value in model.changePane { $0.headerVisible = value } }))
                         .help("Show it again from Workspace → Show Pane Bar or Search Commands.")
+                        .saturation(model.parentManaged ? 0 : 1).opacity(model.parentManaged ? 0.5 : 1)
                     Picker("Type", selection: Binding(get: { model.pane?.type ?? "terminal" }, set: model.setType)) {
                         ForEach(model.types) { type in Text(type.title).tag(type.id) }
                         if !model.types.contains(where: { $0.id == pane.type }) { Text("\(pane.type) (Missing)").tag(pane.type) }
@@ -404,6 +397,32 @@ struct SavedLayoutsView: View {
                 TextField(field.label, text: text, prompt: Text(field.kind == .directory ? "Default folder" : ""))
                     .labelsHidden().textFieldStyle(.roundedBorder).accessibilityLabel(field.label)
             }
+        }
+    }
+}
+
+private struct SavedLayoutTabEditing: ViewModifier {
+    @ObservedObject var model: SavedLayoutsModel
+    let index: Int
+    let count: Int
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if model.parentManaged {
+            content
+        } else {
+            content
+                .draggable(model.tabDragID(at: index))
+                .dropDestination(for: String.self, action: { (items: [String], _: CGPoint) -> Bool in
+                    items.first.map { model.dropTab($0, at: index) } ?? false
+                })
+                .contextMenu {
+                    Button("Move Left") { model.moveTab(from: index, to: index - 1) }.disabled(index == 0)
+                    Button("Move Right") { model.moveTab(from: index, to: index + 1) }.disabled(index == count - 1)
+                    Divider()
+                    Button("Remove Tab") { model.removeTab(at: index) }.disabled(count <= 1)
+                }
+                .accessibilityAction(named: "Move Left") { if index > 0 { model.moveTab(from: index, to: index - 1) } }
+                .accessibilityAction(named: "Move Right") { if index + 1 < count { model.moveTab(from: index, to: index + 1) } }
         }
     }
 }

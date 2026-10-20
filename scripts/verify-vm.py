@@ -493,6 +493,9 @@ def host_main(args):
     selected = [gate.name for gate in selected_gates]
     vm_gates = [gate for gate in selected_gates if gate.location == 'vm']
     vm_names = [gate.name for gate in vm_gates]
+    external_save_input = getattr(args, 'external_save_input', False)
+    if external_save_input and 'layout-apps-ui' not in vm_names:
+        raise SystemExit('--external-save-input requires the layout-apps-ui gate')
     if (args.timeout + 30) * len(vm_gates) + 60 > 86400:
         raise SystemExit('Selection exceeds VMPal\'s 24-hour command limit; select fewer tests or a shorter timeout')
     if sys.platform != 'darwin' or platform.machine() != 'arm64':
@@ -505,6 +508,7 @@ def host_main(args):
     output = ROOT / 'artifacts/vm' / run_id
     output.mkdir(parents=True)
     receipt = {'vm': args.vm, 'tests': selected, 'fullSuite': getattr(args, 'all', False),
+               'externalSaveInput': external_save_input,
                'sourceHashes': {}, 'binaryHashes': {}, 'hostBinaryHashes': {},
                'hostResults': {}, 'guestResults': {}, 'preparations': [],
                'completed': False, 'exitCode': 1}
@@ -635,6 +639,8 @@ def host_main(args):
                 if upgrade_provenance(upgrade_apps) != upgrades:
                     raise RuntimeError('Upgrade app changed during staging')
                 plan = {'tests': {gate.name: list(gate.command) for gate in vm_gates}, 'timeout': args.timeout}
+                if external_save_input:
+                    plan['tests']['layout-apps-ui'].append('--external-save-input')
                 (bundle / '.vm-plan.json').write_text(json.dumps(plan) + '\n')
                 (bundle / '.vm-receipt.json').write_text(json.dumps(receipt) + '\n')
                 archive = Path(temporary) / 'bundle.tar.gz'
@@ -784,6 +790,8 @@ def main():
     parser.add_argument('--vmpal', help='VMPal CLI executable (bundled helper used if not on PATH)')
     parser.add_argument('--timeout', type=int, default=600, help='Seconds per guest test (default: 600)')
     parser.add_argument('--keep-guest', action='store_true', help='Keep the isolated guest run directory for debugging')
+    parser.add_argument('--external-save-input', action='store_true',
+                        help='Wait for VMPal input to confirm native save panels in layout-apps-ui')
     parser.add_argument('--lock-wait', type=int, default=1800, metavar='SECONDS',
                         help='Wait this long for another run to release the VM (default: 1800)')
     parser.add_argument('--guest', help=argparse.SUPPRESS)

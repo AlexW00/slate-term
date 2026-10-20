@@ -91,6 +91,8 @@ import SlateTermCore
 @Test func savedLayoutCLIOnlyOpensNewWindowsAndAcceptsExplicitLaunchers() throws {
     #expect(throws: (any Error).self) { try SavedLayoutsCommand.parse(["open", "--id", "id", "--replace-window", "window"]) }
     #expect(throws: (any Error).self) { try SavedLayoutsCommand.parse(["open", "--id", "id", "--force"]) }
+    let restore = try SavedLayoutsCommand.parse(["restore-original", "--force", "--expected-workspace-revision", "revision"])
+    #expect(restore.action.method == "layouts.restoreOriginal" && restore.force)
     let launcher = try SavedLayoutsCommand.parse(["launcher", "--id", "id", "--path", "/tmp/Test.app", "--name", "My Project", "--icon", "slate"])
     #expect(launcher.action == .launcher && launcher.path == "/tmp/Test.app")
     #expect(launcher.name == "My Project" && launcher.icon == "slate")

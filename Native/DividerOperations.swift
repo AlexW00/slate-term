@@ -114,7 +114,7 @@ extension WorkspaceHost {
     func settleDividerBeforeMutation(_ method: String) throws {
         // Reads continue to see the authoritative model, with tab geometry withheld.
         // These entry points can change/reparent presentation; settle before their guards.
-        if ["layouts.open", "layouts.capture", "command.run", "pane.title", "config.patch", "config.reload", "plugins.register", "plugins.unregister", "plugins.restart", "plugins.settings.patch"].contains(method) {
+        if ["layouts.open", "layouts.restoreOriginal", "layouts.capture", "command.run", "pane.title", "config.patch", "config.reload", "plugins.register", "plugins.unregister", "plugins.restart", "plugins.settings.patch"].contains(method) {
             try finishNativeDivider(cancelled: false)
         }
     }

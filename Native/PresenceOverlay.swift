@@ -206,7 +206,9 @@ final class PresenceOverlayView: NSView {
             sizes[only.id] = max(0, min(sizes[only.id] ?? 0, available - chipWidth - 4))
         }
         var right = bounds.maxX - 14
-        let y = max(bounds.minY, bounds.maxY - contentBottomInset - Self.tagHeight - 14)
+        // The browser's status strip already separates the pill from the pane edge.
+        let bottomPadding: CGFloat = contentBottomInset > 0 ? 4 : 14
+        let y = max(bounds.minY, bounds.maxY - contentBottomInset - Self.tagHeight - bottomPadding)
         for item in shown {
             guard let tag = tags[item.id] else { continue }
             let width = sizes[item.id] ?? 0
@@ -342,7 +344,8 @@ final class PresenceOverlayView: NSView {
                 fields["cornerRadius"] = .number(Self.tagHeight / 2)
                 fields["frame"] = .object(["x": .number(tag.frame.minX), "y": .number(tag.frame.minY),
                                            "width": .number(tag.frame.width), "height": .number(tag.frame.height),
-                                           "bottomInset": .number(bounds.maxY - tag.frame.maxY)])
+                                           "bottomInset": .number(bounds.maxY - tag.frame.maxY),
+                                           "contentBottomInset": .number(contentBottomInset)])
             }
             return .object(fields)
         })

@@ -140,6 +140,7 @@ public enum AutomationCapabilities {
                 "privateBrowserURLs": .bool(false), "replaysCommands": .bool(false),
                 "restoresProcesses": .bool(false), "persistsTranscripts": .bool(true),
                 "savedOutput": .string("boundedDisplayTextNotRawStream"),
+                "savedOutputDisplay": .string("restoredPaneScrollbackBeforeNewShell"),
                 "savedOutputConfiguration": .string("terminal.saved_output_lines"),
                 "maximumDirectoryBytes": .integer(4_096), "maximumURLBytes": .integer(16_384),
                 "autosaveCoalescingMilliseconds": .integer(250)
@@ -237,7 +238,9 @@ public enum AutomationCapabilities {
                     "incompatible": .integer(APIError.incompatible)]),
                 "removeMethod": .string("plugins.unregister"), "required": .array([.string("id")]),
                 "forceClosesPanes": .bool(true), "persisted": .bool(true), "retainsSavedData": .bool(true),
-                "listEnabledField": .string("enabled"), "enableStartsProcesses": .bool(false)
+                "listEnabledField": .string("enabled"), "listEnabledOverrideField": .string("enabledOverride"),
+                "layoutAppEnabledChoice": .string("privateOverridePreservedAcrossParentSynchronization"),
+                "enableStartsProcesses": .bool(false)
             ]),
             "appearance": appearance,
             "notifications": notifications,
@@ -255,7 +258,7 @@ public enum AutomationCapabilities {
             ]),
             "workspaceCommit": .object([
                 "version": .integer(1), "scope": .string("workspace-model mutations"),
-                "additionalMethods": .array([.string("plugins.unregister"), .string("plugins.enable"), .string("plugins.disable"), .string("layouts.open")]),
+                "additionalMethods": .array([.string("plugins.unregister"), .string("plugins.enable"), .string("plugins.disable"), .string("layouts.open"), .string("layouts.restoreOriginal")]),
                 "resultFields": .array(["operationId", "outcome", "workspaceRevision", "workspacePersistence"].map(JSONValue.string)),
                 "outcomes": .array(["committed", "unchanged"].map(JSONValue.string)),
                 "workspacePersistence": .array(WorkspacePersistence.allCases.map { .string($0.rawValue) }),
@@ -293,6 +296,7 @@ public enum AutomationCapabilities {
                 "targetDiscovery": .string("layouts.windows"), "openMode": .string("newWindow"),
                 "libraryScope": .string("currentApplication"), "layoutAppLibrary": .string("private"),
                 "layoutAppFreshOpeningSource": .string("parentSourceRecipe"),
+                "restoreOriginalMethod": .string("layouts.restoreOriginal"), "restoreOriginalRuntime": .string("layoutApp"),
                 "replacementSupported": .bool(false), "launcherMethod": .string("layouts.launcher"),
                 "launcherOptions": .array(["name", "icon", "copyPluginData"].map(JSONValue.string)),
                 "launcherIcons": .array(SavedLayoutLauncherOptions.icons.map(JSONValue.string)),

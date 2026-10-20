@@ -47,6 +47,7 @@ extension AutomationContracts {
         for (id, method) in [("updates.check", AutomationMethod.updatesCheck), ("updates.show", .updatesShow), ("updates.openParent", .updatesOpenParent)] {
             commands[id] = methodCommand(id, contract: updates[method]!)
         }
+        commands["layouts.restoreOriginal"] = methodCommand("layouts.restoreOriginal", contract: savedLayouts[.layoutsRestoreOriginal]!)
         commands["config.reload"] = methodCommand("config.reload", contract: settings[.configReload]!)
         commands["plugins.panelState.reset"] = methodCommand("plugins.panelState.reset", contract: pluginPersistence[.panelStateReset]!)
         for id in NativeWindowAction.commands {

@@ -405,7 +405,9 @@ private struct SettingsView: View {
                     Divider()
                     VStack(alignment: .leading, spacing: 8) {
                         if model.parentManaged && [.plugins, .layouts].contains(model.selection ?? .general) {
-                            Text("Plugins and layout apps are managed in Slate Terminal.")
+                            Text(model.selection == .plugins
+                                 ? "Installed plugins come from Slate Terminal. Enable or disable them here for this app only."
+                                 : "Layout editing is available in Slate Terminal.")
                                 .font(.callout).foregroundStyle(.secondary)
                             if let status = model.pluginSyncStatus {
                                 Text(status).font(.callout).foregroundStyle(.secondary)
@@ -473,12 +475,21 @@ private struct SettingsView: View {
     }
 
     private var general: some View {
-        Section {
-            Toggle("Restore workspace on launch", isOn: $model.restore)
-                .layoutOverrideReset(model: model, key: "layout.restore_workspace")
-                .help("Restore open panels and their saved view state. Closing a panel removes it; shared plugin data is retained separately.")
-        } footer: {
-            Text("Restore tabs and split panes with new shell sessions.")
+        Group {
+            Section {
+                Toggle("Restore workspace on launch", isOn: $model.restore)
+                    .layoutOverrideReset(model: model, key: "layout.restore_workspace")
+                    .help("Restore open panels and their saved view state. Closing a panel removes it; shared plugin data is retained separately.")
+            } footer: {
+                Text("Restore tabs and split panes with new shell sessions.")
+            }
+            if model.restore {
+                Section {
+                    terminalField("Lines to keep", text: $model.savedOutputLines, key: "saved_output_lines")
+                } header: { Text("Saved terminal output") } footer: {
+                    Text("Keep up to 100,000 lines in restored terminals. Enter 0 to disable saving output. Terminals always start a fresh shell.")
+                }
+            }
         }
     }
 
@@ -578,11 +589,6 @@ private struct SettingsView: View {
                 }
             }
             Section {
-                terminalField("Lines to keep", text: $model.savedOutputLines, key: "saved_output_lines")
-            } header: { Text("Saved output") } footer: {
-                Text("Keep up to 100,000 lines for reference after relaunch. Enter 0 to disable saving output. Terminals always start a fresh shell.")
-            }
-            Section {
                 terminalField("Font family", text: $model.fontFamily, key: "font_family")
                 terminalField("Size (points)", text: $model.fontSize, key: "font_size")
                 Toggle("Thicken text", isOn: $model.fontThicken)
@@ -649,7 +655,7 @@ private struct SettingsView: View {
         }
         Section {
             LabeledContent("Shared Browser profile") {
-                Button("Clear All Browser Data…", role: .destructive) { model.clearBrowserData?() }
+                Button("Clear All Site Data…", role: .destructive) { model.clearBrowserData?() }
                     .disabled(model.clearingBrowserData)
             }
         } header: { Text("Website data") } footer: {
@@ -664,18 +670,23 @@ private struct SettingsView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         ForEach(model.browserSites, id: \.self) { site in
-                            Button { model.selectBrowserSite(site) } label: {
-                                HStack {
-                                    Text(site).lineLimit(1).truncationMode(.middle)
-                                    Spacer()
-                                    Image(systemName: model.selectedBrowserSite == site ? "checkmark.circle.fill" : "circle")
-                                        .foregroundStyle(model.selectedBrowserSite == site ? Color.accentColor : Color.secondary)
+                            HStack {
+                                Text(site).lineLimit(1).truncationMode(.middle)
+                                Spacer()
+                                Button(role: .destructive) {
+                                    model.selectBrowserSite(site)
+                                    model.clearBrowserSiteData?()
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .frame(width: 28, height: 28)
+                                        .contentShape(Rectangle())
                                 }
-                                .padding(.vertical, 7)
-                                .contentShape(Rectangle())
+                                .buttonStyle(.borderless)
+                                .disabled(model.loadingBrowserSites)
+                                .help("Clear stored data for \(site)…")
+                                .accessibilityLabel("Clear stored data for \(site)")
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityValue(model.selectedBrowserSite == site ? "Selected" : "")
+                            .frame(minHeight: 32)
                         }
                     }
                 }
@@ -686,8 +697,6 @@ private struct SettingsView: View {
                 Button("Refresh Sites") { model.refreshBrowserSites?() }
                     .disabled(model.loadingBrowserSites)
                 Spacer()
-                Button("Clear Site Data…", role: .destructive) { model.clearBrowserSiteData?() }
-                    .disabled(!model.canClearBrowserSite)
             }
             .disabled(model.clearingBrowserData)
             if model.clearingBrowserData {
@@ -695,7 +704,7 @@ private struct SettingsView: View {
             }
             if let message = model.browserDataMessage { Text(message).foregroundStyle(.secondary) }
             if let error = model.browserDataError { Text(error).foregroundStyle(.red).textSelection(.enabled) }
-        } header: { Text("Clear a specific site") } footer: {
+        } header: { Text("Stored sites") } footer: {
             Text("Stored sites in the shared Browser profile, including sites with no open panes. Private Browser data is separate. Clearing a site also removes data for subdomains grouped with it; open pages may save data again.")
         }
         .disabled(model.clearingBrowserData)
@@ -780,7 +789,6 @@ private struct SettingsView: View {
                         .labelsHidden()
                         .toggleStyle(.checkbox)
                         .fixedSize()
-                        .disabled(model.parentManaged)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(plugin.title)
                             Text(plugin.id).font(.caption).foregroundStyle(.secondary)

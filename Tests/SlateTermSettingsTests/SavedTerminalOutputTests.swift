@@ -3,6 +3,15 @@ import Testing
 import SlateTermCore
 @testable import SlateTermSettings
 
+@Test func restoredDisplayTextPreservesUnicodeAndNeutralizesControls() {
+    let source = "日本語 e\u{301} 🧪\r\n\0\u{1b}]52;c;clipboard\u{7}\u{9}tail\u{9b}6n"
+    let output = SavedTerminalOutput(text: source, capturedAt: Date(), ended: true)
+    #expect(output.terminalDisplayText == "日本語 e\u{301} 🧪\n��]52;c;clipboard�    tail�6n")
+    let large = SavedTerminalOutput(text: String(repeating: "\0", count: SavedTerminalOutput.maximumBytes),
+                                   capturedAt: Date(), ended: true)
+    #expect(large.terminalDisplayText.utf8.count <= SavedTerminalOutput.maximumBytes)
+}
+
 @Test func savedOutputKeepsNewestLogicalLinesAndTrailingNewline() {
     for (source, expected) in [("first\nsecond\nthird\n", "second\nthird\n"),
                                ("first\nsecond\nthird", "second\nthird"),

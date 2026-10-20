@@ -10,11 +10,38 @@ Detailed change record for agents and maintainers. Public release notes live in 
 
 ### Fixed
 
+### Internal
+
+## 0.7.0 — Pending publication
+
+### Added
+
+- Restore Original Layout in layout apps through the command picker, CLI, and shared API, with guarded replacement of the current workspace.
+
+### Changed
+
+- Rename Create Layout App to Create App, preview the chosen icon, and choose the app name and destination in a native save dialog.
+- Let layout apps enable or disable inherited plugins independently, preserving local choices through parent synchronization.
+- Replace stored-site selection with a trash button per row and a Clear All Site Data action.
+
+- Restore saved terminal output directly into each pane's scrollback above the new shell prompt. Move output retention to General and show it only when workspace restoration is enabled.
+
+### Fixed
+
+- Disable layout mutation controls in layout-app Settings while retaining tab and pane inspection.
+- Place browser agent indicators closer to the status strip.
+
 - Prevent sideways page scrolling on the website by clipping the scaled hero glow at its section. WebKit checks passed at nine widths from 320 to 1440 pixels in both themes and five scroll positions; sticky navigation and gallery scrolling remain functional. Physical mobile touch behavior was not tested.
 
 - Release finalization discovers draft candidates through authenticated release listings, including later pages, because GitHub’s tag endpoint excludes drafts. Verified by 23 helper tests and the completed 0.6.0 publication.
 
 ### Internal
+
+- Clarify agent identity flag placement and require verified presence holds for multi-step pane work in the bundled Slate skill.
+- Qualify layout-app polish with 540 package tests, 72 VM-runner tests, selected native gates and shared API response audits. Real VMPal input verifies save-panel acceptance, stale-source rejection and destination collisions.
+
+- Integrated committed development through `4ba65db`, including inline terminal-output restoration and layout-app polish. Preserved public updater, signing, source-packaging and release tooling. Selected development native checks are recorded separately from candidate installation and production upgrade checks.
+- The integrated public candidate passed 541 package tests, a native build, the full-history secret scan, workflow validation, and 72 VM-runner tests. Release preflight ran 120 tooling tests with four optional official-tool tests skipped; actual artifact signing and verification remain pipeline checks.
 
 ## 0.6.0 — 2026-10-20
 

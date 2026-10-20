@@ -70,6 +70,7 @@ with http.server.ThreadingHTTPServer(('127.0.0.1', 0), Page) as server:
                 rpc('debug.key', chord='cmd+,')
                 state = rpc('debug.settings')
                 assert not state['pluginsMenu'] and not state['dirty'], state
+                assert 'layouts.restoreOriginal' not in state['commands'], state['commands']
                 state = rpc('debug.settings', fontSize='17', apply=True)
                 assert state['error'] is None and not state['dirty'], state
                 assert '# Keep my preferences' in config.read_text() and '# points' in config.read_text()

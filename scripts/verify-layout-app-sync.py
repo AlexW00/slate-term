@@ -216,6 +216,69 @@ def stopped_plugin_changes(parent, child, evidence):
             'samples': observations, 'appliedAfterPaneClosed': True}
 
 
+def private_enabled_overrides(parent, child, evidence):
+    parent.rpc('plugins.register', packagePath=package(parent, '11.0.0'))
+    wait_plugin(child, lambda row: row is not None and row['version'] == '11.0.0', 'override fixture installed')
+    assert plugin(child)['enabledOverride'] is None
+    parent_registry = parent.root / 'plugins/registry.json'
+    parent_bytes = parent_registry.read_bytes()
+    pane = open_panel(child, '11.0.0')
+    child.rpc('plugins.disable', id=PLUGIN, error=-32010)
+    assert plugin(child)['enabledOverride'] is None
+    state = child.rpc('debug.settings', section='Plugins', changePlugin=PLUGIN, pluginAction='disable')
+    assert state['pluginEnabled'][PLUGIN], 'Cancelled native disable changed the child'
+    state = child.rpc('debug.settings', changePlugin=PLUGIN, pluginAction='disable', confirmPluginChange=True)
+    assert not state['pluginEnabled'][PLUGIN] and plugin(child)['enabledOverride'] is False
+    assert not any(row['id'] == pane for row in child.panes())
+    assert parent_registry.read_bytes() == parent_bytes
+    child.stop()
+    parent.rpc('plugins.register', packagePath=package(parent, '11.1.0'), replace=True)
+    child.start()
+    assert plugin(child)['version'] == '11.1.0' and not plugin(child)['enabled']
+    assert plugin(child)['enabledOverride'] is False
+    parent.rpc('plugins.register', packagePath=package(parent, '11.2.0'), replace=True)
+    wait_plugin(child, lambda row: row is not None and row['version'] == '11.2.0' and not row['enabled'],
+                'live replacement preserves private disabled choice')
+    parent.rpc('plugins.disable', id=PLUGIN)
+    child.cli('plugins', 'enable', PLUGIN)
+    assert plugin(child)['enabled'] and plugin(child)['enabledOverride'] is True
+    parent.rpc('plugins.register', packagePath=package(parent, '11.3.0'), replace=True)
+    wait_plugin(child, lambda row: row is not None and row['version'] == '11.3.0' and row['enabled'],
+                'parent disabled replacement preserves private enabled choice')
+    assert not plugin(parent)['enabled']
+
+    _, close_parent_clients = fixture.management_clients(parent, parent.root, register=True)
+    close_parent_clients()
+    eventually('controller synced for override parity',
+        lambda: any(row['id'] == 'layout-control' for row in child.rpc('plugins.list')), timeout=20)
+    clients, close_clients = fixture.management_clients(child, parent.root)
+    parent_bytes = parent_registry.read_bytes()
+    try:
+        for kind, client in clients.items():
+            assert client('api.describe')['runtimeAvailability']['plugins.enable']
+            assert client('api.describe')['runtimeAvailability']['plugins.disable']
+            client('plugins.disable', {'id': PLUGIN})
+            assert not plugin(child)['enabled'] and plugin(child)['enabledOverride'] is False
+            client('plugins.enable', {'id': PLUGIN})
+            assert plugin(child)['enabled'] and plugin(child)['enabledOverride'] is True
+            evidence['checks']['private-enabled-override-' + kind] = 'passed'
+    finally:
+        close_clients()
+    assert parent_registry.read_bytes() == parent_bytes
+    child.stop()
+    child.start()
+    assert plugin(child)['enabled'] and plugin(child)['enabledOverride'] is True
+    parent.rpc('plugins.unregister', id=PLUGIN)
+    wait_plugin(child, lambda row: row is None, 'override removed with parent package')
+    assert PLUGIN not in json.loads((child.root / 'plugins/registry.json').read_text()).get('enabledOverrides', {})
+    parent.rpc('plugins.unregister', id='layout-control')
+    eventually('parity controller removed',
+        lambda: not any(row['id'] == 'layout-control' for row in child.rpc('plugins.list')), timeout=20)
+    evidence['checks']['private-enabled-overrides'] = {
+        'nativeConsentAndCancellation': True, 'cli': True, 'parentUnchangedByChild': True,
+        'liveAndStoppedReplacement': True, 'restart': True, 'removalClearsOverride': True}
+
+
 
 def stopped_without_plugin_panes(parent, child, evidence):
     def cleanup_rows():
@@ -506,6 +569,7 @@ def main():
                 changed_parent_during_preparation(parent, child, evidence)
                 stopped_plugin_changes(parent, child, evidence)
                 stopped_without_plugin_panes(parent, child, evidence)
+                private_enabled_overrides(parent, child, evidence)
                 # A duplicate executable invocation must activate the original owner without starting a runtime.
                 pid, socket_path = child.pid, child.path
                 window_ids = [row['windowId'] for row in child.rpc('window.list')['windows']]

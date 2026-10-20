@@ -18,6 +18,7 @@ public struct CommandContract: Codable, Sendable {
         let required: [String]
         switch id {
         // Native invocation captures the current URL; API invocation requires it.
+        case "layouts.restoreOriginal": parameters = ["force": "boolean; terminate running processes"]; required = []
         case "browser.clearSiteData": parameters = ["url": "absolute HTTP(S) URL, required through API"]; required = []
         case "notifications.open": parameters = ["notificationId": "outstanding notification ID"]; required = ["notificationId"]
         case "appearance.set": parameters = ["mode": "light|dark|auto"]; required = ["mode"]

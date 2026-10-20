@@ -1,0 +1,275 @@
+diff --git a/include/ghostty.h b/include/ghostty.h
+index eec6550..0eff5e6 100644
+--- a/include/ghostty.h
++++ b/include/ghostty.h
+@@ -518,6 +518,8 @@ typedef struct {
+   const char* initial_input;
+   bool wait_after_command;
+   ghostty_surface_context_e context;
++  // Plain display text to restore before the child process starts.
++  const char* initial_output;
+ } ghostty_surface_config_s;
+ 
+ typedef struct {
+@@ -1238,6 +1240,8 @@ GHOSTTY_API bool ghostty_surface_read_selection(ghostty_surface_t, ghostty_text_
+ GHOSTTY_API bool ghostty_surface_read_text(ghostty_surface_t,
+                                               ghostty_selection_s,
+                                               ghostty_text_s*);
++// Capture fresh-session output without the text restored at startup.
++GHOSTTY_API bool ghostty_surface_read_session_text(ghostty_surface_t, ghostty_text_s*);
+ GHOSTTY_API void ghostty_surface_free_text(ghostty_surface_t, ghostty_text_s*);
+ 
+ #ifdef __APPLE__
+diff --git a/src/Surface.zig b/src/Surface.zig
+index b532d4d..4d7945a 100644
+--- a/src/Surface.zig
++++ b/src/Surface.zig
+@@ -479,6 +479,19 @@ pub fn init(
+     app: *App,
+     rt_app: *apprt.runtime.App,
+     rt_surface: *apprt.runtime.Surface,
++) !void {
++    return self.initWithOutput(alloc, config_original, app, rt_app, rt_surface, null);
++}
++
++/// Restore plain display text before starting the renderer and child process.
++pub fn initWithOutput(
++    self: *Surface,
++    alloc: Allocator,
++    config_original: *const configpkg.Config,
++    app: *App,
++    rt_app: *apprt.runtime.App,
++    rt_surface: *apprt.runtime.Surface,
++    initial_output: ?[]const u8,
+ ) !void {
+     // Apply our conditional state. If we fail to apply the conditional state
+     // then we log and attempt to move forward with the old config.
+@@ -690,6 +703,7 @@ pub fn init(
+ 
+         try termio.Termio.init(&self.io, alloc, .{
+             .size = size,
++            .capture_fresh_output = initial_output != null,
+             .full_config = config,
+             .config = try termio.Termio.DerivedConfig.init(alloc, config),
+             .backend = .{ .exec = io_exec },
+@@ -730,6 +744,17 @@ pub fn init(
+     // to duplicate.
+     try self.resize(self.size.screen);
+ 
++    // Bypass the escape parser and PTY. Restored text cannot execute commands
++    // or trigger terminal replies, clipboard access, or other escape actions.
++    if (initial_output) |text| {
++        if (text.len > 4 * 1024 * 1024 + 1024) return error.InitialOutputTooLarge;
++        try self.io.terminal.printString(text);
++        if (self.io.fresh_output) |fresh| {
++            const cursor = self.io.terminal.screens.active.cursor;
++            fresh.terminal.setCursorPos(@as(usize, cursor.y) + 1, @as(usize, cursor.x) + 1);
++        }
++    }
++
+     // Start our renderer thread
+     self.renderer_thr = try std.Thread.spawn(
+         .{},
+diff --git a/src/apprt/embedded.zig b/src/apprt/embedded.zig
+index 4c4249e..9f1f260 100644
+--- a/src/apprt/embedded.zig
++++ b/src/apprt/embedded.zig
+@@ -499,6 +499,9 @@ pub const Surface = struct {
+ 
+         /// Context for the new surface
+         context: apprt.surface.NewSurfaceContext = .window,
++
++        /// Plain display text. Never sent to the child or parsed as escape sequences.
++        initial_output: ?[*:0]const u8 = null,
+     };
+ 
+     pub fn init(self: *Surface, app: *App, opts: Options) !void {
+@@ -614,12 +617,13 @@ pub const Surface = struct {
+ 
+         // Initialize our surface right away. We're given a view that is
+         // ready to use.
+-        try self.core_surface.init(
++        try self.core_surface.initWithOutput(
+             app.core_app.alloc,
+             &config,
+             app.core_app,
+             app,
+             self,
++            if (opts.initial_output) |text| std.mem.sliceTo(text, 0) else null,
+         );
+         errdefer self.core_surface.deinit();
+ 
+@@ -1907,6 +1911,28 @@ pub const CAPI = struct {
+         return readTextLocked(surface, core_sel, result);
+     }
+ 
++    /// Read fresh PTY output without the historical text restored into the display.
++    export fn ghostty_surface_read_session_text(surface: *Surface, result: *Text) bool {
++        const core_surface = &surface.core_surface;
++        core_surface.renderer_state.mutex.lockUncancelable(global.io());
++        defer core_surface.renderer_state.mutex.unlock(global.io());
++
++        if (core_surface.io.fresh_output) |fresh| {
++            if (!fresh.available) return false;
++            const screen = fresh.terminal.screens.active;
++            const end = screen.pages.getBottomRight(.screen) orelse return false;
++            const text = screen.selectionString(global.alloc(), .{
++                .sel = .init(screen.pages.getTopLeft(.screen), end, false),
++                .trim = false,
++            }) catch return false;
++            result.* = .{ .tl_px_x = -1, .tl_px_y = -1, .offset_start = 0, .offset_len = 0, .text = text.ptr, .text_len = text.len };
++            return true;
++        }
++        const screen = core_surface.io.terminal.screens.active;
++        const end = screen.pages.getBottomRight(.screen) orelse return false;
++        return readTextLocked(surface, .init(screen.pages.getTopLeft(.screen), end, false), result);
++    }
++
+     fn readTextLocked(
+         surface: *Surface,
+         core_sel: terminal.Selection,
+diff --git a/src/termio/Options.zig b/src/termio/Options.zig
+index a6bf8c4..088722d 100644
+--- a/src/termio/Options.zig
++++ b/src/termio/Options.zig
+@@ -9,6 +9,9 @@ const termio = @import("../termio.zig");
+ /// All size metrics for the terminal.
+ size: renderer.Size,
+ 
++/// Keep fresh PTY output separate from display text restored by the embedder.
++capture_fresh_output: bool = false,
++
+ /// The full app configuration. This is only available during initialization.
+ /// The memory it points to is NOT stable after the init call so any values
+ /// in here must be copied.
+diff --git a/src/termio/Termio.zig b/src/termio/Termio.zig
+index 824c16c..59af4e4 100644
+--- a/src/termio/Termio.zig
++++ b/src/termio/Termio.zig
+@@ -42,6 +42,9 @@ config: DerivedConfig,
+ /// just stores internal state about a grid.
+ terminal: terminalpkg.Terminal,
+ 
++/// Only restored surfaces need this independent, effect-free capture model.
++fresh_output: ?*FreshOutput = null,
++
+ /// The shared render state
+ renderer_state: *renderer.State,
+ 
+@@ -73,6 +76,33 @@ last_cursor_reset: ?std.Io.Timestamp = null,
+ /// to keep track of any state or if its already been freed.
+ thread_enter_state: ?*ThreadEnterState = null,
+ 
++pub const FreshOutput = struct {
++    terminal: terminalpkg.Terminal,
++    stream: terminalpkg.TerminalStream,
++    available: bool = true,
++
++    fn create(alloc: Allocator, options: terminalpkg.Terminal.Options) !*FreshOutput {
++        const self = try alloc.create(FreshOutput);
++        errdefer alloc.destroy(self);
++        var bounded = options;
++        bounded.max_scrollback_bytes = @min(options.max_scrollback_bytes orelse 32 * 1024 * 1024, 32 * 1024 * 1024);
++        bounded.kitty_image_storage_limit = 0;
++        bounded.kitty_image_loading_limits = .direct;
++        self.* = .{
++            .terminal = try terminalpkg.Terminal.init(global.io(), alloc, bounded),
++            .stream = undefined,
++        };
++        self.stream = .init(.{ .allocator = alloc, .handler = .{ .terminal = &self.terminal, .effects = .readonly } });
++        return self;
++    }
++
++    fn destroy(self: *FreshOutput, alloc: Allocator) void {
++        self.stream.deinit();
++        self.terminal.deinit(alloc);
++        alloc.destroy(self);
++    }
++};
++
+ /// The state we need to keep around only until we enter the IO
+ /// thread. Then we can throw it all away.
+ const ThreadEnterState = struct {
+@@ -270,7 +300,7 @@ pub fn init(self: *Termio, alloc: Allocator, opts: termio.Options) !void {
+     };
+ 
+     // Create our terminal
+-    var term = try terminalpkg.Terminal.init(global.io(), alloc, opts: {
++    const terminal_options: terminalpkg.Terminal.Options = opts: {
+         const grid_size = opts.size.grid();
+         break :opts .{
+             .cols = grid_size.columns,
+@@ -294,8 +324,11 @@ pub fn init(self: *Termio, alloc: Allocator, opts: termio.Options) !void {
+             .kitty_image_storage_limit = opts.config.image_storage_limit,
+             .kitty_image_loading_limits = .allWithTempDir(global.tmpDirPath()),
+         };
+-    });
++    };
++    var term = try terminalpkg.Terminal.init(global.io(), alloc, terminal_options);
+     errdefer term.deinit(alloc);
++    const fresh_output = if (opts.capture_fresh_output) try FreshOutput.create(alloc, terminal_options) else null;
++    errdefer if (fresh_output) |fresh| fresh.destroy(alloc);
+ 
+     // The default palette may be an allocator-owned copy, so it is set
+     // once the terminal owns its memory and can release it on deinit.
+@@ -335,6 +368,7 @@ pub fn init(self: *Termio, alloc: Allocator, opts: termio.Options) !void {
+     self.* = .{
+         .alloc = alloc,
+         .terminal = term,
++        .fresh_output = fresh_output,
+         .config = opts.config,
+         .renderer_state = opts.renderer_state,
+         .renderer_wakeup = opts.renderer_wakeup,
+@@ -353,6 +387,7 @@ pub fn init(self: *Termio, alloc: Allocator, opts: termio.Options) !void {
+ 
+ pub fn deinit(self: *Termio) void {
+     self.backend.deinit();
++    if (self.fresh_output) |fresh| fresh.destroy(self.alloc);
+     self.terminal.deinit(self.alloc);
+     self.config.deinit();
+     self.mailbox.deinit(self.alloc);
+@@ -542,6 +577,17 @@ pub fn resize(
+             },
+         );
+ 
++        if (self.fresh_output) |fresh| {
++            fresh.terminal.resize(self.alloc, .{
++                .cols = grid_size.columns,
++                .rows = grid_size.rows,
++                .cell_size_px = .{ .width = self.size.cell.width, .height = self.size.cell.height },
++            }) catch |err| {
++                fresh.available = false;
++                log.err("fresh output resize failed err={}", .{err});
++            };
++        }
++
+         // If we have size reporting enabled we need to send a report.
+         if (self.terminal.modes.get(.in_band_size_reports)) {
+             try self.sizeReportLocked(td, .mode_2048);
+@@ -603,6 +649,14 @@ pub fn clearScreen(self: *Termio, td: *ThreadData, history: bool) !void {
+         // for alt screen, we do nothing.
+         if (self.terminal.screens.active_key == .alternate) return;
+ 
++        if (self.fresh_output) |fresh| {
++            const t = &fresh.terminal;
++            if (history) t.eraseDisplay(.scrollback, false);
++            if (!self.terminal.cursorIsAtPrompt()) {
++                if (t.screens.active.cursor.y > 0) t.screens.active.eraseActive(t.screens.active.cursor.y - 1);
++            } else t.eraseDisplay(.complete, false);
++        }
++
+         // Clear our selection
+         self.terminal.screens.active.clearSelection();
+ 
+@@ -702,6 +756,11 @@ pub fn processOutput(self: *Termio, buf: []const u8) void {
+ 
+ /// Process output from readdata but the lock is already held.
+ fn processOutputLocked(self: *Termio, buf: []const u8) void {
++    if (self.fresh_output) |fresh| {
++        fresh.stream.nextSlice(buf);
++        if (fresh.stream.handler.semantic_failure) fresh.available = false;
++    }
++
+     // Schedule a render. We can call this first because we have the lock.
+     self.terminal_stream.handler.queueRender() catch unreachable;
+ 

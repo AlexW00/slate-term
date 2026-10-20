@@ -125,3 +125,17 @@ Each fixture keeps its original `build-source.json` and a verified `vm-signing.j
 The `layout-app-sync` gate checks live parent plugin changes, deferred replacement/removal while child panes remain open, unavailable package retention, duplicate owner activation, maintenance exclusion, and corrupt/missing startup preservation. Startup-failure evidence includes sampled native WindowServer state and the runtime publication markers; it does not test the non-integration error dialog.
 
 Behavior-changing upgrade baselines may include `fixture-source-variant.json` beside their original build receipt. It binds the entire current source inventory, original source inventory, and exact archived original files. The runner verifies each difference and records `matched-explicit-upgrade-baseline`; it never describes that baseline as a current-source build. Ordinary prebuilt app receipts still require an exact current-source match.
+
+## Native Create App save-panel input
+
+The default `layout-apps-ui` gate captures and cancels the real save panel, then
+creates its child-app fixture through the public API. macOS hosts save panels in
+a separate process and does not allow the app to invoke their OK action.
+
+For actual native confirmation checks, add `--external-save-input` to the VM
+runner with `layout-apps-ui`. The fixture announces each confirmation in its log
+and waits up to 30 seconds for a Create click through VMPal. This mode exercises
+stale-source rejection, destination collision, and successful chosen-name/location
+creation. The runner retains the ordinary VM lease, provenance, and cleanup, and
+records this external-input mode in its receipt. A timeout fails the check; it
+never substitutes a successful save response.

@@ -1,6 +1,6 @@
 # Agent presence
 
-When a coding agent acts on a pane through the CLI, Slate frames the smallest target it knows and shows a detached Liquid Glass pill with the agent's name and an optional short note. Every pill sits at the pane's bottom right, fully rounded and inset from the edges. Presence never affects request admission, authorization or the target of the agent's command. Clicking a navigable pill explicitly focuses its originating Slate terminal.
+When a coding agent acts on a pane through the CLI, Slate frames the smallest target it knows and shows a detached Liquid Glass pill with the agent's name and an optional short note. Every pill sits at the pane's bottom right, fully rounded and inset from the edges. Browser pills sit four points above the native status strip; other panes keep a fourteen-point bottom inset. Presence never affects request admission, authorization or the target of the agent's command. Clicking a navigable pill explicitly focuses its originating Slate terminal.
 
 ## Identifying an agent
 
@@ -11,7 +11,7 @@ slate-term web click --pane p3 --ref REF --note "submitting the form"
 slate-term --help                        # --actor overrides the variable for one call
 ```
 
-Every agent invocation must carry its identity. An export persists only in that shell and its child processes, not across fresh-shell tool calls. Begin each command block with the export, or pass `--actor claude` on every invocation. An inline `SLATE_TERM_ACTOR=claude slate-term …` assignment covers only that one command.
+Every agent invocation must carry its identity. An export persists only in that shell and its child processes, not across fresh-shell tool calls. Begin each command block with the export, or pass `--actor claude` after the subcommand on every invocation (for example `slate-term web snapshot --pane p3 --actor claude`). An inline `SLATE_TERM_ACTOR=claude slate-term …` assignment covers only that one command.
 
 To carry the identity into every child shell, set it when launching the agent:
 
@@ -64,7 +64,10 @@ All pills stay in a single bottom-right group, even for element actions. Only th
 
 ## Holds
 
+Hold presence before inspecting a pane across multiple calls, including metadata reads such as `plugins.panelState.get` that create no activity themselves. Verify `presence list` reports your actor, the target pane, `leased: true`, and `visible: true`; respect disabled activity settings. Release when the pane work ends.
+
 ```sh
+export SLATE_TERM_ACTOR=claude
 slate-term presence hold --pane p4 --ttl 60 --note "triaging the sprint board"
 slate-term presence release --pane p4
 slate-term presence list

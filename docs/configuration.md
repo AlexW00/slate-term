@@ -177,7 +177,7 @@ The app gives Ghostty validated, app-managed color snapshots under `state/palett
 
 The profile's opaque WebKit identifier is kept privately at `state/browser-profile.json` under the app state directory; WebKit manages the actual profile files. Separate `SLATE_TERM_STATE_DIR` fixtures use separate profiles. Do not delete the identifier to clear data: use **Workspace → Browser → Clear Browser Data…**, also available in the command bar and configurable shortcuts. A native warning explains the effects before deleting. **Clear This Site’s Data…** works on focused Browser or Private Browser HTTP(S) pages. [Automation](automation.md#browser-profiles-and-website-data) documents precise site-group scope and noninteractive CLI/API equivalents.
 
-Settings → Browser also provides **Clear All Browser Data…** and **Clear Site Data…**, using the same confirmed operations. For site clearing, choose an open Browser or Private Browser pane and use its URL or enter another absolute HTTP(S) URL. The selected pane determines the profile: normal panes share storage, while each private pane has its own storage. **Refresh Open Panes** updates the selector. This selector lists open panes, not an inventory of stored sites. Clearing runs immediately after confirmation and does not require **Apply**.
+Settings → Browser lists stored sites in this app's shared Browser profile, including sites without an open pane. Each row's trash button clears that site's data after confirmation. **Clear All Site Data…** clears the whole shared profile; **Refresh Sites** reloads the list. Private Browser panes and plugin data remain separate. Clearing runs immediately after confirmation and does not require **Apply**.
 
 ## Browser search
 
@@ -292,16 +292,21 @@ Autosave is best effort. An in-memory command can succeed when a filesystem writ
 
 `terminal.saved_output_lines` sets the number of recent logical lines saved per
 terminal. It defaults to **10,000**, accepts **0–100,000**, and **0 disables saving**.
-The Terminal page in Settings exposes the same value. Lowering it trims retained
+General in Settings exposes the same value beneath **Restore workspace on launch**,
+only while restoration is enabled. Lowering it trims retained
 output immediately. Each terminal also has a 4 MiB text limit, and the workspace
 has a 32 MiB text limit; exceptionally long lines may be shortened.
 
 When workspace restoration is enabled, Slate takes periodic snapshots and saves
-again after orderly process shutdown. **Show Previous Terminal Output** opens
+again after orderly process shutdown. Restored text appears in the terminal pane,
+above a new-session separator and the fresh shell prompt. It supports normal
+scrolling, selection, and terminal search. **Show Previous Terminal Output** opens
 saved text in a read-only, searchable window. Its pane-header clock button and
 **Clear Previous Terminal Output** command operate on the same stored text.
 The current terminal starts a fresh shell in its restored directory. Saved text
-is never typed into that shell or executed.
+is rendered as plain text before that shell starts, without interpreting terminal
+escape sequences or sending it to the shell. Clearing saved output does not erase
+text already displayed in a live terminal's scrollback.
 
 Output can contain sensitive text. It is stored with the private workspace
 snapshot (directory mode 0700, file mode 0600). Setting the limit to zero removes

@@ -84,6 +84,14 @@ public struct SavedLayoutDefinition: Equatable, Codable, Sendable {
         catch { throw invalidSavedLayout("Could not open saved layout: \(error)") }
     }
 
+    /// Rebuild the whole app from its recipe while retaining monotonic runtime identities.
+    public func restoring(in workspace: Workspace) throws -> SavedLayoutOpening {
+        let opening = try opening(in: workspace)
+        var result = opening.workspace
+        for tab in workspace.tabs { try result.closeTab(tab.id) }
+        return SavedLayoutOpening(workspace: result, groupID: opening.groupID, panes: opening.panes)
+    }
+
     private enum CodingKeys: String, CodingKey { case version, id, name, tabs }
     public init(from decoder: any Decoder) throws {
         try requireSavedKeys(decoder, allowed: ["version", "id", "name", "tabs"])

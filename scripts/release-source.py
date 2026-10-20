@@ -251,6 +251,11 @@ def verified_ghostty(root, receipt):
     approved = {
         "src/build/SharedDeps.zig": ("ghostty-optional-libintl.patch", "patched_sha", "patch_sha"),
         "src/termio/Exec.zig": ("ghostty-bounded-shutdown.patch", "shutdown_patched_sha", "shutdown_patch_sha"),
+        "include/ghostty.h": ("ghostty-restored-output.patch", "output_header_patched_sha", "output_patch_sha"),
+        "src/apprt/embedded.zig": ("ghostty-restored-output.patch", "output_embedded_patched_sha", "output_patch_sha"),
+        "src/Surface.zig": ("ghostty-restored-output.patch", "output_surface_patched_sha", "output_patch_sha"),
+        "src/termio/Options.zig": ("ghostty-restored-output.patch", "output_options_patched_sha", "output_patch_sha"),
+        "src/termio/Termio.zig": ("ghostty-restored-output.patch", "output_termio_patched_sha", "output_patch_sha"),
     }
     require(sorted(changes) == sorted(approved), "Ghostty must contain only the approved patches")
     replacements = {}

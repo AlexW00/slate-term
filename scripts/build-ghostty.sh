@@ -41,7 +41,7 @@ patched_sha=ecbbf61a3a432ffb457e8f07e5c79913d6b121f9c5e8ac63950ce6449dba1fb9
   echo 'Ghostty patch checksum mismatch.' >&2; exit 1;
 }
 git -C "$source_dir" diff --cached --quiet || { echo 'Ghostty has staged changes.' >&2; exit 1; }
-git -C "$source_dir" diff --quiet -- . ':!src/build/SharedDeps.zig' ':!src/termio/Exec.zig' || {
+git -C "$source_dir" diff --quiet -- . ':!src/build/SharedDeps.zig' ':!src/termio/Exec.zig' ':!include/ghostty.h' ':!src/apprt/embedded.zig' ':!src/Surface.zig' ':!src/termio/Options.zig' ':!src/termio/Termio.zig' || {
   echo 'Ghostty sources differ from the pin outside the approved patch.' >&2; exit 1;
 }
 source_sha="$(shasum -a 256 "$source_dir/src/build/SharedDeps.zig" | cut -d ' ' -f1)"
@@ -70,6 +70,44 @@ case "$shutdown_source_sha" in
   *) echo 'Ghostty shutdown target differs from both approved versions.' >&2; exit 1 ;;
 esac
 [[ "$(shasum -a 256 "$source_dir/src/termio/Exec.zig" | cut -d ' ' -f1)" = "$shutdown_patched_sha" ]]
+# Restore display text before the shell starts, without treating it as input.
+output_patch_sha=03bdf7d636385e52fefab023831c16008e80f3330d59081ff56d2a8e1ad59916
+output_header_original_sha=78232aec570e266b1ccacaa69b0536c9b7757f4cf747ad26b9d7fb2d378848dd
+output_header_patched_sha=c774f20ecd34ddaa3f5a35ac71e03f3d11b403fb2943fe4b8e054c4a80bdc4cd
+output_embedded_original_sha=45b318567bf891a413224cc70b9a4b4d6ac303abb4e9ff02c788dc1043905e84
+output_embedded_patched_sha=4ed28bcfca9be2fc2caa21ca32d02d381d7a90077d65744bc2778043011a96fd
+output_surface_original_sha=c284b50d1d1eebfc07ea3a17b5f77df9d46243184493a64cd7c37e317d925e3e
+output_surface_patched_sha=24063fb6b84ada78f04a234bd904cf7698928a2bba925ea16bdf0347ef36ff89
+output_options_original_sha=c7104b29c0cf1a68da18d88f6241cda4f5330a0066754e47358a85acfdaadeab
+output_options_patched_sha=df402bba35cf632bc88cea0c3f27cf679a3e3d15702147acff4e39cc9d7f6ddc
+output_termio_original_sha=d80ea8fdecd3da3a9eeefec9a87b92edfc0f2f6db92d23953a7e2003976ffbc7
+output_termio_patched_sha=db66cd8425e4e6c30f2d07eeb0062edad0d6f808985ba7a5392b284a4424146e
+output_patch_file="$root/patches/ghostty-restored-output.patch"
+[[ "$(shasum -a 256 "$output_patch_file" | cut -d ' ' -f1)" = "$output_patch_sha" ]] || {
+  echo 'Ghostty restored-output patch checksum mismatch.' >&2; exit 1;
+}
+output_original=true
+output_patched=true
+for output_target in header embedded surface options termio; do
+  case "$output_target" in
+    header) output_path=include/ghostty.h ;;
+    embedded) output_path=src/apprt/embedded.zig ;;
+    surface) output_path=src/Surface.zig ;;
+    options) output_path=src/termio/Options.zig ;;
+    termio) output_path=src/termio/Termio.zig ;;
+  esac
+  output_original_pin="output_${output_target}_original_sha"
+  output_patched_pin="output_${output_target}_patched_sha"
+  output_source_sha="$(shasum -a 256 "$source_dir/$output_path" | cut -d ' ' -f1)"
+  [[ "$output_source_sha" = "${!output_original_pin}" ]] || output_original=false
+  [[ "$output_source_sha" = "${!output_patched_pin}" ]] || output_patched=false
+done
+if [[ "$output_original" = true ]]; then
+  git -C "$source_dir" apply --check "$output_patch_file"
+  git -C "$source_dir" apply "$output_patch_file"
+elif [[ "$output_patched" != true ]]; then
+  echo 'Ghostty restored-output targets differ from the approved versions.' >&2; exit 1;
+fi
 # Compiler caches belong to this checkout, including linked worktrees.
 export ZIG_GLOBAL_CACHE_DIR="$root/.build/release-zig-cache"
 export ZIG_LOCAL_CACHE_DIR="$source_dir/.zig-cache"
@@ -89,7 +127,7 @@ fi
 python3 - <<'PY_RECEIPT'
 import hashlib
 from pathlib import Path
-inputs = [Path('scripts/build-ghostty.sh'), Path('patches/ghostty-optional-libintl.patch'), Path('patches/ghostty-bounded-shutdown.patch')]
+inputs = [Path('scripts/build-ghostty.sh'), Path('patches/ghostty-optional-libintl.patch'), Path('patches/ghostty-bounded-shutdown.patch'), Path('patches/ghostty-restored-output.patch')]
 for directory in ('.build/bootstrap/ghostty/macos/GhosttyKit.xcframework', '.build/bootstrap/ghostty/zig-out/share'):
     inputs.extend(p for p in sorted(Path(directory).rglob('*')) if p.is_file())
 receipt = Path('.build/bootstrap/ghostty-build.sha256')

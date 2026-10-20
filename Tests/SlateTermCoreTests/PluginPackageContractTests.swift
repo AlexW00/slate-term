@@ -53,7 +53,7 @@ import SlateTermTestSupport
         #expect(AutomationContracts.plugins[method]!.errors.contains(APIError.unavailable))
         #expect(AutomationContracts.plugins[method]!.errors.contains(APIError.settingsWriteFailed))
     }
-    let unavailable: JSONValue = .object(["id": .string("tools"), "title": .string("tools"), "enabled": .bool(true),
+    let unavailable: JSONValue = .object(["id": .string("tools"), "title": .string("tools"), "enabled": .bool(true), "enabledOverride": .null,
         "installationID": .string(UUID().uuidString), "packageRoot": .string("/tmp/managed/contents"),
         "available": .bool(false), "diagnostic": .string("Missing plugin.json"), "compatibilityStatus": .null, "cleanupPending": .bool(false)])
     #expect(schemaAccepts(AutomationContracts.plugins[.pluginsList]!.result, .array([unavailable]), definitions: definitions))

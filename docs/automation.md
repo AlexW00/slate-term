@@ -65,6 +65,12 @@ slate-term terminal historyExport --pane p1 --source previous --path /tmp/previo
 
 Configure saved retention with `terminal.saved_output_lines` (default 10,000; 0 disables it; maximum 100,000). Saved text is also capped at 4 MiB per terminal and 32 MiB per workspace. This records display text for reference, without replaying commands or resuming programs.
 
+Restoration displays saved text in the pane before the new shell starts. It is
+included in current retained history and normal terminal search; `source: "previous"`
+still reads the saved snapshot separately. `api.describe.workspaceRestoration.savedOutputDisplay`
+advertises this behavior. Clearing the saved snapshot does not erase existing live
+scrollback. In Settings, General shows retention only when workspace restoration is on.
+
 ```sh
 slate-term terminal send --pane p1 --text $'printf "hello\\n"\r'
 slate-term terminal key --pane p1 --key ctrl+c

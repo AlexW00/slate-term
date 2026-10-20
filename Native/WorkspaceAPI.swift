@@ -51,7 +51,7 @@ extension WorkspaceHost {
         }
         if method.hasPrefix("layouts.") {
             var supported: Set<String> = ["expectedInstanceId"]
-            if ["layouts.windows", "layouts.capture", "layouts.open"].contains(method) { supported.insert("expectedWorkspaceRevision") }
+            if ["layouts.windows", "layouts.capture", "layouts.open", "layouts.restoreOriginal"].contains(method) { supported.insert("expectedWorkspaceRevision") }
             if method == "layouts.update" { supported.insert("expectedSavedLayoutRevision") }
             if let unsupported = Set(params.keys).intersection(Self.apiGuardKeys).subtracting(supported).sorted().first {
                 throw RPCFailure(code: -32602, message: "\(unsupported) is not supported by \(method)")

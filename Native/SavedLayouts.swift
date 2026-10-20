@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 import SlateTermCore
 import SlateTermSettings
 
@@ -30,6 +31,7 @@ final class SavedLayouts {
     var isVisible: () -> Bool = { false }
     private var refreshTimer: Timer?
     var runDialog: (NSAlert) -> NSApplication.ModalResponse = { $0.runModal() }
+    var runSavePanel: (NSSavePanel) -> NSApplication.ModalResponse = { $0.runModal() }
 
     init(directory: URL) {
         self.directory = directory
@@ -239,7 +241,7 @@ final class SavedLayouts {
         guard usesDefaultLibrary else { throw RPCFailure(code: -32602, message: "Layout apps require the default layout library") }
         let entries = try store.list().filter { $0.definition != nil && $0.diagnostic == nil }
         guard !entries.isEmpty else { try showEditor(); return }
-        guard let index = choose(title: "Create Layout App", prompt: "Layout", choices: entries.map { $0.definition!.name }) else { return }
+        guard let index = choose(title: "Create App", prompt: "Layout", choices: entries.map { $0.definition!.name }) else { return }
         try await showLauncherDialog(id: entries[index].definition!.id, operation: operation)
     }
 
@@ -272,7 +274,7 @@ final class SavedLayouts {
         chooser.addItems(withTitles: choices); alert.accessoryView = chooser
         return alert.runModal() == .alertFirstButtonReturn ? chooser.indexOfSelectedItem : nil
     }
-    private func createLauncher(id: UUID, operation: WorkspaceOperationContext) async throws {
+    func createLauncher(id: UUID, operation: WorkspaceOperationContext) async throws {
         guard !launcherDialogBusy else { throw RPCFailure(code: APIError.conflict, message: "App creation is already pending") }
         launcherDialogBusy = true
         defer { launcherDialogBusy = false }
@@ -294,15 +296,28 @@ final class SavedLayouts {
         }
         let dialog = LayoutLauncherDialog(name: definition.name, unavailablePlugins: unavailable)
         guard runDialog(dialog.alert) == .alertFirstButtonReturn else { return }
-        guard try store.get(id: id).revision == entry.revision, editorModel?.hasDraft(id: id) != true else {
-            throw RPCFailure(code: APIError.conflict, message: "The layout changed while the app dialog was open")
+        func validateSource() throws {
+            try Task.checkCancellation()
+            try operation.validateCaller()
+            guard try store.get(id: id).revision == entry.revision, editorModel?.hasDraft(id: id) != true else {
+                throw RPCFailure(code: APIError.conflict, message: "The layout changed while the app dialog was open")
+            }
         }
-        let options = try SavedLayoutLauncherOptions(name: dialog.name.stringValue, icon: dialog.selection.icon)
-        let folder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications")
-        try Task.checkCancellation()
-        try operation.validateCaller()
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let url = folder.appendingPathComponent(options.name + ".app")
+        try validateSource()
+        let panel = NSSavePanel()
+        panel.title = "Create App"
+        panel.prompt = "Create"
+        panel.nameFieldLabel = "App Name:"
+        panel.nameFieldStringValue = definition.name + ".app"
+        panel.allowedContentTypes = [.applicationBundle]
+        panel.allowsOtherFileTypes = false
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications")
+        guard runSavePanel(panel) == .OK, let url = panel.url else { return }
+        try validateSource()
+        let options = try SavedLayoutLauncherOptions(name: url.deletingPathExtension().lastPathComponent,
+                                                     icon: dialog.selection.icon)
         guard let invokeAsync else { throw RPCFailure(code: APIError.unavailable, message: "Workspace is unavailable") }
         _ = try await invokeAsync("layouts.launcher", ["id": .string(id.uuidString), "path": .string(url.path),
                         "name": .string(options.name), "icon": .string(options.icon), "copyPluginData": .bool(dialog.copyPluginData.state == .on)], operation)
@@ -318,24 +333,7 @@ enum LayoutLauncher {
             return withUnsafeBytes(of: &value) { Data($0) }
         }
         for (size, kind) in [(128, "ic07"), (256, "ic08"), (512, "ic09"), (1024, "ic10")] {
-            let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { bounds in
-                if symbol == "slate" {
-                    NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath).draw(in: bounds)
-                    return true
-                }
-                let tile = bounds.insetBy(dx: bounds.width * 0.08, dy: bounds.height * 0.08)
-                NSColor(calibratedRed: 0.22, green: 0.28, blue: 0.40, alpha: 1).setFill()
-                NSBezierPath(roundedRect: tile, xRadius: bounds.width * 0.19, yRadius: bounds.height * 0.19).fill()
-                let config = NSImage.SymbolConfiguration(pointSize: bounds.width * 0.44, weight: .medium)
-                    .applying(.init(paletteColors: [.white]))
-                if let glyph = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?.withSymbolConfiguration(config) {
-                    let scale = min(bounds.width * 0.5 / glyph.size.width, bounds.height * 0.5 / glyph.size.height)
-                    let size = NSSize(width: glyph.size.width * scale, height: glyph.size.height * scale)
-                    glyph.draw(in: NSRect(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2,
-                                          width: size.width, height: size.height))
-                }
-                return true
-            }
+            let image = iconImage(symbol: symbol, size: CGFloat(size))
             guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
                   let png = bitmap.representation(using: .png, properties: [:]) else {
                 throw RPCFailure(code: -32000, message: "Could not render the app icon")
@@ -343,6 +341,28 @@ enum LayoutLauncher {
             chunks.append(Data(kind.utf8)); chunks.append(integer(png.count + 8)); chunks.append(png)
         }
         return Data("icns".utf8) + integer(chunks.count + 8) + chunks
+    }
+
+    // Preview and packaged icons use the same drawing, including the Slate app icon.
+    static func iconImage(symbol: String, size: CGFloat) -> NSImage {
+        return NSImage(size: NSSize(width: size, height: size), flipped: false) { bounds in
+            if symbol == "slate" {
+                NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath).draw(in: bounds)
+                return true
+            }
+            let tile = bounds.insetBy(dx: bounds.width * 0.08, dy: bounds.height * 0.08)
+            NSColor(calibratedRed: 0.22, green: 0.28, blue: 0.40, alpha: 1).setFill()
+            NSBezierPath(roundedRect: tile, xRadius: bounds.width * 0.19, yRadius: bounds.height * 0.19).fill()
+            let config = NSImage.SymbolConfiguration(pointSize: bounds.width * 0.44, weight: .medium)
+                .applying(.init(paletteColors: [.white]))
+            if let glyph = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?.withSymbolConfiguration(config) {
+                let scale = min(bounds.width * 0.5 / glyph.size.width, bounds.height * 0.5 / glyph.size.height)
+                let size = NSSize(width: glyph.size.width * scale, height: glyph.size.height * scale)
+                glyph.draw(in: NSRect(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2,
+                                      width: size.width, height: size.height))
+            }
+            return true
+        }
     }
 
 }
@@ -356,21 +376,27 @@ final class LayoutLauncherIconSelection {
 @MainActor
 final class LayoutLauncherDialog {
     let alert = NSAlert()
-    let name: NSTextField
+    let preview = NSImageView()
     let selection = LayoutLauncherIconSelection()
     let copyPluginData = NSButton(checkboxWithTitle: "Copy plugin data from Slate Terminal", target: nil, action: nil)
 
     init(name: String, unavailablePlugins: [LayoutAppCreationPreflight.UnavailablePlugin] = []) {
-        self.name = NSTextField(string: name)
-        self.name.placeholderString = "App Name"
-        self.name.setAccessibilityLabel("App Name")
-        alert.messageText = "Create Layout App"
-        alert.informativeText = "Create an independent app in ~/Applications. It follows Slate’s settings and plugins, with its own session, browser logins, and plugin data."
+        alert.messageText = "Create App"
+        alert.informativeText = "Create an independent app from \(name). It follows Slate’s settings and plugins, with its own session, browser logins, and plugin data."
         copyPluginData.state = .on
-        alert.addButton(withTitle: "Create"); alert.addButton(withTitle: "Cancel")
-        let icons = LayoutLauncherIconPicker(selection: selection)
-        var views: [NSView] = [NSTextField(labelWithString: "Name"), self.name,
-                               NSTextField(labelWithString: "Icon"), icons, copyPluginData,
+        alert.addButton(withTitle: "Continue…"); alert.addButton(withTitle: "Cancel")
+        preview.image = LayoutLauncher.iconImage(symbol: selection.icon, size: 256)
+        preview.imageScaling = .scaleProportionallyUpOrDown
+        preview.setAccessibilityLabel("App icon preview")
+        preview.setAccessibilityIdentifier("layoutApp.iconPreview")
+        preview.widthAnchor.constraint(equalToConstant: 96).isActive = true
+        preview.heightAnchor.constraint(equalToConstant: 96).isActive = true
+        let selection = self.selection
+        let icons = LayoutLauncherIconPicker(selection: selection) { [weak preview, weak selection] in
+            guard let selection else { return }
+            preview?.image = LayoutLauncher.iconImage(symbol: selection.icon, size: 256)
+        }
+        var views: [NSView] = [preview, NSTextField(labelWithString: "Icon"), icons, copyPluginData,
                                NSTextField(wrappingLabelWithString: "Data is copied once. Afterwards each app keeps its own changes.")]
         let unavailableListHeight = min(76, max(24, CGFloat(unavailablePlugins.count) * 18 + 8))
         if !unavailablePlugins.isEmpty {
@@ -399,13 +425,12 @@ final class LayoutLauncherDialog {
         // Size the accessory from its wrapped content so it cannot crowd the alert description.
         stack.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 0, right: 12)
         stack.widthAnchor.constraint(equalToConstant: 384).isActive = true
-        self.name.widthAnchor.constraint(equalToConstant: 360).isActive = true
         icons.widthAnchor.constraint(equalToConstant: 360).isActive = true
         icons.heightAnchor.constraint(equalToConstant: 168).isActive = true
         stack.layoutSubtreeIfNeeded()
         stack.setFrameSize(NSSize(width: 384, height: ceil(stack.fittingSize.height)))
         alert.accessoryView = stack
-        alert.window.initialFirstResponder = self.name
+        alert.window.initialFirstResponder = icons
     }
 }
 
@@ -415,7 +440,7 @@ private final class LayoutLauncherIconPicker: NSView {
     private var buttons: [LayoutLauncherIconButton] = []
     override var isFlipped: Bool { true }
 
-    init(selection: LayoutLauncherIconSelection) {
+    init(selection: LayoutLauncherIconSelection, onChange: @escaping () -> Void) {
         self.selection = selection
         super.init(frame: NSRect(x: 0, y: 0, width: 360, height: 168))
         for (index, icon) in SavedLayoutLauncherOptions.icons.enumerated() {
@@ -426,7 +451,7 @@ private final class LayoutLauncherIconPicker: NSView {
             buttons.append(button)
         }
         // Native actions and selection updates must complete inside NSAlert's modal run loop.
-        selection.onChange = { [weak self] in self?.updateSelection() }
+        selection.onChange = { [weak self] in self?.updateSelection(); onChange() }
         updateSelection()
         needsLayout = true
     }
@@ -470,6 +495,7 @@ private final class LayoutLauncherIconButton: NSButton {
         isBordered = false
         setButtonType(.pushOnPushOff)
         setAccessibilityLabel(name)
+        setAccessibilityIdentifier("layoutApp.icon.\(icon)")
         toolTip = name
     }
     required init?(coder: NSCoder) { nil }

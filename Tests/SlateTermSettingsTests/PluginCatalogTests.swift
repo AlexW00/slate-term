@@ -106,6 +106,62 @@ func packageFixture(_ manifest: String = #"{"id":"tools","title":"Tools","comman
     #expect(unavailable.diagnostics["tools"] != nil)
 }
 
+@Test func childPluginEnabledOverridesPersistWithoutChangingParentAndSurviveReplacement() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let source = try packageFixture()
+    defer { try? FileManager.default.removeItem(at: directory); try? FileManager.default.removeItem(at: source.deletingLastPathComponent()) }
+    let parentDirectory = directory.appendingPathComponent("parent")
+    let childDirectory = directory.appendingPathComponent("child")
+    var parent = try PluginCatalog(directory: parentDirectory)
+    var child = try PluginCatalog(directory: childDirectory)
+    try parent.register(parent.packages.prepare(source), replace: false)
+    try child.register(child.packages.prepare(source), replace: false)
+    let parentBytes = try Data(contentsOf: parentDirectory.appendingPathComponent("registry.json"))
+
+    #expect(try child.setEnabled("tools", enabled: false, persistOverride: true))
+    #expect(child.inheritedEnabled(for: parent.records[0]) == false)
+    #expect(try !child.setEnabled("tools", enabled: parent.records[0].enabled))
+    #expect(try Data(contentsOf: parentDirectory.appendingPathComponent("registry.json")) == parentBytes)
+    child = try PluginCatalog(directory: childDirectory)
+    #expect(child.enabledOverrides == ["tools": false])
+    #expect(child.list().array?[0].object?["enabledOverride"] == .bool(false))
+    try child.register(child.packages.prepare(source), replace: true)
+    #expect(child.disabledPlugins == ["tools"])
+    #expect(child.enabledOverrides == ["tools": false])
+
+    #expect(try parent.setEnabled("tools", enabled: false))
+    #expect(try child.setEnabled("tools", enabled: true, persistOverride: true))
+    #expect(child.inheritedEnabled(for: parent.records[0]) == true)
+    #expect(try !child.setEnabled("tools", enabled: parent.records[0].enabled))
+    #expect(child.disabledPlugins.isEmpty)
+    #expect(parent.disabledPlugins == ["tools"])
+    try child.remove("tools")
+    #expect(try PluginCatalog(directory: childDirectory).enabledOverrides.isEmpty)
+}
+
+@Test func explicitPluginEnabledChoicePinsInheritedValueAndWriteFailurePreservesIt() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let source = try packageFixture()
+    defer { try? FileManager.default.removeItem(at: directory); try? FileManager.default.removeItem(at: source.deletingLastPathComponent()) }
+    var catalog = try PluginCatalog(directory: directory)
+    try catalog.register(catalog.packages.prepare(source), replace: false)
+    let originalRevision = catalog.revision
+    #expect(try catalog.setEnabled("tools", enabled: true, persistOverride: true))
+    #expect(catalog.revision != originalRevision)
+    let path = directory.appendingPathComponent("registry.json")
+    let bytes = try Data(contentsOf: path)
+    let revision = catalog.revision
+    #expect(try !catalog.setEnabled("tools", enabled: true, persistOverride: true))
+    #expect(catalog.revision == revision)
+    #expect(try Data(contentsOf: path) == bytes)
+    #expect(chmod(path.path, 0o644) == 0)
+    #expect(throws: (any Error).self) { try catalog.setEnabled("tools", enabled: false, persistOverride: true) }
+    #expect(catalog.revision == revision)
+    #expect(catalog.enabledOverrides == ["tools": true])
+    #expect(catalog.disabledPlugins.isEmpty)
+    #expect(try Data(contentsOf: path) == bytes)
+}
+
 @Test func ZIPPreparationRejectsUnsafePathsTypesCollisionsAndSizeLimits() throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }

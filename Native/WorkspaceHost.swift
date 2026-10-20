@@ -639,10 +639,11 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                         discarded.append(layoutPluginPending.removeValue(forKey: record.id)!)
                     }
                 }
-                if pluginCatalog.records.first(where: { $0.id == record.id })?.enabled != record.enabled {
-                    if !record.enabled && inUse { deferred += 1; continue }
-                    _ = try changePluginRegistration(record.enabled ? .pluginsEnable : .pluginsDisable,
-                        params: ["id": .string(record.id)], operation: operation)
+                let enabled = pluginCatalog.inheritedEnabled(for: record)
+                if pluginCatalog.records.first(where: { $0.id == record.id })?.enabled != enabled {
+                    if !enabled && inUse { deferred += 1; continue }
+                    _ = try changePluginRegistration(enabled ? .pluginsEnable : .pluginsDisable,
+                        params: ["id": .string(record.id)], operation: operation, inheritingEnabled: true)
                 }
             }
             for record in pluginCatalog.records where !desired.contains(where: { $0.id == record.id }) {
@@ -864,7 +865,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     var availableCommands: [WorkspaceCommand] {
-        CommandRegistry.commands + pluginCatalog.activeRegistrations.flatMap(\.workspaceCommands)
+        CommandRegistry.commands.filter { $0.id != "layouts.restoreOriginal" || ApplicationLaunchContext.current.isLayoutApp }
+            + pluginCatalog.activeRegistrations.flatMap(\.workspaceCommands)
     }
     private var unavailableCommands: [String] {
         let known = Set(availableCommands.map(\.id))
@@ -1293,6 +1295,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         try validateAPIGuards(params, method: method)
         guard let contract = AutomationMethod(rawValue: method) else { return try callDebug(method, params: params, operation: operation) }
         switch contract {
+        case .layoutsRestoreOriginal: return try restoreOriginalLayout(params, operation: operation)
         case .layoutsStartupStatus:
             guard withoutAPIGuards(params).isEmpty else { throw RPCFailure(code: -32602, message: "layouts.startupStatus takes no payload parameters") }
             return layoutStartup.status
@@ -1366,7 +1369,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         case .pluginsRegister, .pluginsValidate:
             throw RPCFailure(code: -32603, message: "Package preparation requires asynchronous dispatch")
         case .pluginsEnable, .pluginsDisable, .pluginsUnregister:
-            try ApplicationLaunchContext.current.requireParent()
+            if contract == .pluginsUnregister { try ApplicationLaunchContext.current.requireParent() }
             return try changePluginRegistration(contract, params: params, operation: operation)
         case .contextGet: return try context(params)
         case .shellRunInput:
@@ -1429,6 +1432,11 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             }
             if id == "skills.settings" { showSettings(section: .agents); return .object([:]) }
             if id == "skills.reveal" { return try revealAgentSkill() }
+            if id == "layouts.restoreOriginal" {
+                var payload = params
+                payload.removeValue(forKey: "id")
+                return try restoreOriginalLayout(payload, operation: operation)
+            }
             if id.hasPrefix("layouts.") {
                 let source: LayoutSourceWindow?
                 if id == "layouts.captureWindow" {
@@ -1627,29 +1635,97 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         // Capture the settled native dialog rather than a partial opening animation.
         testConfirmationDelay = params["screenshot"] != nil ? 0.75 : 0.2
         defer { testConfirmationDelay = 0.2 }
-        var details: JSONValue = .null
+        var details: [String: JSONValue] = [:]
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
         testConfirmationHandler = { alert in
             let stack = alert.accessoryView as? NSStackView
+            let views = stack.map(descendants) ?? []
             let fields = stack?.arrangedSubviews.compactMap { $0 as? NSTextField } ?? []
             if let name = params["name"]?.string { fields.first(where: \.isEditable)?.stringValue = name }
-            details = .object(["message": .string(alert.messageText),
-                               "labels": .array(fields.filter { !$0.isEditable }.map { .string($0.stringValue) }),
-                               "sourceSelectors": .integer(stack?.arrangedSubviews.filter { $0 is NSPopUpButton }.count ?? 0)])
+            let preview = views.compactMap { $0 as? NSImageView }.first {
+                $0.accessibilityIdentifier() == "layoutApp.iconPreview"
+            }
+            let before = preview?.image?.tiffRepresentation
+            if let icon = params["icon"]?.string {
+                views.compactMap { $0 as? NSButton }.first {
+                    $0.accessibilityIdentifier() == "layoutApp.icon.\(icon)"
+                }?.performClick(nil)
+            }
+            details = ["message": .string(alert.messageText),
+                       "labels": .array(fields.filter { !$0.isEditable }.map { .string($0.stringValue) }),
+                       "editableFields": .integer(views.compactMap { $0 as? NSTextField }.filter(\.isEditable).count),
+                       "previewPresent": .bool(preview?.image != nil),
+                       "previewChanged": .bool(before != preview?.image?.tiffRepresentation),
+                       "sourceSelectors": .integer(stack?.arrangedSubviews.filter { $0 is NSPopUpButton }.count ?? 0)]
             if let pane = params["focusPane"] { _ = try? self.call("command.run", params: ["id": .string("pane.focus"), "pane": pane]) }
             if let path = params["screenshot"]?.string { try? Self.captureWindow(alert.window.windowNumber, path: path) }
             alert.buttons[params["confirm"] == .bool(true) ? 0 : 1].performClick(nil)
         }
-        defer { testConfirmationHandler = nil }
-        if params["launcher"] == .bool(true) {
+        let originalSavePanel = savedLayouts.runSavePanel
+        defer { testConfirmationHandler = nil; savedLayouts.runSavePanel = originalSavePanel }
+        if params["launcher"] == .bool(true), let id = params["layoutID"]?.string.flatMap(UUID.init(uuidString:)) {
+            guard params["saveConfirm"] != .bool(true) || params["externalInput"] == .bool(true) else {
+                throw RPCFailure(code: -32602, message: "Native save confirmation requires externalInput and a real save-panel action")
+            }
+            savedLayouts.runSavePanel = { panel in
+                if let path = params["destination"]?.string {
+                    let url = URL(fileURLWithPath: path)
+                    panel.directoryURL = url.deletingLastPathComponent()
+                    panel.nameFieldStringValue = url.lastPathComponent
+                }
+                var prepared = false
+                var timedOut = false
+                let externalInput = params["externalInput"] == .bool(true)
+                let timer = Timer(timeInterval: 0.75, repeats: true) { _ in
+                    MainActor.assumeIsolated {
+                        guard panel.isVisible, !prepared else { return }
+                        prepared = true
+                        if let path = params["saveScreenshot"]?.string { try? Self.captureWindow(panel.windowNumber, path: path) }
+                        if params["staleDuringSave"] == .bool(true),
+                           let entry = try? self.call("layouts.get", params: ["id": .string(id.uuidString)]).object,
+                           var definition = entry["definition"]?.object, let revision = entry["revision"] {
+                            definition["name"] = .string("Changed during app creation")
+                            _ = try? self.call("layouts.update", params: ["definition": .object(definition), "expectedSavedLayoutRevision": revision])
+                        }
+                        if externalInput, params["saveConfirm"] == .bool(true), let path = params["readyPath"]?.string {
+                            try? Data("ready".utf8).write(to: URL(fileURLWithPath: path), options: .atomic)
+                        }
+                        if params["saveConfirm"] != .bool(true) { panel.cancel(nil) }
+                        // Confirmation comes only from actual external native input.
+                    }
+                }
+                RunLoop.main.add(timer, forMode: .common)
+                let watchdog = Timer(timeInterval: externalInput ? 30 : 8, repeats: false) { _ in
+                    MainActor.assumeIsolated {
+                        timedOut = true
+                        if let path = params["timeoutScreenshot"]?.string { try? Self.captureWindow(panel.windowNumber, path: path) }
+                        panel.cancel(nil)
+                    }
+                }
+                RunLoop.main.add(watchdog, forMode: .common)
+                defer { timer.invalidate(); watchdog.invalidate() }
+                let response = panel.runModal()
+                details["savePanel"] = .object(["name": .string(panel.nameFieldStringValue),
+                    "path": panel.url.map { .string($0.path) } ?? .null,
+                    "accepted": .bool(response == .OK), "response": .integer(response.rawValue),
+                    "timedOut": .bool(timedOut), "prepared": .bool(prepared),
+                    "action": .string(externalInput && params["saveConfirm"] == .bool(true) ? "externalInput" : "cancel")])
+                if response == .OK, params["occupyDestination"] == .bool(true), let url = panel.url {
+                    try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
+                    try? Data("Keep existing destination".utf8).write(to: url.appendingPathComponent("collision-marker"))
+                }
+                return response
+            }
+            try await savedLayouts.createLauncher(id: id, operation: .init(origin: .native))
+        } else if params["launcher"] == .bool(true) {
             let dialog = LayoutLauncherDialog(name: params["name"]?.string ?? "Development", unavailablePlugins: try await layoutApps.creationUnavailablePlugins())
-            if let icon = params["icon"]?.string { dialog.selection.icon = icon }
             _ = runConfirmationAlert(dialog.alert)
         } else {
             var target: [String: JSONValue] = ["id": .string("layouts.captureWindow")]
             if let pane = params["pane"] { target["pane"] = pane }
             _ = try call("command.run", params: target)
         }
-        return details
+        return .object(details)
     }
 
     private func callDebug(_ method: String, params: [String: JSONValue], operation: WorkspaceOperationContext) throws -> JSONValue {
@@ -1714,6 +1790,21 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 "settingsKey": .bool(settingsWindow?.window != nil && NSApp.keyWindow === settingsWindow?.window),
                 "keyTab": windows.first(where: { $0.value === NSApp.keyWindow }).map { .string($0.key.description) } ?? .null,
                 "tabTitles": .object(Dictionary(uniqueKeysWithValues: windows.map { ($0.key.description, .string($0.value.tab.title)) }))])
+        case "debug.restoreOriginalLayout" where integration:
+            var prompts: [JSONValue] = []
+            var failures: [JSONValue] = []
+            testPresentationError = { failures.append(.integer(($0 as? RPCFailure)?.code ?? -32000)) }
+            testConfirmationHandler = { alert in
+                prompts.append(.string(alert.messageText))
+                if params["changeWhileConfirming"] == .bool(true), let pane = self.workspace.panes.first?.id {
+                    _ = try? self.call("command.run", params: ["id": .string("pane.title.set"),
+                        "pane": .string(pane.description), "title": .string("Changed during confirmation")])
+                }
+                alert.buttons[params["confirm"] == .bool(true) ? 1 : 0].performClick(nil)
+            }
+            defer { testConfirmationHandler = nil; testPresentationError = nil }
+            runUserCommand("layouts.restoreOriginal", params: [:])
+            return .object(["prompts": .array(prompts), "failures": .array(failures)])
         case "debug.pluginPersistence" where integration:
             if params["rejectPublication"] == .bool(true) {
                 rejectNextPluginDataPublication = true
@@ -2091,6 +2182,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             if case .bool(let value) = params["inheritWorkingDirectory"] { model.inheritWorkingDirectory = value }
             if let value = params["fontSize"]?.string { model.fontSize = value }
             if let value = params["savedOutputLines"]?.string { model.savedOutputLines = value }
+            if case .bool(let value) = params["restoreWorkspace"] { model.restore = value }
             if case .number(let value) = params["unfocusedPaneDim"] { model.unfocusedPaneDim = value }
             if case .integer(let value) = params["unfocusedPaneDim"] { model.unfocusedPaneDim = Double(value) }
             if let colors = params["agentColors"]?.object {
@@ -2349,8 +2441,48 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         return try SavedLayoutDefinition(name: "Untitled Layout", tabs: tabs).validated()
     }
 
+    private func restoreOriginalLayout(_ params: [String: JSONValue], operation: WorkspaceOperationContext,
+                                       interactive: Bool = false) throws -> JSONValue {
+        guard let descriptor = ApplicationLaunchContext.current.descriptor else {
+            throw RPCFailure(code: APIError.unavailable, message: "Restore Original Layout is only available in a layout app")
+        }
+        let payload = withoutAPIGuards(params)
+        guard Set(payload.keys).isSubset(of: ["force"]),
+              payload["force"] == nil || payload["force"] == .bool(true) || payload["force"] == .bool(false) else {
+            throw RPCFailure(code: -32602, message: "Restore Original Layout accepts only an optional boolean force")
+        }
+        try validateAPIGuards(params, method: "layouts.restoreOriginal")
+        let definition = try LayoutAppPluginSync.readRecipe(directory: descriptor.recipeDirectory, id: descriptor.layoutID)
+        let revision = revisions.revision
+        var force = payload["force"] == .bool(true)
+        if !force, terminals.values.contains(where: \.needsConfirmClose) {
+            if interactive {
+                guard confirm("Restore the original layout and terminate running processes?") else { return .object([:]) }
+                force = true
+            } else {
+                throw RPCFailure(code: -32010, message: "The layout may have running processes; pass --force to terminate them")
+            }
+        }
+        func validate() throws {
+            try operation.validateCaller()
+            try Task.checkCancellation()
+            try synchronizeNativeGroups()
+            drainNativeLayouts()
+            guard revisions.revision == revision,
+                  try LayoutAppPluginSync.readRecipe(directory: descriptor.recipeDirectory, id: descriptor.layoutID) == definition else {
+                throw RPCFailure(code: APIError.conflict, message: "The workspace or source layout changed; inspect it again before restoring")
+            }
+            if !force, terminals.values.contains(where: \.needsConfirmClose) {
+                throw RPCFailure(code: -32010, message: "The layout may have running processes; pass --force to terminate them")
+            }
+        }
+        try validate()
+        return try openSavedLayout(definition, focus: true, operation: operation, replacingWorkspace: true, beforeCommit: validate)
+    }
+
     private func openSavedLayout(_ definition: SavedLayoutDefinition, focus: Bool,
-                                 operation: WorkspaceOperationContext) throws -> JSONValue {
+                                 operation: WorkspaceOperationContext, replacingWorkspace: Bool = false,
+                                 beforeCommit: () throws -> Void = {}) throws -> JSONValue {
         let problems = definition.problems(types: savedLayouts.types())
         guard problems.isEmpty else { throw RPCFailure(code: -32602, message: problems.joined(separator: "\n")) }
         let recipes = definition.tabs.flatMap(\.panes)
@@ -2370,7 +2502,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 }
             }
         }
-        let opening = try definition.opening(in: workspace, focus: focus)
+        let opening = try replacingWorkspace ? definition.restoring(in: workspace) : definition.opening(in: workspace, focus: focus)
         var openingRecipes: [PaneID: SavedLayoutPane] = [:]
         for (id, var pane) in opening.panes {
             if let type = savedLayouts.types().first(where: { $0.id == pane.type }) {
@@ -2380,14 +2512,14 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }
         var openingWorkspace = opening.workspace
         try preparePluginConfigurations(&openingWorkspace, recipes: openingRecipes)
-        let transition = try WorkspaceTransition(observing: openingWorkspace, from: workspace, revisions: revisions, action: .savedLayoutOpen)
+        let transition = try WorkspaceTransition(observing: openingWorkspace, from: workspace, revisions: revisions, action: replacingWorkspace ? .savedLayoutRestoreOriginal : .savedLayoutOpen)
         let startupPanes = Set(openingRecipes.compactMap { id, pane in
             pane.type == "terminal" && !(pane.configuration["command"]?.string ?? "").isEmpty ? id : nil
         })
         // Reserve before any old sessions are torn down; ordinary runs cannot steal these slots.
         try terminalControl.reserveStartup(startupPanes)
         let persistence: WorkspacePersistence
-        do { persistence = try reconcile(openingWorkspace, recipes: openingRecipes, transition: transition, operation: operation, requestFocus: focus) }
+        do { persistence = try reconcile(openingWorkspace, recipes: openingRecipes, transition: transition, operation: operation, requestFocus: focus, beforeCommit: beforeCommit) }
         catch { startupPanes.forEach { terminalControl.releaseStartup($0) }; throw error }
         for (id, pane) in openingRecipes where pane.type == "terminal" {
             if let command = pane.configuration["command"]?.string, !command.isEmpty, let session = shellSessions[id] {
@@ -2565,8 +2697,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                     ?? restorationDirectory(restoration?.directories[pane.id.description])
                     ?? settings.current.terminal.startingDirectory(inheriting: splitDirectory)
                 if integration { fputs("Integration startup: creating terminal surface\n", stderr) }
-                created[pane.id] = try TerminalView(runtime: runtime, environment: environment, directory: directory)
-                created[pane.id]?.restoreOutput(restoration?.terminalOutput[pane.id.description], lineLimit: settings.current.terminal.savedOutputLines)
+                created[pane.id] = try TerminalView(runtime: runtime, environment: environment, directory: directory,
+                    restoredOutput: restoration?.terminalOutput[pane.id.description],
+                    outputLineLimit: settings.current.terminal.savedOutputLines)
                 if integration {
                     terminalPreparationCount += 1
                     fputs("Integration startup: terminal surface created\n", stderr)
@@ -3391,7 +3524,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         workspaceMenu.addItem(.separator())
         addCommands(["window.new"], to: workspaceMenu)
         workspaceMenu.addItem(.separator())
-        addCommands(["layouts.edit", "layouts.openWindow", "layouts.captureWindow", "plugins.reload", "plugins.panelState.reset"], to: workspaceMenu)
+        addCommands(["layouts.edit", "layouts.openWindow", "layouts.captureWindow", "layouts.restoreOriginal", "plugins.reload", "plugins.panelState.reset"], to: workspaceMenu)
         workspaceMenu.addItem(.separator())
         for (title, commands) in [
             ("Tabs", ["tab.new", "tab.showAll", "tab.rename", "tab.title.clear", "tab.close", "tab.previous", "tab.next"]),
@@ -3685,7 +3818,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         return commands + templates
     }
 
-    private func changePluginRegistration(_ method: AutomationMethod, params: [String: JSONValue], operation: WorkspaceOperationContext) throws -> JSONValue {
+    private func changePluginRegistration(_ method: AutomationMethod, params: [String: JSONValue], operation: WorkspaceOperationContext,
+                                          inheritingEnabled: Bool = false) throws -> JSONValue {
         let payload = withoutAPIGuards(params)
         guard Set(payload.keys).isSubset(of: ["id", "force"]),
               payload["force"] == nil || payload["force"] == .bool(true) || payload["force"] == .bool(false),
@@ -3695,6 +3829,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         let removedPackage = pluginCatalog.records.first { $0.id == id }
         let removing = method == .pluginsUnregister
         let enabling = method == .pluginsEnable
+        let persistOverride = ApplicationLaunchContext.current.isLayoutApp && !inheritingEnabled && !removing
         if enabling {
             guard pluginCatalog.diagnostics[id] == nil,
                   let registration = pluginCatalog.registrations.first(where: { $0.id == id }) else {
@@ -3704,6 +3839,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }
         let action: WorkspaceTransition.Observation = removing ? .pluginRemoval : (enabling ? .pluginEnable : .pluginDisable)
         let changed = removing || pluginCatalog.disabledPlugins.contains(id) == enabling
+            || persistOverride && pluginCatalog.enabledOverrides[id] != enabling
         let using = enabling ? [] : workspace.panes.filter { $0.type == .registered(id) }.map(\.id)
         guard using.isEmpty || payload["force"] == .bool(true) else {
             throw RPCFailure(code: -32010, message: "Plugin is in use; pass --force to close its panes")
@@ -3721,7 +3857,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         ])
         let persist = {
             if removing { try self.pluginCatalog.remove(id) }
-            else { _ = try self.pluginCatalog.setEnabled(id, enabled: enabling) }
+            else { _ = try self.pluginCatalog.setEnabled(id, enabled: enabling, persistOverride: persistOverride) }
         }
         // Preflight publication and persist before assigning the model or retiring resources.
         let persistence: WorkspacePersistence
@@ -3745,7 +3881,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     private func changePluginFromSettings(_ id: String, method: AutomationMethod) {
-        guard !ApplicationLaunchContext.current.isLayoutApp else { return }
+        guard !ApplicationLaunchContext.current.isLayoutApp || method != .pluginsUnregister else { return }
         guard let record = pluginCatalog.records.first(where: { $0.id == id }) else { return }
         let title = pluginCatalog.registrations.first(where: { $0.id == id })?.title ?? id
         let revision = revisions.revision
@@ -3913,7 +4049,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         model.pluginSyncStatus = layoutPluginDiagnostic ?? (layoutPluginDeferredCount > 0 ? "\(layoutPluginDeferredCount) plugin change(s) waiting for open panes to close." : nil)
         refreshLayoutAppSettings()
         model.agentSkills = agentSkills.entries()
-        model.commands = pluginCatalog.activeRegistrations.flatMap(\.workspaceCommands) + CommandRegistry.commands
+        model.commands = availableCommands
             + unavailableCommands.map { .init(id: $0, title: "\($0) (Unavailable)", key: "", shift: false) }
         refreshPluginSettingsStatus()
         if refreshBrowserSites && model.selection == .browser { refreshBrowserSettings() }
@@ -4173,6 +4309,11 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             try synchronizeNativeGroups()
             drainNativeLayouts()
             try finishNativeDivider(cancelled: false)
+            if id == "layouts.restoreOriginal" {
+                params.removeValue(forKey: "id")
+                _ = try restoreOriginalLayout(params, operation: .init(origin: .native), interactive: true)
+                return
+            }
             if id == "plugins.panelState.reset" {
                 let pane = try targetPaneID(params)
                 guard let panel = workspace.panes.first(where: { $0.id == pane })?.pluginPanel else {

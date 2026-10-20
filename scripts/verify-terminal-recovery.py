@@ -131,13 +131,57 @@ publish(mode)
 while True: time.sleep(0.1)
 ''')
     try:
+        listing = directory / 'listing'
+        listing.mkdir()
+        for name in ['restored-alpha.txt', 'restored-beta.txt']:
+            (listing / name).touch()
+        with AppFixture('terminal-recovery-listing-save') as app:
+            prompt(app)
+            app.rpc('command.run', id='welcome.read')
+            app.rpc('terminal.run', pane='p1', shell='zsh', command='ls -1 ' + shlex.quote(str(listing)))
+            quit_normally(app)
+            listing_source = (app.root / 'state/workspace.json').read_text()
+        for iteration in range(2):
+            with AppFixture(f'terminal-recovery-listing-load-{iteration}', workspace_source=listing_source) as app:
+                prompt(app)
+                screen = app.rpc('terminal.capture', pane='p1')['text']
+                assert 'restored-alpha.txt' in screen and 'restored-beta.txt' in screen
+                assert 'New terminal session' in screen and screen.rstrip().endswith('API_TEST>')
+                history = app.rpc('terminal.history', pane='p1')['text']
+                assert history.count('restored-alpha.txt') == 1, 'Restart duplicated restored output'
+                app.rpc('terminal.search', pane='p1', action='set', query='restored-beta.txt')
+                eventually('restored output searchable', lambda: (app.rpc('terminal.search', pane='p1', action='get')['total'] or 0) >= 1)
+                app.rpc('terminal.search', pane='p1', action='end')
+                app.rpc('debug.screenshot', pane='p1', path=str(ROOT / f'artifacts/terminal-restored-inline-{iteration}.png'))
+                quit_normally(app)
+                listing_source = (app.root / 'state/workspace.json').read_text()
+                assert json.loads(listing_source)['restoration']['terminalOutput']['p1']['text'].count('restored-alpha.txt') == 1
+        print('PASS inline restoration: visible listing, fresh prompt, terminal search, and two relaunches without duplication', flush=True)
+
+        clear_snapshot = json.loads(listing_source)
+        clear_snapshot['restoration']['terminalOutput']['p1']['text'] = '\n'.join(
+            f'restored-before-clear-{i:03d}' for i in range(200))
+        with AppFixture('terminal-recovery-cleared-screen', workspace_source=json.dumps(clear_snapshot)) as app:
+            prompt(app)
+            app.rpc('terminal.run', pane='p1', shell='zsh', command="printf '\\033[Hpartial-overwrite\\n'")
+            eventually('cursor rewrite saves fresh output', lambda: 'partial-overwrite' in (saved_output(app) or {}).get('text', ''))
+            assert saved_output(app)['text'].count('restored-before-clear-000') == 1
+            app.rpc('terminal.run', pane='p1', shell='zsh',
+                    command="printf 'before-full-clear\\n\\033[H\\033[2Jafter-full-clear\\n'")
+            eventually('full clear saves new output', lambda: 'after-full-clear' in (saved_output(app) or {}).get('text', ''))
+            assert saved_output(app)['text'].count('restored-before-clear-000') == 1
+            app.rpc('command.run', id='terminal.previousOutput.clear', pane='p1')
+            eventually('cleared restored scrollback stays forgotten', lambda: 'restored-before-clear-' not in (saved_output(app) or {}).get('text', ''))
+            assert 'after-full-clear' in saved_output(app)['text']
+        print('PASS cursor rewrite and full-screen clear: separate capture prevents duplication and re-saving forgotten output', flush=True)
+
         with AppFixture('terminal-recovery-save') as app:
             app.capture_contracts()
             prompt(app)
             app.rpc('command.run', id='welcome.read')
             assert app.rpc('config.get')['current']['terminal']['saved_output_lines'] == 10000
             app.rpc('command.run', id='settings.open')
-            state = app.rpc('debug.settings', section='Terminal', savedOutputLines='10001', apply=True)
+            state = app.rpc('debug.settings', section='General', savedOutputLines='10001', apply=True)
             assert state['error'] is None and not state['dirty']
             assert state['values']['terminal.saved_output_lines'] == '10001'
             assert app.rpc('config.get')['current']['terminal']['saved_output_lines'] == 10001
@@ -149,11 +193,19 @@ while True: time.sleep(0.1)
             state = app.rpc('debug.settings', savedOutputLines='10000', apply=True)
             assert state['error'] is None and not state['dirty']
             for width, height, name in [(1060, 680, 'regular'), (1000, 560, 'compact')]:
-                app.rpc('debug.settings', section='Terminal', width=width, height=height)
+                app.rpc('debug.settings', section='General', width=width, height=height)
                 time.sleep(.2)  # Let the native Settings layout settle before its window capture.
                 path = ROOT / f'artifacts/terminal-recovery-settings-{name}.png'
                 app.rpc('debug.screenshot', settings=True, path=str(path))
                 assert path.stat().st_size > 1000
+            app.rpc('debug.settings', restoreWorkspace=False)
+            time.sleep(.2)
+            app.rpc('debug.screenshot', settings=True, path=str(ROOT / 'artifacts/terminal-recovery-settings-disabled.png'))
+            app.rpc('debug.settings', restoreWorkspace=True)
+            assert app.rpc('debug.settings')['values']['terminal.saved_output_lines'] == '10000'
+            app.rpc('debug.settings', section='Terminal')
+            time.sleep(.2)
+            app.rpc('debug.screenshot', settings=True, path=str(ROOT / 'artifacts/terminal-recovery-settings-terminal.png'))
             app.rpc('debug.key', settings=True, chord='cmd+w')
             original_session = app.rpc('pane.inspect', pane='p1')['sessionId']
             foreground = start_worker(app, 'p1', script, 'foreground', directory)
@@ -210,7 +262,9 @@ while True: time.sleep(0.1)
             time.sleep(6)
             assert (app.root / 'state/workspace.json').stat().st_mtime_ns == saved_at
             current = app.rpc('terminal.history', pane='p1')
-            assert current['source'] == 'current' and FINAL_MARKER not in current['text']
+            assert current['source'] == 'current' and FINAL_MARKER in current['text']
+            assert current['text'].count(FINAL_MARKER) == 1
+            assert saved_output(app)['text'].count(FINAL_MARKER) == 1
             assert not replay.exists(), 'Restoration executed printed output'
             assert previous(app, maxLines=4)['lineCount'] <= 4
             bounded = previous(app, maxBytes=61)

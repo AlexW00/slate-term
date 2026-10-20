@@ -55,6 +55,8 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
     private(set) var previousOutput: SavedTerminalOutput?
     private var completedOutput: SavedTerminalOutput?
     private var capturedOutput: SavedTerminalOutput?
+    private var lastSessionOutput = ""
+    private var reportedCaptureFailure = false
     private let sessionStartedAt = Date()
     private var shutdownCompletions: [@MainActor () -> Void] = []
     var onPreviousOutputChanged: (() -> Void)?
@@ -78,7 +80,8 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
     var onCloseRequest: ((Bool) -> Void)?
     var needsConfirmClose: Bool { surface.map { ghostty_surface_needs_confirm_quit($0) } ?? false }
 
-    init(runtime: GhosttyRuntime, environment: [String: String] = [:], directory: String? = nil) throws {
+    init(runtime: GhosttyRuntime, environment: [String: String] = [:], directory: String? = nil,
+         restoredOutput: SavedTerminalOutput? = nil, outputLineLimit: Int = 0) throws {
         self.runtime = runtime
         self.startingDirectory = directory
         super.init(frame: NSRect(x: 0, y: 0, width: 900, height: 560))
@@ -106,6 +109,16 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
         }
         configuration.env_vars = variables
         configuration.env_var_count = strings.count
+        restoreOutput(restoredOutput, lineLimit: outputLineLimit)
+        let initialOutput: UnsafeMutablePointer<CChar>?
+        if let previousOutput {
+            let boundary = "\n\n── New terminal session · " + ISO8601DateFormatter().string(from: sessionStartedAt) + " ──\n"
+            initialOutput = strdup(previousOutput.terminalDisplayText.trimmingCharacters(in: .newlines) + boundary)
+        } else {
+            initialOutput = nil
+        }
+        defer { if let initialOutput { free(initialOutput) } }
+        configuration.initial_output = initialOutput.map { UnsafePointer($0) }
         surface = ghostty_surface_new(app, &configuration)
         guard surface != nil else { throw TerminalError.initialization("ghostty_surface_new failed") }
         setFocused(false)
@@ -173,8 +186,20 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
     func savedOutput(lineLimit: Int) -> SavedTerminalOutput? {
         guard lineLimit > 0 else { return nil }
         if let completedOutput { return completedOutput }
-        return outputRecord(current: retainedText(maximumBytes: SavedTerminalOutput.maximumBytes).text,
+        return outputRecord(current: currentSessionText(),
                             lineLimit: lineLimit, ended: false)
+    }
+
+    private func currentSessionText() -> String {
+        let result = readText(history: true, maximumBytes: SavedTerminalOutput.maximumBytes, currentSession: true)
+        if result.available {
+            lastSessionOutput = result.text
+            reportedCaptureFailure = false
+        } else if !reportedCaptureFailure {
+            NSLog("Terminal output capture failed; preserving the last successful capture.")
+            reportedCaptureFailure = true
+        }
+        return lastSessionOutput
     }
 
     private func outputRecord(current: String, lineLimit: Int, ended: Bool) -> SavedTerminalOutput? {
@@ -205,7 +230,7 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
         onCloseRequest = nil
         onDesktopNotification = nil
         if let pending = pendingConfirmation { finishConfirmation(pending.id, approved: false) }
-        let before = lineLimit > 0 ? retainedText(maximumBytes: SavedTerminalOutput.maximumBytes).text : ""
+        let before = lineLimit > 0 ? currentSessionText() : ""
         var ttyPath: String?
         var foreground: pid_t?
         if let surface {
@@ -215,7 +240,7 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
             foreground = pid_t(exactly: ghostty_surface_foreground_pid(surface))
         }
         TerminalProcessShutdown.stop(ttyPath: ttyPath, foregroundPID: foreground) { [self] outcome in
-            let after = lineLimit > 0 ? retainedText(maximumBytes: SavedTerminalOutput.maximumBytes).text : ""
+            let after = lineLimit > 0 ? currentSessionText() : ""
             // Normal append-only output needs no duplicate snapshot. A TUI may replace
             // its screen on exit; retain that earlier screen as historical context too.
             let earlier = before.trimmingCharacters(in: .newlines)
@@ -868,11 +893,12 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
     func capture() -> String { readText(history: false, maximumBytes: Int.max).text }
 
     func retainedText(maximumBytes: Int) -> (text: String, truncated: Bool) {
-        readText(history: true, maximumBytes: maximumBytes)
+        let result = readText(history: true, maximumBytes: maximumBytes)
+        return (result.text, result.truncated)
     }
 
-    private func readText(history: Bool, maximumBytes: Int) -> (text: String, truncated: Bool) {
-        guard let surface else { return ("", false) }
+    private func readText(history: Bool, maximumBytes: Int, currentSession: Bool = false) -> (text: String, truncated: Bool, available: Bool) {
+        guard let surface else { return ("", false, false) }
         var text = ghostty_text_s()
         // In the pinned engine SCREEN means all retained rows; ACTIVE means the
         // live screen independently of the user's current scroll position.
@@ -881,12 +907,15 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
             top_left: ghostty_point_s(tag: tag, coord: GHOSTTY_POINT_COORD_TOP_LEFT, x: 0, y: 0),
             bottom_right: ghostty_point_s(tag: tag, coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT, x: 0, y: 0),
             rectangle: false)
-        guard ghostty_surface_read_text(surface, selection, &text) else { return ("", false) }
+        let read = currentSession
+            ? ghostty_surface_read_session_text(surface, &text)
+            : ghostty_surface_read_text(surface, selection, &text)
+        guard read else { return ("", false, false) }
         defer { ghostty_surface_free_text(surface, &text) }
-        guard let bytes = text.text else { return ("", false) }
+        guard let bytes = text.text else { return ("", false, false) }
         let buffer = UnsafeRawBufferPointer(start: bytes, count: Int(text.text_len))
         var start = max(0, buffer.count - max(0, maximumBytes))
         while start < buffer.count, buffer[start] & 0xC0 == 0x80 { start += 1 }
-        return (String(decoding: buffer[start...], as: UTF8.self), start > 0)
+        return (String(decoding: buffer[start...], as: UTF8.self), start > 0, true)
     }
 }

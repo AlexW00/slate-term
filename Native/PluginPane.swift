@@ -476,6 +476,7 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
             capture:(params,options={})=>call('layouts.capture',params,options),
             open:(id,params={},options={})=>call('layouts.open',{...params,id},options),
             launcher:(id,path,params={},options={})=>call('layouts.launcher',{...params,id,path},options),
+            restoreOriginal:(params={},options={})=>call('layouts.restoreOriginal',params,options),
             startupStatus:(params={},options={})=>call('layouts.startupStatus',params,options)
           }),
           terminal:Object.freeze({

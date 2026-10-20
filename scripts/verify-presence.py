@@ -275,7 +275,9 @@ with AppFixture('presence') as app:
     assert frame['target'] == 'element' and frame['element']['width'] > 0 and frame['element']['y'] > 28, frame
     assert frame['glass'] and frame['outsidePassesThrough'], frame
     snapshot('element')
-    assert shown(target)[0]['frame']['bottomInset'] > shown(target)[0]['frame']['height'], shown(target)
+    browser_pill = shown(target)[0]['frame']
+    assert browser_pill['contentBottomInset'] > 0, browser_pill
+    assert abs(browser_pill['bottomInset'] - browser_pill['contentBottomInset'] - 4) < 0.5, browser_pill
     app.cli('web', 'snapshot', '--pane', target, env=agent)
     assert shown(target)[0]['target'] == 'pane', 'A new pane-level call returns the frame to the pane'
     eventually('presence ends', lambda: activities() == [], timeout=6)

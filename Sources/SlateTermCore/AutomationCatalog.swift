@@ -74,7 +74,7 @@ public enum AutomationCatalog {
         let parentRequirement = JSONValue.object(["requires": .string("standardSlateRuntime")])
         return .object(Dictionary(uniqueKeysWithValues: AutomationMethod.publicMethods.map { method in
             let parentOnly = methods[method]?.availability.array?.contains(parentRequirement) == true
-            let childOnly = method == .configResetOverrides || method == .updatesOpenParent
+            let childOnly = method == .configResetOverrides || method == .updatesOpenParent || method == .layoutsRestoreOriginal
             return (method.rawValue, JSONValue.bool(childOnly ? layoutApp : !(layoutApp && parentOnly)))
         }))
     }

@@ -37,6 +37,21 @@ public struct SavedTerminalOutput: Codable, Equatable, Sendable {
             && text.utf8.count <= Self.maximumBytes && Self.lineCount(text) <= Self.maximumLines
     }
 
+    /// Normalize display text before passing it to the terminal's plain-text renderer.
+    public var terminalDisplayText: String {
+        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
+        var result = ""
+        for scalar in normalized.unicodeScalars {
+            switch scalar.value {
+            case 10: result.append("\n")
+            case 9: result.append("    ")
+            case 0...31, 127...159: result.append("\u{FFFD}")
+            default: result.unicodeScalars.append(scalar)
+            }
+        }
+        return Self.boundedText(result, lineLimit: Self.maximumLines)
+    }
+
     /// A final newline ends the last line; it does not introduce an additional empty line.
     public static func lineCount(_ text: String) -> Int {
         guard let last = text.last else { return 0 }

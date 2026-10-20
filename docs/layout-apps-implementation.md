@@ -58,3 +58,11 @@ Periodic management reads use filesystem-invalidated inspection results and fres
 A changed-runtime Debug probe reproduced rejection of a valid replacement because the shell recorded a hash-specific nested requirement. Newly built ad-hoc development runtimes now use an explicit identifier requirement. Developer ID Release signing, publisher validation and runtime library constraints are unchanged. Existing development shells remain outside the compatibility scope.
 
 Discovery now marks network download unavailable in generated apps. Their ordinary saved-layout library remains private and writable, while fresh startup reads the selected source recipe from the parent. Ancestor configuration observation remains deliberate so replacement and missing-directory recovery continue to work. The review's suggested lifecycle deletion policy remains outside this task.
+
+## p66 usability follow-up
+
+Create App previews the selected icon, then uses a native save dialog for the app name and destination. Restore Original Layout is available only in layout apps through Cmd-K, the shared `layouts.restoreOriginal` operation, the CLI and plugin bridge. It replaces current windows from the latest parent source recipe with running-process consent and stale-workspace checks.
+
+Layout-app Settings disable recipe mutation controls while retaining tab/pane inspection. Plugin enable/disable controls store private overrides in that app's registry; parent package synchronization and restart retain those choices. Installing and removing packages remain parent-managed.
+
+Current verification is recorded in [p66 layout-app polish](p66-layout-app-polish.md).
