@@ -44,7 +44,7 @@ extension AutomationContracts {
         for (id, method) in [("browser.clearData", AutomationMethod.browserClearData), ("browser.clearSiteData", .browserClearSiteData)] {
             commands[id] = methodCommand(id, contract: web[method]!)
         }
-        for (id, method) in [("updates.check", AutomationMethod.updatesCheck), ("updates.show", .updatesShow)] {
+        for (id, method) in [("updates.check", AutomationMethod.updatesCheck), ("updates.show", .updatesShow), ("updates.openParent", .updatesOpenParent)] {
             commands[id] = methodCommand(id, contract: updates[method]!)
         }
         commands["config.reload"] = methodCommand("config.reload", contract: settings[.configReload]!)
@@ -115,7 +115,7 @@ extension AutomationContracts {
             routing: "managedSkillCopy", errors: [APIError.unavailable], semantics: ["createsManagedCopyIfMissing": .bool(true), "opensFinder": .bool(true)])
         for id in ["layouts.edit", "layouts.openWindow", "layouts.captureWindow", "layouts.launcher", "layouts.folder"] {
             var conditions: [JSONValue] = []
-            if id == "layouts.launcher" { conditions.append(requires("defaultLayoutLibrary")) }
+            if id == "layouts.launcher" { conditions += [requires("defaultLayoutLibrary"), requires("standardSlateRuntime")] }
             if id == "layouts.captureWindow" { conditions.append(requires("atLeastOneWorkspaceWindow")) }
             var semantics: [String: JSONValue] = ["nativeUI": .bool(true)]
             if ["layouts.openWindow", "layouts.captureWindow", "layouts.launcher"].contains(id) {
@@ -123,7 +123,8 @@ extension AutomationContracts {
                 semantics["dialogCancellation"] = .string("emptyObjectSuccess")
                 semantics["nativeSelection"] = .string(id == "layouts.captureWindow" ? "sourceWorkspaceWindowAndName" : "savedLibraryEntryNotArgumentID")
             }
-            commands[id] = legacy(id, conditions: conditions, routing: "savedLayoutLibraryAndNativeUI", errors: [-32000, APIError.unavailable], semantics: semantics)
+            commands[id] = legacy(id, conditions: conditions, routing: "savedLayoutLibraryAndNativeUI",
+                errors: [-32000, APIError.unavailable] + (id == "layouts.launcher" ? [APIError.layoutAppManagementUnavailable] : []), semantics: semantics)
         }
         for id in ["notifications.next", "notifications.open"] {
             let explicit = id == "notifications.open"
@@ -135,12 +136,15 @@ extension AutomationContracts {
                 errors: [APIError.unavailable], semantics: ["revealsZoomHiddenSource": .bool(true), "deminimizesAndActivates": .bool(true),
                     "dismissesOpenedRecord": .bool(true), "nextSelection": .string("firstOutstandingRecord")])
         }
-        for id in ["plugins.reload", "terminal.find", "terminal.find.next", "terminal.find.previous", "terminal.find.end",
+        for id in ["terminal.previousOutput", "terminal.previousOutput.clear", "plugins.reload", "terminal.find", "terminal.find.next", "terminal.find.previous", "terminal.find.end",
                    "pane.move.chooseDestination", "tab.rename", "tab.showAll"] {
             var fields: [String: JSONValue] = ["paneId": S.paneID]
             var conditions: [JSONValue]
             var semantics: [String: JSONValue] = [:]
             switch id {
+            case "terminal.previousOutput", "terminal.previousOutput.clear":
+                conditions = [requires("terminalWithPreviousOutput")]
+                semantics["historicalTextOnly"] = .bool(true)
             case "plugins.reload":
                 fields["reloading"] = S.constant(.bool(true)); conditions = [requires("registeredPluginPane")]
                 semantics["resultMeans"] = .string("reloadRequestedNotReadiness")

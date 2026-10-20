@@ -248,12 +248,19 @@ def verified_ghostty(root, receipt):
     require(git(ghostty, "rev-parse", "HEAD").decode().strip() == receipt["ghostty_revision"], "Ghostty source revision mismatch")
     require(not git(ghostty, "diff", "--cached", "--name-only"), "Ghostty has staged source changes")
     changes = git(ghostty, "diff", "--name-only").decode().splitlines()
-    require(changes == ["src/build/SharedDeps.zig"], "Ghostty must contain only the approved libintl patch")
-    data = (ghostty / "src/build/SharedDeps.zig").read_bytes()
-    require(hashlib.sha256(data).hexdigest() == shell_pin(root, "patched_sha"), "Ghostty patch content mismatch")
-    patch = (root / "patches/ghostty-optional-libintl.patch").read_bytes()
-    require(hashlib.sha256(patch).hexdigest() == shell_pin(root, "patch_sha"), "Ghostty patch checksum mismatch")
-    return ghostty, {"src/build/SharedDeps.zig": data}
+    approved = {
+        "src/build/SharedDeps.zig": ("ghostty-optional-libintl.patch", "patched_sha", "patch_sha"),
+        "src/termio/Exec.zig": ("ghostty-bounded-shutdown.patch", "shutdown_patched_sha", "shutdown_patch_sha"),
+    }
+    require(sorted(changes) == sorted(approved), "Ghostty must contain only the approved patches")
+    replacements = {}
+    for target, (patch_name, content_pin, patch_pin) in approved.items():
+        data = (ghostty / target).read_bytes()
+        require(hashlib.sha256(data).hexdigest() == shell_pin(root, content_pin), "Ghostty patch content mismatch: " + target)
+        patch = (root / "patches" / patch_name).read_bytes()
+        require(hashlib.sha256(patch).hexdigest() == shell_pin(root, patch_pin), "Ghostty patch checksum mismatch: " + patch_name)
+        replacements[target] = data
+    return ghostty, replacements
 
 
 PREPARE_REBUILD = r'''#!/usr/bin/env python3
@@ -310,7 +317,7 @@ Sparkle is pinned as an Xcode binary package. Its complete matching source is in
 
 The unsigned application is `.derived-rebuild/Build/Products/Release/Slate Terminal.app`. Xcode's build phase includes the two CLI helpers and Ghostty resources. The local Swift references avoid remote package resolution. This route deliberately bypasses the release scripts' Git/clean-build receipts because source archives contain no private Git repository metadata. It reproduces the source inputs and build behavior; signing, timestamps, absolute debug paths, and the explicit Ghostty version label prevent a promise of identical binary bytes.
 
-Before redistributing your build, copy `licenses/`, `THIRD_PARTY_NOTICES.md`, `COPYING.md`, and `LICENSE` into the app's `Contents/Resources/ThirdPartyLicenses/` (name the project license `PROJECT-LICENSE.txt`), retain source access, and sign your own build if desired. Modified builds remain subject to their applicable licenses. See `COPYING.md` and `THIRD_PARTY_NOTICES.md`.
+Before redistributing your build, copy `licenses/`, `THIRD_PARTY_NOTICES.md`, `COPYING.md`, and `LICENSE` into the app's `Contents/Frameworks/SlateRuntime.framework/Versions/A/Resources/ThirdPartyLicenses/` (name the project license `PROJECT-LICENSE.txt`), retain source access, and sign your own build if desired. Modified builds remain subject to their applicable licenses. See `COPYING.md` and `THIRD_PARTY_NOTICES.md`.
 '''.encode()
 
 

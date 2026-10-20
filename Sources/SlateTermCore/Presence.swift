@@ -376,9 +376,10 @@ public enum PresenceColor {
     ]
     public static let fallback: [UInt32] = [0xF78FB3, 0x6FB7FF, 0xD8A657, 0x8BD5CA, 0xC6A0F6, 0xF5A97F]
 
-    public static func rgb(for actorKey: String) -> UInt32 {
-        let base = actorKey.split(separator: ":").first.map(String.init) ?? actorKey
-        if let color = known[base] { return color }
+    public static func rgb(for actorKey: String, overrides: [String: UInt32] = [:]) -> UInt32 {
+        let key = actorKey.lowercased()
+        let base = key.split(separator: ":").first.map(String.init) ?? key
+        if let color = overrides[base] ?? known[base] { return color }
         // FNV-1a keeps the color stable across launches; Swift's hashValue is seeded.
         var hash: UInt32 = 2_166_136_261
         for byte in base.utf8 { hash = (hash ^ UInt32(byte)) &* 16_777_619 }

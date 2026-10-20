@@ -50,3 +50,50 @@ func makeSocket(nonblocking: Bool) throws -> Int32 {
     }
     return descriptor
 }
+
+// Darwin limits socket addresses even when the containing state directory is valid.
+@MainActor
+final class SocketEndpoint {
+    let path: String
+    private let temporaryDirectory: String?
+    private let reference: URL?
+    private var published = false
+
+    init(directory: URL) throws {
+        let name = String(UUID().uuidString.prefix(8))
+        let preferred = directory.appendingPathComponent(name + ".sock").path
+        guard !preferred.utf8.contains(0) else { throw SocketError.invalidPath }
+        if preferred.utf8.count + 1 <= MemoryLayout.size(ofValue: sockaddr_un().sun_path) {
+            path = preferred
+            temporaryDirectory = nil
+            reference = nil
+        } else {
+            // mkdtemp creates an exclusive private directory, independent of home-path length.
+            var template = Array("/tmp/slate-ipc-XXXXXX".utf8CString)
+            guard let result = mkdtemp(&template) else { throw SocketError.system("mkdtemp", errno) }
+            let temporary = String(cString: result)
+            path = temporary + "/" + name + ".sock"
+            temporaryDirectory = temporary
+            reference = directory.appendingPathComponent(name + ".socket-path")
+        }
+    }
+
+    func publish() throws {
+        guard let reference else { return }
+        let staged = reference.path + ".tmp"
+        let descriptor = open(staged, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard descriptor >= 0 else { throw SocketError.system("socket reference", errno) }
+        defer { Darwin.close(descriptor); unlink(staged) }
+        let data = Data((path + "\n").utf8)
+        let count = data.withUnsafeBytes { Darwin.write(descriptor, $0.baseAddress, $0.count) }
+        guard count == data.count else { throw SocketError.system("socket reference write", count < 0 ? errno : EIO) }
+        guard link(staged, reference.path) == 0 else { throw SocketError.system("socket reference publication", errno) }
+        published = true
+    }
+
+    func cleanup() {
+        if published, let reference { unlink(reference.path); published = false }
+        // Never recursively remove an endpoint directory or adopt a pre-existing directory.
+        if let temporaryDirectory { rmdir(temporaryDirectory) }
+    }
+}

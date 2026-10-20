@@ -13,7 +13,7 @@ import time
 
 ROOT = Path(__file__).resolve().parent.parent
 APP = ROOT / '.derived/Build/Products/Debug/Slate Terminal.app/Contents/MacOS/Slate Terminal'
-CLI = APP.parent.parent / 'Helpers/slate-term'
+CLI = APP.parent.parent / 'Frameworks/SlateRuntime.framework/Helpers/slate-term'
 
 
 def eventually(label, condition, timeout=15):
@@ -114,7 +114,7 @@ fi
             cleaned = True
         finally:
             self.log.close()
-            if cleaned:
+            if cleaned and not getattr(self, 'preserve_for_children', False):
                 shutil.rmtree(self.root)
             else:
                 print(f'Preserved fixture ownership metadata: {self.root}', file=sys.stderr)

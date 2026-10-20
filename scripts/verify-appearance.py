@@ -11,7 +11,7 @@ import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP = pathlib.Path(os.environ.get('SLATE_TERM_TEST_APP', ROOT / '.derived/Build/Products/Debug/Slate Terminal.app/Contents/MacOS/Slate Terminal'))
-CLI = APP.parent.parent / 'Helpers/slate-term'
+CLI = APP.parent.parent / 'Frameworks/SlateRuntime.framework/Helpers/slate-term'
 ARTIFACTS = ROOT / 'artifacts'
 
 
@@ -73,10 +73,14 @@ with tempfile.TemporaryDirectory(prefix='slate-appearance-', dir='/tmp') as temp
             assert rpc('debug.inspect')['panes'][0]['surface'] == before
             engine = (directory / 'state/terminal.conf').read_text()
             for line in ['font-thicken = true', 'minimum-contrast = 3.0', 'cursor-style = underline',
-                         'cursor-style-blink = false', 'window-padding-x = 12', 'window-padding-y = 8',
-                         'theme = light:' + json.dumps(str(APP.parent.parent / 'Resources/ghostty/themes/Catppuccin Latte')) +
-                         ',dark:' + json.dumps(str(APP.parent.parent / 'Resources/ghostty/themes/Catppuccin Mocha'))]:
+                         'cursor-style-blink = false', 'window-padding-x = 12', 'window-padding-y = 8']:
                 assert line in engine, (line, engine)
+            theme_line = next(line for line in engine.splitlines() if line.startswith('theme = '))
+            themes = re.fullmatch(r'theme = light:(".*"),dark:(".*")', theme_line)
+            assert themes, theme_line
+            resources = APP.parent.parent / 'Frameworks/SlateRuntime.framework/Resources/ghostty/themes'
+            for value, name in zip(themes.groups(), ['Catppuccin Latte', 'Catppuccin Mocha']):
+                assert pathlib.Path(json.loads(value)).samefile(resources / name), theme_line
             capture('settings-dark')
             capture('terminal-dark', settings=False)
             rpc('debug.settings', section='Terminal', width=840, height=960)

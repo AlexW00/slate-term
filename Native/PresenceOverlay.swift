@@ -308,6 +308,7 @@ final class PresenceOverlayView: NSView {
     var testingState: JSONValue {
         .array(items.map { item in
             var fields: [String: JSONValue] = ["id": .string(item.id), "label": .string(item.label), "target": .string(item.element == nil ? "pane" : "element")]
+            fields["color"] = .string(String(format: "#%06X", item.rgb))
             let ring = item.element.map { elementRings[NSStringFromRect($0)] } ?? paneRing
             if let ring {
                 fields["ringID"] = .string(String(describing: ObjectIdentifier(ring)))
@@ -494,7 +495,7 @@ private final class PresenceRingLayer: CALayer {
     }
 }
 
-/// A centered hold diamond whose breathing continues through ordinary label and appearance refreshes.
+/// A centered activity diamond whose breathing continues through label and appearance refreshes.
 @MainActor
 final class PresenceHoldLayer: CAShapeLayer {
     static let animationKey = "holdBreathing"
@@ -681,7 +682,7 @@ private final class PresenceTagView: NSButton {
         for text in [icon, nameText, note, detail] { text.contentsScale = scale }
         nameText.foregroundColor = (dark ? agent : agent.blended(withFraction: 0.35, of: .black) ?? agent).cgColor
         note.foregroundColor = NSColor.labelColor.cgColor
-        var symbol = "●"
+        var symbol = ""
         var text = ""
         var spinning = false
         var holding = false
@@ -695,9 +696,8 @@ private final class PresenceTagView: NSButton {
             nameText.string = item.label
             note.string = item.note ?? ""
             switch item.status {
-            case .active: break
+            case .active, .held: holding = true
             case .live(let elapsed): spinning = true; text = elapsed
-            case .held: holding = true
             case .ok(let value): symbol = "✓"; text = value ?? ""; statusColor = .labelColor
             case .failed(let value):
                 symbol = "✕"; text = value ?? ""

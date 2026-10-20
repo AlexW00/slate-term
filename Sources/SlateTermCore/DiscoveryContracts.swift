@@ -34,6 +34,9 @@ extension AutomationContracts {
         definitions["CommandList"] = S.array(S.reference("CommandDescription"), maximum: builtinIDs.count + 64 * 32)
         var description = AutomationCapabilities.fields.mapValues(S.constant)
         description["appInstanceId"] = S.uuid
+        description["mode"] = S.strings(["standard", "layoutApp"])
+        description["layoutAppID"] = S.nullable(S.uuid)
+        description["runtimeAvailability"] = S.record(S.boolean)
         description["commands"] = S.reference("CommandList")
         description["contracts"] = S.reference("AutomationCatalog")
         definitions["APIDescription"] = complete(description)

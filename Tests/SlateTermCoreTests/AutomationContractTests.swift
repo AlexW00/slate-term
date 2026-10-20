@@ -66,3 +66,32 @@ import SlateTermTestSupport
     missingIdentity.removeValue(forKey: "sessionId")
     #expect(!schemaAccepts(AutomationContracts.terminal[.terminalOperationResult]!.result, .object(missingIdentity)))
 }
+
+@Test func historyContractsDescribeSourcesMetadataAndBoundedOutputs() throws {
+    for method in [AutomationMethod.terminalHistory, .terminalHistoryExport] {
+        let contract = AutomationContracts.terminal[method]!
+        for source: JSONValue? in [nil, .string("current"), .string("previous"), .string("all"), .null, .integer(1)] {
+            var params: [String: JSONValue] = method == .terminalHistoryExport ? ["path": .string("/tmp/output.txt")] : [:]
+            if let source { params["source"] = source }
+            #expect(schemaAccepts(contract.input, .object(params)) == ((try? TerminalHistoryRequest(params)) != nil))
+        }
+        for source in ["current", "previous"] {
+            var fields: [String: JSONValue] = ["paneId": .string("p1"), "sessionId": .string("current-session"),
+                "source": .string(source), "available": .bool(true), "capturedAt": source == "previous" ? .number(1_792_454_400) : .null,
+                "ended": source == "previous" ? .bool(true) : .null,
+                "lineCount": .integer(1), "byteCount": .integer(3), "truncated": .bool(false)]
+            fields[method == .terminalHistory ? "text" : "path"] = .string(method == .terminalHistory ? "ok\n" : "/tmp/output.txt")
+            #expect(schemaAccepts(contract.result, .object(fields)))
+            fields["capturedAt"] = .string("not a timestamp")
+            #expect(!schemaAccepts(contract.result, .object(fields)))
+            fields["capturedAt"] = .null
+            fields.removeValue(forKey: "available")
+            #expect(!schemaAccepts(contract.result, .object(fields)))
+        }
+        #expect(contract.semantics["sessionId"] == .string("currentPaneSessionGuardNotHistoricalSession"))
+    }
+    let unavailable: JSONValue = .object(["paneId": .string("p1"), "sessionId": .string("current-session"),
+        "source": .string("previous"), "available": .bool(false), "capturedAt": .null, "ended": .null,
+        "lineCount": .integer(0), "byteCount": .integer(0), "truncated": .bool(false), "text": .string("")])
+    #expect(schemaAccepts(AutomationContracts.terminal[.terminalHistory]!.result, unavailable))
+}

@@ -14,7 +14,7 @@ import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP = pathlib.Path(os.environ.get("SLATE_TERM_TEST_APP", ROOT / ".derived/Build/Products/Debug/Slate Terminal.app/Contents/MacOS/Slate Terminal"))
-CLI = APP.parent.parent / "Helpers/slate-term"
+CLI = APP.parent.parent / "Frameworks/SlateRuntime.framework/Helpers/slate-term"
 
 
 def eventually(label, condition, timeout=15):
@@ -109,13 +109,13 @@ try:
                 with_frame = rpc("browser.navigate", pane="p1", url=url + "with-frame")
                 assert with_frame["title"] == "Slate Browser Fixture", "Blocked subframe failed the main navigation"
                 evaluate("document.querySelector('#name').focus(); true")
-                other_tab = cli("tabs", "new")["tabId"]
+                other_tab = cli("tabs", "new", "--focus-policy", "new")["tabId"]
                 cli("tabs", "focus", "--tab", "t1")
                 rpc("debug.key", chord="j", dispatch=True)
                 eventually("browser input focus after native tab activation", lambda: evaluate("document.querySelector('#name').value") == "j")
                 cli("tabs", "close", "--tab", other_tab, "--force")
                 assert rpc("debug.browserAddress", pane="p1")["addressFocused"]
-                address_tab = cli("tabs", "new")["tabId"]
+                address_tab = cli("tabs", "new", "--focus-policy", "new")["tabId"]
                 cli("tabs", "focus", "--tab", "t1")
                 rpc("debug.key", chord="j", dispatch=True)
                 address_state = next(p["browser"] for p in rpc("debug.inspect")["panes"] if p["paneId"] == "p1")

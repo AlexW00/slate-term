@@ -1,6 +1,15 @@
 import AppKit
 
-@main
+@_cdecl("SlateRuntimeMain")
+@MainActor
+public func SlateRuntimeMain(_ abiVersion: UInt32) -> Int32 {
+    guard abiVersion == 1 else { return 64 }
+    do { ApplicationLaunchContext.current = try .resolve() }
+    catch { fputs("Invalid application identity: \(error)\n", stderr); return 65 }
+    SlateTermApplication.main()
+    return 0
+}
+
 struct SlateTermApplication {
     @MainActor static func main() {
         let integration = ProcessInfo.processInfo.environment["SLATE_TERM_INTEGRATION"] == "1"
@@ -18,7 +27,7 @@ struct SlateTermApplication {
             app.setActivationPolicy(.prohibited)
             Task {
                 do {
-                    try await BrowserData.removeTestProfile(directory: URL(fileURLWithPath: root).appendingPathComponent("state"))
+                    try await BrowserData.removeTestProfile(directory: (ApplicationLaunchContext.current.descriptor?.base ?? URL(fileURLWithPath: root)).appendingPathComponent("state"))
                     exit(0)
                 } catch {
                     fputs("Test browser profile cleanup failed: \(error)\n", stderr)
@@ -42,7 +51,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         do {
             NSWindow.allowsAutomaticWindowTabbing = false
-            let resources = Bundle.main.resourceURL!.appendingPathComponent("ghostty").path
+            let resources = RuntimeBundle.bundle.resourceURL!.appendingPathComponent("ghostty").path
             setenv("GHOSTTY_RESOURCES_DIR", resources, 1)
             let integration = ProcessInfo.processInfo.environment["SLATE_TERM_INTEGRATION"] == "1"
             if integration { fputs("Integration startup: creating workspace host\n", stderr) }
@@ -55,12 +64,17 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
             pendingLayoutURLs.removeAll()
             NSApp.activate(ignoringOtherApps: true)
         } catch {
-            fputs("Slate Terminal startup failed: \(error)\n", stderr)
+            fputs("\(ApplicationLaunchContext.current.displayName) startup failed: \(error)\n", stderr)
             if ProcessInfo.processInfo.environment["SLATE_TERM_INTEGRATION"] != "1" {
                 let alert = NSAlert()
-                alert.messageText = "Slate Terminal could not start"
+                alert.messageText = "\(ApplicationLaunchContext.current.displayName) could not start"
                 alert.informativeText = String(describing: error)
-                alert.runModal()
+                if let failure = error as? LayoutAppRestorationFailure {
+                    alert.messageText = "\(ApplicationLaunchContext.current.displayName) couldn’t restore its session"
+                    alert.addButton(withTitle: "Quit")
+                    alert.addButton(withTitle: "Show in Finder")
+                    if alert.runModal() == .alertSecondButtonReturn { NSWorkspace.shared.activateFileViewerSelecting([failure.file]) }
+                } else { alert.runModal() }
             }
             host?.close()
             exit(1)
@@ -73,7 +87,11 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        host?.confirmTermination() == false ? .terminateCancel : .terminateNow
+        guard let host else { return .terminateNow }
+        if host.isTerminating { return .terminateLater }
+        guard host.confirmTermination() else { return .terminateCancel }
+        host.prepareForTermination { sender.reply(toApplicationShouldTerminate: true) }
+        return .terminateLater
     }
 
     func applicationDidBecomeActive(_ notification: Notification) { host?.setApplicationFocused(true) }

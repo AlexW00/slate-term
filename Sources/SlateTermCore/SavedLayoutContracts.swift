@@ -43,6 +43,13 @@ extension AutomationContracts {
                 "x-maxNormalizedSavedLayoutBytes": .integer(262_144)])
         }
         let revision = S.string(pattern: "^[0-9a-f]{64}(?![\\s\\S])")
+        definitions["LayoutAppRecord"] = complete([
+            "layoutAppID": S.uuid, "layoutID": S.uuid, "name": S.string(minimumLength: 1),
+            "path": S.string(minimumLength: 1), "runtimeVersion": S.string(minimumLength: 1),
+            "runtimeBuild": S.string(minimumLength: 1), "revision": S.revision,
+            "running": S.boolean, "available": S.boolean,
+            "shellCodeHash": S.string(), "updateReady": S.boolean
+        ])
         definitions["SavedLayoutEntry"] = complete(["file": S.string(), "definition": S.reference("SavedLayoutDefinition"), "revision": revision])
         // Summary truncation can append an ellipsis and replace an incomplete
         // UTF-8 scalar. The emitted string is larger than the prefix byte budget.
@@ -76,6 +83,7 @@ extension AutomationContracts {
         let definition = S.reference("SavedLayoutDefinitionInput")
         let workspaceGuards = ["expectedInstanceId", "expectedWorkspaceRevision"]
         let knownFields = requires("validValuesForAvailablePaneTypeFields")
+        let parentRuntime = requires("standardSlateRuntime")
         let uniqueFile = requires("uniqueReadableValidSavedLayoutUUID")
         let fileSemantics: [String: JSONValue] = ["authoritative": .string("rescannedFiles"), "maximumJSONFiles": .integer(256),
             "maximumPrettyPrintedFileBytes": .integer(262_144), "publication": .string("completeFileAtomicPublication"),
@@ -118,11 +126,31 @@ extension AutomationContracts {
                     "snapshotPersistenceFailureDoesNotUndoOpen": .bool(true), "automaticCommandRetry": .bool(false)]),
             .layoutsLauncher: contract(["id": S.uuid, "path": S.string(pattern: "^/[^\\u0000]*(?![\\s\\S])", format: "slate-layout-launcher-path"),
                 "name": S.string(minimumLength: 1, maximumUTF8Bytes: 240),
-                "icon": S.defaulted(S.strings(SavedLayoutLauncherOptions.icons), .string("slate"))], required: ["id", "path"],
-                result: S.object(["id": S.uuid, "path": S.string()], required: ["id", "path"]),
-                conditions: [uniqueFile, requires("defaultLayoutLibrary"), requires("newAppDestinationAndAvailableBundledLauncherAndLocalSigner")], errors: [-32000],
-                semantics: ["overwritesExistingDestination": .bool(false), "copiesRecipe": .bool(false), "shortcutUsesLatestRecipeByUUID": .bool(true),
-                    "dialog": .bool(false), "spotlightIndexingGuaranteed": .bool(false)]),
+                "icon": S.defaulted(S.strings(SavedLayoutLauncherOptions.icons), .string("slate")),
+                "copyPluginData": S.defaulted(S.boolean, .bool(true))], required: ["id", "path"],
+                result: S.object(["id": S.uuid, "path": S.string(), "layoutAppID": S.uuid,
+                    "runtimeVersion": S.string(minimumLength: 1), "runtimeBuild": S.string(minimumLength: 1),
+                    "syncedPluginIDs": S.array(S.string()), "copiedPluginDataIDs": S.array(S.string()),
+                    "unavailablePlugins": S.array(S.object(["id": S.string(), "reason": S.string()], required: ["id", "reason"])),
+                    "launchServicesRegistered": S.boolean, "launchServicesStatus": S.integer()],
+                    required: ["id", "path", "layoutAppID", "runtimeVersion", "runtimeBuild", "syncedPluginIDs", "copiedPluginDataIDs", "unavailablePlugins", "launchServicesRegistered", "launchServicesStatus"]),
+                conditions: [parentRuntime, uniqueFile, requires("defaultLayoutLibrary"),
+                    requires("newAppDestinationAndAvailableCompatibleRuntimeAndLocalSigner")],
+                errors: [-32000, APIError.layoutAppManagementUnavailable, APIError.incompatible],
+                semantics: ["overwritesExistingDestination": .bool(false), "copiesRecipe": .bool(false),
+                    "freshOpenUsesLatestRecipeByUUID": .bool(true), "independentApplication": .bool(true),
+                    "pluginDataCopy": .string("oneTimePrivateCopy"), "dialog": .bool(false),
+                    "spotlightIndexingGuaranteed": .bool(false), "availabilityIsRuntimeConstraint": .bool(true)]),
+            .layoutAppsList: contract(result: S.array(S.reference("LayoutAppRecord"), maximum: 256),
+                conditions: [parentRuntime], errors: [-32000, APIError.layoutAppManagementUnavailable], routing: "layoutAppCatalog",
+                semantics: ["includesUnavailableRecords": .bool(true), "availabilityIsRuntimeConstraint": .bool(true)]),
+            .layoutAppsRefresh: contract(["layoutAppID": S.uuid], required: ["layoutAppID", "expectedBundleRevision"],
+                result: S.reference("LayoutAppRecord"), guards: ["expectedInstanceId", "expectedBundleRevision"],
+                conditions: [parentRuntime, requires("stoppedAvailableUnambiguousLayoutApp"), requires("compatibleRuntimePayload")],
+                errors: [APIError.layoutAppManagementUnavailable, APIError.unavailable, APIError.incompatible, -32000],
+                routing: "explicitLayoutAppIdentityNeverFocus",
+                semantics: ["replacement": .string("privateCompatibleRuntimePayload"), "resignsOuterShell": .bool(false),
+                    "preservesLayoutAppIdentityAndPrivateState": .bool(true), "availabilityIsRuntimeConstraint": .bool(true)]),
             .layoutsStartupStatus: contract(result: S.array(S.reference("SavedLayoutStartup")), routing: "allLiveLayoutStartupSessions",
                 semantics: ["promptWaitSeconds": .integer(30), "completionWaitSeconds": .integer(295),
                     "completionTimeoutStopsShell": .bool(false), "includesCommandText": .bool(false), "automaticRetry": .bool(false)])

@@ -216,7 +216,7 @@ final class PluginInstances {
 
     func connect(socketPath: String, appInstanceID: String) {
         connection = PluginControlConnection(socketPath: socketPath, appInstanceID: appInstanceID,
-            cliPath: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/slate-term").path)
+            cliPath: RuntimeBundle.helpersURL.appendingPathComponent("slate-term").path)
     }
 
     func acquire(_ registration: PluginRegistration, pane: PaneID, tab: TabID) throws -> PluginInstance {

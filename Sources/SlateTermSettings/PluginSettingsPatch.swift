@@ -10,13 +10,14 @@ public enum PluginSettingsPatch {
         let value: JSONValue? // nil means delete; JSON null is never a TOML value.
     }
 
-    public static func updating(source: String, pluginID: String, operations: [JSONValue]) throws -> String {
+    public static func updating(source: String, pluginID: String, operations: [JSONValue],
+                                parseConfiguration: (String) throws -> AppConfiguration = AppConfiguration.parse) throws -> String {
         try validateNamespace(pluginID)
         guard source.utf8.count <= maxSourceBytes else { throw invalid("Plugin patches require source of at most 1 MiB") }
         guard operations.count <= 32, try JSONEncoder().encode(operations).count <= 65536 else {
             throw invalid("Invalid plugin namespace or patch exceeds 32 operations / 64 KiB")
         }
-        let before = try AppConfiguration.parse(source)
+        let before = try parseConfiguration(source)
         var expected = JSONValue.object(before.plugins[pluginID] ?? [:])
         let parsed = try operations.map(parse)
         for (index, operation) in parsed.enumerated() {
@@ -47,7 +48,7 @@ public enum PluginSettingsPatch {
         if expected == .object(before.plugins[pluginID] ?? [:]) { return source }
         var result = lines.joined(separator: "\n")
         if !result.hasSuffix("\n") { result += "\n" }
-        let after = try AppConfiguration.parse(result)
+        let after = try parseConfiguration(result)
         guard .object(after.plugins[pluginID] ?? [:]) == expected,
               before.plugins.filter({ $0.key != pluginID }) == after.plugins.filter({ $0.key != pluginID }),
               after.changedKeys(from: before).allSatisfy({ $0 == "plugins" }) else {

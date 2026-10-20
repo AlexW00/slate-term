@@ -13,7 +13,7 @@ from plugin_package_fixture import package_fixture
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP = pathlib.Path(os.environ.get('SLATE_TERM_TEST_APP', ROOT / '.derived/Build/Products/Debug/Slate Terminal.app/Contents/MacOS/Slate Terminal'))
-CLI = APP.parent.parent / 'Helpers/slate-term'
+CLI = APP.parent.parent / 'Frameworks/SlateRuntime.framework/Helpers/slate-term'
 
 
 def eventually(label, check):
@@ -83,6 +83,17 @@ with http.server.ThreadingHTTPServer(('127.0.0.1', 0), Page) as server:
                 assert rpc('config.get')['current']['appearance']['unfocused_pane_dim'] == 0.35
                 time.sleep(0.3)
                 rpc('debug.screenshot', settings=True, path=str(ROOT / 'artifacts/settings-pane-dimming.png'))
+                colors = {'codex': '#123456', 'my.agent': '#ABCDEF'}
+                rpc('debug.settings', section='AI Agents', agentColors=colors)
+                assert rpc('config.get')['current']['agents']['colors'] == {}
+                rpc('debug.settings', revert=True)
+                assert rpc('debug.settings')['values']['agents.colors'] == '{  }'
+                state = rpc('debug.settings', agentColors=colors, apply=True)
+                assert state['error'] is None and not state['dirty'], state
+                assert rpc('config.get')['current']['agents']['colors'] == colors
+                rpc('debug.screenshot', settings=True, path=str(ROOT / 'artifacts/settings-agent-colors.png'))
+                state = rpc('debug.settings', agentColors={}, apply=True)
+                assert state['error'] is None and rpc('config.get')['current']['agents']['colors'] == {}
                 saved = config.read_text()
                 state = rpc('debug.settings', fontSize='0', apply=True)
                 assert state['error'] and config.read_text() == saved
@@ -202,13 +213,13 @@ with http.server.ThreadingHTTPServer(('127.0.0.1', 0), Page) as server:
                 panes = rpc('debug.inspect')['panes']
                 assert next(p for p in panes if p['paneId'] == 'p1')['browser']['addressFocused']
                 eventually('browser finished reloading', lambda: not rpc('browser.get', pane='p1')['loading'])
-                right = command('split.right')['paneId']
+                right = command('split.right', focus='new')['paneId']
                 eventually('new pane focused', lambda: next(t for t in rpc('workspace.get')['tabs'] if t['id'] == 't1')['focusedPane'] == right)
                 rpc('debug.key', chord='ctrl+alt+h')
                 eventually('focus left shortcut', lambda: next(t for t in rpc('workspace.get')['tabs'] if t['id'] == 't1')['focusedPane'] == 'p1')
                 rpc('debug.key', chord='ctrl+alt+l')
                 eventually('right pane focused', lambda: next(t for t in rpc('workspace.get')['tabs'] if t['id'] == 't1')['focusedPane'] == right)
-                bottom = command('split.down')['paneId']
+                bottom = command('split.down', focus='new')['paneId']
                 rpc('debug.key', chord='ctrl+alt+k')
                 eventually('right pane focused', lambda: next(t for t in rpc('workspace.get')['tabs'] if t['id'] == 't1')['focusedPane'] == right)
                 rpc('debug.key', chord='ctrl+alt+j')

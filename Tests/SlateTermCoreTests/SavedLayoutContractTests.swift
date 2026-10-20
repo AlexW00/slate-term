@@ -81,7 +81,7 @@ private let savedLayoutContractDefinitions = AutomationContracts.savedLayoutDefi
 
 @Test func savedLayoutContractsPreserveDocumentGuardsAndWholeGroupTargeting() throws {
     let contracts = AutomationContracts.savedLayouts
-    #expect(Set(contracts.keys) == Set(AutomationMethod.publicMethods.filter { $0.rawValue.hasPrefix("layouts.") }))
+    #expect(Set(contracts.keys) == Set(AutomationMethod.publicMethods.filter { $0.rawValue.hasPrefix("layouts.") || $0.rawValue.hasPrefix("layoutApps.") }))
     let definition = try JSONValue.encoding(SavedLayoutDefinition.blank())
     #expect(!schemaAccepts(contracts[.layoutsUpdate]!.input, .object(["definition": definition]), definitions: savedLayoutContractDefinitions))
     #expect(schemaAccepts(contracts[.layoutsUpdate]!.input, .object(["definition": definition, "expectedSavedLayoutRevision": .string("stale-but-well-formed")]), definitions: savedLayoutContractDefinitions))

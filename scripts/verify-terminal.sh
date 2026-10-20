@@ -5,11 +5,13 @@ source scripts/native-gate.sh
 slate_native_gate terminal
 if [[ "${SLATE_VM_PREBUILT:-0}" != 1 ]]; then
 root="$PWD"
+swift build --product slate-term --jobs 4
+bin="$(swift build --show-bin-path)"
 framework="$root/.build/bootstrap/ghostty/macos/GhosttyKit.xcframework/macos-arm64"
 [[ -f "$framework/libghostty-internal.a" ]] || { echo "Missing pinned GhosttyKit; run scripts/build-ghostty.sh" >&2; exit 1; }
 slate_native_swiftc -swift-version 6 -parse-as-library -g \
-  -I "$framework/Headers" \
-  Native/Terminal/*.swift Tests/TerminalLifecycle/TerminalLifecycle.swift \
+  -I "$framework/Headers" -I "$bin" -L "$bin" -lSlateTermSettings \
+  Native/Terminal/*.swift Native/TerminalProcessShutdown.swift Tests/TerminalLifecycle/TerminalLifecycle.swift \
   "$framework/libghostty-internal.a" \
   -framework AppKit -framework Metal -framework MetalKit -framework QuartzCore \
   -framework CoreText -framework CoreGraphics -framework Carbon -framework IOKit \

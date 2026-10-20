@@ -13,7 +13,7 @@ import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP = ROOT / ".derived/Build/Products/Debug/Slate Terminal.app/Contents/MacOS/Slate Terminal"
-CLI = APP.parent.parent / "Helpers/slate-term"
+CLI = APP.parent.parent / "Frameworks/SlateRuntime.framework/Helpers/slate-term"
 ARTIFACTS = ROOT / "artifacts"
 
 

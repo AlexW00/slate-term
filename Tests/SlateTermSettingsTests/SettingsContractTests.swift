@@ -31,6 +31,9 @@ private let settingsSchemaFormats: SchemaFormatChecks = [
         'dotted.key' = [1, 2, 3]
         [notifications]
         banners = 'other_apps'
+        [agents.colors]
+        codex = '#123456'
+        'my.agent' = '#abcdef'
         """, "[appearance]\ntheme = 'dark'\n"]
     let colors = try TerminalPalette.parse("background = #102030\nforeground = #ffffff\n").colors
     for source in sources {
@@ -58,6 +61,10 @@ private let settingsSchemaFormats: SchemaFormatChecks = [
         ["terminal.working_directory": .string("relative")], ["terminal.working_directory": .string("~someone/path")],
         ["terminal.working_directory": .string("/tmp/invalid\tpath")], ["terminal.working_directory": .string("")],
         ["terminal.inherit_working_directory": .bool(false)], ["terminal.inherit_working_directory": .string("false")],
+        ["terminal.saved_output_lines": .integer(0)], ["terminal.saved_output_lines": .integer(100_000)],
+        ["terminal.saved_output_lines": .integer(-1)], ["terminal.saved_output_lines": .integer(100_001)],
+        ["terminal.saved_output_lines": .number(1.5)], ["terminal.saved_output_lines": .bool(true)],
+        ["terminal.saved_output_lines": .string("10000")], ["terminal.saved_output_lines": .null],
         ["terminal.padding_x": .integer(64)], ["terminal.padding_x": .number(1.5)], ["terminal.font_thicken": .string("true")],
         ["terminal.dark_theme": .string("My Palette")], ["terminal.dark_theme": .string("../bad")],
         ["keybind.cmd+x": .string("pane.focus")], ["keybind.CMD+🦊": .string("unbound")],
@@ -67,7 +74,14 @@ private let settingsSchemaFormats: SchemaFormatChecks = [
         ["browser.search_url": .string("https://{query}.example.test/")], ["notifications.minimum_seconds": .integer(0)],
         ["terminal.font_family": .string("\n")], ["terminal.font_family": .null], ["terminal.unknown": .bool(true)],
         ["plugins.notes.option": .bool(true)]]
-    for values in samples {
+    let colorSamples: [[String: JSONValue]] = [
+        ["agents.colors": .object([:])], ["agents.colors": .object(["codex": .string("#123456"), "my.agent": .string("#abcdef")])],
+        ["agents.colors": .object(["Codex": .string("#123456")])], ["agents.colors": .object(["a:b": .string("#123456")])],
+        ["agents.colors": .object(["a": .string("red")])], ["agents.colors": .object(["a": .null])],
+        ["agents.colors": .null], ["agents.colors": .string("#123456")],
+        ["agents.colors": .object(Dictionary(uniqueKeysWithValues: (0..<65).map { ("agent\($0)", .string("#123456")) }))]
+    ]
+    for values in samples + colorSamples {
         let input: JSONValue = .object(["values": .object(values), "expectedSourceRevision": .string("source")])
         let accepted = (try? ConfigurationPatch.updating(source: "", values: values)) != nil
         #expect(schemaAccepts(schema, input, definitions: settingsSchemaDefinitions, formats: settingsSchemaFormats) == accepted)
@@ -114,5 +128,8 @@ private let settingsSchemaFormats: SchemaFormatChecks = [
     #expect(!schemaAccepts(AutomationContracts.settings[.pluginSettingsPatch]!.result, namespace, definitions: settingsSchemaDefinitions))
     #expect(AutomationContracts.settings[.configPatch]!.errors.contains(APIError.settingsWriteFailed))
     #expect(!schemaAccepts(AutomationContracts.settings[.pluginSettingsGet]!.input, .object(["id": .string("notes\n")]), definitions: settingsSchemaDefinitions))
-    #expect(AutomationContracts.settings.count == 9)
+    #expect(Set(AutomationContracts.settings.keys) == Set<AutomationMethod>([
+        .configGet, .configValidate, .configReload, .configPatch, .configResetOverrides,
+        .pluginSettingsGet, .pluginSettingsPatch, .paletteList, .paletteImport, .appearanceGet
+    ]))
 }

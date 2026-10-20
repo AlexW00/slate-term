@@ -12,7 +12,7 @@ import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP = ROOT / ".derived/Build/Products/Debug/Slate Terminal.app/Contents/MacOS/Slate Terminal"
-CLI = ROOT / ".derived/Build/Products/Debug/Slate Terminal.app/Contents/Helpers/slate-term"
+CLI = ROOT / ".derived/Build/Products/Debug/Slate Terminal.app/Contents/Frameworks/SlateRuntime.framework/Helpers/slate-term"
 
 
 def eventually(label, condition, timeout=15):
@@ -133,7 +133,7 @@ with tempfile.TemporaryDirectory(prefix="slate-settings-", dir="/tmp") as tempor
             assert "terminal.shell" in rpc("config.get")["restartRequired"]
             assert rpc("debug.inspect")["panes"][0]["surface"] == before["surface"]
             t2 = cli("tabs", "new")["tabId"]
-            t3 = cli("tabs", "new")["tabId"]
+            t3 = cli("tabs", "new", "--focus-policy", "new")["tabId"]
             assert rpc("workspace.get")["groups"][0]["tabs"] == ["t1", t2, t3], "Native insertion reversed the tab order"
             assert rpc("debug.reorder", tab=t3, index=0)["selectionPreserved"]
             eventually("native reorder autosaved without a synchronizing RPC read", lambda: json.loads(state.read_text())["groups"][0]["tabs"] == [t3, "t1", t2])

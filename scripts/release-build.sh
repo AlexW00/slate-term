@@ -50,6 +50,9 @@ app="$output/Slate Terminal.app"
 source_commit="$(git rev-parse HEAD)"
 source_dirty=false
 if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then source_dirty=true; fi
+source_snapshot="$(mktemp "${TMPDIR:-/tmp}/slate-build-source.XXXXXX")"
+trap 'rm -f "$source_snapshot"' EXIT
+python3 scripts/release-source-inventory.py capture --root "$root" --snapshot "$source_snapshot"
 # Each checkout owns its build directories, including linked worktrees.
 xcodebuild -project slate-term.xcodeproj -scheme SlateTermApp -configuration Release \
   -destination 'platform=macOS,arch=arm64' -derivedDataPath "$root/.derived-release" \
@@ -63,21 +66,25 @@ xcodebuild -project slate-term.xcodeproj -scheme SlateTermApp -configuration Rel
   }
 built="$root/.derived-release/Build/Products/Release/Slate Terminal.app"
 for tool in slate-term slate-layout-launcher; do
-  [[ -x "$built/Contents/Helpers/$tool" ]] || { echo "Missing embedded helper: $tool" >&2; exit 1; }
-  codesign --verify --strict "$built/Contents/Helpers/$tool"
+  [[ -x "$built/Contents/Frameworks/SlateRuntime.framework/Versions/A/Helpers/$tool" ]] || { echo "Missing embedded helper: $tool" >&2; exit 1; }
+  codesign --verify --strict "$built/Contents/Frameworks/SlateRuntime.framework/Versions/A/Helpers/$tool"
 done
-# A loader failure here would break every installed CLI command.
-env -u DYLD_FRAMEWORK_PATH -u DYLD_LIBRARY_PATH "$built/Contents/Helpers/slate-term" --help > /dev/null
+python3 scripts/package-runtime.py verify --app "$built"
+# Helper execution and loading are verified in the release VM, not on the build host.
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$built/Contents/Info.plist")" = "$version" ]]
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$built/Contents/Info.plist")" = "$build_number" ]]
 [[ "$(lipo -archs "$built/Contents/MacOS/Slate Terminal")" = arm64 ]]
-if [[ "$source_dirty" = false ]] && { [[ "$(git rev-parse HEAD)" != "$source_commit" ]] || [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; }; then
-  echo 'Source changed during the build; rebuild before preparing release assets.' >&2; exit 1;
-fi
 ditto "$built" "$app"
 python3 scripts/collect-release-licenses.py --app "$app"
-python3 - "$app" "$output/build-source.json" "$source_commit" "$source_dirty" "$version" "$build_number" <<'PY_RECEIPT'
+# Notices are versioned resources; reseal the unsigned payload before recording its tree.
+python3 scripts/package-runtime.py sign --app "$app" --identity -
+# Dirty worktrees are allowed, but every input must remain identical for this receipt.
+[[ "$(git rev-parse HEAD)" = "$source_commit" ]] || {
+  echo 'Source commit changed during the build; rebuild before preparing release assets.' >&2; exit 1;
+}
+python3 - "$app" "$output/build-source.json" "$source_commit" "$source_dirty" "$version" "$build_number" "$source_snapshot" <<'PY_RECEIPT'
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -102,6 +109,12 @@ receipt = {
     'ghostty_revision': subprocess.check_output(['git', '-C', '.build/bootstrap/ghostty', 'rev-parse', 'HEAD'], text=True).strip(),
     'app_tree_sha256': digest.hexdigest(),
 }
+snapshot = json.loads(Path(sys.argv[7]).read_text())
+spec = importlib.util.spec_from_file_location('source_inventory', 'scripts/release-source-inventory.py')
+inventory = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(inventory)
+inventory.verify_receipt(Path.cwd(), snapshot)
+receipt.update(snapshot)
 Path(sys.argv[2]).write_text(json.dumps(receipt, indent=2) + '\n')
 PY_RECEIPT
 printf 'Built %s\n' "$app"

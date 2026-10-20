@@ -1,15 +1,28 @@
 import Foundation
 import SlateTermCore
 
-/// Starting locations and windowed geometry, never executable recipes or live sessions.
+/// Starting locations, window geometry, and saved text, never executable recipes or live sessions.
 /// Stored atomically beside topology in the same private workspace snapshot.
 public struct WorkspaceRestoration: Codable, Equatable, Sendable {
     public var version = 1
     public var directories: [String: String] = [:]
     public var browserURLs: [String: String] = [:]
     public var windowFrames: [String: Frame] = [:]
+    public var terminalOutput: [String: SavedTerminalOutput] = [:]
 
     public init() {}
+
+    enum CodingKeys: String, CodingKey { case version, directories, browserURLs, windowFrames, terminalOutput }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decode(Int.self, forKey: .version)
+        directories = try container.decode([String: String].self, forKey: .directories)
+        browserURLs = try container.decode([String: String].self, forKey: .browserURLs)
+        windowFrames = try container.decode([String: Frame].self, forKey: .windowFrames)
+        terminalOutput = try container.contains(.terminalOutput)
+            ? container.decode([String: SavedTerminalOutput].self, forKey: .terminalOutput) : [:]
+    }
 
     /// AppKit screen coordinates, in points. Group IDs identify windows across launches;
     /// native window numbers and app-epoch window selectors deliberately do not.
@@ -60,6 +73,7 @@ public struct WorkspaceRestoration: Codable, Equatable, Sendable {
         let groups = Set(workspace.groups.map { $0.id.description })
         var kept = self
         kept.directories = directories.filter { terminals.contains($0.key) }
+        kept.terminalOutput = terminalOutput.filter { terminals.contains($0.key) }
         kept.browserURLs = browserURLs.filter { browsers.contains($0.key) }
         kept.windowFrames = windowFrames.filter { groups.contains($0.key) }
         return kept
@@ -71,10 +85,12 @@ public struct WorkspaceRestoration: Codable, Equatable, Sendable {
         let browsers = Set(workspace.panes.filter { $0.type == .browser }.map { $0.id.description })
         let groups = Set(workspace.groups.map { $0.id.description })
         guard version == 1, Set(directories.keys).isSubset(of: terminals),
+              Set(terminalOutput.keys).isSubset(of: terminals), terminalOutput.values.allSatisfy(\.isValid),
+              terminalOutput.values.reduce(0, { $0 + $1.text.utf8.count }) <= SavedTerminalOutput.maximumWorkspaceBytes,
               Set(browserURLs.keys).isSubset(of: browsers), Set(windowFrames.keys).isSubset(of: groups),
               directories.values.allSatisfy(Self.allowsDirectory),
               browserURLs.values.allSatisfy(Self.allowsBrowserURL), windowFrames.values.allSatisfy(\.isValid) else {
-            throw WorkspaceError.invalidSnapshot("Invalid restoration locations, window geometry, or identity references")
+            throw WorkspaceError.invalidSnapshot("Invalid restoration locations, saved output, window geometry, or identity references")
         }
     }
 }

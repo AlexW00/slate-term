@@ -67,7 +67,7 @@ with AppFixture('api-parity') as app:
     assert not restored['settled'] or not restored['minimized'], restored
     eventually('restored', lambda: not app.rpc('window.get', windowId=wid)['minimized'])
     app.rpc('command.run', id='window.focus', windowId=wid)
-    tab = app.rpc('command.run', id='tab.new')['tabId']
+    tab = app.rpc('command.run', id='tab.new', focus='new')['tabId']
     app.rpc('command.run', id='window.minimize', windowId=wid, error=-32051)
     app.rpc('command.run', id='tab.close', tab=tab, force=True)
     app.rpc('command.run', id='window.focus', windowId=wid)

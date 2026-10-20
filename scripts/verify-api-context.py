@@ -40,7 +40,7 @@ with AppFixture('api-context') as app:
     exported = json.loads(output.read_text())
     assert exported == dict(SLATE_TERM_PANE_ID='p1', SLATE_TERM_TAB_ID='t1', SLATE_TERM_INSTANCE_ID=epoch, SLATE_TERM_SESSION_ID=session), exported
 
-    second = app.rpc('command.run', id='split.right', pane='p1')['paneId']
+    second = app.rpc('command.run', id='split.right', pane='p1', focus='new')['paneId']
     changed = app.rpc('workspace.snapshot', limit=1)
     assert changed['workspaceRevision'] != revision and changed['nextCursor']
     assert changed['panes'][0]['layoutRevision'] != layout1
@@ -83,7 +83,7 @@ with AppFixture('api-context') as app:
     app.rpc('browser.snapshot', pane='p1', expectedSourceRevision='unsupported', error=-32602)
 
     # Background pane identity, not the key tab, controls tab reads and destructive commands.
-    foreground = app.rpc('command.run', id='window.new')['tabId']
+    foreground = app.rpc('command.run', id='window.new', focus='new')['tabId']
     assert app.rpc('workspace.get')['keyTabID'] == foreground
     assert app.cli('layout', 'get', '--pane', second) == app.rpc('layout.get', tab='t1')
     app.cli('tabs', 'close', '--pane', second, '--force')

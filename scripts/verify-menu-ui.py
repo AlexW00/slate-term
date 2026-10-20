@@ -10,7 +10,7 @@ import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP = pathlib.Path(os.environ.get('SLATE_TERM_TEST_APP', ROOT / '.derived/Build/Products/Debug/Slate Terminal.app/Contents/MacOS/Slate Terminal'))
-CLI = APP.parent.parent / 'Helpers/slate-term'
+CLI = APP.parent.parent / 'Frameworks/SlateRuntime.framework/Helpers/slate-term'
 ARTIFACTS = ROOT / 'artifacts'
 
 
@@ -100,7 +100,7 @@ with tempfile.TemporaryDirectory(prefix='slate-menu-', dir='/tmp') as temporary:
                     else:
                         if item.get('command') in {'layouts.edit', 'layouts.openWindow', 'layouts.captureWindow', 'plugins.reload', 'plugins.panelState.reset',
                                                    'pane.header.show', 'pane.header.hide', 'pane.header.toggle',
-                                                   'pane.rename', 'pane.copyID', 'pane.move.chooseDestination', 'tab.rename', 'tab.title.clear', 'appearance.auto', 'appearance.light', 'appearance.dark',
+                                                   'tab.showAll', 'pane.rename', 'pane.copyID', 'pane.move.chooseDestination', 'tab.rename', 'tab.title.clear', 'appearance.auto', 'appearance.light', 'appearance.dark',
                                                    'notifications.next', 'notifications.open', 'notifications.settings',
                                                    'welcome.read', 'welcome.unread', 'welcome.reset',
                                                    'browser.clearData', 'browser.clearSiteData',
@@ -141,14 +141,14 @@ with tempfile.TemporaryDirectory(prefix='slate-menu-', dir='/tmp') as temporary:
             for pane in ['p2', 'p3']:
                 cli('panes', 'close', '--pane', pane, '--force')
 
-            detached_tab = cli('tabs', 'new')['tabId']
+            detached_tab = cli('tabs', 'new', '--focus-policy', 'new')['tabId']
             press('cmd+ctrl+n')
             assert len(rpc('workspace.get')['groups']) == 2
             assert rpc('workspace.get')['keyTabID'] == detached_tab
             cli('tabs', 'close', '--tab', detached_tab, '--force')
             (directory / 'config.toml').write_text('[keybind]\n"cmd+shift+j" = "pane.copyID"\n"cmd+ctrl+n" = "unbound"\n')
             rpc('config.reload')
-            attached_tab = cli('tabs', 'new')['tabId']
+            attached_tab = cli('tabs', 'new', '--focus-policy', 'new')['tabId']
             before_unbound = rpc('workspace.get')['groups']
             press('cmd+ctrl+n')
             assert rpc('workspace.get')['groups'] == before_unbound, 'Unbound native detach still consumed the shortcut'

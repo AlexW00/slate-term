@@ -55,6 +55,8 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
         public let shell: String
         public let workingDirectory: String
         public let inheritWorkingDirectory: Bool
+        /// Latest output lines retained across launches; zero disables saving output.
+        public let savedOutputLines: Int
         public let fontFamily: String
         /// Typographic points. Slate Terminal accepts finite sizes in 1...256.
         public let fontSize: Double
@@ -71,6 +73,7 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
         public let darkTheme: TerminalTheme
         enum CodingKeys: String, CodingKey {
             case workingDirectory = "working_directory", inheritWorkingDirectory = "inherit_working_directory"
+            case savedOutputLines = "saved_output_lines"
             case shell, fontFamily = "font_family", fontSize = "font_size", shellIntegration = "shell_integration"
             case fontThicken = "font_thicken", minimumContrast = "minimum_contrast"
             case cursorStyle = "cursor_style", cursorBlink = "cursor_blink"
@@ -154,11 +157,13 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
     public var notifications = NotificationPolicy()
     /// Shows frames and tags on panes while a self-identified agent acts on them.
     public var showAgentActivity = true
+    public var agentColors: [String: String] = [:]
+    public var agentColorRGB: [String: UInt32] { agentColors.compactMapValues { UInt32($0.dropFirst(), radix: 16) } }
 
     public static let defaults = AppConfiguration(
         browser: Browser(searchURL: "https://www.google.com/search?q={query}"),
         theme: .system,
-        terminal: Terminal(shell: "/bin/zsh", workingDirectory: "~", inheritWorkingDirectory: true, fontFamily: "SF Mono", fontSize: 13, shellIntegration: .auto,
+        terminal: Terminal(shell: "/bin/zsh", workingDirectory: "~", inheritWorkingDirectory: true, savedOutputLines: 10_000, fontFamily: "SF Mono", fontSize: 13, shellIntegration: .auto,
                            fontThicken: false, minimumContrast: 1, cursorStyle: .block, cursorBlink: .auto,
                            paddingX: 2, paddingY: 2, lightTheme: TerminalTheme(.builtinLight), darkTheme: TerminalTheme(.builtinDark)),
         restoreWorkspace: true,
@@ -178,6 +183,12 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
 
     public static func parse(_ source: String) throws -> AppConfiguration {
         let raw = try TOMLDecoder().decode(Raw.self, from: source)
+        let table = try TOMLTable(source: source)
+        var agentColors: [String: String] = [:]
+        if table.keys.contains("agents") {
+            let agents = try table.table(forKey: "agents")
+            if agents.keys.contains("colors") { agentColors = try AgentAccentColors.parse(agents.table(forKey: "colors")) }
+        }
         let defaults = Self.defaults
         let unfocusedPaneDim = raw.appearance?.unfocusedPaneDim?.value ?? defaults.unfocusedPaneDim
         guard unfocusedPaneDim.isFinite, (0...1).contains(unfocusedPaneDim) else {
@@ -187,6 +198,7 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
             shell: raw.terminal?.shell ?? defaults.terminal.shell,
             workingDirectory: raw.terminal?.workingDirectory ?? defaults.terminal.workingDirectory,
             inheritWorkingDirectory: raw.terminal?.inheritWorkingDirectory ?? defaults.terminal.inheritWorkingDirectory,
+            savedOutputLines: raw.terminal?.savedOutputLines ?? defaults.terminal.savedOutputLines,
             fontFamily: raw.terminal?.fontFamily ?? defaults.terminal.fontFamily,
             fontSize: raw.terminal?.fontSize?.value ?? defaults.terminal.fontSize,
             shellIntegration: raw.terminal?.shellIntegration ?? defaults.terminal.shellIntegration,
@@ -198,6 +210,9 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
             paddingY: raw.terminal?.paddingY ?? defaults.terminal.paddingY,
             lightTheme: raw.terminal?.lightTheme ?? defaults.terminal.lightTheme,
             darkTheme: raw.terminal?.darkTheme ?? defaults.terminal.darkTheme)
+        guard (0...SavedTerminalOutput.maximumLines).contains(terminal.savedOutputLines) else {
+            throw ConfigurationError.invalid("terminal.saved_output_lines must be an integer between 0 and 100000")
+        }
         guard terminal.minimumContrast.isFinite, (1...21).contains(terminal.minimumContrast) else {
             throw ConfigurationError.invalid("terminal.minimum_contrast must be finite and between 1 and 21")
         }
@@ -246,7 +261,8 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
         }
         return AppConfiguration(browser: try Browser.parse(raw.browser?.searchURL ?? defaults.browser.searchURL), theme: raw.appearance?.theme ?? defaults.theme, unfocusedPaneDim: unfocusedPaneDim, terminal: terminal,
                                 restoreWorkspace: raw.layout?.restoreWorkspace ?? defaults.restoreWorkspace, keyBindings: bindings, plugins: plugins, notifications: raw.notifications ?? NotificationPolicy(),
-                                showAgentActivity: raw.agents?.showActivity ?? defaults.showAgentActivity)
+                                showAgentActivity: raw.agents?.showActivity ?? defaults.showAgentActivity,
+                                agentColors: agentColors)
     }
 
     public static func load(from url: URL) throws -> AppConfiguration {
@@ -279,6 +295,8 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
         if plugins != previous.plugins { keys.append("plugins") }
         if restoreWorkspace != previous.restoreWorkspace { keys.append("layout.restore_workspace") }
         if showAgentActivity != previous.showAgentActivity { keys.append("agents.show_activity") }
+        if agentColors != previous.agentColors { keys.append("agents.colors") }
+        if terminal.savedOutputLines != previous.terminal.savedOutputLines { keys.append("terminal.saved_output_lines") }
         if terminal.fontFamily != previous.terminal.fontFamily { keys.append("terminal.font_family") }
         if terminal.fontSize != previous.terminal.fontSize { keys.append("terminal.font_size") }
         if terminal.fontThicken != previous.terminal.fontThicken { keys.append("terminal.font_thicken") }
@@ -311,7 +329,8 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
         try container.encode(notifications, forKey: .notifications)
         try container.encode(plugins, forKey: .plugins)
         try container.encode(["restore_workspace": restoreWorkspace], forKey: .layout)
-        try container.encode(["show_activity": showAgentActivity], forKey: .agents)
+        try container.encode(["show_activity": JSONValue.bool(showAgentActivity),
+                              "colors": .object(agentColors.mapValues(JSONValue.string))], forKey: .agents)
         try container.encode(Dictionary(uniqueKeysWithValues: keyBindings.map { ($0.key.description, $0.value) }), forKey: .keybind)
     }
 
@@ -339,9 +358,10 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
     }
     private struct AgentValues: Decodable {
         let showActivity: Bool?
-        enum Keys: String, CodingKey, CaseIterable { case showActivity = "show_activity" }
+        enum Keys: String, CodingKey, CaseIterable { case showActivity = "show_activity", colors }
         init(from decoder: any Decoder) throws {
-            showActivity = try checkedContainer(decoder, Keys.self).decodeIfPresent(Bool.self, forKey: .showActivity)
+            let c = try checkedContainer(decoder, Keys.self)
+            showActivity = try c.decodeIfPresent(Bool.self, forKey: .showActivity)
         }
     }
     private struct BrowserValues: Decodable {
@@ -372,6 +392,7 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
         let shell: String?
         let workingDirectory: String?
         let inheritWorkingDirectory: Bool?
+        let savedOutputLines: Int?
         let fontFamily: String?
         let fontSize: Number?
         let shellIntegration: ShellIntegration?
@@ -385,6 +406,7 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
         let darkTheme: TerminalTheme?
         enum Keys: String, CodingKey, CaseIterable {
             case workingDirectory = "working_directory", inheritWorkingDirectory = "inherit_working_directory"
+            case savedOutputLines = "saved_output_lines"
             case shell, fontFamily = "font_family", fontSize = "font_size", shellIntegration = "shell_integration"
             case fontThicken = "font_thicken", minimumContrast = "minimum_contrast"
             case cursorStyle = "cursor_style", cursorBlink = "cursor_blink"
@@ -395,6 +417,7 @@ public struct AppConfiguration: Equatable, Sendable, Encodable {
             shell = try c.decodeIfPresent(String.self, forKey: .shell)
             workingDirectory = try c.decodeIfPresent(String.self, forKey: .workingDirectory)
             inheritWorkingDirectory = try c.decodeIfPresent(Bool.self, forKey: .inheritWorkingDirectory)
+            savedOutputLines = try c.decodeIfPresent(Int.self, forKey: .savedOutputLines)
             fontFamily = try c.decodeIfPresent(String.self, forKey: .fontFamily)
             fontSize = try c.decodeIfPresent(Number.self, forKey: .fontSize)
             shellIntegration = try c.decodeIfPresent(ShellIntegration.self, forKey: .shellIntegration)

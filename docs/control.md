@@ -6,6 +6,8 @@ The app exposes a private, per-instance Unix-domain stream socket. Terminals and
 
 The socket directory is private (0700), and the server verifies the connecting user's credentials with Darwin `LOCAL_PEERCRED`. Same-user access grants workspace/terminal control; this is not a sandbox against other processes running as that user. Never expose or proxy the socket to untrusted clients.
 
+If the private state path exceeds Darwin’s socket-address limit, the server binds in an exclusive 0700 temporary directory. It publishes a 0600 `*.socket-path` file in the requested control directory containing the actual absolute socket path. Terminals and managed services receive that path directly. Normal shutdown removes the socket, reference and temporary directory. External discovery must validate the reference and handshake with the intended app instance; a leftover reference after a crash does not establish liveness.
+
 ## Wire format
 
 UTF-8 JSON-RPC 2.0 objects, one per newline. No HTTP, batch arrays, or binary framing. Send `hello` first on **each connection**:

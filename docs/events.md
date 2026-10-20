@@ -156,3 +156,7 @@ Possible bounded publications are preflighted before source persistence/runtime 
 ## Bounds
 
 Retention is at most 1,024 events and 2 MiB; each encoded event is at most 16 KiB. Publication and batch admission reserve 128 bytes per event for delivery metadata, reducing available payload space. Batches contain at most 128 events and 512 KiB. There are at most 128 pending native polls, 64 topic patterns per filter, and 32 outstanding bridge calls per view. Cancellation still works when all bridge slots are occupied. Overload is explicit rather than silently dropping matching events. Disconnecting a Unix peer cancels its suspended poll.
+
+## Layout apps
+
+`host.layoutapp.created` and `host.layoutapp.refreshed` publish after app creation or a changed runtime is committed. Their bounded payload contains `layoutAppID`, `runtimeVersion`, `runtimeBuild`, and `revision`. Explicit native and trusted-client operations retain their operation attribution; automatic parent catch-up uses native attribution. No-op refreshes publish nothing. Resnapshot with `layoutApps.list` after journal expiry. Filesystem installation is not a rollbackable workspace transaction.

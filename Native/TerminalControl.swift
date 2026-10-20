@@ -1,6 +1,7 @@
 import Foundation
 import Darwin
 import SlateTermCore
+import SlateTermSettings
 
 /// Generic terminal I/O and authenticated shell completion. Tool-specific protocols live in extensions.
 @MainActor
@@ -87,8 +88,8 @@ final class TerminalControl {
         case "send": fields = ["text"]
         case "key": fields = ["key"]
         case "capture": fields = []
-        case "history": fields = ["maxBytes", "maxLines"]
-        case "historyExport": fields = ["maxBytes", "maxLines", "path"]
+        case "history": fields = ["maxBytes", "maxLines", "source"]
+        case "historyExport": fields = ["maxBytes", "maxLines", "path", "source"]
         case "search": fields = ["action", "query"]
         case "run": fields = ["command", "timeoutMilliseconds", "shell"]
         case "start": fields = ["command", "shell"]
@@ -144,11 +145,20 @@ final class TerminalControl {
                 }
                 path = value
             } else { path = nil }
-            let tail = target.view.retainedText(maximumBytes: request.maxBytes)
+            let previous = request.source == .previous ? target.view.previousOutput : nil
+            if path != nil, request.source == .previous, previous == nil {
+                throw RPCFailure(code: APIError.unavailable, message: "No previous terminal output is available")
+            }
+            let tail = request.source == .current
+                ? target.view.retainedText(maximumBytes: request.maxBytes)
+                : (text: previous?.text ?? "", truncated: false)
             let result = request.result(text: tail.text, byteTruncated: tail.truncated)
             var response: [String: JSONValue] = ["paneId": .string(pane.description), "sessionId": .string(target.sessionID),
                 "truncated": .bool(result.truncated), "lineCount": .integer(result.lineCount),
-                "byteCount": .integer(result.text.utf8.count)]
+                "byteCount": .integer(result.text.utf8.count), "source": .string(request.source.rawValue),
+                "available": .bool(request.source == .current || previous != nil),
+                "capturedAt": previous.map { .number($0.capturedAt.timeIntervalSince1970) } ?? .null,
+                "ended": previous.map { .bool($0.ended) } ?? .null]
             if let path {
                 try validateCaller()
                 // Never replace a file or follow an existing final symlink. Export

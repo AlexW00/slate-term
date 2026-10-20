@@ -20,8 +20,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 APP = ROOT / '.derived/Build/Products/Debug/Slate Terminal.app'
-CLI = APP / 'Contents/Helpers/slate-term'
-GHOSTTY = APP / 'Contents/Resources/ghostty'
+CLI = APP / 'Contents/Frameworks/SlateRuntime.framework/Helpers/slate-term'
+GHOSTTY = APP / 'Contents/Frameworks/SlateRuntime.framework/Resources/ghostty'
 SHELLS = ROOT / '.build/test-shells'
 BASH_BOOTSTRAP = 'builtin source "$SLATE_TERM_BASH_INIT"'
 FISH_RUN_KEY = '\U0010FFFD'

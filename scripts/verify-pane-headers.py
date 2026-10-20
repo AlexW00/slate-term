@@ -154,7 +154,7 @@ while True: time.sleep(1)
     assert app.cli('panes', 'show-header', '--pane', panel, env=service_env)['headerVisible']
     assert events(cursor)[0]['payload']['origin']['kind'] == 'service'
     # Explicit bridge targets, including cross-tab targets, do not inherit sibling guards.
-    other_tab = command('tab.new')['tabId']
+    other_tab = command('tab.new', focus='new')['tabId']
     other_pane = next(t['focusedPane'] for t in app.rpc('workspace.get')['tabs'] if t['id'] == other_tab)
     target = dict(pane=other_pane, expectedLayoutRevision=inspect(other_pane)['layoutRevision'])
     reply = js(f"await workspace.panes.hideHeader({json.dumps(target)})")

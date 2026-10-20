@@ -15,7 +15,7 @@ with tempfile.TemporaryDirectory(prefix='slate-restoration-', dir='/tmp') as tem
     secret = Path(temporary) / 'private-location-must-not-persist.html'
     secret.write_text('<!doctype html><title>Private page</title>')
     marker = Path(temporary) / 'executions.txt'
-    with AppFixture('workspace-restoration-save') as app:
+    with AppFixture('workspace-restoration-save', configuration='[terminal]\nshell = "/bin/zsh"\nsaved_output_lines = 0\n') as app:
         eventually('original authenticated shell', lambda: app.rpc('context.get')['terminal']['state'] == 'prompt')
         app.rpc('command.run', id='welcome.read')
         original_session = app.rpc('pane.inspect', pane='p1')['sessionId']

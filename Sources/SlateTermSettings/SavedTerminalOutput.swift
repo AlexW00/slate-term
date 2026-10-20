@@ -1,0 +1,68 @@
+import Foundation
+
+/// Historical display text only. It never describes a process to resume or a command to execute.
+public struct SavedTerminalOutput: Codable, Equatable, Sendable {
+    public static let maximumLines = 100_000
+    public static let maximumBytes = 4 * 1024 * 1024
+    public static let maximumWorkspaceBytes = 32 * 1024 * 1024
+
+    public var text: String
+    public var capturedAt: Date
+    /// Whether the terminal's process had already exited when this text was captured.
+    public var ended: Bool
+
+    public init(text: String, capturedAt: Date, ended: Bool) {
+        self.text = text
+        self.capturedAt = capturedAt
+        self.ended = ended
+    }
+
+    enum CodingKeys: String, CodingKey { case text, capturedAt, ended }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        text = try container.decode(String.self, forKey: .text)
+        capturedAt = try container.decode(Date.self, forKey: .capturedAt)
+        ended = try container.decode(Bool.self, forKey: .ended)
+        guard isValid else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath,
+                debugDescription: "Saved terminal output exceeds its bounds or has an invalid capture date"))
+        }
+    }
+
+    public var isValid: Bool {
+        let timestamp = capturedAt.timeIntervalSince1970
+        // Restrict persisted dates to calendar years 1 through 9999.
+        return timestamp.isFinite && (-62_135_596_800...253_402_300_799).contains(timestamp)
+            && text.utf8.count <= Self.maximumBytes && Self.lineCount(text) <= Self.maximumLines
+    }
+
+    /// A final newline ends the last line; it does not introduce an additional empty line.
+    public static func lineCount(_ text: String) -> Int {
+        guard let last = text.last else { return 0 }
+        return text.reduce(0) { $0 + ($1.isNewline ? 1 : 0) } + (last.isNewline ? 0 : 1)
+    }
+
+    /// Retains the newest logical lines without splitting Unicode characters or CRLF endings.
+    /// The byte cap can shorten a long line. Invalid limits and zero return no text.
+    public static func boundedText(_ text: String, lineLimit: Int, byteLimit: Int = maximumBytes) -> String {
+        guard (1...maximumLines).contains(lineLimit), byteLimit > 0 else { return "" }
+        let budget = min(byteLimit, maximumBytes)
+        var start = text.endIndex
+        var bytes = 0
+        var lines = 0
+        while start > text.startIndex {
+            let previous = text.index(before: start)
+            let character = text[previous]
+            if character.isNewline && start != text.endIndex {
+                lines += 1
+                if lines >= lineLimit { break }
+            }
+            let size = text[previous..<start].utf8.count
+            guard size <= budget - bytes else { break }
+            bytes += size
+            start = previous
+        }
+        return String(text[start...])
+    }
+}

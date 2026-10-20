@@ -32,6 +32,7 @@ public struct UpdateSnapshot: Codable, Equatable, Sendable {
     public var updateID: String?
     public var phase: UpdatePhase
     public var currentVersion: String
+    public var source: String
     public var release: UpdateRelease?
     public var receivedBytes: UInt64
     public var expectedBytes: UInt64
@@ -39,12 +40,13 @@ public struct UpdateSnapshot: Codable, Equatable, Sendable {
     public var windowVisible: Bool
 
     public init(revision: String = "0", updateID: String? = nil, phase: UpdatePhase = .idle,
-                currentVersion: String, release: UpdateRelease? = nil, receivedBytes: UInt64 = 0,
+                currentVersion: String, source: String = "signedFeed", release: UpdateRelease? = nil, receivedBytes: UInt64 = 0,
                 expectedBytes: UInt64 = 0, detail: String? = nil, windowVisible: Bool = false) {
         self.revision = revision
         self.updateID = updateID
         self.phase = phase
         self.currentVersion = currentVersion
+        self.source = source
         self.release = release
         self.receivedBytes = receivedBytes
         self.expectedBytes = expectedBytes
@@ -53,12 +55,12 @@ public struct UpdateSnapshot: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case revision, updateID = "updateId", phase, currentVersion, release, receivedBytes, expectedBytes, detail, windowVisible
+        case revision, updateID = "updateId", phase, currentVersion, source, release, receivedBytes, expectedBytes, detail, windowVisible
     }
 }
 
 public enum UpdateAction: String, Codable, CaseIterable, Sendable {
-    case get, show, check, download, cancel, install
+    case get, show, check, download, cancel, install, openParent
     public var method: String { "updates.\(rawValue)" }
 }
 

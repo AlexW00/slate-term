@@ -7,6 +7,7 @@ import SlateTermCore
 @MainActor
 public final class UnixServer {
     public let path: String
+    private let endpoint: SocketEndpoint
     private var listener: DispatchSourceRead?
     private var peers: [Int32: Peer] = [:]
     private let service: ServiceIdentity?
@@ -33,7 +34,11 @@ public final class UnixServer {
               attributes.st_mode & S_IFMT == S_IFDIR, attributes.st_mode & 0o777 == 0o700 else {
             throw SocketError.insecureDirectory
         }
-        path = directory.appendingPathComponent("\(UUID().uuidString.prefix(8)).sock").path
+        let endpoint = try SocketEndpoint(directory: directory)
+        self.endpoint = endpoint
+        path = endpoint.path
+        var initialized = false
+        defer { if !initialized { endpoint.cleanup() } }
         let descriptor = try makeSocket(nonblocking: true)
         var bound = false
         do {
@@ -46,6 +51,7 @@ public final class UnixServer {
             guard chmod(path, 0o600) == 0, listen(descriptor, SOMAXCONN) == 0 else {
                 throw SocketError.system("listen", errno)
             }
+            try endpoint.publish()
         } catch {
             Darwin.close(descriptor)
             // Never unlink another server's socket after a bind collision.
@@ -59,6 +65,7 @@ public final class UnixServer {
         source.setCancelHandler { Darwin.close(descriptor) }
         listener = source
         source.resume()
+        initialized = true
     }
 
     isolated deinit { close() }
@@ -70,6 +77,7 @@ public final class UnixServer {
         peers.removeAll()
         listener.cancel()
         unlink(path)
+        endpoint.cleanup()
     }
 
     private func acceptConnections(_ listener: Int32) {
@@ -109,6 +117,11 @@ private final class Peer {
     private var framing = LineFramer()
     private var session = ProtocolSession()
     private var output = Data()
+    private struct PendingReply {
+        var bytes: Int
+        let completion: RPCReplyCompletion
+    }
+    private var pendingReplies: [PendingReply] = []
     private var writerActive = false
     private var closed = false
     private var requests: [Data] = []
@@ -140,6 +153,9 @@ private final class Peer {
         processing?.cancel()
         requests.removeAll()
         requestBytes = 0
+        let replies = pendingReplies
+        pendingReplies.removeAll()
+        for reply in replies { reply.completion.finish() }
         if !writerActive { writer.resume() }
         writer.cancel()
         reader.cancel()
@@ -196,6 +212,9 @@ private final class Peer {
         var id = JSONValue.null
         var notification = false
         var decoded = false
+        let completion = RPCReplyCompletion { [weak self] in self?.close() }
+        var enqueued = false
+        defer { if !enqueued { completion.finish() } }
         do {
             let request = try RPCRequest.decode(data)
             decoded = true
@@ -214,9 +233,14 @@ private final class Peer {
                 if let service { reply["service"] = .object(service.info) }
                 result = .object(reply)
             case .command:
-                result = try await handle(request.method, request.params ?? [:], request.metadata)
+                result = try await RPCReplyCompletion.$current.withValue(completion) {
+                    try await handle(request.method, request.params ?? [:], request.metadata)
+                }
             }
-            if !notification { enqueue(RPCResponse(id: id, result: result)) }
+            if !notification {
+                enqueue(RPCResponse(id: id, result: result), completion: completion)
+                enqueued = true
+            }
         } catch {
             // Malformed input may be a repeated hello that failed before decoding.
             // Invalidate the ordinary protocol session too; a generation endpoint
@@ -236,17 +260,19 @@ private final class Peer {
             case is CancellationError: failure = .init(code: -32022, message: "Request was cancelled")
             default: failure = .init(code: -32602, message: String(describing: error))
             }
-            enqueue(RPCResponse(id: id, error: failure))
+            enqueue(RPCResponse(id: id, error: failure), completion: completion)
+            enqueued = true
         }
     }
 
-    private func enqueue(_ response: RPCResponse) {
-        guard !closed else { return }
+    private func enqueue(_ response: RPCResponse, completion: RPCReplyCompletion) {
+        guard !closed else { completion.finish(); return }
         guard let bytes = try? JSONEncoder().encode(response), output.count + bytes.count + 1 <= 1_048_576 else {
-            close(); return
+            completion.finish(); close(); return
         }
         output.append(bytes)
         output.append(10)
+        pendingReplies.append(.init(bytes: bytes.count + 1, completion: completion))
         if !writerActive { writerActive = true; writer.resume() }
     }
 
@@ -258,6 +284,16 @@ private final class Peer {
             return
         }
         output.removeFirst(count)
+        var remaining = count
+        while remaining > 0, !pendingReplies.isEmpty {
+            if remaining < pendingReplies[0].bytes {
+                pendingReplies[0].bytes -= remaining
+                break
+            }
+            let reply = pendingReplies.removeFirst()
+            remaining -= reply.bytes
+            reply.completion.finish()
+        }
         if output.isEmpty { writerActive = false; writer.suspend() }
     }
 }

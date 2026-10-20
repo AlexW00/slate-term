@@ -29,3 +29,25 @@ import Testing
         #expect(throws: RPCFailure.self) { try TerminalSearchRequest(params) }
     }
 }
+
+@Test func historySourcesAreExplicitAndTextBoundsApplyToSavedOutput() throws {
+    #expect(try TerminalHistoryRequest([:]).source == .current)
+    #expect(try TerminalHistoryRequest(["source": .string("previous")]).source == .previous)
+    for bad: JSONValue in [.string("all"), .integer(1), .null, .bool(true)] {
+        #expect(throws: RPCFailure.self) { try TerminalHistoryRequest(["source": bad]) }
+    }
+    let request = try TerminalHistoryRequest(["source": .string("previous"), "maxBytes": .integer(8), "maxLines": .integer(2)])
+    let result = request.result(text: "old\r\n日本語\r\nlast\r\n", byteTruncated: false)
+    #expect(result.text == "\r\nlast\r\n")
+    #expect(result.truncated && result.lineCount == 2 && result.text.utf8.count == 8)
+    let oneLine = try TerminalHistoryRequest(["maxLines": .integer(1)])
+    #expect(oneLine.result(text: "old\r\nlast\r\n", byteTruncated: false).text == "last\r\n")
+    let tiny = try TerminalHistoryRequest(["maxBytes": .integer(3)])
+    let cluster = tiny.result(text: "before👩🏽‍💻", byteTruncated: false)
+    #expect(cluster.text.isEmpty && cluster.truncated && cluster.lineCount == 0)
+    let decomposed = tiny.result(text: "beforee\u{301}", byteTruncated: false)
+    #expect(decomposed.text == "e\u{301}" && decomposed.lineCount == 1)
+    let large = String(repeating: "x", count: 4 * 1024 * 1024)
+    let bounded = try TerminalHistoryRequest([:]).result(text: large, byteTruncated: false)
+    #expect(bounded.text.utf8.count == TerminalHistoryRequest.maximumBytes && bounded.truncated && bounded.lineCount == 1)
+}

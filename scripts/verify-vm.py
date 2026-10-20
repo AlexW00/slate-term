@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent
 MACHINE = '/Applications/VMPal.app/Contents/Helpers/VMPalMachine.app/Contents/MacOS/VMPalMachine'
 sys.path.insert(0, str(ROOT / 'scripts'))
 from verification_gates import ALIASES, BY_NAME, GATES, select, validate
+from vm_test_bundle import APP_GUEST_PATH, UPGRADE_APPS, app_provenance, app_tree_hash, selected_app
 
 NATIVE = {gate.name: (Path(gate.command[1]).name, gate.product) for gate in GATES if gate.native}
 
@@ -288,6 +289,9 @@ def guest_main(plan):
         for name, expected in {**receipt['sourceHashes'], **receipt['binaryHashes']}.items():
             if digest(ROOT / name) != expected:
                 raise RuntimeError('Transferred artifact/source mismatch: ' + name)
+        for role, provenance in receipt.get('upgradeApps', {}).items():
+            if app_tree_hash(ROOT / provenance['guestPath']) != provenance['treeSHA256']:
+                raise RuntimeError('Transferred upgrade app mismatch: ' + role)
         cg = ctypes.CDLL('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics')
         cg.CGPreflightScreenCaptureAccess.restype = ctypes.c_bool
         if not cg.CGPreflightScreenCaptureAccess():
@@ -318,7 +322,8 @@ def guest_main(plan):
             print('VM RUN ' + name, flush=True)
             before = artifact_snapshot(artifacts)
             command = [str(ROOT / arg) if arg.startswith('scripts/') else arg for arg in command]
-            status = run_gate(command, artifacts / (name + '.log'), plan['timeout'])
+            status = run_gate(command, artifacts / (name + '.log'), plan['timeout'],
+                              env=guest_gate_environment(name, receipt))
             leaked = cleanup_apps(ROOT)
             if leaked:
                 print('FAIL: cleaned up leaked test processes: ' + str(leaked), flush=True)
@@ -430,9 +435,47 @@ def acquire_lock(shell, owner, wait_seconds, recover, sleep=time.sleep, clock=ti
         sleep(15)
 
 
+def prebuilt_app_selection(args, selected):
+    requested = getattr(args, 'app', None)
+    if requested is None:
+        return None
+    if getattr(args, 'all', False) or any(gate.name == 'build' for gate in selected):
+        raise ValueError('--app cannot be combined with --all or the build gate; prebuilt runs do not certify an app build')
+    if not any(gate.requires_app for gate in selected):
+        raise ValueError('--app requires a selected VM gate that runs the app')
+    return selected_app(ROOT, requested)
+
+
+def upgrade_app_selection(args, selected):
+    requested = {'upgrade': getattr(args, 'upgrade_app', None),
+                 'incompatible': getattr(args, 'incompatible_upgrade_app', None)}
+    enabled = any(gate.name == 'layout-app-upgrades' for gate in selected)
+    if enabled and not all(requested.values()):
+        raise ValueError('layout-app-upgrades requires --upgrade-app and --incompatible-upgrade-app')
+    if not enabled and any(requested.values()):
+        raise ValueError('--upgrade-app and --incompatible-upgrade-app require the layout-app-upgrades gate')
+    return {role: selected_app(ROOT, path) for role, path in requested.items() if path is not None}
+
+
+def upgrade_provenance(apps):
+    return {role: app_provenance(ROOT, path, guest_path=UPGRADE_APPS[role][0]) for role, path in apps.items()}
+
+
+def guest_gate_environment(name, receipt):
+    environment = dict(os.environ)
+    for _, variable in UPGRADE_APPS.values():
+        environment.pop(variable, None)
+    if name == 'layout-app-upgrades':
+        for role, (_, variable) in UPGRADE_APPS.items():
+            environment[variable] = str(ROOT / receipt['upgradeApps'][role]['executable']['guestPath'])
+    return environment
+
+
 def host_main(args):
     available = gates()
     if args.list or (not args.tests and not getattr(args, 'all', False)):
+        if any(getattr(args, key, None) is not None for key in ['app', 'upgrade_app', 'incompatible_upgrade_app']):
+            raise SystemExit('Prebuilt app selection requires selected VM gates and cannot be combined with --list')
         validate(ROOT)
         for gate in GATES:
             print(gate.name + (' [host]' if gate.location == 'host' else ' [VM]'))
@@ -441,7 +484,11 @@ def host_main(args):
     try:
         validate(ROOT)
         selected_gates = select(args.tests, complete=getattr(args, 'all', False))
-    except ValueError as error:
+        upgrade_apps = upgrade_app_selection(args, selected_gates)
+        upgrades = upgrade_provenance(upgrade_apps)
+        prebuilt_app = prebuilt_app_selection(args, selected_gates)
+        prebuilt_provenance = app_provenance(ROOT, prebuilt_app) if prebuilt_app is not None else None
+    except (ValueError, OSError, subprocess.CalledProcessError) as error:
         raise SystemExit(str(error))
     selected = [gate.name for gate in selected_gates]
     vm_gates = [gate for gate in selected_gates if gate.location == 'vm']
@@ -461,6 +508,10 @@ def host_main(args):
                'sourceHashes': {}, 'binaryHashes': {}, 'hostBinaryHashes': {},
                'hostResults': {}, 'guestResults': {}, 'preparations': [],
                'completed': False, 'exitCode': 1}
+    if prebuilt_provenance is not None:
+        receipt['app'] = dict(prebuilt_provenance, selection='prebuilt', buildGateRun=False)
+    if upgrades:
+        receipt['upgradeApps'] = upgrades
     remote = None
     copied_results = False
     locked = False
@@ -530,7 +581,7 @@ def host_main(args):
                     raise RuntimeError('Build prerequisite failed: ' + gate.name)
         if vm_gates:
             needs_app = any(gate.requires_app for gate in vm_gates)
-            needs_engine = needs_app or any(gate.native and gate.native.ghostty for gate in vm_gates)
+            needs_engine = (needs_app and prebuilt_app is None) or any(gate.native and gate.native.ghostty for gate in vm_gates)
             needs_package = any(gate.native and gate.native.package for gate in vm_gates)
             def build(command, env=None):
                 print('HOST BUILD ' + shlex.join(command), flush=True)
@@ -543,9 +594,9 @@ def host_main(args):
                     raise subprocess.CalledProcessError(status, command)
             if needs_engine and 'engine' not in receipt['hostResults']:
                 build(['bash', 'scripts/build-ghostty.sh'])
-            if needs_app and 'build' not in receipt['hostResults']:
+            if needs_app and prebuilt_app is None and 'build' not in receipt['hostResults']:
                 build(['bash', 'scripts/build-app.sh'])
-            elif needs_package and not needs_app:
+            elif needs_package and (not needs_app or prebuilt_app is not None):
                 build(['swift', 'build', '--product', 'slate-term', '--jobs', '4'])
             if needs_package:
                 package_bin = Path(checked(['swift', 'build', '--show-bin-path'], cwd=ROOT,
@@ -557,6 +608,15 @@ def host_main(args):
                 (ROOT / '.build/vm-tests').mkdir(parents=True, exist_ok=True)
                 build(['swiftc', 'Tests/WebOperations/CheckScreenshot.swift', '-o', '.build/vm-tests/check-screenshot'])
             ensure_sources()
+            app = prebuilt_app or ROOT / APP_GUEST_PATH
+            if needs_app:
+                provenance = app_provenance(ROOT, app, configuration=None if prebuilt_app is not None else 'Debug')
+                if prebuilt_provenance is not None and provenance != prebuilt_provenance:
+                    raise RuntimeError('Prebuilt app changed before staging')
+                receipt['app'] = dict(provenance, selection='prebuilt' if prebuilt_app is not None else 'host-build',
+                                      buildGateRun='build' in receipt['hostResults'])
+            if upgrade_provenance(upgrade_apps) != upgrades:
+                raise RuntimeError('Upgrade app changed before staging')
             with tempfile.TemporaryDirectory(prefix='slate-vm-bundle-') as temporary:
                 bundle = Path(temporary) / 'bundle'
                 bundle.mkdir()
@@ -568,8 +628,12 @@ def host_main(args):
                     else:
                         shutil.copy2(source, target)
                 from vm_test_bundle import stage_products
-                receipt['binaryHashes'], receipt['hostBinaryHashes'] = stage_products(ROOT, bundle, vm_gates, package_bin)
+                receipt['binaryHashes'], receipt['hostBinaryHashes'] = stage_products(ROOT, bundle, vm_gates, package_bin, app=prebuilt_app, upgrade_apps=upgrade_apps)
                 ensure_sources()
+                if needs_app and app_tree_hash(app) != receipt['app']['treeSHA256']:
+                    raise RuntimeError('App bundle changed during staging')
+                if upgrade_provenance(upgrade_apps) != upgrades:
+                    raise RuntimeError('Upgrade app changed during staging')
                 plan = {'tests': {gate.name: list(gate.command) for gate in vm_gates}, 'timeout': args.timeout}
                 (bundle / '.vm-plan.json').write_text(json.dumps(plan) + '\n')
                 (bundle / '.vm-receipt.json').write_text(json.dumps(receipt) + '\n')
@@ -688,6 +752,17 @@ def host_main(args):
                 if not (ROOT / name).is_file() or digest(ROOT / name) != expected:
                     receipt.setdefault('hostBinaryChanged', []).append(name)
                     receipt['exitCode'] = receipt['exitCode'] or 1
+            if receipt.get('app'):
+                app = Path(receipt['app']['hostPath'])
+                if not app.is_dir() or app_tree_hash(app) != receipt['app']['treeSHA256']:
+                    receipt['hostAppChanged'] = True
+                    receipt['exitCode'] = receipt['exitCode'] or 1
+                elif prebuilt_provenance is not None and app_provenance(ROOT, app) != prebuilt_provenance:
+                    receipt['hostAppProvenanceChanged'] = True
+                    receipt['exitCode'] = receipt['exitCode'] or 1
+            if upgrade_provenance(upgrade_apps) != upgrades:
+                receipt['hostUpgradeAppsChanged'] = True
+                receipt['exitCode'] = receipt['exitCode'] or 1
             if receipt['fullSuite'] and receipt['completed'] and receipt['exitCode'] == 0:
                 certificate = {'completedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(),
                                'vm': args.vm, 'runDirectory': str(output), 'checks': selected,
@@ -702,6 +777,9 @@ def main():
     parser.add_argument('tests', nargs='*', help='Test names from --list; no selection lists tests without running them')
     parser.add_argument('--list', action='store_true', help='List the complete gate inventory without starting a VM or building')
     parser.add_argument('--all', action='store_true', help='Run every inventory gate; compile on host and execute all native/UI gates in the VM')
+    parser.add_argument('--app', type=Path, help='Run selected app VM gates with this absolute repository-owned prebuilt .app; excludes --all and build')
+    parser.add_argument('--upgrade-app', type=Path, help='Repository-owned changed-build app for layout-app-upgrades')
+    parser.add_argument('--incompatible-upgrade-app', type=Path, help='Repository-owned signed incompatible-ABI fixture for layout-app-upgrades')
     parser.add_argument('--vm', default=os.environ.get('SLATE_TEST_VM', 'slate-term'))
     parser.add_argument('--vmpal', help='VMPal CLI executable (bundled helper used if not on PATH)')
     parser.add_argument('--timeout', type=int, default=600, help='Seconds per guest test (default: 600)')

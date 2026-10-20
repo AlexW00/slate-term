@@ -57,6 +57,20 @@ extension WorkspaceHost {
                 throw RPCFailure(code: -32602, message: "\(unsupported) is not supported by \(method)")
             }
         }
+        if try string("expectedBundleRevision") != nil && method != "layoutApps.refresh" {
+            throw RPCFailure(code: -32602, message: "expectedBundleRevision is only supported by layoutApps.refresh")
+        }
+        if method == "config.resetOverrides" {
+            guard Set(params.keys).intersection(Self.apiGuardKeys).isSubset(of: ["expectedInstanceId", "expectedSourceRevision"]) else {
+                throw RPCFailure(code: -32602, message: "Unsupported configuration override safety guard")
+            }
+        }
+        if method.hasPrefix("layoutApps.") {
+            let allowed = Set(AutomationMethod(rawValue: method).flatMap { AutomationCatalog.methods[$0]?.guards } ?? [])
+            guard Set(params.keys).intersection(Self.apiGuardKeys).isSubset(of: allowed) else {
+                throw RPCFailure(code: -32602, message: "Unsupported layout app safety guard")
+            }
+        }
         if let _ = try string("expectedSavedLayoutRevision") {
             guard method == "layouts.update" else { throw RPCFailure(code: -32602, message: "expectedSavedLayoutRevision is only supported by layouts.update") }
             // This document guard is checked by SavedLayoutStore at atomic publication, not against TOML.
@@ -102,7 +116,7 @@ extension WorkspaceHost {
             let id = params["id"]?.string ?? ""
             let configurationCommand = id == "config.reload" || id.hasPrefix("appearance.") || id.hasPrefix("terminal.font.") || id == "terminal.palette.set"
                 || id.hasPrefix("agents.activity.")
-            guard ["config.patch", "config.reload"].contains(method) || (method == "command.run" && configurationCommand) else {
+            guard ["config.patch", "config.reload", "config.resetOverrides"].contains(method) || (method == "command.run" && configurationCommand) else {
                 throw RPCFailure(code: -32602, message: "expectedSourceRevision is not supported by this operation")
             }
             guard try configurationRevision().revision == expected else { throw RPCFailure(code: APIError.conflict, message: "Configuration source changed; inspect again") }
@@ -124,7 +138,12 @@ extension WorkspaceHost {
     func apiMethods() -> [String] { AutomationMethod.publicMethods.map(\.rawValue) }
 
     func describeAPI() throws -> JSONValue {
-        try AutomationCatalog.describe(instanceID: instanceID, commands: availableCommands)
+        var value = try AutomationCatalog.describe(instanceID: instanceID, commands: availableCommands).object!
+        let layout = ApplicationLaunchContext.current.isLayoutApp
+        value["mode"] = .string(layout ? "layoutApp" : "standard")
+        value["layoutAppID"] = ApplicationLaunchContext.current.descriptor.map { .string($0.layoutAppID.uuidString) } ?? .null
+        value["runtimeAvailability"] = AutomationCatalog.runtimeAvailability(layoutApp: layout)
+        return .object(value)
     }
 
     func workspaceSnapshot(_ params: [String: JSONValue]) throws -> JSONValue {

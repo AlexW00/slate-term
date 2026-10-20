@@ -7,7 +7,7 @@ import SlateTermSettings
 @main
 struct SlateTermCLI: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "slate-term", abstract: "Control a running Slate Terminal workspace.",
-        subcommands: [WarningsCLI.self, NotifyCLI.self, NotificationsCLI.self, Tabs.self, Panes.self, WindowsCLI.self, TerminalCommand.self, BrowserCommand.self, WebCLI.self, Plugins.self, Events.self, ContextCommand.self, ShellCommand.self, LayoutCommand.self, SavedLayoutsCommand.self, Commands.self, ConfigCommand.self, WorkspaceCLI.self, APICLI.self, AppearanceCLI.self, AgentActivityCLI.self, PresenceCLI.self, PaletteCLI.self, SkillCLI.self, WelcomeCLI.self, UpdatesCLI.self, RPC.self, Version.self, PluginWorker.self])
+        subcommands: [WarningsCLI.self, NotifyCLI.self, NotificationsCLI.self, Tabs.self, Panes.self, WindowsCLI.self, TerminalCommand.self, BrowserCommand.self, WebCLI.self, Plugins.self, Events.self, ContextCommand.self, ShellCommand.self, LayoutCommand.self, SavedLayoutsCommand.self, LayoutAppsCommand.self, Commands.self, ConfigCommand.self, WorkspaceCLI.self, APICLI.self, AppearanceCLI.self, AgentActivityCLI.self, PresenceCLI.self, PaletteCLI.self, SkillCLI.self, WelcomeCLI.self, UpdatesCLI.self, RPC.self, Version.self, PluginWorker.self])
 
     static func main() {
         do {
@@ -153,6 +153,7 @@ struct TerminalCommand: ParsableCommand {
     @Option(help: "Logical key, e.g. ctrl+c, alt+left, shift+tab; text entry uses send.") var key: String?
     @Option(help: "Wait for this literal screen text instead of a shell prompt.") var contains: String?
     @Option(help: "Require a later authenticated prompt sequence.") var afterSequence: Int?
+    @Option(help: "History source: current terminal or previous saved output; default current.") var source: TerminalHistoryRequest.Source?
     @Option(help: "History tail byte limit, 1...131072.") var maxBytes: Int?
     @Option(help: "History tail line limit, 1...10000.") var maxLines: Int?
     @Option(help: "New absolute local file for historyExport; never overwrites.") var path: String?
@@ -161,6 +162,9 @@ struct TerminalCommand: ParsableCommand {
     @Option(help: "Run/wait deadline in milliseconds, 1...295000; default 30000. Expiry does not stop the process.") var timeoutMilliseconds: Int?
 
     func run() throws {
+        if source != nil, action != .history && action != .historyExport {
+            throw ValidationError("--source applies only to terminal history or historyExport")
+        }
         let handleLookup = AutomationMethod(rawValue: "terminal.\(action.rawValue)")?.family == .terminalOperations
         if handleLookup {
             guard target.pane == nil, target.tab == nil, !target.force, !target.active,
@@ -181,6 +185,7 @@ struct TerminalCommand: ParsableCommand {
         if let key { params["key"] = .string(key) }
         if let contains { params["contains"] = .string(contains) }
         if let afterSequence { params["afterSequence"] = .integer(afterSequence) }
+        if let source { params["source"] = .string(source.rawValue) }
         if let maxBytes { params["maxBytes"] = .integer(maxBytes) }
         if let maxLines { params["maxLines"] = .integer(maxLines) }
         if let path { params["path"] = .string(path) }
@@ -497,29 +502,37 @@ struct Commands: ParsableCommand {
 
 struct ConfigCommand: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "config", abstract: "Inspect, reload, or validate TOML configuration.")
-    enum Action: String, CaseIterable, ExpressibleByArgument { case get, reload, validate, set, patch }
+    enum Action: String, CaseIterable, ExpressibleByArgument { case get, reload, validate, set, patch, resetOverrides = "reset-overrides" }
     @Argument var action: Action
-    @Option var key: String?
+    @Option(name: .customLong("key")) var keys: [String] = []
     @Option(help: "JSON value for set, or an object of dotted application keys for patch.") var value: String?
     @Option var expectedSourceRevision: String?
     @Option(help: "File for offline validation; defaults to SLATE_TERM_CONFIG_FILE or ~/.config/slate-term/config.toml.") var file: String?
     @OptionGroup var connection: Connection
     func run() throws {
+        if action == .resetOverrides {
+            guard file == nil, value == nil, !keys.isEmpty, let expectedSourceRevision, !expectedSourceRevision.isEmpty else {
+                throw ValidationError("config reset-overrides requires --key and --expected-source-revision; --file/--value are unsupported")
+            }
+            try connection.call("config.resetOverrides", params: ["keys": .array(keys.map(JSONValue.string)),
+                "expectedSourceRevision": .string(expectedSourceRevision)])
+            return
+        }
         if action == .set || action == .patch {
             guard file == nil, let value, let expectedSourceRevision else { throw ValidationError("config set/patch requires --value and --expected-source-revision; --file is offline-only") }
             let decoded = try JSONDecoder().decode(JSONValue.self, from: Data(value.utf8))
             let values: [String: JSONValue]
             if action == .set {
-                guard let key else { throw ValidationError("config set requires --key") }
+                guard keys.count == 1, let key = keys.first else { throw ValidationError("config set requires one --key") }
                 values = [key: decoded]
             } else {
-                guard key == nil, let object = decoded.object else { throw ValidationError("config patch requires an object value, not --key") }
+                guard keys.isEmpty, let object = decoded.object else { throw ValidationError("config patch requires an object value, not --key") }
                 values = object
             }
             try connection.call("config.patch", params: ["values": .object(values), "expectedSourceRevision": .string(expectedSourceRevision)])
             return
         }
-        guard key == nil, value == nil else { throw ValidationError("--key/--value apply only to config set/patch") }
+        guard keys.isEmpty, value == nil else { throw ValidationError("--key/--value apply only to config set/patch/reset-overrides") }
         if action != .validate {
             guard file == nil else { throw ValidationError("--file applies only to config validate") }
             var params: [String: JSONValue] = action == .reload ? ["id": .string("config.reload")] : [:]
@@ -568,6 +581,7 @@ struct Version: ParsableCommand {
 }
 
 extension ShellKind: ExpressibleByArgument {}
+extension TerminalHistoryRequest.Source: ExpressibleByArgument {}
 
 /// Detached delivery for shell reports. posix_spawn, not fork: a forked Swift process must
 /// not run Foundation or Dispatch code. The copy starts its own session with no terminal, so

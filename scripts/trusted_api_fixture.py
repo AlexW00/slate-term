@@ -166,7 +166,7 @@ def verify_trusted_api(app, service_call):
         # Default targets must resolve before layout guards, even with another key tab.
         tab = app.rpc('pane.inspect', pane=panel)['tabId']
         revision = app.rpc('pane.inspect', pane=panel)['layoutRevision']
-        app.rpc('command.run', id='tab.new')
+        app.rpc('command.run', id='tab.new', focus='new')
         assert bridge('pane.inspect', {'expectedLayoutRevision': revision})['paneId'] == panel
         before = app.rpc('workspace.get')
         for pane in [panel, browser]:

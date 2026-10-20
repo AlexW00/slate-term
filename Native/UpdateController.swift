@@ -3,6 +3,8 @@ import Combine
 import SwiftUI
 import Sparkle
 import SlateTermCore
+import SlateTermIPC
+import SlateTermSettings
 
 /// One app-wide update session serves native controls and every trusted API client.
 @MainActor
@@ -11,9 +13,22 @@ final class UpdateController: NSObject, ObservableObject, SPUUserDriver, SPUUpda
     var onChange: ((UpdateSnapshot, UpdateSnapshot) -> Void)?
     var nativeAction: ((UpdateAction, String?) -> Void)?
     var confirmInstallation: (() -> Bool)?
+    var restartConfirmed: (() -> Void)?
+    let isLayoutApp = ApplicationLaunchContext.current.isLayoutApp
+    var displayName: String { ApplicationLaunchContext.current.displayName }
     private let configuration: UpdateConfiguration?
     private var updater: SPUUpdater?
     private var updateWindow: NSWindow?
+    private var parentRuntimeWatchers: [URL: DirectoryTreeWatcher] = [:]
+    private var localParentInput: LayoutAppUpdateSource.InspectionInput?
+    private var localParentGeneration = UUID()
+    private var localParentDirty = true
+    private var localParentRefresh: Task<Void, Never>?
+    private var localParentRefreshID = UUID()
+    private var localParentSequence: UInt64 = 0
+    private var localParentAppliedSequence: UInt64 = 0
+    private var localParentRequests = 0
+    private var localInstallBusy = false
     private var offerReply: ((SPUUserUpdateChoice) -> Void)?
     private var sparkleCancellation: (() -> Void)?
     private var acknowledgement: (() -> Void)?
@@ -30,22 +45,28 @@ final class UpdateController: NSObject, ObservableObject, SPUUserDriver, SPUUpda
     private var fixture = false
 
     init(bundle: Bundle = .main) {
-        let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development"
-        var initial = UpdateSnapshot(currentVersion: version)
-        do {
-            configuration = try UpdateConfiguration(
-                feedURL: bundle.object(forInfoDictionaryKey: "SUFeedURL") as? String,
-                publicKey: bundle.object(forInfoDictionaryKey: "SUPublicEDKey") as? String,
-                requiresSignedFeed: bundle.object(forInfoDictionaryKey: "SURequireSignedFeed") as? Bool == true,
-                verifiesBeforeExtraction: bundle.object(forInfoDictionaryKey: "SUVerifyUpdateBeforeExtraction") as? Bool == true,
-                signatureFailuresExpire: (bundle.object(forInfoDictionaryKey: "SUSignedFeedFailureExpirationInterval") as? NSNumber)?.doubleValue != 0)
-        } catch {
+        let versionBundle = ApplicationLaunchContext.current.isLayoutApp ? RuntimeBundle.bundle : bundle
+        let version = versionBundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development"
+        var initial = UpdateSnapshot(currentVersion: version, source: ApplicationLaunchContext.current.isLayoutApp ? "localParent" : "signedFeed")
+        if ApplicationLaunchContext.current.isLayoutApp {
             configuration = nil
-            initial.phase = .unavailable
-            initial.detail = "This build does not have a configured, signed update channel."
+        } else {
+            do {
+                configuration = try UpdateConfiguration(
+                    feedURL: bundle.object(forInfoDictionaryKey: "SUFeedURL") as? String,
+                    publicKey: bundle.object(forInfoDictionaryKey: "SUPublicEDKey") as? String,
+                    requiresSignedFeed: bundle.object(forInfoDictionaryKey: "SURequireSignedFeed") as? Bool == true,
+                    verifiesBeforeExtraction: bundle.object(forInfoDictionaryKey: "SUVerifyUpdateBeforeExtraction") as? Bool == true,
+                    signatureFailuresExpire: (bundle.object(forInfoDictionaryKey: "SUSignedFeedFailureExpirationInterval") as? NSNumber)?.doubleValue != 0)
+            } catch {
+                configuration = nil
+                initial.phase = .unavailable
+                initial.detail = "This build does not have a configured, signed update channel."
+            }
         }
         snapshot = initial
         super.init()
+        if isLayoutApp { refreshLocalParent() }
     }
 
     private func change(_ mutate: (inout UpdateSnapshot) -> Void) {
@@ -58,18 +79,28 @@ final class UpdateController: NSObject, ObservableObject, SPUUserDriver, SPUUpda
         onChange?(before, next)
     }
 
-    func perform(_ request: UpdateRequest, validateCaller: @escaping () throws -> Void = {}) throws -> UpdateSnapshot {
+    func perform(_ request: UpdateRequest, validateCaller: @escaping @MainActor () throws -> Void = {}) async throws -> UpdateSnapshot {
         try validateCaller()
         if let requested = request.updateID, requested != snapshot.updateID {
             throw RPCFailure(code: APIError.conflict, message: "The update session changed; read updates.get before acting.")
         }
         switch request.action {
-        case .get: break
+        case .get: if isLayoutApp && !fixture { try await refreshLocalParentNow(validateCaller: validateCaller) }
+        case .openParent:
+            guard isLayoutApp else { throw LayoutAppUpdateSource.unavailable("Open Slate Terminal is available in a layout app.") }
+            let input = try LayoutAppUpdateSource.captureInspectionInput()
+            let parent = try await BlockingIOExecutor.run { try LayoutAppUpdateSource.parentApplication(input) }
+            try Task.checkCancellation()
+            try validateCaller()
+            guard !stopping, try LayoutAppUpdateSource.captureInspectionInput() == input else {
+                throw RPCFailure(code: APIError.conflict, message: "The parent application changed; try opening it again.")
+            }
+            _ = try await NSWorkspace.shared.openApplication(at: parent, configuration: .init())
         case .show: showWindow()
-        case .check: try check()
+        case .check: try await check(validateCaller: validateCaller)
         case .download: try beginDownload()
         case .cancel: try cancel()
-        case .install: try install(validateCaller: validateCaller)
+        case .install: try await install(validateCaller: validateCaller)
         }
         return snapshot
     }
@@ -98,8 +129,9 @@ final class UpdateController: NSObject, ObservableObject, SPUUserDriver, SPUUpda
     func hideWindow() { updateWindow?.orderOut(nil); change { $0.windowVisible = false } }
     func windowShouldClose(_ sender: NSWindow) -> Bool { hideWindow(); return false }
 
-    private func check() throws {
+    private func check(validateCaller: @escaping @MainActor () throws -> Void) async throws {
         showWindow()
+        if isLayoutApp && !fixture { try await refreshLocalParentNow(validateCaller: validateCaller); return }
         if [.checking, .available, .downloading, .verifying, .ready, .installing].contains(snapshot.phase) { return }
         guard configuration != nil || fixture else { return }
         if fixture { beginCheck(); return }
@@ -132,6 +164,7 @@ final class UpdateController: NSObject, ObservableObject, SPUUserDriver, SPUUpda
     }
 
     private func beginDownload() throws {
+        guard !isLayoutApp || fixture else { throw LayoutAppUpdateSource.unavailable("Layout apps use the verified local parent runtime; no download is needed.") }
         guard [.available, .downloadError].contains(snapshot.phase), let release = snapshot.release,
               let id = snapshot.updateID, offerReply != nil, !notesPending else {
             throw RPCFailure(code: APIError.unavailable, message: "Wait for the signed release notes and an available update before downloading.")
@@ -194,6 +227,7 @@ final class UpdateController: NSObject, ObservableObject, SPUUserDriver, SPUUpda
     }
 
     private func cancel() throws {
+        guard !isLayoutApp || fixture else { throw LayoutAppUpdateSource.unavailable("Layout apps use the verified local parent runtime; no download can be cancelled.") }
         guard snapshot.phase != .installing else {
             throw RPCFailure(code: APIError.unavailable, message: "Installation was explicitly started; complete the normal quit confirmation.")
         }
@@ -208,7 +242,160 @@ final class UpdateController: NSObject, ObservableObject, SPUUserDriver, SPUUpda
         }
     }
 
-    private func install(validateCaller: () throws -> Void) throws {
+    private func captureLocalParentInput() throws -> LayoutAppUpdateSource.InspectionInput {
+        let input = try LayoutAppUpdateSource.captureInspectionInput()
+        if localParentInput != input {
+            localParentInput = input
+            localParentGeneration = UUID()
+            localParentDirty = true
+        }
+        for parent in Array(parentRuntimeWatchers.keys) where !input.candidates.contains(parent) {
+            parentRuntimeWatchers.removeValue(forKey: parent)?.close()
+        }
+        for parent in input.candidates where parentRuntimeWatchers[parent] == nil {
+            parentRuntimeWatchers[parent] = try? DirectoryTreeWatcher(url: parent) { [weak self] in
+                guard let self, !self.stopping else { return }
+                self.localParentGeneration = UUID()
+                self.localParentDirty = true
+                self.refreshLocalParent()
+            }
+        }
+        return input
+    }
+
+    /// Activation reads the cached snapshot. Only changed candidates or watcher events inspect again.
+    func refreshLocalParent() {
+        guard isLayoutApp, !fixture, !stopping, !localInstallBusy, snapshot.phase != .installing else { return }
+        _ = try? captureLocalParentInput()
+        guard localParentDirty, localParentRefresh == nil, localParentRequests == 0 else { return }
+        let refreshID = UUID()
+        localParentRefreshID = refreshID
+        let generation = localParentGeneration
+        localParentRefresh = UpdateOperationScope.$current.withValue(nil) {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                defer {
+                    if self.localParentRefreshID == refreshID {
+                        self.localParentRefresh = nil
+                        if self.localParentGeneration != generation, self.localParentDirty { self.refreshLocalParent() }
+                    }
+                }
+                do {
+                    let (result, sequence) = try await self.inspectLocalParent()
+                    self.applyLocalParent(result, sequence: sequence)
+                } catch is CancellationError { }
+                catch {
+                    guard !self.stopping, !self.fixture, !self.localInstallBusy else { return }
+                    self.applyLocalParent(.failure(error), sequence: self.localParentSequence)
+                }
+            }
+        }
+    }
+
+    private func stopLocalParentRefresh() {
+        localParentGeneration = UUID()
+        localParentDirty = true
+        localParentRefreshID = UUID()
+        localParentRefresh?.cancel()
+        localParentRefresh = nil
+    }
+
+    private func inspectLocalParent(validateCaller: @MainActor () throws -> Void = {}) async throws
+        -> (Result<LayoutAppUpdateSource, Error>, UInt64) {
+        while true {
+            try Task.checkCancellation()
+            guard !stopping, !fixture else { throw CancellationError() }
+            let input = try captureLocalParentInput()
+            let generation = localParentGeneration
+            localParentSequence &+= 1
+            let sequence = localParentSequence
+            let result = try await BlockingIOExecutor.run { Result { try LayoutAppUpdateSource.inspect(input) } }
+            try Task.checkCancellation()
+            try validateCaller()
+            guard !stopping, !fixture else { throw CancellationError() }
+            // Never publish an inspection invalidated while its files were being read.
+            let currentInput = try captureLocalParentInput()
+            guard generation == localParentGeneration, currentInput == input else { continue }
+            return (result, sequence)
+        }
+    }
+
+    private func applyLocalParent(_ result: Result<LayoutAppUpdateSource, Error>, sequence: UInt64) {
+        guard !stopping, !fixture, snapshot.phase != .installing,
+              sequence >= localParentAppliedSequence else { return }
+        localParentAppliedSequence = sequence
+        // Failed observers cannot support a durable inspection cache.
+        localParentDirty = localParentInput?.candidates.contains { parentRuntimeWatchers[$0] == nil } ?? true
+        switch result {
+        case .success(let source):
+            let currentBuild = RuntimeBundle.bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
+            let newer = source.build.compare(currentBuild, options: .numeric) == .orderedDescending
+            change {
+                $0.updateID = source.updateID; $0.phase = newer ? .ready : .current
+                $0.release = newer ? UpdateRelease(id: source.updateID, version: source.version, build: source.build,
+                    downloadURL: "", contentLength: 0, signature: "") : nil
+                $0.detail = newer ? "A verified runtime update is ready from Slate Terminal. Restart to apply it." : "This app is using the latest compatible runtime available from Slate Terminal."
+            }
+        case .failure(let error):
+            change { $0.updateID = nil; $0.release = nil; $0.phase = .unavailable; $0.detail = String(describing: error) }
+        }
+    }
+
+    private func refreshLocalParentNow(validateCaller: @MainActor () throws -> Void) async throws {
+        guard snapshot.phase != .installing else { return }
+        localParentRequests += 1
+        defer {
+            localParentRequests -= 1
+            if localParentDirty { refreshLocalParent() }
+        }
+        let (result, sequence) = try await inspectLocalParent(validateCaller: validateCaller)
+        applyLocalParent(result, sequence: sequence)
+    }
+
+    private func installLocal(validateCaller: @MainActor () throws -> Void) async throws {
+        guard !localInstallBusy else {
+            throw RPCFailure(code: APIError.conflict, message: "A layout app restart is already being prepared.")
+        }
+        guard snapshot.phase == .ready, let id = snapshot.updateID else {
+            throw LayoutAppUpdateSource.unavailable("Check for a verified parent runtime update before restarting.")
+        }
+        localInstallBusy = true
+        stopLocalParentRefresh()
+        defer {
+            localInstallBusy = false
+            if snapshot.phase != .installing { refreshLocalParent() }
+        }
+        guard confirmInstallation?() ?? true else { return }
+        try Task.checkCancellation()
+        try validateCaller()
+        let (result, _) = try await inspectLocalParent(validateCaller: validateCaller)
+        let source = try result.get()
+        guard snapshot.phase == .ready, snapshot.updateID == id, source.updateID == id else {
+            throw RPCFailure(code: APIError.conflict, message: "The parent update changed during confirmation. Check again before restarting.")
+        }
+        let generation = localParentGeneration
+        try Task.checkCancellation()
+        try validateCaller()
+        let prepared = try await LayoutAppUpdateSource.prepareRelaunch(source: source)
+        do {
+            try Task.checkCancellation()
+            try validateCaller()
+            guard !stopping, snapshot.phase == .ready, snapshot.updateID == id,
+                  localParentGeneration == generation else {
+                throw RPCFailure(code: APIError.conflict, message: "The parent update changed while preparing the restart. Check again.")
+            }
+            prepared.commit()
+            restartConfirmed?()
+            change { $0.phase = .installing; $0.detail = "Restarting to apply the verified parent runtime." }
+            RPCReplyCompletion.afterReply { NSApp.terminate(nil) }
+        } catch {
+            await BlockingIOExecutor.finish { prepared.cancel() }
+            throw error
+        }
+    }
+
+    private func install(validateCaller: @MainActor () throws -> Void) async throws {
+        if isLayoutApp && !fixture { try await installLocal(validateCaller: validateCaller); return }
         if snapshot.phase == .installing, let retryTermination, installConsentID == snapshot.updateID {
             try validateCaller(); retryTermination(); return
         }
@@ -217,10 +404,12 @@ final class UpdateController: NSObject, ObservableObject, SPUUserDriver, SPUUpda
         }
         // Confirmation can reenter the app; revalidate both the caller and captured update afterwards.
         guard confirmInstallation?() ?? true else { return }
+        try Task.checkCancellation()
         try validateCaller()
         guard snapshot.updateID == id, snapshot.phase == .ready, offerReply != nil else {
             throw RPCFailure(code: APIError.conflict, message: "The update changed during quit confirmation.")
         }
+        try Task.checkCancellation()
         installConsentID = id
         offerReply = nil
         change { $0.phase = .installing; $0.detail = "Downloading and validating the update for installation."; $0.receivedBytes = 0 }
@@ -229,6 +418,9 @@ final class UpdateController: NSObject, ObservableObject, SPUUserDriver, SPUUpda
 
     func shutdown() {
         stopping = true; pendingCheck = false
+        stopLocalParentRefresh()
+        parentRuntimeWatchers.values.forEach { $0.close() }
+        parentRuntimeWatchers.removeAll()
         stopDownload()
         let reply = offerReply; offerReply = nil; reply?(.dismiss)
         let cancel = sparkleCancellation; sparkleCancellation = nil; cancel?()
@@ -250,16 +442,16 @@ final class UpdateController: NSObject, ObservableObject, SPUUserDriver, SPUUpda
         guard !stopping, snapshot.phase == .checking else { reply(state.stage == .installing ? .skip : .dismiss); return }
         sparkleCancellation = nil
         guard item.signingValidationStatus == .succeeded, validNotesMetadata(item),
-              state.stage == .notDownloaded, !item.isInformationOnlyUpdate,
+              !item.isInformationOnlyUpdate,
               let url = item.fileURL, url.scheme?.lowercased() == "https", url.user == nil, url.password == nil,
               item.contentLength > 0, item.contentLength <= UpdateArchiveVerifier.maxArchiveBytes,
               let enclosure = item.propertiesDictionary["enclosure"] as? [String: Any],
               let signature = enclosure["sparkle:edSignature"] as? String,
               Data(base64Encoded: signature)?.count == 64 else {
-            reply(state.stage == .installing ? .skip : .dismiss)
-            change { $0.phase = .verificationError; $0.detail = "This update does not meet Slate’s signed-update requirements." }
+            _ = admitOffer(stage: state.stage, metadataValid: false, reply: reply)
             return
         }
+        guard admitOffer(stage: state.stage, metadataValid: true, reply: reply) else { return }
         offerReply = reply
         notesPending = item.releaseNotesURL != nil
         let notes = notesPending ? "Loading signed release notes…" : (item.itemDescription ?? "No release notes were provided.")
@@ -269,6 +461,30 @@ final class UpdateController: NSObject, ObservableObject, SPUUserDriver, SPUUpda
             $0.phase = .available; $0.release = release; $0.expectedBytes = release.contentLength
             $0.detail = notesPending ? "Loading signed release notes…" : nil
         }
+    }
+
+    private func admitOffer(stage: SPUUserUpdateStage, metadataValid: Bool,
+                            reply: (SPUUserUpdateChoice) -> Void) -> Bool {
+        guard metadataValid else {
+            offerReply = nil
+            reply(stage == .installing ? .skip : .dismiss)
+            change { $0.phase = .verificationError; $0.detail = "This update does not meet Slate’s signed-update requirements." }
+            return false
+        }
+        guard stage == .notDownloaded else {
+            offerReply = nil
+            // Skipping a downloaded offer clears resumable data; an explicit check clears the skipped version.
+            // Dismissing an installing offer can authorize installation on a later quit.
+            reply(.skip)
+            change {
+                $0.phase = .checkError
+                $0.detail = stage == .installing
+                    ? "An installation from an earlier session was skipped. Check again to choose an update."
+                    : "A download from an earlier session was discarded. Check again to review an update before downloading."
+            }
+            return false
+        }
+        return true
     }
 
     func showUpdateReleaseNotes(with downloadData: SPUDownloadData) {
@@ -381,6 +597,7 @@ final class UpdateController: NSObject, ObservableObject, SPUUserDriver, SPUUpda
     // The VM fixture supplies transport outcomes, then exercises production actions and views.
     func fixtureState(_ phase: UpdatePhase) {
         fixture = true
+        stopLocalParentRefresh()
         stopDownload()
         installConsentID = nil; retryTermination = nil; notesPending = false
         let id = UUID().uuidString
@@ -399,6 +616,11 @@ final class UpdateController: NSObject, ObservableObject, SPUUserDriver, SPUUpda
         guard fixture else { return }
         switch name {
         case "notesFailure": notesFailed()
+        case "validDownloadedOffer", "validInstallingOffer":
+            let stage: SPUUserUpdateStage = name == "validInstallingOffer" ? .installing : .downloaded
+            _ = admitOffer(stage: stage, metadataValid: true) { [weak self] choice in
+                self?.fixtureReadyChoices.append(choice == .skip ? "skip" : choice == .dismiss ? "dismiss" : "install")
+            }
         case "progress":
             change {
                 $0.receivedBytes = receivedBytes

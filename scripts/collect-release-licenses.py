@@ -13,7 +13,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
 LICENSES = ROOT / "licenses"
-BUNDLE_DIRECTORY = Path("Contents/Resources/ThirdPartyLicenses")
+BUNDLE_DIRECTORY = Path("Contents/Frameworks/SlateRuntime.framework/Versions/A/Resources/ThirdPartyLicenses")
 
 
 def digest(data):

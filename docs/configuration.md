@@ -49,6 +49,20 @@ show_activity = true # frames and tags on panes while an agent acts on them
 
 These tables and `[plugins.<id>]` settings are supported currently. Unknown keys, built-in commands, and duplicate canonical shortcut spellings are errors rather than silently ignored settings. Well-formed `plugin.<plugin-id>.<command-id>` bindings are retained even when their plugin is unavailable; unavailable commands do not intercept keys. See [plugin commands and settings](plugins.md#shortcuts-and-settings).
 
+## Layout app configuration
+
+A generated layout app reads Slate Terminal's configuration and `palettes/` directory read-only. Its changes go to `config/overrides.toml` beneath its own `LayoutApps/<layoutAppID>/` state root. Explicit local settings take precedence, including values equal to built-in defaults. Nested plugin settings merge by key; arrays replace the inherited array. Both configuration files are watched, and invalid local edits retain the last applied configuration. If the parent configuration is unreadable or invalid, defaults supply the inherited values and valid local overrides still apply, with a diagnostic in configuration status.
+
+Settings shows effective values and saves only edited fields. A local override has a **Reset** action that removes it and uses the parent's current value. Apply or revert pending changes before resetting. Parent and local edits both invalidate an open draft or API source revision. Custom palettes and installed plugins are managed in Slate Terminal; the layout app can select shared palettes and edit its own plugin settings. Deleting a local plugin setting reveals any inherited value at that path.
+
+`config.get` reports the local writable `path`, read-only `parentPath`, `parentError`, and `overriddenKeys`. Ordinary Slate Terminal reports `null`, `null`, and `[]` for the latter three fields. `config.patch` continues to set explicit values; JSON null is not deletion. Use `config.resetOverrides` with `keys` and `expectedSourceRevision` to remove local application overrides:
+
+```sh
+slate-term config reset-overrides --key terminal.font_size --expected-source-revision REV
+```
+
+Repeat `--key` to reset multiple settings. Reset accepts 1–128 distinct supported application keys and returns the same write receipt as `config.patch`. It never modifies the parent file and returns `-32022` in ordinary Slate Terminal. Plugin overrides use `plugins.settings.patch` with explicit `delete` operations.
+
 ## Settings window
 
 Open **Slate Terminal → Settings…** (⌘,) for native General, Appearance, Terminal, Browser, Layouts, Keyboard Shortcuts, Plugins, and AI Agents sections. **Apply** validates and saves changes to the config file; **Revert** discards pending edits. External edits reload automatically when there are no pending GUI changes. If the file changes while you edit, Settings asks you to revert before saving.
@@ -78,6 +92,18 @@ The TOML key `appearance.unfocused_pane_dim` accepts finite numbers from 0 to 1.
 ## Agent activity
 
 **Settings → AI Agents → Show agent activity on panes** (`agents.show_activity`, default `true`) controls whether panes show agent activity frames and tags. The same switch is available as `agents.activity.show`, `agents.activity.hide` and `agents.activity.toggle` in the ⌘K picker and through `command.run`, as `slate-term agent-activity show|hide|toggle`, and through `config.patch`. It changes presentation only; it does not change what agents can do, and `presence.list`, holds and events keep working. Activity is shown only for agents that identify themselves; see [agent presence](presence.md).
+
+**Agent accent colors** in the same section provides color pickers for built-in agents and an **Add** field for custom agents. **Reset** restores a built-in color; **Remove** restores a custom agent's automatic color. Apply/Revert work like other preferences. Colors update existing activity frames and pills without restarting terminals.
+
+```toml
+[agents.colors]
+codex = "#B79CFF"
+"my.agent" = "#3A9CA8"
+```
+
+Use lowercase actor family names (1–32 ASCII letters, digits, `.`, `_`, `-`, starting with a letter or digit). Actor matching ignores case and the `:suffix`, so `My.Agent:reviewer` uses `my.agent`. Values are opaque `#RRGGBB` colors; up to 64 overrides are supported. Missing names retain automatic colors. Custom names already work as CLI actors; adding a color does not install or launch an agent.
+
+`config.get` returns `agents.colors`. `config.patch` and `slate-term config set --key agents.colors --value '{"codex":"#B79CFF"}' --expected-source-revision REVISION` replace the complete override map; omitted names reset and `{}` resets everything. Read and merge existing entries before changing one color. Registered plugins and services use the same operation, validation, and source-revision conflict guard. This argument-requiring preference does not add a one-click command or shortcut.
 
 ## Working directory
 
@@ -167,7 +193,7 @@ slate-term config reload
 
 Validation is offline and never modifies the file. An explicitly supplied missing file is an error; an absent default file uses defaults. `get` and `reload` connect to the app through the usual socket selection. Reload is also a registry command (`command run config.reload`) and a Workspace menu item.
 
-The app watches both the file and its parent directory, handling in-place writes, atomic editor replacement, deletion, and recreation. Invalid edits retain the last successfully applied settings. Inspect `config get` or **Slate Terminal → Configuration & Workspace Status** for errors. Replacing the parent directory itself is not currently tracked; restart the app after doing that.
+The app watches the file and its ancestor directories, handling in-place writes, atomic editor replacement, deletion, and recreation, including replacement of a parent directory. Observation of inherited configuration does not create missing parent directories. Invalid edits retain the last successfully applied settings. Inspect `config get` or **Slate Terminal → Configuration & Workspace Status** for errors.
 
 - Font family/size, text thickening, minimum contrast, cursor defaults, appearance, palettes, and keybindings update without replacing terminal surfaces or PTYs. Font sizes are finite numbers from **1 to 256 points**; minimum contrast is a finite **1–21** ratio (1 leaves colors unchanged). Text thickening uses Ghostty's native macOS font rendering.
 - `light_theme` and `dark_theme` accept the [bundled palettes or custom color-only files](#terminal-palettes) above. Defaults remain Builtin Light/Dark. Auto follows macOS; `config get` reports Auto canonically as `"system"` for compatibility.
@@ -250,7 +276,7 @@ The app saves the validated model to:
 
 The state directory is private (0700); snapshots have mode 0600 and are replaced atomically. `SLATE_TERM_STATE_DIR` changes the base directory. Autosave follows model mutations, focus, divider changes, and native tab-group changes.
 
-Restoration preserves pane/tab/group IDs, counters, tab order, split trees/fractions, focus history, optional manual tab names, and each pane's `headerVisible` setting. Missing/null tab `manualTitle` means the default `New Tab`; noncanonical/invalid non-null names reject the snapshot rather than silently rewriting it. Old snapshots without that field default to shown; non-Boolean values (including null) are rejected. Visibility follows the pane slot through moves, zoom/restore and type changes. Newly created panes start with their bar shown. Use Workspace → Show Pane Bar or Search Commands to recover a hidden bar; show/hide/toggle are bindable commands with no default shortcut. Hiding cancels an open rename draft without saving; show the bar first to use native rename/type/move controls. Programmatic title changes work while hidden. It starts **new shell processes** in the last observed working directories (home if a saved directory has disappeared or is inaccessible). It also restores normal-browser starting URLs and windowed frames per tab group, fitting frames to currently connected screens. It does **not** replay startup commands, persist terminal output, restore live processes, private-browser URLs, back/forward stacks, full-screen mode, or minimization. URLs use the existing safe browser schemes, never executable JavaScript or embedded credentials. A missing local page reports the normal browser loading error. Location changes and window movement/resizing coalesce saves at 250 ms; ordinary workspace changes and orderly quit also save. Abrupt termination can lose the most recent unflushed changes. Runtime metadata is saved atomically with topology in the same private snapshot, not in saved-layout recipes. Invalid metadata or unavailable registered pane types suspend restoration rather than silently replacing the original file. `api.describe.workspaceRestoration` advertises these semantics to CLI, pages, and services; `config.get.workspace` reports persistence failures. No separate save/restore command or shortcut is added: the existing `layout.restore_workspace` preference controls all clients and native operations.
+Restoration preserves pane/tab/group IDs, counters, tab order, split trees/fractions, focus history, optional manual tab names, and each pane's `headerVisible` setting. Missing/null tab `manualTitle` means the default `New Tab`; noncanonical/invalid non-null names reject the snapshot rather than silently rewriting it. Old snapshots without that field default to shown; non-Boolean values (including null) are rejected. Visibility follows the pane slot through moves, zoom/restore and type changes. Newly created panes start with their bar shown. Use Workspace → Show Pane Bar or Search Commands to recover a hidden bar; show/hide/toggle are bindable commands with no default shortcut. Hiding cancels an open rename draft without saving; show the bar first to use native rename/type/move controls. Programmatic title changes work while hidden. It starts **new shell processes** in the last observed working directories (home if a saved directory has disappeared or is inaccessible). It also restores normal-browser starting URLs and windowed frames per tab group, fitting frames to currently connected screens. It saves bounded previous terminal output for reference (see below). It does **not** replay startup commands, restore live processes, private-browser URLs, back/forward stacks, full-screen mode, or minimization. URLs use the existing safe browser schemes, never executable JavaScript or embedded credentials. A missing local page reports the normal browser loading error. Location changes and window movement/resizing coalesce saves at 250 ms; ordinary workspace changes and orderly quit also save. Abrupt termination can lose the most recent unflushed changes. Runtime metadata is saved atomically with topology in the same private snapshot, not in saved-layout recipes. Invalid metadata or unavailable registered pane types suspend restoration rather than silently replacing the original file. `api.describe.workspaceRestoration` advertises these semantics to CLI, pages, and services; `config.get.workspace` reports persistence failures. No separate save/restore command or shortcut is added: the existing `layout.restore_workspace` preference controls all clients and native operations.
 
 Closing the last window leaves the app running. **New Window** (⌘N) and **New Tab** (⌘T) remain available without a terminal window, including from Settings. Clicking the Dock icon reopens a workspace window. If the saved workspace is empty at launch, the app opens one fresh terminal while preserving the saved identity counters.
 
@@ -261,3 +287,30 @@ With `restore_workspace = false`, the app neither loads nor overwrites the exist
 A corrupt or incompatible startup snapshot is preserved unchanged. The app opens a recovery workspace with autosave suspended and reports the error. Repair or move the old file and restart to resume normal restoration. Do not edit a healthy snapshot while the app is running.
 
 Autosave is best effort. An in-memory command can succeed when a filesystem write fails; the app's status menu and `config get` → `workspace.error` report that failure. Built-in workspace mutation replies also report a path-free `workspacePersistence` status: `saved`, `failed`, `disabled`, `suspended`, or `notRequired` for registry-only work. Model acceptance and published events are not rolled back after an autosave failure; do not replay a mutation just because its save failed. The reply captures its own save result even if a separate native editor completion saves again before the reply is sent. A single-writer file lock rejects concurrent app instances sharing one state directory; use separate state directories for independent instances. The lock releases on process exit, including an abrupt exit. Atomic replacement protects readers from partial JSON; power-loss durability is not guaranteed.
+
+### Saved terminal output
+
+`terminal.saved_output_lines` sets the number of recent logical lines saved per
+terminal. It defaults to **10,000**, accepts **0–100,000**, and **0 disables saving**.
+The Terminal page in Settings exposes the same value. Lowering it trims retained
+output immediately. Each terminal also has a 4 MiB text limit, and the workspace
+has a 32 MiB text limit; exceptionally long lines may be shortened.
+
+When workspace restoration is enabled, Slate takes periodic snapshots and saves
+again after orderly process shutdown. **Show Previous Terminal Output** opens
+saved text in a read-only, searchable window. Its pane-header clock button and
+**Clear Previous Terminal Output** command operate on the same stored text.
+The current terminal starts a fresh shell in its restored directory. Saved text
+is never typed into that shell or executed.
+
+Output can contain sensitive text. It is stored with the private workspace
+snapshot (directory mode 0700, file mode 0600). Setting the limit to zero removes
+saved output from subsequent workspace saves. Existing backups and snapshots
+kept while workspace saving is disabled or suspended are not rewritten.
+
+On quit, attached terminal jobs receive a bounded opportunity to handle hangup
+and termination before forced stopping. Slate keeps reading output during that
+interval. Intentionally detached sessions are left alone. A crash or force quit
+can only recover the most recent completed snapshot; final output is not
+guaranteed when a program ignores signals, outlives the deadline, or cannot be
+verified as belonging to the terminal.

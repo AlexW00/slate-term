@@ -12,7 +12,7 @@ import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP = ROOT / ".derived/Build/Products/Debug/Slate Terminal.app/Contents/MacOS/Slate Terminal"
-CLI = ROOT / ".derived/Build/Products/Debug/Slate Terminal.app/Contents/Helpers/slate-term"
+CLI = ROOT / ".derived/Build/Products/Debug/Slate Terminal.app/Contents/Frameworks/SlateRuntime.framework/Helpers/slate-term"
 
 
 def eventually(label, condition, timeout=15):
@@ -68,8 +68,10 @@ for mode in ["system", "quoted", "literal"]:
                 literal = '日本語 café \\ and "quotes"'
                 cli("panes", "send", "--pane", "p1", "--text", "printf '\\nSLATE_UNICODE=%s\\n' " + shlex.quote(literal) + "\r")
                 eventually("literal UTF-8 and escaping", lambda: "SLATE_UNICODE=" + literal in capture())
-                cli("panes", "send", "--pane", "p1", "--text", "printf '\\nSLATE_REAL_CLI=%s\\n' \"$(command -v slate-term)\"\r")
-                eventually("bundled CLI wins shell PATH", lambda: "SLATE_REAL_CLI=" + str(CLI) in capture())
+                cli("panes", "send", "--pane", "p1", "--text", "printf '\\nSLATE_REAL_CLI='; /usr/bin/stat -Lf '%d:%i' \"$(command -v slate-term)\"\r")
+                identity = CLI.stat()
+                expected_cli = f"SLATE_REAL_CLI={identity.st_dev}:{identity.st_ino}"
+                eventually("bundled CLI wins shell PATH", lambda: expected_cli in capture())
                 cli("panes", "send", "--pane", "p1", "--text", "slate-term panes list --json\r")
                 eventually("CLI runs inside production zsh", lambda: re.search(r'"id"\s*:\s*"p1"', capture()))
                 if mode != "literal":

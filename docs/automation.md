@@ -56,6 +56,15 @@ See [API extension progress](api-extension-progress.md) for what is verified on 
 
 Terminal Find and bounded history reads/exports are documented in [MVP foundations](mvp-foundations.md#terminal-findhistory-slice--implemented-selected-verification-passed). `terminal.capture` reads the active screen; use `terminal.history` for retained output. Native Find and `terminal.search` share the engine's retained-history search.
 
+`terminal.history` and `terminal.historyExport` accept `source: "current"` (default) or `"previous"`. Previous output is the saved text restored for that pane, separate from its fresh shell. Both sources respect `maxBytes` (1–131,072, default 131,072) and `maxLines` (1–10,000, default 2,000). The response includes `source`, `available`, `capturedAt` (Unix seconds for previous output, otherwise null), and `ended` (whether process exit was observed for previous output, otherwise null). Existing `paneId` and `sessionId` identify the current target; `sessionId` never identifies or resumes an old process. Missing previous output returns empty text with `available: false`. Exporting missing previous output fails without creating a file. Exports require an absolute path, create a private file, and never overwrite an existing file.
+
+```sh
+slate-term terminal history --pane p1 --source previous --max-lines 500
+slate-term terminal historyExport --pane p1 --source previous --path /tmp/previous-terminal.txt
+```
+
+Configure saved retention with `terminal.saved_output_lines` (default 10,000; 0 disables it; maximum 100,000). Saved text is also capped at 4 MiB per terminal and 32 MiB per workspace. This records display text for reference, without replaying commands or resuming programs.
+
 ```sh
 slate-term terminal send --pane p1 --text $'printf "hello\\n"\r'
 slate-term terminal key --pane p1 --key ctrl+c
@@ -219,3 +228,5 @@ Wait states: `attached`, `detached`, `visible` (default), `hidden`. Timeout is 0
 - Browser shares one persistent website store; Private Browser has a per-pane ephemeral store. Neither restores its live document/back-forward history from workspace JSON.
 - HTTP(S), `about:blank` and explicit local files only; no URL credentials, remote file hosts, directory browser, download manager, remote debugging port, CDP compatibility, or privileged plugin API.
 - `browser.eval --script ...` remains available for explicit page-world JavaScript. It must return a JSON-representable value; screenshots capture the web-view viewport, not an entire scrolling document.
+
+`api.describe` and `context.get` distinguish `mode: standard|layoutApp` and the persistent nullable `layoutAppID` from the per-launch instance identifier. Discovery also reports `runtimeAvailability` by method. Parent-only management remains in every trusted client's catalog and returns the same typed error when called from a layout app.

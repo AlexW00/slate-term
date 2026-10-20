@@ -19,6 +19,10 @@ extension AppConfiguration {
             guard !literal.contains("\n"), !literal.contains("\r") else {
                 throw ConfigurationError.invalid("Settings values must be single-line TOML literals")
             }
+            if path == "agents.colors" {
+                try AgentAccentColors.updating(&lines, literal: literal)
+                continue
+            }
             var found = false
             for record in try TOMLSourceEditor.scan(lines) {
                 guard let existingPath = record.path else { continue }

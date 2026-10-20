@@ -24,6 +24,7 @@ struct SavedLayoutsCommand: ParsableCommand {
     @Option(help: "Name for the captured layout or launcher.") var name: String?
     @Option(help: "New absolute .app destination for launcher creation; never overwritten.") var path: String?
     @Option(help: "Launcher icon from api.describe savedLayouts.launcherIcons.") var icon: String?
+    @Flag(inversion: .prefixedNo, help: "Copy plugin data once into the new app (launcher only; defaults on).") var copyPluginData = true
     @Flag(help: "Include previously configured startup commands, not running shell commands.") var includeCommands = false
     @Flag(help: "Omit current terminal directories from capture.") var omitDirectories = false
     @Flag(help: "Omit current browser URLs from capture.") var omitUrls = false
@@ -53,6 +54,8 @@ struct SavedLayoutsCommand: ParsableCommand {
         if includeCommands { params["includeCommands"] = .bool(true) }
         if omitDirectories { params["includeDirectories"] = .bool(false) }
         if omitUrls { params["includeURLs"] = .bool(false) }
+        if action == .launcher { params["copyPluginData"] = .bool(copyPluginData) }
+        else if !copyPluginData { throw ValidationError("--no-copy-plugin-data requires launcher") }
         // No inherited pane/tab hints: capture requires an explicit window group; open creates a new one.
         try connection.call(action.method, params: params)
     }

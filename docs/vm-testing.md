@@ -10,7 +10,7 @@ bash scripts/verify-all.sh                          # Complete suite
 # Equivalent: python3 scripts/verify-vm.py --all
 ```
 
-No selection only lists tests; it does not build or launch anything. `scripts/verification_gates.py` is the shared inventory for selection, full execution and completeness checks: **91 invocations**, including seven host checks, all 19 native recipes and three separate app iterations. `app` aliases `app-1`; `--all` includes `app-1`, `app-2` and `app-3`. Unregistered verification scripts fail inventory validation rather than being silently omitted.
+No selection only lists tests; it does not build or launch anything. `scripts/verification_gates.py` is the shared inventory for selection, full execution and completeness checks: **96 invocations**, including seven host checks, all 19 native recipes and three separate app iterations. `app` aliases `app-1`; `--all` includes `app-1`, `app-2` and `app-3`. Unregistered verification scripts fail inventory validation rather than being silently omitted.
 
 **Build on the host; execute native/UI tests sequentially only in the VM.** The seven host-classified gates are engine build, package tests, runner tests, release-tooling tests, mutation checks, app build and whitespace. There is no guest compilation or host GUI fallback. Direct native shell scripts normally compile and execute on the same machine; use the VM runner instead.
 
@@ -22,6 +22,40 @@ No selection only lists tests; it does not build or launch anything. `scripts/ve
 - Execution runtime at `~/Developer/slate-vm/runtime/bin`: Python 3.9+, Node and tmux. The prepared VM uses a copied relocatable runtime, not guest Xcode. A missing runtime fails explicitly instead of installing development tools.
 
 Execution has been exercised on macOS 27.0.1 with **two CPUs and 4 GB RAM**. The runner starts/resumes the VM in background mode and keeps its virtual display awake. Its window can remain hidden; closing it may suspend the VM. The VM remains running afterward.
+
+### Unlocking the test VM
+
+Alex has granted standing authorization to unlock this test VM during development
+and release verification. Carry it forward without asking again. This applies to
+VM sign-in, not unrelated accounts or browser authentication.
+
+First use VMPal's saved password:
+
+```sh
+/Applications/VMPal.app/Contents/Helpers/VMPalMachine.app/Contents/MacOS/VMPalMachine \
+  --cli sign-in slate-term
+```
+
+If the saved password is stale, use the authenticated 1Password CLI to fetch
+`op://Personal/vmpal - slate-term/password`, refresh VMPal through standard input,
+and sign in. An unauthenticated CLI requires its normal authentication flow;
+do not create accounts or change credential configuration automatically.
+
+```sh
+(
+  set -o pipefail
+  op read 'op://Personal/vmpal - slate-term/password' |
+    /Applications/VMPal.app/Contents/Helpers/VMPalMachine.app/Contents/MacOS/VMPalMachine \
+      --cli set slate-term --account-password-file - &&
+    /Applications/VMPal.app/Contents/Helpers/VMPalMachine.app/Contents/MacOS/VMPalMachine \
+      --cli sign-in slate-term
+)
+```
+
+Keep shell tracing off. Never print the password or put it in command arguments,
+files, logs, or the repository. VMPal checks for a locked screen before typing.
+Verify the unlocked desktop before resuming native tests. Do not repeatedly retry
+a rejected password; ask for help only if normal authentication or sign-in fails.
 
 ## Build and transfer
 
@@ -73,3 +107,21 @@ method/command/client coverage, not a claim that every handler/state was exercis
 Run it separately from the VM runner; a VM receipt alone does not certify this audit.
 
 Historical focused evidence includes successful terminal/text-checking/browser execution (`20261016T031205Z-55d6457a`), actual timeout/cancellation receipts (`20261016T031250Z-02ce1790`, `20261016T031305Z-f737e0a2`), and browser-navigation/command-picker (`20261016T040246Z-61937331`). These establish those particular runs, not a fresh full-suite pass. Use the current full certificate and its linked run receipt for current-source verification.
+
+
+### Signed Release layout-app checks
+
+Use separately built and locally signed Release fixtures without rebuilding them as Debug:
+
+```sh
+python3 scripts/verify-vm.py layout-apps layout-app-upgrades layout-app-sync layout-apps-ui \
+  --app "$PWD/artifacts/release/layout-apps-v1/Slate Terminal.app" \
+  --upgrade-app "$PWD/artifacts/release/layout-apps-v2/Slate Terminal.app" \
+  --incompatible-upgrade-app "$PWD/artifacts/release/layout-apps-abi2/Slate Terminal.app"
+```
+
+Each fixture keeps its original `build-source.json` and a verified `vm-signing.json` linking the unsigned tree, signed tree, source receipt and exact signing certificate. The ABI-negative fixture is explicitly derived on the host and signed after its metadata change. The runner records the derivation's selected signed bytes; neither it nor the guest signs or compiles a replacement. UI captures still require independent visual review, and API reset/icon selection checks do not establish mouse hit-target behavior.
+
+The `layout-app-sync` gate checks live parent plugin changes, deferred replacement/removal while child panes remain open, unavailable package retention, duplicate owner activation, maintenance exclusion, and corrupt/missing startup preservation. Startup-failure evidence includes sampled native WindowServer state and the runtime publication markers; it does not test the non-integration error dialog.
+
+Behavior-changing upgrade baselines may include `fixture-source-variant.json` beside their original build receipt. It binds the entire current source inventory, original source inventory, and exact archived original files. The runner verifies each difference and records `matched-explicit-upgrade-baseline`; it never describes that baseline as a current-source build. Ordinary prebuilt app receipts still require an exact current-source match.

@@ -81,13 +81,28 @@ class SparkleToolIntegrationTests(unittest.TestCase):
         self.assertFalse((self.assets / "Slate-Terminal-1.2.3-42-arm64.md").exists())
 
     def test_nested_sparkle_signing_preserves_downloader_entitlements_and_framework_links(self):
-        framework = self.app / "Contents/Frameworks/Sparkle.framework"
+        runtime = self.app / "Contents/Frameworks/SlateRuntime.framework"
+        version = runtime / "Versions/A"
+        (version / "Resources").mkdir(parents=True)
+        (runtime / "Versions/Current").symlink_to("A")
+        for name in ("Resources", "Frameworks", "Helpers", "SlateRuntime"):
+            (runtime / name).symlink_to("Versions/Current/" + name)
+        for name in ("ghostty", "terminfo", "skills"):
+            (version / "Resources" / name).mkdir()
+        (version / "Resources/Info.plist").write_bytes(plistlib.dumps({
+            "CFBundleIdentifier": "com.slateterm.runtime", "CFBundleExecutable": "SlateRuntime",
+            "CFBundlePackageType": "FMWK", "CFBundleVersion": "42", "SlateRuntimeABI": "1",
+        }))
+        subprocess.run(["xcrun", "clang", "-arch", "arm64", "-dynamiclib", "-x", "c", "-",
+                        "-o", str(version / "SlateRuntime")], input=b"int fixture(void) { return 0; }\n",
+                       check=True, capture_output=True)
+        framework = version / "Frameworks/Sparkle.framework"
         shutil.copytree(Path(TOOLS) / "Sparkle.framework", framework, symlinks=True)
         executable = self.app / "Contents/MacOS/Fixture"
         executable.unlink()
         subprocess.run(["xcrun", "clang", "-arch", "arm64", "-x", "c", "-", "-o", str(executable)], input=b"int main(void) { return 0; }\n", check=True, capture_output=True)
         executable.chmod(0o755)
-        helpers = self.app / "Contents/Helpers"
+        helpers = version / "Helpers"
         helpers.mkdir()
         for name in ("slate-term", "slate-layout-launcher"):
             shutil.copy2(executable, helpers / name)
@@ -98,15 +113,10 @@ class SparkleToolIntegrationTests(unittest.TestCase):
         expected = {"com.apple.security.network.client": True}
         entitlements.write_bytes(plistlib.dumps(expected))
         subprocess.run(["codesign", "--force", "--sign", "-", "--options", "runtime", "--entitlements", str(entitlements), str(downloader)], check=True, capture_output=True)
-        script = (ROOT / "scripts/release-package.sh").read_text()
-        signing = re.search(r"python3 - \"\$bundle\" \"\$unsigned\" <<'PY'\n(.*?)\nPY\n", script, re.DOTALL)
-        self.assertIsNotNone(signing)
-        environment = {**os.environ, "SLATE_SIGNING_IDENTITY": "-"}
-        environment.pop("SLATE_SIGNING_KEYCHAIN", None)
-        # Exercise the production signing order with ad-hoc signatures, without identities or Keychain access.
-        # Ad-hoc signatures cannot carry trusted timestamps; timestamp behavior requires a real release rehearsal.
-        code = signing.group(1).replace("'--timestamp', ", "")
-        result = subprocess.run([sys.executable, "-", str(self.app), "0"], input=code, text=True, capture_output=True, env=environment)
+        # Exercise the production runtime signer without release credentials or Keychain access.
+        result = subprocess.run([sys.executable, str(ROOT / "scripts/package-runtime.py"),
+                                 "sign", "--app", str(self.app), "--identity", "-"],
+                                capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         subprocess.run(["codesign", "--verify", "--deep", "--strict", str(self.app)], check=True, capture_output=True)
         actual = subprocess.check_output(["codesign", "-d", "--entitlements", ":-", str(downloader)], stderr=subprocess.DEVNULL)
@@ -119,9 +129,12 @@ class SparkleToolIntegrationTests(unittest.TestCase):
 
         # A truncated framework must fail before packaging, even for unsigned smoke builds.
         (framework / 'Versions/B/Autoupdate').unlink()
-        missing = subprocess.run([sys.executable, "-", str(self.app), "1"], input=code, text=True, capture_output=True, env=environment)
+        missing = subprocess.run([sys.executable, str(ROOT / "scripts/package-runtime.py"),
+                                  "verify", "--app", str(self.app), "--architecture", "arm64"],
+                                 text=True, capture_output=True)
         self.assertNotEqual(missing.returncode, 0)
-        self.assertIn("Missing executable Sparkle component", missing.stderr)
+        self.assertIn("Runtime link escapes its bundle or is broken:", missing.stderr)
+        self.assertIn("Autoupdate", missing.stderr)
 
     def test_missing_secret_never_invokes_keychain_fallback(self):
         self.package()

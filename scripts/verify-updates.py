@@ -61,7 +61,7 @@ with AppFixture('updates', '[terminal]\nshell="/bin/zsh"\n') as app:
     assert descriptor['updates']['installationRequiresConfirmation'] is True
     assert descriptor['updates']['eventTopic'] == 'host.updates.changed'
     commands = {command['id']: command for command in app.rpc('command.list')}
-    assert {name for name in commands if name.startswith('updates.')} == {'updates.show', 'updates.check'}
+    assert {name for name in commands if name.startswith('updates.')} == {'updates.show', 'updates.check', 'updates.openParent'}
     assert all(commands[name]['contract']['workspaceIndependent'] and not commands[name]['contract']['requiresArguments']
                for name in ['updates.show', 'updates.check'])
     before = snapshot()
@@ -73,6 +73,31 @@ with AppFixture('updates', '[terminal]\nshell="/bin/zsh"\n') as app:
     def menu_commands(items):
         return [item.get('command') for item in items] + [value for item in items for value in menu_commands(item.get('children', []))]
     assert 'updates.check' in menu_commands(app.rpc('debug.menuTree'))
+
+    # Valid metadata from an earlier session must not imply fresh installation consent.
+    for operation, detail in [('validDownloadedOffer', 'download from an earlier session was discarded'),
+                              ('validInstallingOffer', 'installation from an earlier session was skipped')]:
+        state = fixture('checking')
+        count = debug()['installReplies']
+        resumed = debug(operation=operation)
+        assert resumed['phase'] == 'checkError', resumed
+        assert resumed['readyChoices'][-1] == 'skip', resumed
+        assert detail in resumed['detail'].lower(), resumed
+        assert 'Check again' in resumed['detail'] and 'signed-update requirements' not in resumed['detail'], resumed
+        assert_unarmed(count, resumed)
+        assert 'release' not in resumed, resumed
+        for action in ['download', 'install']:
+            params = dict(updateId=state['updateId'])
+            if action == 'install':
+                params['confirm'] = True
+            app.rpc('updates.' + action, error=-32051, **params)
+        callback = debug(operation='readyCallback')
+        assert callback['readyChoices'][-1] == 'skip', callback
+        assert_unarmed(count, callback)
+        press('primary')  # Check Again starts a new check, never installation.
+        eventually('resumed offer can check again', lambda: phase_is('checking'))
+        assert snapshot()['updateId'] != state['updateId']
+        assert_unarmed(count)
 
     # No install choice may be issued by a fresh check, download, verification, or dismiss.
     for phase in ['available', 'downloading', 'verifying', 'ready', 'downloadError', 'verificationError', 'checkError']:
@@ -290,28 +315,46 @@ while True: time.sleep(1)
     assert debug()['installReplies'] == count + 1
     app.rpc('plugins.service.stop', id='updates.service')
 
-    # The real process quit prompt still protects a running terminal command.
-    app.rpc('terminal.send', pane='p1', text="printf '\\nUPDATE_BUSY_READY\\n'; /bin/sleep 120\r")
-    eventually('owned foreground process', terminal_busy)
+    # Parent installation still protects dirty layouts and revalidates after the dialog.
+    draft = app.rpc('debug.savedLayouts', create=True)
+    app.rpc('debug.savedLayouts', file=draft['file'], name='Uncommitted update draft')
     state = fixture('ready')
     count = debug()['installReplies']
     denied = debug(operation='install', confirmQuit=False)
     assert denied['phase'] == 'ready' and denied['updateId'] == state['updateId'], denied
-    assert any('running processes' in prompt['message'] for prompt in denied['quitPrompts']), denied
-    assert terminal_busy() and app.process.poll() is None
+    assert any('closing Settings' in prompt['message'] for prompt in denied['quitPrompts']), denied
+    assert app.rpc('debug.savedLayouts', file=draft['file'])['dirty']
     assert_unarmed(count, denied)
-    assert app.rpc('debug.closeConfirmation', quit=True, answer='cancel') is False
     app.rpc('debug.updates', operation='install', confirmQuit=True, replaceWhileConfirming=True, error=-32050)
     assert snapshot()['updateId'] != state['updateId'] and phase_is('ready')
+    assert not app.rpc('debug.savedLayouts', file=draft['file'])['dirty']
     assert_unarmed(count)
     callback = debug(operation='readyCallback')
     assert callback['readyChoices'][-1] == 'skip'
-    accepted = debug(operation='install', confirmQuit=True)
+
+    # Consent starts installation; process warnings belong to actual termination.
+    app.rpc('terminal.send', pane='p1', text="/bin/sleep 120\r")
+    eventually('owned foreground process', terminal_busy)
+    accepted = debug(operation='install', confirmQuit=False)
     assert accepted['phase'] == 'installing' and accepted['installReplies'] == count + 1, accepted
-    assert any('running processes' in prompt['message'] for prompt in accepted['quitPrompts']), accepted
+    assert accepted['quitPrompts'] == [], accepted
+    assert terminal_busy() and app.process.poll() is None
     assert debug(operation='readyCallback')['readyChoices'][-1] == 'install'
+    # This calls the same host decision as applicationShouldTerminate, without exiting.
+    assert app.rpc('debug.closeConfirmation', quit=True, answer='cancel') is False
+    assert phase_is('installing') and terminal_busy() and app.process.poll() is None
+    assert app.rpc('debug.closeConfirmation', quit=True, answer='terminate') is True
     app.rpc('terminal.key', pane='p1', key='ctrl+c')
     eventually('owned foreground process stopped', lambda: not terminal_busy())
+    # Work started after consent must retain the same termination safeguard.
+    app.rpc('terminal.send', pane='p1', text="/bin/sleep 120\r")
+    eventually('new work after installation consent', terminal_busy)
+    assert app.rpc('debug.closeConfirmation', quit=True, answer='cancel') is False
+    assert phase_is('installing') and terminal_busy() and app.process.poll() is None
+    assert app.rpc('debug.closeConfirmation', quit=True, answer='terminate') is True
+    assert debug()['installReplies'] == count + 1
+    app.rpc('terminal.key', pane='p1', key='ctrl+c')
+    eventually('new foreground process stopped', lambda: not terminal_busy())
 
     # Press the actual native install button after quit protection has been exercised.
     fixture('ready')
@@ -334,7 +377,7 @@ while True: time.sleep(1)
         for phase in states:
             fixture(phase)
             debug(appearance=appearance)
-            time.sleep(0.15)  # Let the compositor present the already-observed native state.
+            time.sleep(0.5)  # Let native button and appearance transitions settle before capture.
             capture = ROOT / f'artifacts/updates-{phase}-{appearance}.png'
             capture.unlink(missing_ok=True)
             state = debug(screenshot=str(capture))

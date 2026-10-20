@@ -102,7 +102,18 @@ with AppFixture('presence') as app:
     [tag] = shown(target)
     assert tag['label'] == 'claude' and tag['target'] == 'pane' and tag['note'] == 'reading failing test output', tag
     assert tag['glass'] and tag['outsidePassesThrough'], tag
+    assert tag['status'] == 'active', tag
+    assert tag['holdIconCenterY'] == tag['frame']['height'] / 2, tag
+    assert tag['holdAnimation']['active'] != tag['holdAnimation']['reduceMotion'], tag
     snapshot('pane')
+
+    # Recolor a retained hold through the production API, then restore automatic colors.
+    app.cli('presence', 'hold', '--pane', target, env=agent)
+    for colors, expected in [({'claude': '#123456'}, '#123456'), ({}, '#FF9466')]:
+        app.cli('config', 'set', '--key', 'agents.colors', '--value', json.dumps(colors),
+                '--expected-source-revision', app.rpc('config.get')['sourceRevision'])
+        assert shown(target)[0]['color'] == expected, shown(target)
+    app.cli('presence', 'release', '--pane', target, env=agent)
 
     # The agent's own pane never shows presence.
     app.cli('terminal', 'capture', '--pane', 'p1', env=agent)

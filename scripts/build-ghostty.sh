@@ -41,7 +41,7 @@ patched_sha=ecbbf61a3a432ffb457e8f07e5c79913d6b121f9c5e8ac63950ce6449dba1fb9
   echo 'Ghostty patch checksum mismatch.' >&2; exit 1;
 }
 git -C "$source_dir" diff --cached --quiet || { echo 'Ghostty has staged changes.' >&2; exit 1; }
-git -C "$source_dir" diff --quiet -- . ':!src/build/SharedDeps.zig' || {
+git -C "$source_dir" diff --quiet -- . ':!src/build/SharedDeps.zig' ':!src/termio/Exec.zig' || {
   echo 'Ghostty sources differ from the pin outside the approved patch.' >&2; exit 1;
 }
 source_sha="$(shasum -a 256 "$source_dir/src/build/SharedDeps.zig" | cut -d ' ' -f1)"
@@ -53,6 +53,23 @@ case "$source_sha" in
   *) echo 'Ghostty patch target differs from both approved versions.' >&2; exit 1 ;;
 esac
 [[ "$(shasum -a 256 "$source_dir/src/build/SharedDeps.zig" | cut -d ' ' -f1)" = "$patched_sha" ]]
+# Disposal remains bounded even when startup or ownership inspection fails.
+shutdown_patch_sha=bb25ccd279dd824bdfb1bd87f2a2cda221a86fb1a7dee79a1c2f75f22855b533
+shutdown_original_sha=9dd5d3854330e589a5a67255531e92738f5f48b1b7dd0be4d39ef2b13fbfab95
+shutdown_patched_sha=e3f6cbb941902833881e1f4ebf6be1dd42a2418f8d5b65cb408be24a1b8b11ab
+shutdown_patch_file="$root/patches/ghostty-bounded-shutdown.patch"
+[[ "$(shasum -a 256 "$shutdown_patch_file" | cut -d ' ' -f1)" = "$shutdown_patch_sha" ]] || {
+  echo 'Ghostty shutdown patch checksum mismatch.' >&2; exit 1;
+}
+shutdown_source_sha="$(shasum -a 256 "$source_dir/src/termio/Exec.zig" | cut -d ' ' -f1)"
+case "$shutdown_source_sha" in
+  "$shutdown_original_sha")
+    git -C "$source_dir" apply --check "$shutdown_patch_file"
+    git -C "$source_dir" apply "$shutdown_patch_file" ;;
+  "$shutdown_patched_sha") ;;
+  *) echo 'Ghostty shutdown target differs from both approved versions.' >&2; exit 1 ;;
+esac
+[[ "$(shasum -a 256 "$source_dir/src/termio/Exec.zig" | cut -d ' ' -f1)" = "$shutdown_patched_sha" ]]
 # Compiler caches belong to this checkout, including linked worktrees.
 export ZIG_GLOBAL_CACHE_DIR="$root/.build/release-zig-cache"
 export ZIG_LOCAL_CACHE_DIR="$source_dir/.zig-cache"
@@ -72,7 +89,7 @@ fi
 python3 - <<'PY_RECEIPT'
 import hashlib
 from pathlib import Path
-inputs = [Path('scripts/build-ghostty.sh'), Path('patches/ghostty-optional-libintl.patch')]
+inputs = [Path('scripts/build-ghostty.sh'), Path('patches/ghostty-optional-libintl.patch'), Path('patches/ghostty-bounded-shutdown.patch')]
 for directory in ('.build/bootstrap/ghostty/macos/GhosttyKit.xcframework', '.build/bootstrap/ghostty/zig-out/share'):
     inputs.extend(p for p in sorted(Path(directory).rglob('*')) if p.is_file())
 receipt = Path('.build/bootstrap/ghostty-build.sha256')

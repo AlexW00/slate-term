@@ -9,16 +9,17 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
     case layoutsList = "layouts.list", layoutsGet = "layouts.get", layoutsFields = "layouts.fields", layoutsValidate = "layouts.validate"
     case layoutsCreate = "layouts.create", layoutsUpdate = "layouts.update", layoutsWindows = "layouts.windows"
     case layoutsCapture = "layouts.capture", layoutsOpen = "layouts.open", layoutsLauncher = "layouts.launcher", layoutsStartupStatus = "layouts.startupStatus"
+    case layoutAppsList = "layoutApps.list", layoutAppsRefresh = "layoutApps.refresh"
     case layoutConfiguration = "layout.configuration"
     case layoutGet = "layout.get", tabsList = "tabs.list", panesList = "panes.list", paneInspect = "pane.inspect"
     case commandList = "command.list", commandRun = "command.run"
     case windowList = "window.list", windowGet = "window.get"
-    case configGet = "config.get", configReload = "config.reload", configValidate = "config.validate", configPatch = "config.patch"
+    case configGet = "config.get", configReload = "config.reload", configValidate = "config.validate", configPatch = "config.patch", configResetOverrides = "config.resetOverrides"
     case paletteList = "palette.list", paletteImport = "palette.import", appearanceGet = "appearance.get"
     case skillsList = "skills.list", skillsInstall = "skills.install", skillsUninstall = "skills.uninstall"
-    case welcomeGet = "welcome.get"
     case updatesGet = "updates.get", updatesShow = "updates.show", updatesCheck = "updates.check"
-    case updatesDownload = "updates.download", updatesCancel = "updates.cancel", updatesInstall = "updates.install"
+    case updatesDownload = "updates.download", updatesCancel = "updates.cancel", updatesInstall = "updates.install", updatesOpenParent = "updates.openParent"
+    case welcomeGet = "welcome.get"
     case presenceList = "presence.list", presenceHold = "presence.hold", presenceRelease = "presence.release", presenceFocus = "presence.focus"
     case pluginsList = "plugins.list", pluginsRegister = "plugins.register", pluginsValidate = "plugins.validate", pluginsUnregister = "plugins.unregister"
     case pluginsEnable = "plugins.enable", pluginsDisable = "plugins.disable"
@@ -51,12 +52,12 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
     public enum Family: String, Sendable { case synchronous, contextual, notifications, terminal, terminalOperations, browser, web, events, pluginRuntime, pluginPersistence, services, integration }
     public var family: Family {
         switch self {
-        case .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsCreate, .layoutsUpdate, .layoutsWindows, .layoutsCapture, .layoutsOpen, .layoutsLauncher, .layoutsStartupStatus,
+        case .layoutAppsList, .layoutAppsRefresh, .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsCreate, .layoutsUpdate, .layoutsWindows, .layoutsCapture, .layoutsOpen, .layoutsLauncher, .layoutsStartupStatus,
              .describe, .version, .contextGet, .workspaceGet, .workspaceSnapshot, .layoutGet, .tabsList, .panesList, .paneInspect,
-             .commandList, .commandRun, .windowList, .windowGet, .configGet, .configReload, .configValidate, .configPatch,
+             .commandList, .commandRun, .windowList, .windowGet, .configGet, .configReload, .configValidate, .configPatch, .configResetOverrides,
              .paletteList, .paletteImport, .appearanceGet, .welcomeGet, .skillsList, .skillsInstall, .skillsUninstall, .pluginsList, .pluginsRegister, .pluginsValidate, .pluginsUnregister, .pluginsEnable, .pluginsDisable, .pluginsStatus, .pluginsLogs,
              .pluginSettingsGet, .pluginSettingsPatch, .panesSend, .panesCapture, .presenceList, .presenceHold, .presenceRelease, .presenceFocus,
-             .updatesGet, .updatesShow, .updatesCheck, .updatesDownload, .updatesCancel, .updatesInstall: .synchronous
+             .updatesGet, .updatesShow, .updatesCheck, .updatesDownload, .updatesCancel, .updatesInstall, .updatesOpenParent: .synchronous
         case .notificationsPost, .notificationsList, .notificationsDismiss, .notificationsStatus: .notifications
         case .layoutConfiguration, .contextInspect, .settingsGet, .paneTitle: .contextual
         case .terminalSend, .terminalKey, .terminalCapture, .terminalRun, .terminalWait, .terminalStart, .terminalHistory, .terminalHistoryExport, .terminalSearch: .terminal
@@ -78,7 +79,7 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
         switch self {
         case .shellUpdate, .shellRunInput: .authenticatedIntegration
         case .serviceReady, .serviceStop: .emergencyControl
-        case .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsWindows, .layoutsStartupStatus, .layoutConfiguration,
+        case .layoutAppsList, .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsWindows, .layoutsStartupStatus, .layoutConfiguration,
              .describe, .version, .contextGet, .contextInspect, .workspaceGet, .workspaceSnapshot, .layoutGet,
              .tabsList, .panesList, .paneInspect, .commandList, .windowList, .windowGet, .configGet, .configValidate,
              .paletteList, .appearanceGet, .welcomeGet, .skillsList, .pluginsList, .pluginsValidate, .pluginsStatus, .pluginsLogs, .pluginSettingsGet, .settingsGet, .pluginDataGet, .panelStateGet,
@@ -86,13 +87,12 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
              .terminalCapture, .terminalWait, .terminalHistory, .panesCapture, .eventsHead, .eventsPoll, .webGet, .webSnapshot, .webWait,
              .browserGet, .browserSnapshot, .browserWait, .browserListData, .serviceList, .serviceStatus, .serviceLogs,
              .notificationsList, .notificationsStatus, .presenceList, .presenceHold, .presenceRelease, .updatesGet: .read
-        case .layoutsCreate, .layoutsUpdate, .layoutsCapture, .layoutsOpen, .layoutsLauncher, .commandRun, .configReload, .configPatch, .paletteImport, .skillsInstall, .skillsUninstall, .pluginsRegister, .pluginsUnregister, .pluginsEnable, .pluginsDisable,
+        case .layoutAppsRefresh, .layoutsCreate, .layoutsUpdate, .layoutsCapture, .layoutsOpen, .layoutsLauncher, .commandRun, .configReload, .configPatch, .configResetOverrides, .paletteImport, .skillsInstall, .skillsUninstall, .pluginsRegister, .pluginsUnregister, .pluginsEnable, .pluginsDisable,
              .pluginsRestart, .pluginSettingsPatch, .pluginDataPatch, .pluginDataReset, .panelStatePatch, .panelStateReset, .paneTitle, .terminalSend,
              .terminalKey, .terminalRun, .terminalStart, .terminalHistoryExport, .terminalSearch, .panesSend, .eventsEmit, .webClick, .webFill, .webSelect, .webScroll,
              .webFocus, .webKey, .webCheck, .webSetValue, .webScreenshot, .browserNavigate, .browserClick, .browserFill, .browserSelect, .browserScroll,
              .browserEval, .browserScreenshot, .browserClearData, .browserClearSiteData, .browserRemoveSiteData, .serviceStart,
-             .notificationsPost, .notificationsDismiss, .presenceFocus,
-             .updatesShow, .updatesCheck, .updatesDownload, .updatesCancel, .updatesInstall: .mutation
+             .notificationsPost, .notificationsDismiss, .presenceFocus, .updatesShow, .updatesCheck, .updatesDownload, .updatesCancel, .updatesInstall, .updatesOpenParent: .mutation
         }
     }
 
@@ -130,14 +130,14 @@ public enum AutomationMethod: String, CaseIterable, Sendable {
         case .pluginDataGet, .pluginDataPatch, .pluginDataReset, .settingsGet, .pluginSettingsGet, .pluginSettingsPatch:
             if params["id"] == nil, let plugin = defaults.pluginID { params["id"] = .string(plugin) }
         case .terminalOperations, .terminalOperationStatus, .terminalOperationResult, .terminalOperationWait,
-             .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsCreate, .layoutsUpdate, .layoutsWindows, .layoutsCapture, .layoutsOpen, .layoutsLauncher, .layoutsStartupStatus,
+             .layoutAppsList, .layoutAppsRefresh, .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsCreate, .layoutsUpdate, .layoutsWindows, .layoutsCapture, .layoutsOpen, .layoutsLauncher, .layoutsStartupStatus,
              .describe, .version, .workspaceGet, .tabsList, .panesList, .commandList, .windowList, .windowGet,
-             .configGet, .configReload, .configValidate, .configPatch, .paletteList, .paletteImport, .appearanceGet, .welcomeGet,
+             .configGet, .configReload, .configValidate, .configPatch, .configResetOverrides, .paletteList, .paletteImport, .appearanceGet, .welcomeGet,
              .skillsList, .skillsInstall, .skillsUninstall, .pluginsList, .pluginsRegister, .pluginsValidate, .pluginsUnregister, .pluginsEnable, .pluginsDisable, .pluginsStatus, .pluginsRestart, .pluginsLogs,
              .eventsHead, .eventsPoll, .eventsEmit, .serviceStart, .serviceStop, .serviceList, .serviceStatus,
              .serviceLogs, .serviceReady, .shellUpdate, .shellRunInput, .browserClearData, .browserListData, .browserRemoveSiteData,
              .notificationsList, .notificationsDismiss, .notificationsStatus, .presenceList, .presenceHold, .presenceRelease, .presenceFocus,
-             .updatesGet, .updatesShow, .updatesCheck, .updatesDownload, .updatesCancel, .updatesInstall: break
+             .updatesGet, .updatesShow, .updatesCheck, .updatesDownload, .updatesCancel, .updatesInstall, .updatesOpenParent: break
         }
         return params
     }

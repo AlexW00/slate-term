@@ -39,6 +39,7 @@ final class SettingsModel: ObservableObject {
     @Published var shell = ""
     @Published var workingDirectory = "~"
     @Published var inheritWorkingDirectory = true
+    @Published var savedOutputLines = "10000"
     @Published var fontFamily = ""
     @Published var fontSize = ""
     @Published var fontThicken = false
@@ -86,6 +87,7 @@ final class SettingsModel: ObservableObject {
     @Published var notifySound = false
     @Published var notifyCommandDetails = false
     @Published var showAgentActivity = true
+    @Published var agentColors: [String: String] = [:]
     @Published var notificationAuthorization = "Checking…"
     var authorizeNotifications: (() -> Void)?
     var notificationAuthorizationLabel: String {
@@ -104,9 +106,21 @@ final class SettingsModel: ObservableObject {
     @Published var error: String?
     @Published var layouts: SavedLayoutsModel?
     @Published var layoutsError: String?
+    @Published var layoutAppName: String?
+    @Published var sourceLayoutName: String?
+    @Published var runtimeVersion: String?
+    @Published var parentManaged = false
+    @Published var overriddenKeys: Set<String> = []
+    @Published var inheritedShortcuts: [String: String] = [:]
+    @Published var layoutAppUpdateStatus: String?
+    @Published var pluginSyncStatus: String?
+    @Published var layoutApps: [JSONValue] = []
+    var resetOverrides: (([String], String) throws -> Void)?
+    var refreshLayoutApp: ((String, String) -> Void)?
     @Published private var baseline: [String: String] = [:]
     private var source = ""
     let configURL: URL
+    let paletteDirectory: URL
     var save: ((String, [String: String]) throws -> Void)?
     var registerPlugin: (() -> Void)?
     var setPluginEnabled: ((String, Bool) -> Void)?
@@ -116,13 +130,29 @@ final class SettingsModel: ObservableObject {
     var revealAgentSkill: (() -> Void)?
     var refreshAgentSkills: (() -> Void)?
 
-    init(configURL: URL) { self.configURL = configURL }
+    init(configURL: URL, paletteDirectory: URL? = nil) {
+        self.configURL = configURL
+        self.paletteDirectory = paletteDirectory ?? configURL.deletingLastPathComponent().appendingPathComponent("palettes")
+    }
+
+    func resetOverride(_ keys: [String]) {
+        guard parentManaged, !isDirty else { return }
+        do { try resetOverrides?(keys, source); error = nil }
+        catch { self.error = String(describing: error) }
+    }
+
+    func shortcutOverrideKeys(for command: String) -> [String] {
+        let chords = Set(shortcuts.filter { $0.value == command }.keys)
+            .union(inheritedShortcuts.filter { $0.value == command }.keys)
+        return chords.map { "keybind." + $0 }.filter(overriddenKeys.contains).sorted()
+    }
 
     var values: [String: String] {
         var values = ["appearance.theme": AppConfiguration.quotedString(theme),
                       "appearance.unfocused_pane_dim": String(unfocusedPaneDim),
                       "terminal.working_directory": AppConfiguration.quotedString(workingDirectory),
                       "terminal.inherit_working_directory": inheritWorkingDirectory ? "true" : "false",
+                      "terminal.saved_output_lines": savedOutputLines,
                       "terminal.shell": AppConfiguration.quotedString(shell),
                       "terminal.font_family": AppConfiguration.quotedString(fontFamily),
                       "terminal.font_size": fontSize,
@@ -143,7 +173,8 @@ final class SettingsModel: ObservableObject {
                       "notifications.banners": AppConfiguration.quotedString(notifyBanners.rawValue),
                       "notifications.sound": notifySound ? "true" : "false",
                       "notifications.command_details": notifyCommandDetails ? "true" : "false",
-                      "agents.show_activity": showAgentActivity ? "true" : "false"]
+                      "agents.show_activity": showAgentActivity ? "true" : "false",
+                      "agents.colors": AgentAccentColors.literal(agentColors)]
         for (chord, command) in shortcuts { values["keybind." + chord] = AppConfiguration.quotedString(command) }
         return values
     }
@@ -157,6 +188,7 @@ final class SettingsModel: ObservableObject {
         shell = configuration.terminal.shell
         workingDirectory = configuration.terminal.workingDirectory
         inheritWorkingDirectory = configuration.terminal.inheritWorkingDirectory
+        savedOutputLines = String(configuration.terminal.savedOutputLines)
         fontFamily = configuration.terminal.fontFamily
         fontSize = String(configuration.terminal.fontSize)
         fontThicken = configuration.terminal.fontThicken
@@ -177,6 +209,7 @@ final class SettingsModel: ObservableObject {
         notifySound = configuration.notifications.sound
         notifyCommandDetails = configuration.notifications.commandDetails
         showAgentActivity = configuration.showAgentActivity
+        agentColors = configuration.agentColors
         shortcuts = Dictionary(uniqueKeysWithValues: configuration.keyBindings.map { ($0.key.description, $0.value) })
         self.source = source
         if !preserveError { self.error = error }
@@ -186,10 +219,11 @@ final class SettingsModel: ObservableObject {
     }
 
     private var paletteLibrary: PaletteLibrary {
-        PaletteLibrary(directory: configURL.deletingLastPathComponent().appendingPathComponent("palettes"))
+        PaletteLibrary(directory: paletteDirectory)
     }
 
     func importPalette(from url: URL) throws -> String {
+        guard !parentManaged else { throw ConfigurationError.invalid("Import shared palettes in Slate Terminal") }
         let entry = try paletteLibrary.importPalette(from: url)
         customPalettes = try paletteLibrary.entries()
         return entry.name
@@ -269,10 +303,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 }
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general = "General", appearance = "Appearance", terminal = "Terminal", browser = "Browser", notifications = "Notifications", layouts = "Layouts", shortcuts = "Keyboard Shortcuts", plugins = "Plugins", agents = "AI Agents"
+    case layoutApp = "Layout app", general = "General", appearance = "Appearance", terminal = "Terminal", browser = "Browser", notifications = "Notifications", layouts = "Layouts", shortcuts = "Keyboard Shortcuts", plugins = "Plugins", agents = "AI Agents"
     var id: String { rawValue }
     var symbol: String {
         switch self {
+        case .layoutApp: "app.badge"
         case .general: "gearshape"
         case .appearance: "circle.lefthalf.filled"
         case .terminal: "terminal"
@@ -286,6 +321,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     }
     var color: Color {
         switch self {
+        case .layoutApp: .teal
         case .general: .gray
         case .appearance: .indigo
         case .terminal: .black
@@ -301,11 +337,12 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 
 private struct SettingsView: View {
     @ObservedObject var model: SettingsModel
+    @State private var generatedAppsContentHeight: CGFloat = 116
     let reload: () -> Void
 
     var body: some View {
         HStack(spacing: 0) {
-            List(SettingsSection.allCases, selection: $model.selection) { section in
+            List(SettingsSection.allCases.filter { $0 != .layoutApp || model.parentManaged }, selection: $model.selection) { section in
                 Label {
                     Text(section.rawValue)
                         .fontWeight(model.selection == section ? .semibold : .regular)
@@ -328,12 +365,14 @@ private struct SettingsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 8)
                 if model.selection == .layouts, let layouts = model.layouts {
+                    if !model.layoutApps.isEmpty { generatedApps }
                     SavedLayoutsView(model: layouts)
                 } else if model.selection == .plugins && model.plugins.isEmpty {
                     emptyPlugins
                 } else {
                     Form {
                         switch model.selection ?? .general {
+                        case .layoutApp: layoutApp
                         case .general: general
                         case .appearance: appearance
                         case .terminal: terminal
@@ -348,7 +387,7 @@ private struct SettingsView: View {
                     .formStyle(.grouped)
                     .scrollContentBackground(.automatic)
                 }
-                if model.selection == .agents {
+                if model.selection == .agents && !model.parentManaged {
                     Divider().padding(.horizontal, 24)
                     HStack {
                         Spacer()
@@ -362,26 +401,81 @@ private struct SettingsView: View {
                         .font(.callout).foregroundStyle(.red)
                         .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding()
                 }
-                if model.selection != .layouts {
-                  Divider()
-                  HStack {
-                    Button("Show Config File") {
-                        NSWorkspace.shared.selectFile(model.configURL.path, inFileViewerRootedAtPath: model.configURL.deletingLastPathComponent().path)
-                    }
-                    Spacer()
-                    Button("Revert", action: reload).disabled(!model.isDirty && model.error == nil)
-                    Button("Apply") { model.apply() }.disabled(!model.isDirty)
-                        .keyboardShortcut("s", modifiers: .command)
-                  }.padding(16)
+                if (model.selection != .layouts || model.parentManaged) && model.selection != .layoutApp {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 8) {
+                        if model.parentManaged && [.plugins, .layouts].contains(model.selection ?? .general) {
+                            Text("Plugins and layout apps are managed in Slate Terminal.")
+                                .font(.callout).foregroundStyle(.secondary)
+                            if let status = model.pluginSyncStatus {
+                                Text(status).font(.callout).foregroundStyle(.secondary)
+                            }
+                        }
+                        if model.selection != .layouts && model.selection != .layoutApp {
+                            HStack {
+                                Button("Show Config File") {
+                                    NSWorkspace.shared.selectFile(model.configURL.path, inFileViewerRootedAtPath: model.configURL.deletingLastPathComponent().path)
+                                }
+                                Spacer()
+                                Button("Revert", action: reload).disabled(!model.isDirty && model.error == nil)
+                                Button("Apply") { model.apply() }.disabled(!model.isDirty)
+                                    .keyboardShortcut("s", modifiers: .command)
+                            }
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
+    private var layoutApp: some View {
+        Section {
+            LabeledContent("Name", value: model.layoutAppName ?? "Layout app")
+            LabeledContent("Source layout", value: model.sourceLayoutName ?? "Unavailable")
+            LabeledContent("Runtime version", value: model.runtimeVersion ?? "Unknown")
+            if let status = model.layoutAppUpdateStatus {
+                Text(status).foregroundStyle(.secondary)
+            }
+        } footer: {
+            Text("Settings and plugins come from Slate Terminal. Settings changed here apply only to this app; Reset uses Slate Terminal’s value again. \(model.layoutAppName ?? "This app") keeps its own browser logins and plugin data.")
+        }
+    }
+
+    private var generatedApps: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Generated Apps").font(.headline)
+            ScrollView {
+                VStack(spacing: 10) {
+                    ForEach(Array(model.layoutApps.enumerated()), id: \.offset) { _, value in
+                        if let app = value.object, let id = app["layoutAppID"]?.string, let revision = app["revision"]?.string {
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(app["name"]?.string ?? "Layout app").lineLimit(1)
+                                    Text(generatedAppStatus(app)).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button("Refresh App") { model.refreshLayoutApp?(id, revision) }
+                                    .disabled(model.parentManaged || app["available"] != .bool(true) || app["running"] == .bool(true))
+                            }
+                        }
+                    }
+                }
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { generatedAppsContentHeight = $0 }
+            }.frame(height: min(generatedAppsContentHeight, 116))
+        }.padding(.horizontal, 24).padding(.vertical, 12)
+    }
+
+    private func generatedAppStatus(_ app: [String: JSONValue]) -> String {
+        guard app["available"] == .bool(true) else { return "Unavailable" }
+        let version = app["runtimeVersion"]?.string ?? "Unknown version"
+        return version + (app["running"] == .bool(true) ? " · Running" : " · Not running") + (app["updateReady"] == .bool(true) ? " · Update ready" : "")
+    }
+
     private var general: some View {
         Section {
             Toggle("Restore workspace on launch", isOn: $model.restore)
+                .layoutOverrideReset(model: model, key: "layout.restore_workspace")
                 .help("Restore open panels and their saved view state. Closing a panel removes it; shared plugin data is retained separately.")
         } footer: {
             Text("Restore tabs and split panes with new shell sessions.")
@@ -392,8 +486,11 @@ private struct SettingsView: View {
         Group {
             Section {
                 Toggle("Notify when long-running commands finish", isOn: $model.notifyAutomatic)
+                    .layoutOverrideReset(model: model, key: "notifications.automatic")
                 TextField("Minimum duration (seconds)", text: $model.notifyMinimumSeconds)
+                    .layoutOverrideReset(model: model, key: "notifications.minimum_seconds")
                 Toggle("Allow notifications from tools and plugins", isOn: $model.notifyTools)
+                    .layoutOverrideReset(model: model, key: "notifications.tools")
             } footer: {
                 Text("Command completion requires shell integration. Notifications from the focused pane are suppressed.")
             }
@@ -402,9 +499,11 @@ private struct SettingsView: View {
                     Text("From other panes").tag(NotificationPolicy.Banner.otherPanes)
                     Text("Only while using another app").tag(NotificationPolicy.Banner.otherApps)
                     Text("Off").tag(NotificationPolicy.Banner.off)
-                }
+                }.layoutOverrideReset(model: model, key: "notifications.banners")
                 Toggle("Play notification sounds", isOn: $model.notifySound)
+                    .layoutOverrideReset(model: model, key: "notifications.sound")
                 Toggle("Include command text in completion notifications", isOn: $model.notifyCommandDetails)
+                    .layoutOverrideReset(model: model, key: "notifications.command_details")
             } footer: {
                 Text("Command text can contain sensitive information and may appear on your lock screen. Unread indicators work without desktop permission.")
             }
@@ -431,12 +530,14 @@ private struct SettingsView: View {
                     Text("Auto").tag("system")
                 }
                 .pickerStyle(.segmented)
+                .layoutOverrideReset(model: model, key: "appearance.theme")
             } header: { Text("Appearance") } footer: {
                 Text("Auto follows your Mac’s appearance. Applies to the app and terminal panes.")
             }
             Section {
                 HStack {
-                    Slider(value: $model.unfocusedPaneDim, in: 0...1, step: 0.01) {
+                    Slider(value: Binding(get: { model.unfocusedPaneDim },
+                                          set: { model.unfocusedPaneDim = ($0 * 100).rounded() / 100 }), in: 0...1) {
                         Text("Unfocused pane dimming")
                     }
                         .accessibilityValue(Text(model.unfocusedPaneDim, format: .percent.precision(.fractionLength(0))))
@@ -444,16 +545,19 @@ private struct SettingsView: View {
                         .monospacedDigit()
                         .frame(width: 44, alignment: .trailing)
                 }
+                .layoutOverrideReset(model: model, key: "appearance.unfocused_pane_dim")
             } header: { Text("Pane dimming") } footer: {
-                Text("Dims unselected panes in every window. 0% turns dimming off. Choose Apply to update open panes.")
+                Text("Dims unselected panes in every window. 0% turns dimming off.")
             }
             Section {
                 PalettePicker(title: "Light palette", selection: $model.lightTheme, customPalettes: model.customPalettes,
-                              importPalette: model.importPalette, reportError: { model.error = $0 })
+                              importAllowed: !model.parentManaged, importPalette: model.importPalette, reportError: { model.error = $0 })
+                    .layoutOverrideReset(model: model, key: "terminal.light_theme")
                 PalettePicker(title: "Dark palette", selection: $model.darkTheme, customPalettes: model.customPalettes,
-                              importPalette: model.importPalette, reportError: { model.error = $0 })
+                              importAllowed: !model.parentManaged, importPalette: model.importPalette, reportError: { model.error = $0 })
+                    .layoutOverrideReset(model: model, key: "terminal.dark_theme")
             } header: { Text("Terminal colors") } footer: {
-                Text("Select Custom Palette… imports a color-only Ghostty palette into the config’s palettes folder. Choose Apply to use your selection in open terminals.")
+                Text(model.parentManaged ? "Custom palettes come from Slate Terminal. Choose Apply to use your selection in open terminals." : "Select Custom Palette… imports a color-only Ghostty palette into the config’s palettes folder. Choose Apply to use your selection in open terminals.")
             }
         }
     }
@@ -462,7 +566,8 @@ private struct SettingsView: View {
         Group {
             Section {
                 Toggle("New splits use the current directory", isOn: $model.inheritWorkingDirectory)
-                if !model.inheritWorkingDirectory {
+                    .layoutOverrideReset(model: model, key: "terminal.inherit_working_directory")
+                if !model.inheritWorkingDirectory || model.overriddenKeys.contains("terminal.working_directory") {
                     terminalField("Default directory", text: $model.workingDirectory, key: "working_directory")
                 }
             } header: { Text("Working directory") } footer: {
@@ -473,9 +578,15 @@ private struct SettingsView: View {
                 }
             }
             Section {
+                terminalField("Lines to keep", text: $model.savedOutputLines, key: "saved_output_lines")
+            } header: { Text("Saved output") } footer: {
+                Text("Keep up to 100,000 lines for reference after relaunch. Enter 0 to disable saving output. Terminals always start a fresh shell.")
+            }
+            Section {
                 terminalField("Font family", text: $model.fontFamily, key: "font_family")
                 terminalField("Size (points)", text: $model.fontSize, key: "font_size")
                 Toggle("Thicken text", isOn: $model.fontThicken)
+                    .layoutOverrideReset(model: model, key: "terminal.font_thicken")
                 terminalField("Minimum contrast", text: $model.minimumContrast, key: "minimum_contrast")
             } header: { Text("Text") } footer: {
                 Text("Contrast ranges from 1 (original colors) to 21. Higher values can turn low-contrast text black or white.")
@@ -486,12 +597,12 @@ private struct SettingsView: View {
                     Text("Bar").tag(AppConfiguration.CursorStyle.bar)
                     Text("Underline").tag(AppConfiguration.CursorStyle.underline)
                     Text("Hollow block").tag(AppConfiguration.CursorStyle.blockHollow)
-                }
+                }.layoutOverrideReset(model: model, key: "terminal.cursor_style")
                 Picker("Blink", selection: $model.cursorBlink) {
                     Text("Automatic").tag(AppConfiguration.CursorBlink.auto)
                     Text("On").tag(AppConfiguration.CursorBlink.on)
                     Text("Off").tag(AppConfiguration.CursorBlink.off)
-                }
+                }.layoutOverrideReset(model: model, key: "terminal.cursor_blink")
             } header: { Text("Cursor") } footer: {
                 Text("Sets the default cursor. Shell integration and terminal programs can override it.")
             }
@@ -506,7 +617,7 @@ private struct SettingsView: View {
                 Picker("Shell integration", selection: $model.integration) {
                     Text("Automatic").tag("auto")
                     Text("Off").tag("off")
-                }
+                }.layoutOverrideReset(model: model, key: "terminal.shell_integration")
             } header: { Text("Shell") } footer: {
                 Text("Use an absolute executable path, such as /bin/zsh. zsh, bash and fish get automatic integration. Shell changes apply to new terminals.")
             }
@@ -526,12 +637,13 @@ private struct SettingsView: View {
                     .font(.caption).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
-        }
+        }.layoutOverrideReset(model: model, key: "terminal." + key)
     }
 
     @ViewBuilder private var browser: some View {
         Section {
             TextField("Search URL", text: $model.searchURL)
+                .layoutOverrideReset(model: model, key: "browser.search_url")
         } header: { Text("Search engine") } footer: {
             Text("Use {query} where the search text belongs. For example: https://www.google.com/search?q={query}")
         }
@@ -599,19 +711,27 @@ private struct SettingsView: View {
                             model.assignShortcut(replacement, to: command.id)
                         }
                         .frame(width: 140, height: 24)
-                        Button { model.resetShortcut(for: command.id) } label: {
-                            Image(systemName: "arrow.counterclockwise")
+                        if model.parentManaged {
+                            let keys = model.shortcutOverrideKeys(for: command.id)
+                            if !keys.isEmpty {
+                                Button("Reset") { model.resetOverride(keys) }.disabled(model.isDirty)
+                                    .accessibilityLabel("Reset shortcut for \(command.title)")
+                            }
+                        } else {
+                            Button { model.resetShortcut(for: command.id) } label: {
+                                Image(systemName: "arrow.counterclockwise")
+                            }
+                                .frame(width: 28, height: 24)
+                                .help("Reset to default shortcut")
+                                .accessibilityLabel("Reset shortcut for \(command.title)")
                         }
-                            .frame(width: 28, height: 24)
-                            .help("Reset to default shortcut")
-                            .accessibilityLabel("Reset shortcut for \(command.title)")
                     }
                 } label: {
                     Text(command.title)
                 }
             }
         } footer: {
-            Text("Click a shortcut and press a new key combination. Escape cancels; Delete clears it. Reset restores the default shortcut.")
+            Text(model.parentManaged ? "Click a shortcut and press a new key combination. Escape cancels; Delete clears it. Reset uses Slate Terminal’s shortcut." : "Click a shortcut and press a new key combination. Escape cancels; Delete clears it. Reset restores the default shortcut.")
         }
     }
 
@@ -623,11 +743,11 @@ private struct SettingsView: View {
                         .font(.system(size: 44)).foregroundStyle(.secondary)
                     VStack(spacing: 8) {
                         Text("No Plugins").font(.title2.weight(.semibold))
-                        Text("Install a plugin ZIP to add commands or panel types to Slate Terminal.")
+                        Text(model.parentManaged ? "Plugins installed in Slate Terminal appear here." : "Install a plugin ZIP to add commands or panel types to Slate Terminal.")
                             .foregroundStyle(.secondary)
                     }
-                    Button("Install Plugin…") { model.registerPlugin?() }
-                    pluginRegistrationHint
+                    Button("Install Plugin…") { model.registerPlugin?() }.disabled(model.parentManaged)
+                    if !model.parentManaged { pluginRegistrationHint }
                 }
                 .multilineTextAlignment(.center)
                 .padding(24)
@@ -660,6 +780,7 @@ private struct SettingsView: View {
                         .labelsHidden()
                         .toggleStyle(.checkbox)
                         .fixedSize()
+                        .disabled(model.parentManaged)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(plugin.title)
                             Text(plugin.id).font(.caption).foregroundStyle(.secondary)
@@ -681,6 +802,7 @@ private struct SettingsView: View {
                         Button { model.removePlugin?(plugin.id) } label: {
                             Image(systemName: "trash")
                         }
+                        .disabled(model.parentManaged)
                         .help("Remove \(plugin.title). Saved plugin data and preferences are retained.")
                         .accessibilityLabel("Remove \(plugin.title)")
                     }
@@ -689,11 +811,11 @@ private struct SettingsView: View {
             Section {
                 HStack {
                     Spacer()
-                    Button("Install Plugin…") { model.registerPlugin?() }
+                    Button("Install Plugin…") { model.registerPlugin?() }.disabled(model.parentManaged)
                     Spacer()
                 }
             } footer: {
-                pluginRegistrationHint
+                if !model.parentManaged { pluginRegistrationHint }
             }
         }
     }
@@ -702,35 +824,41 @@ private struct SettingsView: View {
         Group {
             Section {
                 Toggle("Show agent activity on panes", isOn: $model.showAgentActivity)
+                    .layoutOverrideReset(model: model, key: "agents.show_activity")
             } footer: {
                 Text("Highlight panes and elements while a coding agent works on them through the Slate Terminal CLI. Only agents that identify themselves are shown.")
             }
+            AgentColorSettings(colors: $model.agentColors)
             Section {
                 ForEach(model.agentSkills, id: \.target.id) { entry in
                     LabeledContent {
-                        switch entry.status {
+                        if model.parentManaged {
+                            Text("Managed by Slate Terminal").foregroundStyle(.secondary)
+                        } else {
+                          switch entry.status {
                         case .installed:
                             Button("Remove") { model.changeAgentSkill?(entry.target.id, false) }
                         case .notInstalled:
                             Button("Install") { model.changeAgentSkill?(entry.target.id, true) }
                         case .conflict:
                             Text("Another skill uses this name").foregroundStyle(.secondary)
+                          }
                         }
                     } label: {
                         HStack(spacing: 6) {
                             Text(entry.target.name)
-                            if entry.status == .installed {
+                            if entry.status == .installed && !model.parentManaged {
                                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).accessibilityLabel("Installed")
                             }
                         }
-                        Text(entry.detected ? entry.target.detail : "\(entry.target.detail) · not set up")
+                        Text(model.parentManaged || entry.detected ? entry.target.detail : "\(entry.target.detail) · not set up")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
             } header: {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Slate Terminal skill")
-                    Text("Install this skill so your coding agent knows how to use Slate Terminal, control panes, and build plugins.")
+                    Text(model.parentManaged ? "Skills are managed by Slate Terminal." : "Install this skill so your coding agent knows how to use Slate Terminal, control panes, and build plugins.")
                         .font(.callout).fontWeight(.regular).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -745,10 +873,95 @@ private struct SettingsView: View {
 
 }
 
+private struct LayoutOverrideReset: ViewModifier {
+    @ObservedObject var model: SettingsModel
+    let key: String
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if model.parentManaged && model.overriddenKeys.contains(key) {
+            HStack(spacing: 12) {
+                content.frame(maxWidth: .infinity)
+                Button("Reset") { model.resetOverride([key]) }
+                    .disabled(model.isDirty)
+                    .accessibilityLabel("Reset " + key)
+                    .accessibilityIdentifier("settings.reset." + key)
+            }
+        } else { content }
+    }
+}
+
+private extension View {
+    func layoutOverrideReset(model: SettingsModel, key: String) -> some View {
+        modifier(LayoutOverrideReset(model: model, key: key))
+    }
+}
+
+private struct AgentColorSettings: View {
+    @Binding var colors: [String: String]
+    @State private var newAgent = ""
+    @State private var error: String?
+
+    private var names: [String] { Set(PresenceColor.known.keys).union(colors.keys).sorted() }
+
+    var body: some View {
+        Section {
+            ForEach(names, id: \.self) { name in
+                HStack {
+                    ColorPicker(name, selection: binding(for: name), supportsOpacity: false)
+                        .accessibilityIdentifier("settings.agentColor." + name)
+                    if PresenceColor.known[name] != nil {
+                        Button("Reset") { colors.removeValue(forKey: name) }
+                            .disabled(colors[name] == nil)
+                            .accessibilityLabel("Reset \(name) color")
+                    } else {
+                        Button("Remove", systemImage: "minus.circle") { colors.removeValue(forKey: name) }
+                            .labelStyle(.iconOnly)
+                            .accessibilityLabel("Remove \(name) color")
+                    }
+                }
+            }
+            HStack {
+                TextField("Custom agent name", text: $newAgent)
+                    .accessibilityIdentifier("settings.agentColor.name")
+                Button("Add") { addAgent() }
+                    .disabled(newAgent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || colors.count >= 64)
+            }
+            if let error { Text(error).font(.caption).foregroundStyle(.red) }
+        } header: { Text("Agent accent colors") } footer: {
+            Text("Match the name your agent uses, such as codex or my-agent. Names with a : suffix share their agent’s color.")
+        }
+    }
+
+    private func binding(for name: String) -> Binding<Color> {
+        Binding(get: {
+            let rgb = colors[name].flatMap { UInt32($0.dropFirst(), radix: 16) } ?? PresenceColor.rgb(for: name)
+            return Color(.sRGB, red: Double((rgb >> 16) & 255) / 255,
+                         green: Double((rgb >> 8) & 255) / 255, blue: Double(rgb & 255) / 255, opacity: 1)
+        }, set: { color in
+            guard let rgb = NSColor(color).usingColorSpace(.sRGB) else { return }
+            func component(_ value: CGFloat) -> Int { Int((min(1, max(0, value)) * 255).rounded()) }
+            colors[name] = String(format: "#%02X%02X%02X", component(rgb.redComponent), component(rgb.greenComponent), component(rgb.blueComponent))
+        })
+    }
+
+    private func addAgent() {
+        let name = newAgent.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !names.contains(name) else { error = "This agent is already listed."; return }
+        do {
+            var updated = colors
+            updated[name] = String(format: "#%06X", PresenceColor.rgb(for: name))
+            colors = try AgentAccentColors.validate(updated)
+            newAgent = ""
+            error = nil
+        } catch { self.error = String(describing: error) }
+    }
+}
+
 private struct PalettePicker: View {
     let title: String
     @Binding var selection: String
     let customPalettes: [PaletteLibrary.Entry]
+    var importAllowed = true
     let importPalette: (URL) throws -> String
     let reportError: (String) -> Void
     @State private var choosing = false
@@ -774,14 +987,16 @@ private struct PalettePicker: View {
                !customPalettes.contains(where: { $0.name == selection }) {
                 Text("\(selection) (unavailable)").tag(selection)
             }
-            Divider()
-            Text("Select Custom Palette…").tag("/import")
+            if importAllowed {
+                Divider()
+                Text("Select Custom Palette…").tag("/import")
+            }
         }
         .disabled(choosing)
     }
 
     private func chooseFile() {
-        guard !choosing else { return }
+        guard importAllowed, !choosing else { return }
         choosing = true
         let panel = NSOpenPanel()
         panel.canChooseDirectories = false

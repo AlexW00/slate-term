@@ -17,10 +17,8 @@ class InventoryTests(unittest.TestCase):
     def test_full_inventory_includes_every_script_and_three_app_iterations(self):
         inventory.validate(REPO)
         selected = inventory.select([], complete=True)
-        self.assertEqual(len(selected), 91)
+        self.assertEqual(len(selected), 96)
         self.assertIn('plugin-packages', [gate.name for gate in selected])
-        self.assertEqual(inventory.BY_NAME['updates'].location, 'vm')
-        self.assertTrue(inventory.BY_NAME['updates'].requires_app)
         self.assertTrue({'shell-hooks', 'shells'} <= {gate.name for gate in selected})
         self.assertEqual([gate.name for gate in selected], list(inventory.ORDER))
         self.assertEqual([gate.name for gate in selected if gate.command[-1] == 'scripts/verify-app.py'],

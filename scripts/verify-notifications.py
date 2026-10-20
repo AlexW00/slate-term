@@ -49,7 +49,7 @@ with AppFixture('notifications', configuration) as app:
     # Establish the required initial shell state before starting another native window.
     # Socket readiness alone does not mean the first authenticated prompt arrived.
     eventually('source shell prompt', lambda: app.rpc('pane.inspect', pane=source)['state'] == 'prompt')
-    target_tab = app.rpc('command.run', id='tab.new')['tabId']
+    target_tab = app.rpc('command.run', id='tab.new', focus='new')['tabId']
     active = app.rpc('context.get')['focusedPaneId']
 
     for invalid in [dict(title=''), dict(title='x' * 257), dict(title='x', body='x' * 4097),

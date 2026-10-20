@@ -5,8 +5,18 @@ import SlateTermSettings
 extension WorkspaceHost {
     func captureRestoration() -> WorkspaceRestoration {
         var result = WorkspaceRestoration()
+        var remainingOutputBytes = SavedTerminalOutput.maximumWorkspaceBytes
         for pane in workspace.panes {
             let key = pane.id.description
+            if pane.type == .terminal, remainingOutputBytes > 0,
+               var output = terminals[pane.id]?.savedOutput(lineLimit: settings.current.terminal.savedOutputLines) {
+                output.text = SavedTerminalOutput.boundedText(output.text,
+                    lineLimit: settings.current.terminal.savedOutputLines, byteLimit: remainingOutputBytes)
+                if !output.text.isEmpty {
+                    result.terminalOutput[key] = output
+                    remainingOutputBytes -= output.text.utf8.count
+                }
+            }
             if pane.type == .terminal,
                let directory = shellSessions[pane.id]?.report?.workingDirectory ?? terminals[pane.id]?.context.workingDirectory ?? terminals[pane.id]?.startingDirectory,
                WorkspaceRestoration.allowsDirectory(directory) {

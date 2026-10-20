@@ -11,7 +11,7 @@ from plugin_package_fixture import package_fixture
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP = ROOT / ".derived/Build/Products/Debug/Slate Terminal.app/Contents/MacOS/Slate Terminal"
-CLI = APP.parent.parent / "Helpers/slate-term"
+CLI = APP.parent.parent / "Frameworks/SlateRuntime.framework/Helpers/slate-term"
 ARTIFACTS = ROOT / "artifacts"
 
 
@@ -71,7 +71,7 @@ with tempfile.TemporaryDirectory(prefix="slate-pane-titles-", dir="/tmp") as tem
             time.sleep(1)
             rpc("debug.paneHeader", pane="p1", rename="Build")
             check("p1")
-            p2 = cli("panes", "split", "--right", "--pane", "p1")["paneId"]
+            p2 = cli("panes", "split", "--right", "--pane", "p1", "--focus-policy", "new")["paneId"]
             cli("panes", "type", "--pane", p2, "--type", "browser", "--force")
             eventually("browser ready", lambda: rpc("browser.get", pane=p2)["title"] == "New Browser"
                        and not rpc("browser.get", pane=p2)["loading"])

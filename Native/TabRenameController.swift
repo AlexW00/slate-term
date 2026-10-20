@@ -45,12 +45,13 @@ final class TabRenameController: NSObject, NSTextFieldDelegate {
         sheet.isReleasedWhenClosed = false
         sheet.title = "Rename Tab"
         field.stringValue = originalTitle ?? ""
-        field.placeholderString = TabTitle.defaultTitle
+        let defaultTitle = ApplicationLaunchContext.current.descriptor?.name ?? TabTitle.defaultTitle
+        field.placeholderString = defaultTitle
         field.setAccessibilityLabel("Tab name")
         field.delegate = self
         let heading = NSTextField(labelWithString: "Rename Tab")
         heading.font = .systemFont(ofSize: 14, weight: .semibold)
-        let hint = NSTextField(labelWithString: "Leave empty to use \(TabTitle.defaultTitle).")
+        let hint = NSTextField(labelWithString: "Leave empty to use \(defaultTitle).")
         hint.font = .systemFont(ofSize: 11)
         hint.textColor = .secondaryLabelColor
         errorLabel.font = .systemFont(ofSize: 11)

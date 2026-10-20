@@ -24,6 +24,7 @@ final class SavedLayoutsModel: ObservableObject {
     var didSave: (() -> Void)?
     var createLauncher: ((UUID) throws -> Void)?
     var launcherUnavailable: String?
+    var parentManaged = false
 
     func makeLauncher() {
         guard let definition else { return }
@@ -177,6 +178,7 @@ struct SavedLayoutsView: View {
     @ObservedObject var model: SavedLayoutsModel
     @State private var previewSize = CGSize(width: 360, height: 260)
     @State private var inspectorHasMore = false
+    @State private var editorHasMore = false
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
@@ -193,7 +195,23 @@ struct SavedLayoutsView: View {
             Divider()
             VStack(spacing: 0) {
                 if let definition = model.definition {
-                    editor(definition)
+                    GeometryReader { geometry in
+                        ScrollView {
+                            // Keep the footer reachable when generated apps reduce the editor's height.
+                            editor(definition).frame(height: max(320, geometry.size.height))
+                        }
+                        .onScrollGeometryChange(for: Bool.self) { scroll in
+                            geometry.size.height + 1 < 320 && scroll.visibleRect.maxY + 1 < scroll.contentSize.height
+                        } action: { _, hasMore in editorHasMore = hasMore }
+                        .safeAreaInset(edge: .bottom, spacing: 0) {
+                            if editorHasMore {
+                                Label("Scroll for more layout controls", systemImage: "chevron.down")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity).padding(8)
+                                    .background(.background)
+                            }
+                        }
+                    }
                 } else {
                     ContentUnavailableView {
                         Label(model.entry == nil ? "No Saved Layouts" : "Layout Needs Repair",
@@ -217,9 +235,9 @@ struct SavedLayoutsView: View {
                     .opacity(model.conflict || model.isDirty ? 1 : 0)
                     .accessibilityHidden(!model.conflict && !model.isDirty)
                 HStack {
-                    Button("Create Spotlight Launcher…", action: model.makeLauncher)
-                        .disabled(model.definition == nil || model.isDirty || model.conflict || model.launcherUnavailable != nil)
-                        .help(model.launcherUnavailable ?? "Create an app shortcut for the saved layout. Save changes first.")
+                    Button("Create Layout App…", action: model.makeLauncher)
+                        .disabled(model.parentManaged || model.definition == nil || model.isDirty || model.conflict || model.launcherUnavailable != nil)
+                        .help(model.launcherUnavailable ?? "Create an independent app from the saved layout. Save changes first.")
                     Spacer()
                     Button("Revert", action: model.revert).disabled(!model.isDirty && !model.conflict)
                     Button("Save Changes", action: model.save).keyboardShortcut("s", modifiers: .command)

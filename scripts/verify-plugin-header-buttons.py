@@ -10,7 +10,7 @@ from plugin_package_fixture import package_fixture
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP = ROOT / '.derived/Build/Products/Debug/Slate Terminal.app/Contents/MacOS/Slate Terminal'
-CLI = APP.parent.parent / 'Helpers/slate-term'
+CLI = APP.parent.parent / 'Frameworks/SlateRuntime.framework/Helpers/slate-term'
 ARTIFACTS = ROOT / 'artifacts'
 
 
@@ -116,7 +116,7 @@ with tempfile.TemporaryDirectory(prefix='slate-header-buttons-', dir='/tmp') as 
             assert ids('p1') == ['all', 'terminal', 'extra-a', 'extra-b', 'extra-c']
             click('p1', 'all')
             click('p1', 'extra-c')  # Actual overflow-menu dispatch.
-            p2 = cli('panes', 'split', '--right', '--pane', 'p1')['paneId']
+            p2 = cli('panes', 'split', '--right', '--pane', 'p1', '--focus-policy', 'new')['paneId']
             assert rpc('workspace.get')['tabs'][0]['focusedPane'] == p2
             click('p1', 'terminal')  # Unfocused sibling must still be the target.
             cli('panes', 'type', '--pane', p2, '--type', 'browser', '--force')
@@ -140,7 +140,7 @@ with tempfile.TemporaryDirectory(prefix='slate-header-buttons-', dir='/tmp') as 
             cli('panes', 'type', '--pane', p2, '--type', 'notes-panel', '--force')
             assert ids(p2) == ['all', 'widget', 'extra-a', 'extra-b', 'extra-c']
             click(p2, 'widget')
-            other = cli('command', 'run', 'window.new')['tabId']
+            other = cli('command', 'run', 'window.new', '--params', '{"focus":"new"}')['tabId']
             click('p1', 'all')  # Another native window is now key.
             cli('tabs', 'close', '--tab', other, '--force')
 

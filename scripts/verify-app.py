@@ -12,7 +12,7 @@ import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP = ROOT / ".derived/Build/Products/Debug/Slate Terminal.app/Contents/MacOS/Slate Terminal"
-CLI = ROOT / ".derived/Build/Products/Debug/Slate Terminal.app/Contents/Helpers/slate-term"
+CLI = ROOT / ".derived/Build/Products/Debug/Slate Terminal.app/Contents/Frameworks/SlateRuntime.framework/Helpers/slate-term"
 
 
 def eventually(label, condition, timeout=15):
@@ -122,9 +122,9 @@ with tempfile.TemporaryDirectory(prefix="slate-app-", dir="/tmp") as temporary:
                 pane = cli("panes", "split", "--left", "--pane", "p1")["paneId"]
                 cli("panes", "close", "--pane", pane, "--force")
             assert cli("rpc", "debug.inspect")["panes"][0]["surface"] == original_surface
-            background_survivor = cli("panes", "split", "--right", "--pane", "p1")["paneId"]
-            background_pane = cli("panes", "split", "--down", "--pane", "p1")["paneId"]
-            tab = cli("tabs", "new")["tabId"]
+            background_survivor = cli("panes", "split", "--right", "--pane", "p1", "--focus-policy", "new")["paneId"]
+            background_pane = cli("panes", "split", "--down", "--pane", "p1", "--focus-policy", "new")["paneId"]
+            tab = cli("tabs", "new", "--focus-policy", "new")["tabId"]
             cli("panes", "close", "--pane", background_pane, "--force")
             cli("rpc", "debug.activate", "--params", '{"tab":"t1"}')
             activated = cli("rpc", "debug.inspect")

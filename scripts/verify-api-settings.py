@@ -169,6 +169,8 @@ with AppFixture('api-settings', source) as app:
     eventually('plugin document', lambda: evaluate('typeof workspace') == 'object')
     evaluate('await workspace.call("config.patch", {expectedSourceRevision:(await workspace.call("config.get")).sourceRevision,values:{"appearance.unfocused_pane_dim":0.25}})')
     assert app.rpc('config.get')['current']['appearance']['unfocused_pane_dim'] == 0.25
+    evaluate('await workspace.call("config.patch", {expectedSourceRevision:(await workspace.call("config.get")).sourceRevision,values:{"agents.colors":{"codex":"#123456","my.agent":"#ABCDEF"}}})')
+    assert app.rpc('config.get')['current']['agents']['colors'] == {'codex': '#123456', 'my.agent': '#ABCDEF'}
     # Registered pages can configure and create terminal splits through the public API.
     evaluate('await workspace.call("config.patch", {expectedSourceRevision:(await workspace.call("config.get")).sourceRevision,values:{"terminal.working_directory":' + json.dumps(str(fallback)) + ',"terminal.inherit_working_directory":false}})')
     plugin_split = evaluate('await workspace.panes.split({direction:"right",expectedLayoutRevision:(await workspace.panes.inspect()).layoutRevision})')['paneId']

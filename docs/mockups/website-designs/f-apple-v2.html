@@ -100,7 +100,7 @@ h1,h2,h3,p{margin:0}
 .pill:hover{background:var(--blue-h);text-decoration:none}
 .pill.gh{gap:4px;background:var(--ctl);color:var(--text)}
 .pill.gh:hover{background:var(--ctl-h)}
-.pill .star{width:11px;height:11px}
+.pill .github{width:13px;height:13px}
 .lnav-menu .pill.gh{margin-left:-16px}
 @media (max-width:734px){.lnav{height:48px}.lnav-in{padding:0 16px}.lnav-title{font-size:19px}.lnav-menu a:not(.pill){display:none}}
 
@@ -881,7 +881,7 @@ footer a:hover{color:var(--text)}
       <a href="#agents">Agents</a>
       <a href="#examples">Plugin ideas</a>
       <a class="pill" href="https://github.com/AlexW00/slate-term/releases/latest/download/Slate-Terminal-arm64.dmg" aria-label="Download Slate Terminal for Mac">Download</a>
-      <a class="pill gh" href="https://github.com/AlexW00/slate-term" aria-label="Star Slate Terminal on GitHub"><svg class="star" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 1.2l2 4.1 4.5.6-3.3 3.1.8 4.5L8 11.4l-4 2.1.8-4.5L1.5 5.9 6 5.3z"/></svg>Star</a>
+      <a class="pill gh" href="https://github.com/AlexW00/slate-term" aria-label="Slate Terminal on GitHub"><svg class="github" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 .297C5.37.297 0 5.67 0 12.297c0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.043-1.61-4.043-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.09-.745.083-.729.083-.729 1.205.084 1.838 1.237 1.838 1.237 1.07 1.835 2.809 1.305 3.495.998.108-.776.418-1.305.762-1.605-2.665-.303-5.466-1.334-5.466-5.93 0-1.31.469-2.381 1.236-3.221-.124-.303-.536-1.524.118-3.176 0 0 1.008-.322 3.301 1.23A11.52 11.52 0 0 1 12 6.099c1.02.005 2.045.138 3.003.404 2.291-1.552 3.297-1.23 3.297-1.23.656 1.652.244 2.873.12 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.804 5.625-5.475 5.921.43.372.823 1.102.823 2.222 0 1.606-.015 2.898-.015 3.293 0 .322.216.694.825.576C20.565 22.092 24 17.599 24 12.297c0-6.627-5.373-12-12-12"/></svg>GitHub</a>
     </div>
   </div>
 </nav>
@@ -959,6 +959,23 @@ footer a:hover{color:var(--text)}
           </div>
         </article>
 
+        <article class="tile s2 t-prs reveal" aria-labelledby="tb3">
+          <h3 id="tb3">See what your agents are doing.</h3>
+          <p>A floating pill at the bottom right shows who is working in a pane and why.</p>
+          <div class="vis v-prs" aria-hidden="true">
+            <div class="solo kt" data-pal>
+              <div class="mp">
+                <div class="phd"><span class="ty"><span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span><b>Terminal</b></span><span class="ptitle">pnpm test</span><span></span></div>
+                <pre><span class="g">❯</span> pnpm test checkout
+<span class="g">✓</span> cart totals <span class="d">(4)</span>
+<span class="g">✓</span> promo codes <span class="d">(6)</span>
+<span class="d">running payment.spec…</span></pre>
+                <div class="prs on"><div class="ring" style="--ag:#ff9466"></div><div class="tags"><span class="ptag on" style="--ag:#ff9466"><span class="st"><span class="psp"></span></span><span class="nm">claude</span><span class="no">running the tests</span><span class="dt">4.2s</span></span></div></div>
+              </div>
+            </div>
+          </div>
+        </article>
+
         <article class="tile s2 reveal" aria-labelledby="tb2">
           <h3 id="tb2">A panel can be anything.</h3>
           <p>A terminal, a browser, notes or your own plugin. Switch any pane in place.</p>
@@ -979,23 +996,6 @@ footer a:hover{color:var(--text)}
                 <div><span class="ck"></span>Browser</div>
                 <div><span class="ck"></span>Private Browser</div>
                 <div><span class="ck"></span>Notes</div>
-              </div>
-            </div>
-          </div>
-        </article>
-
-        <article class="tile s2 t-prs reveal" aria-labelledby="tb3">
-          <h3 id="tb3">See what your agents are doing.</h3>
-          <p>A floating pill at the bottom right shows who is working in a pane and why.</p>
-          <div class="vis v-prs" aria-hidden="true">
-            <div class="solo kt" data-pal>
-              <div class="mp">
-                <div class="phd"><span class="ty"><span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span><b>Terminal</b></span><span class="ptitle">pnpm test</span><span></span></div>
-                <pre><span class="g">❯</span> pnpm test checkout
-<span class="g">✓</span> cart totals <span class="d">(4)</span>
-<span class="g">✓</span> promo codes <span class="d">(6)</span>
-<span class="d">running payment.spec…</span></pre>
-                <div class="prs on"><div class="ring" style="--ag:#ff9466"></div><div class="tags"><span class="ptag on" style="--ag:#ff9466"><span class="st"><span class="psp"></span></span><span class="nm">claude</span><span class="no">running the tests</span><span class="dt">4.2s</span></span></div></div>
               </div>
             </div>
           </div>

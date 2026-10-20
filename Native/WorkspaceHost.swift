@@ -29,7 +29,12 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         return try reconcile(next, transition: transition, operation: operation, requestFocus: true)
     }
     private var pluginCatalog: PluginCatalog
-    private var packageOperationBusy = false
+    private var packageOperationBusy = false {
+        didSet {
+            guard oldValue, !packageOperationBusy, ApplicationLaunchContext.current.isLayoutApp else { return }
+            DispatchQueue.main.async { [weak self] in self?.reconcileLayoutAppPlugins() }
+        }
+    }
     var pluginSettingsRecipients: [(id: String, plugin: String)] {
         pluginInstances.all.map { (id: $0.id, plugin: $0.registration.id) }
     }
@@ -41,7 +46,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     private let pluginCommands = PluginCommands()
     var serviceSettingsRecipients: [(plugin: String, target: ServiceEventRecipient)] { backgroundServices.recipients }
     private lazy var backgroundServices = BackgroundServices(appID: instanceID,
-        cliPath: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/slate-term").path, operations: operations,
+        cliPath: RuntimeBundle.helpersURL.appendingPathComponent("slate-term").path, operations: operations,
         registrations: { [weak self] in self?.pluginCatalog.activeRegistrations ?? [] },
         settings: { [weak self] id in self?.settings.current.plugins[id] ?? [:] },
         request: { [weak self] method, params, metadata, caller in
@@ -56,6 +61,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }, retireOwned: { [weak self] owner in
             self?.pluginCommands.cancelOwned(by: owner) ?? Task { false }
         })
+    private let previousOutputActionRevision = UUID()
     private var headerActionRevisions: [String: UUID] = [:]
     private let runtime: GhosttyRuntime
     private var server: UnixServer?
@@ -64,8 +70,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     var containers: [PaneID: PaneContainer] = [:]
     lazy var presence = PresenceController(host: self)
     lazy var updates = makeUpdatesController()
+    var layoutAppRestartConfirmed = false
     var updateEventOperation: WorkspaceOperationContext?
-    var updateImmediateOperation: WorkspaceOperationContext?
     private struct PaneDragContext {
         let pane: PaneID
         let tab: TabID
@@ -75,6 +81,11 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     private var paneDragContext: PaneDragContext?
     private let processTitles = TerminalProcessTitles()
     private var titleTimer: DispatchSourceTimer?
+    private var outputTimer: DispatchSourceTimer?
+    private var persistedTerminalOutput: [String: SavedTerminalOutput] = [:]
+    private(set) var isTerminating = false
+    private var retiringTerminals: [UUID: TerminalView] = [:]
+    private var previousOutputWindows: [PaneID: PreviousOutputWindowController] = [:]
     private var processNames: [PaneID: String] = [:]
     private var shellNames: [PaneID: String] = [:]
     var terminals: [PaneID: TerminalView] = [:]
@@ -133,6 +144,35 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     var configurationSourceRevision = UUID().uuidString
     var appliedConfigurationRevision = UUID().uuidString
     private var configurationWatcher: ConfigurationWatcher?
+    private var parentConfigurationWatcher: ConfigurationWatcher?
+    private var parentPluginWatcher: DirectoryTreeWatcher?
+    private var layoutAppTimer: Timer?
+    private var layoutAppMaintenanceTask: Task<Void, Never>?
+    private var layoutAppSettingsTask: Task<Void, Never>?
+    private var layoutWorkspacePublished = false
+    private var layoutPluginPending: [String: PreparedPluginPackage] = [:]
+    private var layoutPluginSyncTask: Task<Void, Never>?
+    private var layoutPluginSyncRequested = false
+    private var layoutPluginSyncClosed = false
+    private var layoutPluginRetryAfter: ContinuousClock.Instant?
+    private var layoutPluginRetryDelay: Double = 2
+    private var layoutPluginRetryCount = 0
+    private var layoutPluginLastParentRecords: [InstalledPlugin]?
+    private var layoutPluginPauseArmed = false
+    private var layoutPluginPauseContinuation: CheckedContinuation<Void, Never>?
+    private var layoutPluginPausePackages: [JSONValue] = []
+    private var layoutPluginDiagnostic: String?
+    private var layoutPluginDeferredCount = 0
+    private var sharedPaletteData: [Data?] = []
+    private lazy var layoutApps: LayoutApps = {
+        let apps = LayoutApps(parentBase: settings.base, parentConfigURL: settings.configURL)
+        apps.onChange = { [weak self] topic, fields, operation in
+            do { try self?.events.publishOperation(operation.publication(topic: topic, payload: fields)) }
+            catch { NSLog("Layout app event publication failed: %@", String(describing: error)) }
+            self?.refreshLayoutAppSettings()
+        }
+        return apps
+    }()
     private var appearanceObservation: NSKeyValueObservation?
     var appearanceRefreshScheduled = false
     var publishedAppearanceRevision: String?
@@ -156,6 +196,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     var settingsModel: SettingsModel?
     private var statusMenuItem: NSMenuItem?
     private var workspaceShortcuts: NSMenu?
+    private var testConfirmationDelay: TimeInterval = 0.2
     private var testConfirmationHandler: ((NSAlert) -> Void)?
     private var testPresentationError: ((any Error) -> Void)?
     private struct ConfigurationApplyFault { let replacement: String? }
@@ -186,23 +227,37 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         self.settings = settings
         browserData = try BrowserData(directory: settings.base.appendingPathComponent("state"))
         savedLayouts = SavedLayouts(directory: settings.configURL.deletingLastPathComponent().appendingPathComponent("layouts"))
-        let catalog = try PluginCatalog(directory: settings.base.appendingPathComponent("plugins"))
+        var catalog = try PluginCatalog(directory: settings.base.appendingPathComponent("plugins"))
+        if let descriptor = ApplicationLaunchContext.current.descriptor {
+            try LayoutAppPluginSync.initial(catalog: &catalog, parentBase: descriptor.parentBase,
+                                            preserving: settings.restorablePluginTypes())
+        }
         let maintenance = try catalog.packages.cleanAbandonedStaging().merging(catalog.packages.orphanRoots(referenced: catalog.records)) { first, _ in first }
         for (root, reason) in maintenance { PackageFiles.retain(root: root, reason: reason) }
         pluginCatalog = catalog
         pluginInstances = PluginInstances()
-        self.workspace = settings.restore(or: workspace, registeredTypes: Set(catalog.activeRegistrations.filter(\.hasPanel).map(\.id)))
+        var initial = workspace
+        if ApplicationLaunchContext.current.isLayoutApp {
+            for pane in initial.panes { try initial.close(pane.id) }
+        }
+        var restoredWorkspace = settings.restore(or: initial, registeredTypes: Set(catalog.activeRegistrations.filter(\.hasPanel).map(\.id)))
+        try restoredWorkspace.setDefaultTabTitle(ApplicationLaunchContext.current.descriptor?.name ?? TabTitle.defaultTitle)
+        self.workspace = restoredWorkspace
+        if ApplicationLaunchContext.current.isLayoutApp, let error = settings.workspaceError {
+            throw LayoutAppRestorationFailure(message: error, file: settings.base.appendingPathComponent("state/workspace.json"))
+        }
         // An app launched from another Slate pane must not pass that app's routing,
         // command settings or shell credentials to its new surfaces. Ghostty inherits
         // the process environment before applying explicit per-surface overrides.
         let inheritedIdentity = Set(["SLATE_TERM_CLI", "SLATE_TERM_SOCKET", "SLATE_TERM_INSTANCE_ID", "SLATE_TERM_PANE_ID", "SLATE_TERM_TAB_ID",
-                                     "SLATE_TERM_SESSION_ID", "SLATE_TERM_CONTEXT_TOKEN", "SLATE_TERM_RUN_KEY", "SLATE_TERM_SHELL_PID", "SLATE_TERM_INVOCATION_ID"])
+                                     "SLATE_TERM_SESSION_ID", "SLATE_TERM_CONTEXT_TOKEN", "SLATE_TERM_RUN_KEY", "SLATE_TERM_SHELL_PID", "SLATE_TERM_INVOCATION_ID", "SLATE_LAYOUT_STATE_FD"])
         for key in environment.keys where inheritedIdentity.contains(key) || key.hasPrefix("SLATE_TERM_PLUGIN_") || key.hasPrefix("SLATE_TERM_COMMAND_") || key.hasPrefix("SLATE_TERM_SERVICE_") {
             unsetenv(key)
         }
         runtime = try GhosttyRuntime(configurationURL: settings.engineURL)
         super.init()
         _ = revisions // Seed before the first mutation, including native/legacy paths.
+        savedLayouts.layoutApps = layoutApps
         savedLayouts.types = { [weak self] in SavedLayoutPaneType.available(plugins: self?.pluginCatalog.activeRegistrations ?? []) }
         savedLayouts.windows = { [weak self] in self?.layoutSourceWindows ?? [] }
         savedLayouts.runDialog = { [weak self] alert in self?.runConfirmationAlert(alert) ?? .alertSecondButtonReturn }
@@ -217,6 +272,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         savedLayouts.invoke = { [weak self] method, params, operation in
             guard let self else { throw SocketError.disconnected }
             return try self.call(method, params: params, operation: operation)
+        }
+        savedLayouts.invokeAsync = { [weak self] method, params, operation in
+            guard let self, self.server != nil else { throw CancellationError() }
+            return try await self.callAsync(method, params: params, operation: operation)
         }
         savedLayouts.onChange = { [weak self] in self?.refreshCommandPicker() }
         savedLayouts.showSettings = { [weak self] in self?.showSettings(section: .layouts) }
@@ -276,16 +335,34 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         var initial = workspace
         // Closing the last window saves a valid empty workspace. A fresh launch
         // still needs a terminal, while retaining the saved identity counters.
-        if initial.tabs.isEmpty { try initial.newTab() }
-        try reconcile(initial, restoration: settings.restoredState)
+        if initial.tabs.isEmpty, let descriptor = ApplicationLaunchContext.current.descriptor {
+            try openLayoutAppRecipe(descriptor)
+        } else {
+            if initial.tabs.isEmpty { try initial.newTab() }
+            try reconcile(initial, restoration: settings.restoredState)
+        }
+        layoutWorkspacePublished = true
         if integration { fputs("Integration startup: initial workspace reconciled\n", stderr) }
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now(), repeating: .milliseconds(500), leeway: .milliseconds(100))
         timer.setEventHandler { [weak self] in MainActor.assumeIsolated { self?.refreshTerminalTitles() } }
         timer.resume()
         titleTimer = timer
+        let outputTimer = DispatchSource.makeTimerSource(queue: .main)
+        outputTimer.schedule(deadline: .now() + 5, repeating: 5, leeway: .seconds(1))
+        outputTimer.setEventHandler { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, !self.isTerminating, self.settings.current.restoreWorkspace,
+                      !self.settings.savingSuspended, self.settings.current.terminal.savedOutputLines > 0 else { return }
+                let restoration = self.captureRestoration()
+                guard restoration.terminalOutput != self.persistedTerminalOutput else { return }
+                self.persistWorkspace(restoration: restoration)
+            }
+        }
+        outputTimer.resume()
+        self.outputTimer = outputTimer
         // Installed agent links point at the managed copy; refresh it to this app version's skill.
-        do { try agentSkills.refreshIfInstalled() }
+        do { if !ApplicationLaunchContext.current.isLayoutApp { try agentSkills.refreshIfInstalled() } }
         catch { NSLog("Could not refresh the agent skill: %@", String(describing: error)) }
         appearanceObservation = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
             MainActor.assumeIsolated { self?.updateTerminalAppearance() }
@@ -293,6 +370,42 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         configurationWatcher = try ConfigurationWatcher(url: settings.configURL) { [weak self] in
             do { _ = try self?.reloadConfiguration() }
             catch { NSLog("Configuration reload rejected; see Configuration & Workspace Status") }
+        }
+        if let parent = settings.parentConfigURL {
+            parentConfigurationWatcher = try ConfigurationWatcher(url: parent, createDirectory: false) { [weak self] in
+                do { _ = try self?.reloadConfiguration() }
+                catch { NSLog("Parent configuration reload failed") }
+            }
+        }
+        if let descriptor = ApplicationLaunchContext.current.descriptor {
+            parentPluginWatcher = try DirectoryTreeWatcher(url: descriptor.parentBase.appendingPathComponent("plugins")) { [weak self] in
+                self?.reconcileLayoutAppPlugins(parentChanged: true)
+            }
+            reconcileLayoutAppPlugins()
+        }
+        layoutAppTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if ApplicationLaunchContext.current.isLayoutApp {
+                    if let source = try? self.configurationSource(),
+                       self.settings.configurationSourceIdentity(source) != self.configurationRevisionSource {
+                        do { _ = try self.reloadConfiguration() }
+                        catch { NSLog("Parent configuration reload failed") }
+                    }
+                    self.refreshSharedPalettes()
+                    self.retryLayoutAppPluginSync()
+                }
+                else {
+                    if self.layoutAppMaintenanceTask == nil {
+                        self.layoutAppMaintenanceTask = Task { [weak self] in
+                            guard let self else { return }
+                            defer { self.layoutAppMaintenanceTask = nil }
+                            await self.layoutApps.catchUp()
+                            if self.settingsWindow?.window?.isVisible == true { self.refreshLayoutAppSettings() }
+                        }
+                    }
+                }
+            }
         }
         // Re-read after arming observation so edits during terminal startup are
         // not lost between the initial settings read and watcher attachment.
@@ -303,8 +416,39 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }
     }
 
+    func prepareForTermination(completion: @escaping @MainActor () -> Void) {
+        guard !isTerminating else { return }
+        isTerminating = true
+        outputTimer?.cancel(); outputTimer = nil
+        persistWorkspace()
+        let views = Array(terminals.values) + Array(retiringTerminals.values)
+        var remaining = views.count
+        guard remaining > 0 else {
+            RunLoop.main.perform(inModes: [.common, .modalPanel]) { MainActor.assumeIsolated { completion() } }
+            CFRunLoopWakeUp(CFRunLoopGetMain())
+            return
+        }
+        for terminal in views {
+            terminal.beginShutdown(lineLimit: settings.current.terminal.savedOutputLines) { [self] in
+                remaining -= 1
+                guard remaining == 0 else { return }
+                persistWorkspace()
+                completion()
+            }
+        }
+    }
+
+    private func retireTerminal(_ terminal: TerminalView) {
+        let key = UUID()
+        retiringTerminals[key] = terminal
+        terminal.beginShutdown(lineLimit: 0) { [weak self, terminal] in
+            terminal.close()
+            self?.retiringTerminals.removeValue(forKey: key)
+        }
+    }
+
     func close() {
-        updates.shutdown()
+        closeLayoutAppPluginSync()
         notificationsRunning = false
         notificationDelivery.close()
         notificationStore = NotificationStore()
@@ -318,14 +462,23 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         nativeLayoutInvalid.removeAll()
         dividerFixture = nil
         nativeLayoutProbe = nil
-        persistWorkspace()
+        if !ApplicationLaunchContext.current.isLayoutApp || layoutWorkspacePublished { persistWorkspace() }
         if let integrationKeyboardMonitor { NSEvent.removeMonitor(integrationKeyboardMonitor) }
         integrationKeyboardMonitor = nil
         testPasteboard?.releaseGlobally()
         testPasteboard = nil
         titleTimer?.cancel(); titleTimer = nil
+        outputTimer?.cancel(); outputTimer = nil
+        previousOutputWindows.values.forEach { $0.close() }; previousOutputWindows.removeAll()
         configurationWatcher?.close()
         configurationWatcher = nil
+        parentConfigurationWatcher?.close(); parentConfigurationWatcher = nil
+        parentPluginWatcher?.close(); parentPluginWatcher = nil
+        updates.shutdown()
+        layoutAppTimer?.invalidate(); layoutAppTimer = nil
+        layoutAppMaintenanceTask?.cancel(); layoutAppMaintenanceTask = nil
+        layoutAppSettingsTask?.cancel(); layoutAppSettingsTask = nil
+        layoutApps.close()
         appearanceObservation = nil
         tabGroupObservations.removeAll()
         reconciling = true
@@ -338,6 +491,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         savedLayouts.close()
         terminalControl.close()
         terminals.values.forEach { $0.close() }
+        retiringTerminals.values.forEach { $0.close() }; retiringTerminals.removeAll()
         leaves.values.compactMap { $0 as? BrowserPane }.forEach { $0.close() }
         leaves.values.compactMap { $0 as? PluginPane }.forEach { $0.close() }
         pluginInstances.close()
@@ -355,22 +509,220 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
 
     func setApplicationFocused(_ focused: Bool) {
         runtime.setFocused(focused)
-        if focused { refreshNotifications() }
+        if focused { refreshNotifications(); updates.refreshLocalParent() }
     }
 
     func showWorkspaceWindow() {
         if let tab = workspace.keyTabID, let window = windows[tab] {
             if window.isMiniaturized { window.deminiaturize(nil) }
             window.makeKeyAndOrderFront(nil)
+        } else if let descriptor = ApplicationLaunchContext.current.descriptor {
+            do { try openLayoutAppRecipe(descriptor) } catch { present(error) }
         } else {
             runUserCommand("window.new", params: [:])
         }
     }
 
+    private func refreshSharedPalettes() {
+        let themes = [settings.current.terminal.lightTheme, settings.current.terminal.darkTheme]
+        let contents: [Data?] = themes.map { theme in
+            guard theme.bundled == nil,
+                  let file = try? FileHandle(forReadingFrom: settings.paletteDirectory.appendingPathComponent(theme.rawValue + ".conf")) else { return nil }
+            defer { try? file.close() }
+            return try? file.read(upToCount: 131_073)
+        }
+        guard contents != sharedPaletteData else { return }
+        sharedPaletteData = contents
+        do { _ = try reloadConfiguration() } catch { NSLog("Shared palette reload failed") }
+    }
+
+    private func reconcileLayoutAppPlugins(parentChanged: Bool = false) {
+        guard let descriptor = ApplicationLaunchContext.current.descriptor, !layoutPluginSyncClosed else { return }
+        layoutPluginSyncRequested = true
+        if parentChanged, let records = try? LayoutAppPluginSync.records(parentBase: descriptor.parentBase),
+           records != layoutPluginLastParentRecords {
+            layoutPluginRetryAfter = nil
+            layoutPluginRetryDelay = 2
+        }
+        guard layoutPluginRetryAfter.map({ ContinuousClock.now >= $0 }) ?? true,
+              layoutPluginSyncTask == nil, !packageOperationBusy, !reconciling else { return }
+        layoutPluginSyncTask = Task { [weak self] in
+            guard let self else { return }
+            await self.runLayoutAppPluginSync(parentBase: descriptor.parentBase)
+        }
+    }
+
+    private func retryLayoutAppPluginSync() {
+        guard !layoutPluginSyncClosed, layoutPluginSyncRequested, layoutPluginSyncTask == nil,
+              !packageOperationBusy, !reconciling, let deadline = layoutPluginRetryAfter,
+              ContinuousClock.now >= deadline else { return }
+        layoutPluginRetryCount += 1
+        reconcileLayoutAppPlugins()
+    }
+
+    private func runLayoutAppPluginSync(parentBase: URL) async {
+        while layoutPluginSyncRequested && !layoutPluginSyncClosed && !Task.isCancelled {
+            guard !packageOperationBusy, !reconciling else { break }
+            layoutPluginSyncRequested = false
+            var failed = false
+            do {
+                if try await applyLayoutAppPluginSync(parentBase: parentBase) {
+                    layoutPluginDiagnostic = nil
+                    layoutPluginRetryAfter = nil
+                    layoutPluginRetryDelay = 2
+                }
+            } catch is CancellationError { break }
+            catch {
+                layoutPluginDiagnostic = String(describing: error)
+                layoutPluginSyncRequested = true
+                layoutPluginRetryAfter = .now.advanced(by: .seconds(layoutPluginRetryDelay))
+                layoutPluginRetryDelay = min(layoutPluginRetryDelay * 2, 30)
+                failed = true
+            }
+            settingsModel?.pluginSyncStatus = layoutPluginDiagnostic ?? (layoutPluginDeferredCount > 0 ? "\(layoutPluginDeferredCount) plugin change(s) waiting for open panes to close." : nil)
+            if failed { break }
+        }
+        if layoutPluginSyncClosed || Task.isCancelled {
+            let pending = Array(layoutPluginPending.values)
+            layoutPluginPending.removeAll()
+            await LayoutAppPluginSync.discard(pending)
+        }
+        layoutPluginSyncTask = nil
+        if layoutPluginSyncRequested && !layoutPluginSyncClosed && !packageOperationBusy && !reconciling {
+            reconcileLayoutAppPlugins()
+        }
+    }
+
+    private func applyLayoutAppPluginSync(parentBase: URL) async throws -> Bool {
+        let desired = try LayoutAppPluginSync.records(parentBase: parentBase)
+        layoutPluginLastParentRecords = desired
+        let revision = pluginCatalog.revision
+        let required = desired.filter { record in
+            pluginCatalog.records.first(where: { $0.id == record.id })?.archiveSHA256 != record.archiveSHA256
+                && layoutPluginPending[record.id]?.archiveSHA256 != record.archiveSHA256
+        }
+        let store = pluginCatalog.packages
+        let prepared: [PreparedPluginPackage] = required.isEmpty ? [] : try await BlockingIOExecutor.run {
+            try required.map { try LayoutAppPluginSync.prepare($0, store: store, parentBase: parentBase) }
+        }
+        var discarded = prepared
+        do {
+            if !prepared.isEmpty { await pauseLayoutAppPluginSync(prepared) }
+            try Task.checkCancellation()
+            guard !layoutPluginSyncClosed else { throw CancellationError() }
+            // Parent intent and local ownership can change while archives are being extracted.
+            guard !packageOperationBusy, !reconciling, pluginCatalog.revision == revision,
+                  try LayoutAppPluginSync.records(parentBase: parentBase) == desired else {
+                layoutPluginSyncRequested = true
+                await LayoutAppPluginSync.discard(discarded)
+                return false
+            }
+            discarded.removeAll()
+            for id in Array(layoutPluginPending.keys) {
+                let pending = layoutPluginPending[id]!
+                if !desired.contains(where: { $0.id == id && $0.archiveSHA256 == pending.archiveSHA256 }) {
+                    discarded.append(layoutPluginPending.removeValue(forKey: id)!)
+                }
+            }
+            for package in prepared {
+                if let old = layoutPluginPending.updateValue(package, forKey: package.manifest.id) { discarded.append(old) }
+            }
+            var deferred = 0
+            let operation = WorkspaceOperationContext(origin: .native)
+            for record in desired {
+                let existing = pluginCatalog.records.first { $0.id == record.id }
+                let inUse = workspace.panes.contains { $0.type == .registered(record.id) }
+                if existing?.archiveSHA256 != record.archiveSHA256 {
+                    if inUse { deferred += 1; continue }
+                    if let package = layoutPluginPending[record.id] {
+                        _ = try commitPackage(package, replace: existing != nil, revision: pluginCatalog.revision, operation: operation)
+                        discarded.append(layoutPluginPending.removeValue(forKey: record.id)!)
+                    }
+                }
+                if pluginCatalog.records.first(where: { $0.id == record.id })?.enabled != record.enabled {
+                    if !record.enabled && inUse { deferred += 1; continue }
+                    _ = try changePluginRegistration(record.enabled ? .pluginsEnable : .pluginsDisable,
+                        params: ["id": .string(record.id)], operation: operation)
+                }
+            }
+            for record in pluginCatalog.records where !desired.contains(where: { $0.id == record.id }) {
+                if workspace.panes.contains(where: { $0.type == .registered(record.id) }) { deferred += 1; continue }
+                _ = try changePluginRegistration(.pluginsUnregister, params: ["id": .string(record.id)], operation: operation)
+                if let old = layoutPluginPending.removeValue(forKey: record.id) { discarded.append(old) }
+            }
+            layoutPluginDeferredCount = deferred
+        } catch {
+            await LayoutAppPluginSync.discard(discarded)
+            throw error
+        }
+        await LayoutAppPluginSync.discard(discarded)
+        return true
+    }
+
+    private func closeLayoutAppPluginSync() {
+        layoutPluginSyncClosed = true
+        layoutPluginSyncRequested = false
+        layoutPluginRetryAfter = nil
+        releaseLayoutAppPluginPause()
+        layoutPluginSyncTask?.cancel()
+        if layoutPluginSyncTask == nil {
+            let pending = Array(layoutPluginPending.values)
+            layoutPluginPending.removeAll()
+            layoutPluginSyncTask = Task { [weak self] in
+                await LayoutAppPluginSync.discard(pending)
+                self?.layoutPluginSyncTask = nil
+            }
+        }
+    }
+
+    private func pauseLayoutAppPluginSync(_ packages: [PreparedPluginPackage]) async {
+        guard layoutPluginPauseArmed, !layoutPluginSyncClosed else { return }
+        layoutPluginPauseArmed = false
+        layoutPluginPausePackages = packages.map { package in .object([
+            "id": .string(package.manifest.id), "installationID": .string(package.installationID.uuidString.lowercased()),
+            "archiveSHA256": .string(package.archiveSHA256), "directory": .string(package.directory.path)
+        ]) }
+        await withCheckedContinuation { layoutPluginPauseContinuation = $0 }
+    }
+
+    private func releaseLayoutAppPluginPause() {
+        layoutPluginPauseArmed = false
+        layoutPluginPausePackages.removeAll()
+        let continuation = layoutPluginPauseContinuation
+        layoutPluginPauseContinuation = nil
+        continuation?.resume()
+    }
+
+    private func debugLayoutAppPluginPreparation(_ action: String) throws -> JSONValue {
+        switch action {
+        case "arm":
+            guard !layoutPluginSyncClosed, !layoutPluginPauseArmed, layoutPluginPauseContinuation == nil else {
+                throw RPCFailure(code: APIError.conflict, message: "A plugin synchronization pause is already pending")
+            }
+            layoutPluginPauseArmed = true
+        case "status": break
+        case "release": releaseLayoutAppPluginPause()
+        default: throw RPCFailure(code: -32602, message: "Expected arm, status, or release")
+        }
+        return .object([
+            "phase": .string(layoutPluginPauseContinuation != nil ? "paused" : layoutPluginPauseArmed ? "armed" : "idle"),
+            "packages": .array(layoutPluginPausePackages), "running": .bool(layoutPluginSyncTask != nil),
+            "pendingPlugins": .array(layoutPluginPending.keys.sorted().map(JSONValue.string)),
+            "deferredCount": .integer(layoutPluginDeferredCount),
+            "diagnostic": layoutPluginDiagnostic.map(JSONValue.string) ?? .null,
+            "retryPending": .bool(layoutPluginRetryAfter != nil), "retryCount": .integer(layoutPluginRetryCount)
+        ])
+    }
+
+    private func openLayoutAppRecipe(_ descriptor: LayoutAppDescriptor) throws {
+        let data = try LayoutAppPluginSync.readRecipe(directory: descriptor.recipeDirectory, id: descriptor.layoutID)
+        _ = try openSavedLayout(data, focus: true, operation: .init(origin: .native))
+    }
+
     private func reloadConfiguration(operation: WorkspaceOperationContext = .init(origin: .native)) throws -> JSONValue {
-        let candidate = try? AppConfiguration.parse(configurationSource())
+        let candidate = try? settings.loadEffectiveConfiguration(overridesSource: configurationSource())
         let result = try performSettingsOperation(operation: operation, candidate: candidate) { try applyConfiguration() }
-        if let source = configurationRevisionSource, (try? AppConfiguration.parse(source)) == settings.current {
+        if let source = try? configurationSource(), (try? settings.loadEffectiveConfiguration(overridesSource: source)) == settings.current {
             configurationWatcher?.acknowledgeAppliedContents(Data(source.utf8))
         }
         return result
@@ -386,6 +738,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             }
             if engineChanged { try runtime.reload(from: url) }
         }
+        terminals.values.forEach { $0.updateOutputLimit(settings.current.terminal.savedOutputLines) }
         applyAppearance()
         updatePaneDimming()
         presence.render()
@@ -411,10 +764,12 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     @discardableResult
-    func persistWorkspace() -> WorkspacePersistence {
+    func persistWorkspace(restoration suppliedRestoration: WorkspaceRestoration? = nil) -> WorkspacePersistence {
         // Persistence observes an already committed model; it must never discover/attribute
         // earlier native mutations to whichever request happens to save next.
-        let persistence = settings.save(workspace, restoration: captureRestoration())
+        let restoration = suppliedRestoration ?? captureRestoration()
+        let persistence = settings.save(workspace, restoration: restoration)
+        if persistence == .saved { persistedTerminalOutput = restoration.terminalOutput }
         updateStatusMenu()
         refreshCommandPicker()
         return persistence
@@ -464,7 +819,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         alert.runModal()
     }
 
-    private func confirmSettingsClose() -> Bool {
+    func confirmSettingsClose() -> Bool {
         guard let model = settingsModel?.layouts, model.hasUnsavedChanges else { return true }
         let alert = NSAlert()
         alert.messageText = "Save changes to your layouts before closing Settings?"
@@ -489,11 +844,22 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         var params: [String: JSONValue] = ["expectedInstanceId": .string(instanceID)]
         if [.download, .cancel, .install].contains(action), let updateID { params["updateId"] = .string(updateID) }
         if action == .install { params["confirm"] = .bool(true) }
-        do { _ = try call(action.method, params: params) }
-        catch { present(error) }
+        let captured = params
+        Task { [weak self] in
+            do { _ = try await self?.callAsync(action.method, params: captured, operation: .init(origin: .native)) }
+            catch is CancellationError { }
+            catch { if self?.server != nil { self?.present(error) } }
+        }
+    }
+
+    func validateUpdateOperation(_ action: UpdateAction, params: [String: JSONValue], operation: WorkspaceOperationContext) throws {
+        guard server != nil else { throw CancellationError() }
+        try operation.validateCaller()
+        try validateAPIGuards(params, method: action.method)
     }
 
     func confirmTermination() -> Bool {
+        if layoutAppRestartConfirmed { return true }
         return !terminals.values.contains(where: \.needsConfirmClose) || confirm("Quit and terminate running processes?")
     }
 
@@ -532,7 +898,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         invocation["tab"] = tab.map { .string($0.description) }
         let connection = try operation.serviceOwner.map { try backgroundServices.connection(for: $0) }
             ?? PluginControlConnection(socketPath: socketPath, appInstanceID: instanceID,
-                cliPath: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/slate-term").path)
+                cliPath: RuntimeBundle.helpersURL.appendingPathComponent("slate-term").path)
         let preferences = settings.current.plugins[registration.id] ?? [:]
         let registrationRevision = headerActionRevisions[registration.id]
         return { [weak self, invocation] in
@@ -560,6 +926,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
 
     func callAsync(_ method: String, params: [String: JSONValue], operation suppliedOperation: WorkspaceOperationContext? = nil,
                    metadata: RPCMetadata? = nil, caller: AutomationCaller? = nil) async throws -> JSONValue {
+        guard !isTerminating else { throw RPCFailure(code: APIError.unavailable, message: "Application is shutting down") }
         do {
             return try await dispatchAPI(method, params: params, operation: suppliedOperation, metadata: metadata, caller: caller)
         } catch is CancellationError {
@@ -578,6 +945,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         guard contract != nil || (integration && method.hasPrefix("debug.")) else {
             throw RPCFailure(code: -32601, message: "Unknown method: \(method)")
         }
+        guard !isTerminating else { throw RPCFailure(code: APIError.unavailable, message: "Application is shutting down") }
         guard !reconciling, !settlingNativeLayouts else { throw RPCFailure(code: APIError.conflict, message: "Workspace presentation is being reconciled") }
         try caller?.validate()
         try synchronizeNativeGroups()
@@ -643,6 +1011,32 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                                operation: WorkspaceOperationContext, caller: AutomationCaller?,
                                onTerminalCompletion: (@MainActor (TerminalOperationStatus) -> Void)? = nil) async throws -> JSONValue {
         var params = input
+        if integration, method == "debug.layoutDialogs" { return try await debugLayoutDialogs(params) }
+        if integration, method == "debug.updates" { return try await debugUpdates(params, operation: operation) }
+        if method.hasPrefix("updates."), let action = UpdateAction(rawValue: String(method.dropFirst("updates.".count))) {
+            return try await callUpdates(action, params: params, operation: operation)
+        }
+        if method == "command.run", let id = params["id"]?.string,
+           ["updates.check", "updates.show", "updates.openParent"].contains(id) {
+            var payload = params
+            payload.removeValue(forKey: "id")
+            return try await callUpdates(UpdateAction(rawValue: String(id.dropFirst("updates.".count)))!, params: payload, operation: operation)
+        }
+        if integration, method == "debug.savedLayouts", let path = params.removeValue(forKey: "launcherPath")?.string {
+            try savedLayouts.showEditor()
+            if let definition = savedLayouts.editorModel?.definition {
+                _ = try await callLayoutAppOperation("layouts.launcher", params: ["id": .string(definition.id.uuidString),
+                    "path": .string(path), "name": params["launcherName"] ?? .string(definition.name),
+                    "icon": params["launcherIcon"] ?? .string("slate")], operation: operation)
+            }
+        }
+        if contract == .layoutAppsList || contract == .layoutAppsRefresh || contract == .layoutsLauncher {
+            return try await callLayoutAppOperation(method, params: params, operation: operation)
+        }
+        if method == "command.run", params["id"] == .string("layouts.launcher") {
+            try await savedLayouts.performLauncher(operation: operation)
+            return .object([:])
+        }
         if contract == .pluginsRegister || contract == .pluginsValidate {
             return try await installPlugin(params: params, validateOnly: contract == .pluginsValidate, operation: operation)
         }
@@ -889,6 +1283,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     private func call(_ method: String, params: [String: JSONValue], operation suppliedOperation: WorkspaceOperationContext? = nil) throws -> JSONValue {
+        guard !isTerminating else { throw RPCFailure(code: APIError.unavailable, message: "Application is shutting down") }
         guard !reconciling, !settlingNativeLayouts else { throw RPCFailure(code: APIError.conflict, message: "Workspace presentation is being reconciled") }
         try synchronizeNativeGroups()
         drainNativeLayouts()
@@ -901,7 +1296,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         case .layoutsStartupStatus:
             guard withoutAPIGuards(params).isEmpty else { throw RPCFailure(code: -32602, message: "layouts.startupStatus takes no payload parameters") }
             return layoutStartup.status
-        case .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsCreate, .layoutsUpdate, .layoutsWindows, .layoutsCapture, .layoutsOpen, .layoutsLauncher:
+        case .layoutAppsList, .layoutAppsRefresh, .layoutsLauncher:
+            throw RPCFailure(code: APIError.unavailable, message: "Layout app operations require asynchronous dispatch")
+        case .configResetOverrides: return try resetConfigurationOverrides(params, operation: operation)
+        case .layoutsList, .layoutsGet, .layoutsFields, .layoutsValidate, .layoutsCreate, .layoutsUpdate, .layoutsWindows, .layoutsCapture, .layoutsOpen:
             var payload = withoutAPIGuards(params)
             payload["expectedSavedLayoutRevision"] = params["expectedSavedLayoutRevision"]
             return try savedLayouts.call(method, params: payload, operation: operation)
@@ -913,6 +1311,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         case .pluginSettingsPatch: return try patchPluginSettings(params, operation: operation)
         case .paletteList: return try listPalettes()
         case .appearanceGet: return try appearanceInfo(params)
+        case .updatesGet, .updatesShow, .updatesCheck, .updatesDownload, .updatesCancel, .updatesInstall, .updatesOpenParent:
+            throw RPCFailure(code: APIError.unavailable, message: "Update operations require asynchronous dispatch")
         case .welcomeGet: return try welcomeInfo(params)
         case .presenceList:
             guard withoutAPIGuards(params).isEmpty else { throw RPCFailure(code: -32602, message: "presence.list takes no payload parameters") }
@@ -929,13 +1329,15 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             let pane = try targetPaneID(params)
             return contract == .presenceHold ? try presence.hold(pane: pane, params: payload, actor: operation.actor)
                 : try presence.release(pane: pane, actor: operation.actor)
-        case .updatesGet, .updatesShow, .updatesCheck, .updatesDownload, .updatesCancel, .updatesInstall:
-            return try callUpdates(UpdateAction(rawValue: String(method.dropFirst("updates.".count)))!, params: params, operation: operation)
         case .skillsList: return try listAgentSkills(params)
-        case .skillsInstall: return try changeAgentSkills(params, install: true)
-        case .skillsUninstall: return try changeAgentSkills(params, install: false)
+        case .skillsInstall:
+            try ApplicationLaunchContext.current.requireParent()
+            return try changeAgentSkills(params, install: true)
+        case .skillsUninstall:
+            try ApplicationLaunchContext.current.requireParent()
+            return try changeAgentSkills(params, install: false)
         case .paletteImport: return try importPalette(params)
-        case .version: return .object(["cliVersion": .string("0.1.0-dev"), "appVersion": .string("0.1.0-dev"), "protocolVersion": .integer(1)])
+        case .version: return .object(["cliVersion": .string("0.1.0-dev"), "appVersion": .string(RuntimeBundle.bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0-dev"), "protocolVersion": .integer(1)])
         case .windowList: return try nativeWindowsInfo(params)
         case .windowGet:
             let target = try targetNativeWindow(params)
@@ -964,6 +1366,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         case .pluginsRegister, .pluginsValidate:
             throw RPCFailure(code: -32603, message: "Package preparation requires asynchronous dispatch")
         case .pluginsEnable, .pluginsDisable, .pluginsUnregister:
+            try ApplicationLaunchContext.current.requireParent()
             return try changePluginRegistration(contract, params: params, operation: operation)
         case .contextGet: return try context(params)
         case .shellRunInput:
@@ -1004,6 +1407,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         case .configReload: return try reloadConfiguration(operation: operation)
         case .commandRun:
             guard let id = params["id"]?.string else { throw RPCFailure(code: -32602, message: "Command id is required") }
+            if ["updates.check", "updates.show", "updates.openParent"].contains(id) {
+                throw RPCFailure(code: APIError.unavailable, message: "Update operations require asynchronous dispatch")
+            }
             if ["welcome.read", "welcome.unread", "welcome.reset"].contains(id) {
                 var payload = params
                 payload.removeValue(forKey: "id")
@@ -1011,10 +1417,6 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             }
             if let result = try runSettingsCommand(id, params: params, operation: operation) { return result }
             if id == "config.reload" { return try reloadConfiguration(operation: operation) }
-            if id == "updates.check" || id == "updates.show" {
-                var payload = params; payload.removeValue(forKey: "id")
-                return try callUpdates(id == "updates.check" ? .check : .show, params: payload, operation: operation)
-            }
             if id == "settings.open" { showSettings(); return .object([:]) }
             if id == "notifications.settings" { showSettings(section: .notifications); return .object([:]) }
             if id == "notifications.next" || id == "notifications.open" {
@@ -1074,6 +1476,28 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                     throw RPCFailure(code: APIError.unavailable, message: "Move chooser requires a visible unzoomed pane bar and another pane")
                 }
                 container.showMoveMenu()
+                return .object(["paneId": .string(pane.description)])
+            }
+            if id == "terminal.previousOutput" || id == "terminal.previousOutput.clear" {
+                guard Set(withoutAPIGuards(params).keys).isSubset(of: ["id", "pane", "tab"]) else {
+                    throw RPCFailure(code: -32602, message: "Unknown previous output parameter")
+                }
+                let pane = try targetPaneID(params)
+                guard let terminal = terminals[pane], let output = terminal.previousOutput else {
+                    throw RPCFailure(code: APIError.unavailable, message: "This terminal has no previous output")
+                }
+                if id == "terminal.previousOutput.clear" {
+                    terminal.clearPreviousOutput()
+                    persistWorkspace()
+                } else {
+                    let viewer = previousOutputWindows[pane] ?? PreviousOutputWindowController(output: output)
+                    viewer.onClear = { [weak self, weak terminal] in
+                        guard let self, let terminal, self.terminals[pane] === terminal else { return }
+                        self.runUserCommand("terminal.previousOutput.clear", params: ["pane": .string(pane.description)])
+                    }
+                    previousOutputWindows[pane] = viewer
+                    viewer.show()
+                }
                 return .object(["paneId": .string(pane.description)])
             }
             if id == "terminal.find" || id.hasPrefix("terminal.find.") {
@@ -1199,9 +1623,70 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         }
     }
 
+    private func debugLayoutDialogs(_ params: [String: JSONValue]) async throws -> JSONValue {
+        // Capture the settled native dialog rather than a partial opening animation.
+        testConfirmationDelay = params["screenshot"] != nil ? 0.75 : 0.2
+        defer { testConfirmationDelay = 0.2 }
+        var details: JSONValue = .null
+        testConfirmationHandler = { alert in
+            let stack = alert.accessoryView as? NSStackView
+            let fields = stack?.arrangedSubviews.compactMap { $0 as? NSTextField } ?? []
+            if let name = params["name"]?.string { fields.first(where: \.isEditable)?.stringValue = name }
+            details = .object(["message": .string(alert.messageText),
+                               "labels": .array(fields.filter { !$0.isEditable }.map { .string($0.stringValue) }),
+                               "sourceSelectors": .integer(stack?.arrangedSubviews.filter { $0 is NSPopUpButton }.count ?? 0)])
+            if let pane = params["focusPane"] { _ = try? self.call("command.run", params: ["id": .string("pane.focus"), "pane": pane]) }
+            if let path = params["screenshot"]?.string { try? Self.captureWindow(alert.window.windowNumber, path: path) }
+            alert.buttons[params["confirm"] == .bool(true) ? 0 : 1].performClick(nil)
+        }
+        defer { testConfirmationHandler = nil }
+        if params["launcher"] == .bool(true) {
+            let dialog = LayoutLauncherDialog(name: params["name"]?.string ?? "Development", unavailablePlugins: try await layoutApps.creationUnavailablePlugins())
+            if let icon = params["icon"]?.string { dialog.selection.icon = icon }
+            _ = runConfirmationAlert(dialog.alert)
+        } else {
+            var target: [String: JSONValue] = ["id": .string("layouts.captureWindow")]
+            if let pane = params["pane"] { target["pane"] = pane }
+            _ = try call("command.run", params: target)
+        }
+        return details
+    }
+
     private func callDebug(_ method: String, params: [String: JSONValue], operation: WorkspaceOperationContext) throws -> JSONValue {
         switch method {
-        case "debug.updates" where integration: return try debugUpdates(params)
+        case "debug.layoutPluginPreparation" where integration:
+            guard ApplicationLaunchContext.current.isLayoutApp,
+                  Set(params.keys) == ["action"], let action = params["action"]?.string else {
+                throw RPCFailure(code: -32602, message: "A layout app and preparation action are required")
+            }
+            return try debugLayoutAppPluginPreparation(action)
+
+        case "debug.layoutAppPreparation" where integration:
+            guard Set(params.keys) == ["action"], let action = params["action"]?.string else {
+                throw RPCFailure(code: -32602, message: "A preparation action is required")
+            }
+            return try layoutApps.debugCreationPause(action)
+
+        case "debug.quit" where integration:
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(100)) { [weak self] in
+                self?.testConfirmationHandler = { alert in alert.buttons[min(1, alert.buttons.count - 1)].performClick(nil) }
+                NSApp.terminate(nil)
+                self?.testConfirmationHandler = nil
+            }
+            return .object([:])
+        case "debug.previousOutput" where integration:
+            let pane = try targetPaneID(params)
+            guard let viewer = previousOutputWindows[pane] else { return .object(["visible": .bool(false)]) }
+            if case .integer(let width) = params["width"], case .integer(let height) = params["height"],
+               (420...1600).contains(width), (300...1000).contains(height) {
+                viewer.window?.setContentSize(NSSize(width: CGFloat(width), height: CGFloat(height)))
+            }
+            if params["find"] == .bool(true) { viewer.pressFindShortcut() }
+            if case .bool(let end) = params["horizontalEnd"] { viewer.scrollHorizontally(toEnd: end) }
+            if params["clear"] == .bool(true) { viewer.clickClear() }
+            return .object(["visible": .bool(viewer.window?.isVisible == true), "title": .string(viewer.window?.title ?? ""),
+                "text": .string(viewer.savedText), "readOnly": .bool(viewer.isReadOnly), "findVisible": .bool(viewer.findVisible),
+                "horizontalOffset": .number(viewer.horizontalOffset)])
         case "debug.inspect" where integration: return inspect()
         case "debug.presence" where integration: return presence.testingState()
         case "debug.presenceClick" where integration:
@@ -1209,6 +1694,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 throw RPCFailure(code: -32602, message: "pane and activityId are required")
             }
             return .object(["clicked": .bool(container.clickPresenceForTesting(id))])
+        case "debug.updates" where integration:
+            throw RPCFailure(code: APIError.unavailable, message: "Update testing requires asynchronous dispatch")
         case "debug.welcomeInsert" where integration:
             guard let container = containers[try targetPaneID(params)] else {
                 throw RPCFailure(code: -32051, message: "Pane container is unavailable")
@@ -1546,37 +2033,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             guard mode != "externalEdit" || (replacement != nil && replacement!.utf8.count <= 65536) else { throw RPCFailure(code: -32602, message: "A bounded replacement source is required") }
             configurationApplyFault = .init(replacement: mode == "externalEdit" ? replacement : nil)
             return .object(["armed": .bool(true)])
-        case "debug.layoutDialogs" where integration:
-            var details: JSONValue = .null
-            testConfirmationHandler = { alert in
-                let stack = alert.accessoryView as? NSStackView
-                let fields = stack?.arrangedSubviews.compactMap { $0 as? NSTextField } ?? []
-                if let name = params["name"]?.string { fields.first(where: \.isEditable)?.stringValue = name }
-                details = .object(["message": .string(alert.messageText),
-                                   "labels": .array(fields.filter { !$0.isEditable }.map { .string($0.stringValue) }),
-                                   "sourceSelectors": .integer(stack?.arrangedSubviews.filter { $0 is NSPopUpButton }.count ?? 0)])
-                if let pane = params["focusPane"] { _ = try? self.call("command.run", params: ["id": .string("pane.focus"), "pane": pane]) }
-                if let path = params["screenshot"]?.string { try? Self.captureWindow(alert.window.windowNumber, path: path) }
-                alert.buttons[params["confirm"] == .bool(true) ? 0 : 1].performClick(nil)
-            }
-            defer { testConfirmationHandler = nil }
-            if params["launcher"] == .bool(true) {
-                let dialog = LayoutLauncherDialog(name: params["name"]?.string ?? "Development")
-                if let icon = params["icon"]?.string { dialog.selection.icon = icon }
-                _ = runConfirmationAlert(dialog.alert)
-            } else {
-                var target: [String: JSONValue] = ["id": .string("layouts.captureWindow")]
-                if let pane = params["pane"] { target["pane"] = pane }
-                _ = try call("command.run", params: target)
-            }
-            return details
         case "debug.savedLayouts" where integration:
             try savedLayouts.showEditor()
             let model = savedLayouts.editorModel!
-            if let path = params["launcherPath"]?.string, let definition = model.definition {
-                try LayoutLauncher.create(at: URL(fileURLWithPath: path), layoutID: definition.id, name: params["launcherName"]?.string ?? definition.name,
-                                          icon: params["launcherIcon"]?.string ?? "slate")
-            }
             if let file = params["file"]?.string { model.select(file) }
             if let name = params["name"]?.string { model.change { $0.name = name } }
             if let type = params["type"]?.string { model.setType(type) }
@@ -1622,6 +2081,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 return .object(["visible": .bool(settingsWindow?.window?.isVisible == true),
                                 "agentSkills": .object(Dictionary(uniqueKeysWithValues: skills)),
                                 "layoutsAvailable": .bool(settingsModel?.layouts != nil),
+                                "layoutApps": .array(settingsModel?.layoutApps ?? []),
                                 "notificationAuthorization": settingsModel.map { .string($0.notificationAuthorization) } ?? .null])
             }
             showSettings(section: nil, refreshBrowserSites: false)
@@ -1630,8 +2090,15 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             if let value = params["workingDirectory"]?.string { model.workingDirectory = value }
             if case .bool(let value) = params["inheritWorkingDirectory"] { model.inheritWorkingDirectory = value }
             if let value = params["fontSize"]?.string { model.fontSize = value }
+            if let value = params["savedOutputLines"]?.string { model.savedOutputLines = value }
             if case .number(let value) = params["unfocusedPaneDim"] { model.unfocusedPaneDim = value }
             if case .integer(let value) = params["unfocusedPaneDim"] { model.unfocusedPaneDim = Double(value) }
+            if let colors = params["agentColors"]?.object {
+                model.agentColors = try colors.mapValues { value in
+                    guard let color = value.string else { throw RPCFailure(code: -32602, message: "Expected color string") }
+                    return color
+                }
+            }
             if let value = params["searchURL"]?.string { model.searchURL = value }
             if params["refreshBrowserSites"] == .bool(true) { refreshBrowserSettings() }
             if let value = params["browserSite"]?.string { model.selectBrowserSite(value) }
@@ -1756,7 +2223,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 guard process.terminationStatus == 0 else { throw RPCFailure(code: -32000, message: "Picker context capture failed") }
                 return .object([:])
             }
-            guard let path = params["path"]?.string, let window = params["layouts"] == .bool(true) ? settingsWindow?.window : (params["picker"] == .bool(true) ? commandPicker?.window : (params["settings"] == .bool(true) ? settingsWindow?.window : windows[workspace.keyTabID ?? TabID(1)])) else {
+            let previousWindow = params["previousOutput"] == .bool(true) ? previousOutputWindows[try targetPaneID(params)]?.window : nil
+            guard let path = params["path"]?.string, let window = previousWindow ?? (params["layouts"] == .bool(true) ? settingsWindow?.window : (params["picker"] == .bool(true) ? commandPicker?.window : (params["settings"] == .bool(true) ? settingsWindow?.window : windows[workspace.keyTabID ?? TabID(1)]))) else {
                 throw RPCFailure(code: -32602, message: "path and key window are required")
             }
             if params["renderContent"] == .bool(true), let view = window.contentView?.superview {
@@ -1822,6 +2290,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     private func callFromPlugin(_ method: String, params: [String: JSONValue], metadata: RPCMetadata?, pane: PaneID, view: PluginPane) async throws -> JSONValue {
+        guard !isTerminating else { throw RPCFailure(code: APIError.unavailable, message: "Application is shutting down") }
         guard !reconciling, !settlingNativeLayouts else { throw RPCFailure(code: APIError.conflict, message: "Workspace presentation is being reconciled") }
         guard leaves[pane] === view, let tab = workspace.tabs.first(where: { $0.layout.paneIDs.contains(pane) }) else { throw RPCFailure(code: -32022, message: "Plugin instance was replaced") }
         let audience = try view.causationAudience(epoch: operations.epoch)
@@ -1982,7 +2451,9 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                                 "shell": report.map { .string($0.shellKind.rawValue) } ?? .null,
                                 "runAvailable": report.map { .bool($0.acceptsRunInput) } ?? .null])
         }
-        return .object(["instanceId": .string(instanceID), "scope": .string(scope), "tabId": .string(tab.id.description),
+        return .object(["mode": .string(ApplicationLaunchContext.current.isLayoutApp ? "layoutApp" : "standard"),
+                        "layoutAppID": ApplicationLaunchContext.current.descriptor.map { .string($0.layoutAppID.uuidString) } ?? .null,
+                        "instanceId": .string(instanceID), "scope": .string(scope), "tabId": .string(tab.id.description),
                         "focusedPaneId": .string(tab.focusedPane.description), "activeTerminalPaneId": tab.activeTerminal.map { .string($0.description) } ?? .null,
                         "terminal": terminal])
     }
@@ -2066,7 +2537,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 let tab = next.tabs.first { $0.layout.paneIDs.contains(pane.id) }!
                 // Ghostty's shell path hook must restore our CLI directory, not
                 // Contents/MacOS (whose same-named binary launches the GUI).
-                let helpers = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers").path
+                let helpers = RuntimeBundle.helpersURL.path
                 let token = UUID().uuidString
                 let session = ShellSession(token: token)
                 var environment = [
@@ -2095,6 +2566,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                     ?? settings.current.terminal.startingDirectory(inheriting: splitDirectory)
                 if integration { fputs("Integration startup: creating terminal surface\n", stderr) }
                 created[pane.id] = try TerminalView(runtime: runtime, environment: environment, directory: directory)
+                created[pane.id]?.restoreOutput(restoration?.terminalOutput[pane.id.description], lineLimit: settings.current.terminal.savedOutputLines)
                 if integration {
                     terminalPreparationCount += 1
                     fputs("Integration startup: terminal surface created\n", stderr)
@@ -2127,7 +2599,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             try commitWorkspace(transition, operation: operation, additionalPublications: additionalPublications, beforeCommit: beforeCommit)
         } catch {
             reconciling = false
-            created.values.forEach { $0.close() }
+            created.values.forEach { retireTerminal($0) }
             createdPlugins.values.forEach { $0.close() }
             pluginInstances.prune(workspace: workspace)
             throw error
@@ -2172,7 +2644,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             leaves[id]?.removeFromParent()
             (leaves[id] as? BrowserPane)?.close()
             (leaves[id] as? PluginPane)?.close()
-            terminals.removeValue(forKey: id)?.close()
+            previousOutputWindows.removeValue(forKey: id)?.close()
+            if let terminal = terminals.removeValue(forKey: id) { retireTerminal(terminal) }
             leaves.removeValue(forKey: id)
         }
         for id in changedTabs { rendered.removeValue(forKey: id) }
@@ -2187,6 +2660,13 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 self.runUserCommand("pane.close", params: ["pane": .string(id.description), "force": .bool(!processAlive)])
             }
             terminals[id] = terminal
+            terminal.onPreviousOutputChanged = { [weak self, weak terminal] in
+                guard let self, let terminal, self.terminals[id] === terminal else { return }
+                if let output = terminal.previousOutput { self.previousOutputWindows[id]?.update(output) }
+                else { self.previousOutputWindows.removeValue(forKey: id)?.close() }
+                self.refreshHeaderActions()
+                self.refreshCommandPicker()
+            }
             shellNames[id] = integration && ProcessInfo.processInfo.environment["SLATE_TERM_TEST_REAL_SHELL"] != "1" ? "sh" : URL(fileURLWithPath: settings.current.terminal.shell).lastPathComponent
             terminal.onDesktopNotification = { [weak self, weak terminal] title, body in
                 guard let self, let terminal, self.terminals[id] === terminal else { return }
@@ -2235,7 +2715,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             container?.view.removeFromSuperview(); container?.removeFromParent()
             leaves[id]?.view.removeFromSuperview()
             leaves[id]?.removeFromParent()
-            terminals.removeValue(forKey: id)?.close()
+            previousOutputWindows.removeValue(forKey: id)?.close()
+            if let terminal = terminals.removeValue(forKey: id) { retireTerminal(terminal) }
             (leaves[id] as? BrowserPane)?.close()
             (leaves[id] as? PluginPane)?.close()
             leaves.removeValue(forKey: id)
@@ -2435,6 +2916,17 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         createdPlugins.values.forEach { $0.activate() }
         pluginInstances.prune(workspace: workspace)
         reconciling = false
+        if ApplicationLaunchContext.current.isLayoutApp {
+            let previousPlugins = Set(previous.panes.compactMap { pane -> String? in
+                if case .registered(let id) = pane.type { return id }; return nil
+            })
+            let currentPlugins = Set(next.panes.compactMap { pane -> String? in
+                if case .registered(let id) = pane.type { return id }; return nil
+            })
+            if layoutPluginSyncRequested || !previousPlugins.subtracting(currentPlugins).isEmpty {
+                DispatchQueue.main.async { [weak self] in self?.reconcileLayoutAppPlugins() }
+            }
+        }
         // Capture this save's result before separately attributed editor completions run.
         return persistWorkspace()
     }
@@ -2610,6 +3102,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     private func finishPendingPaneRenames() {
+        guard !isTerminating else { return }
         guard !reconciling, !settlingNativeLayouts else { return }
         let pending = pendingPaneRenames
         pendingPaneRenames.removeAll()
@@ -2838,11 +3331,21 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         return false
     }
 
+    @objc private func showAbout() {
+        var options: [NSApplication.AboutPanelOptionKey: Any] = [
+            .applicationName: ApplicationLaunchContext.current.displayName,
+            .applicationVersion: RuntimeBundle.bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
+            .version: RuntimeBundle.bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
+        ]
+        if ApplicationLaunchContext.current.isLayoutApp { options[.credits] = NSAttributedString(string: "Built on Slate Terminal") }
+        NSApp.orderFrontStandardAboutPanel(options: options)
+    }
+
     private func buildMenus() {
         let menu = NSMenu()
-        let appMenu = NSMenu(title: "Slate Terminal")
-        let about = appMenu.addItem(withTitle: "About Slate Terminal", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
-        about.target = NSApp
+        let appMenu = NSMenu(title: ApplicationLaunchContext.current.displayName)
+        let about = appMenu.addItem(withTitle: "About \(ApplicationLaunchContext.current.displayName)", action: #selector(showAbout), keyEquivalent: "")
+        about.target = self
         appMenu.addItem(.separator())
         addCommands(["updates.check"], to: appMenu)
         appMenu.addItem(.separator())
@@ -2862,7 +3365,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         updateStatusMenu()
         appMenu.addItem(.separator())
         let ownsQuitKey = activeKeyBindings.keys.contains { $0.nativeKey == "q" && $0.nativeModifiers == [.command] }
-        appMenu.addItem(withTitle: "Quit Slate Terminal", action: #selector(NSApplication.terminate(_:)), keyEquivalent: ownsQuitKey ? "" : "q")
+        appMenu.addItem(withTitle: "Quit \(ApplicationLaunchContext.current.displayName)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: ownsQuitKey ? "" : "q")
         let appItem = NSMenuItem()
         appItem.submenu = appMenu
         menu.addItem(appItem)
@@ -2933,7 +3436,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             editMenu.addItem(withTitle: title, action: action, keyEquivalent: key)
         }
         editMenu.addItem(.separator())
-        addCommands(["terminal.find", "terminal.find.next", "terminal.find.previous", "terminal.find.end"], to: editMenu)
+        addCommands(["terminal.find", "terminal.find.next", "terminal.find.previous", "terminal.find.end", "terminal.previousOutput", "terminal.previousOutput.clear"], to: editMenu)
         let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
         editItem.submenu = editMenu
         menu.insertItem(editItem, at: 1)
@@ -3031,7 +3534,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             case .privateBrowser: type = "private-browser"
             case .registered(let id): type = id
             }
-            let actions = pluginCatalog.activeRegistrations.flatMap { registration in
+            var actions = pluginCatalog.activeRegistrations.flatMap { registration in
                 registration.headerButtons.filter { $0.matches(paneType: type) }.map { button in
                     let command = "plugin.\(registration.id).\(button.command)"
                     return PaneHeaderAction(id: button.namespacedID(plugin: registration.id), title: "\(registration.title): \(button.title)",
@@ -3042,6 +3545,14 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                             self.runUserCommand(command, params: ["pane": .string(pane.id.description), "tab": .string(tab.id.description)])
                         })
                 }
+            }
+            if let terminal = terminals[pane.id], terminal.previousOutput != nil {
+                actions.insert(PaneHeaderAction(id: "terminal.previousOutput", title: "Show Previous Terminal Output",
+                    symbol: "clock.arrow.circlepath", enabled: true, revision: previousOutputActionRevision,
+                    perform: { [weak self, weak terminal] in
+                        guard let self, let terminal, self.terminals[pane.id] === terminal else { return }
+                        self.runUserCommand("terminal.previousOutput", params: ["pane": .string(pane.id.description)])
+                    }), at: 0)
             }
             containers[pane.id]?.setHeaderActions(actions)
         }
@@ -3065,7 +3576,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         let contributions = Dictionary(uniqueKeysWithValues: pluginCatalog.activeRegistrations.flatMap { registration in
             registration.commands.map { ($0.namespacedID(plugin: registration.id), (title: $0.title, plugin: registration.title)) }
         })
-        let excluded: Set<String> = ["command.picker", "layouts.openWindow", "layouts.launcher", "layouts.folder", "welcome.reset"]
+        let excluded: Set<String> = Set(["command.picker", "layouts.openWindow", "layouts.launcher", "layouts.folder", "welcome.reset"] + (ApplicationLaunchContext.current.isLayoutApp ? ["skills.settings", "skills.reveal"] : ["updates.openParent"]))
         let commands = availableCommands.filter { !excluded.contains($0.id) && (!$0.contract.requiresArguments || $0.id == "plugins.panelState.reset") }.map { command in
             var title = command.title
             var detail = "Workspace"
@@ -3083,7 +3594,6 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             } else {
                 switch command.id {
                 case let id where id.hasPrefix("layouts."): detail = "Saved Layouts"; symbol = "rectangle.split.2x2"; keywords = "recipe template save launch spotlight"
-                case "updates.check", "updates.show": detail = "Software Update"; symbol = "arrow.down.circle"; keywords = "version release notes changelog download install update"
                 case "settings.open": detail = "Application"; symbol = "gearshape"; keywords = "preferences configuration"
                 case "notifications.next":
                     detail = "Notifications"; symbol = "bell.badge"; keywords = "unread attention jump next"
@@ -3092,6 +3602,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 case "config.reload": detail = "Application"; symbol = "arrow.clockwise"; keywords = "settings refresh"
                 case "plugins.reload": detail = "Plugin"; symbol = "arrow.clockwise"; keywords = "refresh widget panel"
                 case "plugins.panelState.reset": detail = "Plugin"; symbol = "arrow.counterclockwise"; keywords = "reset panel view state selection"
+                case "updates.check", "updates.show", "updates.openParent": detail = "Software Update"; symbol = "arrow.down.circle"; keywords = "version release notes changelog update restart parent"
                 case "welcome.read", "welcome.unread":
                     detail = "Welcome Message"; symbol = "text.alignleft"; keywords = "onboarding welcome message read unread dismiss reset"
                     if command.id == "welcome.read", settings.welcome.acknowledged == true { unavailable = "Welcome message is already marked as read" }
@@ -3132,6 +3643,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 if !command.contract.workspaceIndependent {
                     if missingTarget { unavailable = "The original workspace target was closed" }
                     else if tab == nil && command.id != "tab.new" { unavailable = "Open a workspace to use this command" }
+                    else if command.id.hasPrefix("terminal.previousOutput"), pane.flatMap({ terminals[$0.id] })?.previousOutput == nil { unavailable = "This terminal has no previous output" }
                     else if command.id.hasPrefix("terminal.find"), pane?.type != .terminal { unavailable = "Focus a terminal pane to search" }
                     else if command.id.hasPrefix("terminal.find."), pane.flatMap({ terminals[$0.id] })?.findState.active != true { unavailable = "Start a terminal search first" }
                     else if command.id == "plugins.panelState.reset", pane?.pluginPanel == nil { unavailable = "Focus a plugin panel to reset its view" }
@@ -3233,6 +3745,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     private func changePluginFromSettings(_ id: String, method: AutomationMethod) {
+        guard !ApplicationLaunchContext.current.isLayoutApp else { return }
         guard let record = pluginCatalog.records.first(where: { $0.id == id }) else { return }
         let title = pluginCatalog.registrations.first(where: { $0.id == id })?.title ?? id
         let revision = revisions.revision
@@ -3262,11 +3775,28 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
 
     func showSettings(section: SettingsSection?, refreshBrowserSites: Bool = true) {
         if settingsWindow == nil {
-            let model = SettingsModel(configURL: settings.configURL)
+            let model = SettingsModel(configURL: settings.configURL, paletteDirectory: settings.paletteDirectory)
             settingsModel = model
             model.save = { [weak self] source, changes in
                 guard let self else { return }
                 try self.saveSettings(source: source, changes: changes)
+            }
+            model.resetOverrides = { [weak self] keys, identity in
+                guard let self else { return }
+                let read = try self.configurationRevision()
+                guard self.settings.configurationSourceIdentity(read.source) == identity else {
+                    throw RPCFailure(code: APIError.conflict, message: "Configuration changed; choose Revert before resetting")
+                }
+                _ = try self.call("config.resetOverrides", params: ["keys": .array(keys.map(JSONValue.string)), "expectedSourceRevision": .string(read.revision)])
+                self.refreshSettings(force: true)
+            }
+            model.refreshLayoutApp = { [weak self] id, revision in
+                Task { [weak self] in
+                    do {
+                        _ = try await self?.callAsync("layoutApps.refresh", params: ["layoutAppID": .string(id), "expectedBundleRevision": .string(revision)], operation: .init(origin: .native))
+                        self?.refreshSettings()
+                    } catch { self?.settingsModel?.error = String(describing: error) }
+                }
             }
             model.refreshBrowserSites = { [weak self] in self?.refreshBrowserSettings() }
             model.clearBrowserData = { [weak self] in self?.clearBrowserDataFromSettings(siteOnly: false) }
@@ -3319,15 +3849,69 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         catch let error as CocoaError where error.code == .fileReadNoSuchFile { return "" }
     }
 
+    private func refreshLayoutAppSettings() {
+        guard !ApplicationLaunchContext.current.isLayoutApp, settingsModel != nil, layoutAppSettingsTask == nil else { return }
+        layoutAppSettingsTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.layoutAppSettingsTask = nil }
+            guard let apps = try? await self.layoutApps.list(cached: true).array,
+                  !Task.isCancelled, let model = self.settingsModel else { return }
+            if model.layoutApps != apps { model.layoutApps = apps }
+        }
+    }
+
+    private func callLayoutAppOperation(_ method: String, params: [String: JSONValue],
+                                        operation: WorkspaceOperationContext) async throws -> JSONValue {
+        let validate: @MainActor () throws -> Void = { [weak self] in
+            guard let self, self.server != nil else { throw CancellationError() }
+            try Task.checkCancellation()
+            try operation.validateCaller()
+            try self.validateAPIGuards(params, method: method)
+        }
+        try validate()
+        let payload = withoutAPIGuards(params)
+        switch method {
+        case "layoutApps.list":
+            guard payload.isEmpty else { throw RPCFailure(code: -32602, message: "layoutApps.list takes no parameters") }
+            let result = try await layoutApps.list()
+            try validate()
+            return result
+        case "layoutApps.refresh":
+            guard Set(payload.keys) == ["layoutAppID"],
+                  let id = params["layoutAppID"]?.string.flatMap(UUID.init(uuidString:)),
+                  let revision = params["expectedBundleRevision"]?.string else {
+                throw RPCFailure(code: -32602, message: "layoutAppID and expectedBundleRevision are required")
+            }
+            return try await layoutApps.refresh(id: id, expectedRevision: revision, operation: operation, validate: validate)
+        case "layouts.launcher":
+            return try await savedLayouts.callLauncher(params: payload, operation: operation, validate: validate)
+        default: preconditionFailure("Only layout app operations reach this path")
+        }
+    }
+
     func refreshSettings(force: Bool = false, refreshBrowserSites: Bool = true) {
         guard let model = settingsModel else { return }
         do {
             let source = try configurationSource()
             // Edit what is on disk, even when a missing palette made startup
             // fall back to defaults. Otherwise choosing a default cannot repair it.
-            let editable = (try? AppConfiguration.parse(source)) ?? settings.current
-            model.load(editable, source: source, error: settings.error, force: force)
+            let editable = (try? settings.loadEffectiveConfiguration(overridesSource: source)) ?? settings.current
+            model.load(editable, source: settings.configurationSourceIdentity(source), error: settings.error, force: force)
         } catch { model.error = String(describing: error) }
+        let launch = ApplicationLaunchContext.current
+        model.parentManaged = launch.isLayoutApp
+        model.layoutAppName = launch.descriptor?.name
+        model.sourceLayoutName = launch.descriptor.flatMap { try? LayoutAppPluginSync.readRecipe(directory: $0.recipeDirectory, id: $0.layoutID).name }
+        let runtimeVersion = RuntimeBundle.bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+        let runtimeBuild = RuntimeBundle.bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+        model.runtimeVersion = "\(runtimeVersion) (\(runtimeBuild))"
+        model.layoutAppUpdateStatus = launch.isLayoutApp ? updates.snapshot.detail : nil
+        model.overriddenKeys = Set((try? settings.overriddenSettingKeys()) ?? [])
+        if let parent = settings.parentConfigURL, let inherited = try? AppConfiguration.load(from: parent) {
+            model.inheritedShortcuts = Dictionary(uniqueKeysWithValues: inherited.keyBindings.map { ($0.key.description, $0.value) })
+        }
+        model.pluginSyncStatus = layoutPluginDiagnostic ?? (layoutPluginDeferredCount > 0 ? "\(layoutPluginDeferredCount) plugin change(s) waiting for open panes to close." : nil)
+        refreshLayoutAppSettings()
         model.agentSkills = agentSkills.entries()
         model.commands = pluginCatalog.activeRegistrations.flatMap(\.workspaceCommands) + CommandRegistry.commands
             + unavailableCommands.map { .init(id: $0, title: "\($0) (Unavailable)", key: "", shift: false) }
@@ -3364,23 +3948,28 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     func saveSettings(source: String, changes: [String: String], refreshEditor: Bool = true) throws {
-        guard try configurationSource() == source else {
-            throw ConfigurationError.invalid("The config file changed outside Settings. Choose Revert to load it before editing again.")
+        let local = try configurationSource()
+        guard settings.configurationSourceIdentity(local) == source else {
+            throw ConfigurationError.invalid("The config file changed outside Settings. Choose Revert before editing again.")
         }
-        let updated = try AppConfiguration.updating(source: source, values: changes)
-        try saveConfigurationSource(source: source, updated: updated, refreshEditor: refreshEditor)
+        let updated = try settings.updatingConfigurationSource(source: local, values: changes)
+        guard settings.configurationSourceIdentity(try configurationSource()) == source else {
+            throw RPCFailure(code: APIError.conflict, message: "Configuration changed before save")
+        }
+        try saveConfigurationSource(source: local, updated: updated, refreshEditor: refreshEditor)
     }
 
     func saveConfigurationSource(source: String, updated: String, refreshEditor: Bool = true,
                                  operation: WorkspaceOperationContext = .init(origin: .native)) throws {
-        guard try configurationSource() == source else { throw RPCFailure(code: APIError.conflict, message: "Configuration source changed before save") }
+        let sourceIdentity = settings.configurationSourceIdentity(source)
+        guard settings.configurationSourceIdentity(try configurationSource()) == sourceIdentity else { throw RPCFailure(code: APIError.conflict, message: "Configuration source changed before save") }
         // Resolve once and create stable snapshots before changing the TOML.
-        let prepared = try settings.prepare(AppConfiguration.parse(updated))
-        guard try configurationSource() == source else {
+        let prepared = try settings.prepare(settings.loadEffectiveConfiguration(overridesSource: updated))
+        guard settings.configurationSourceIdentity(try configurationSource()) == sourceIdentity else {
             throw ConfigurationError.invalid("The config file changed outside Settings. Choose Revert before applying.")
         }
         _ = try performSettingsOperation(operation: operation, candidate: prepared.configuration, intendedSource: updated) {
-            guard try configurationSource() == source else { throw RPCFailure(code: APIError.conflict, message: "Configuration source changed before save") }
+            guard settings.configurationSourceIdentity(try configurationSource()) == sourceIdentity else { throw RPCFailure(code: APIError.conflict, message: "Configuration source changed before save") }
             try FileManager.default.createDirectory(at: settings.configURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try updated.write(to: settings.configURL, atomically: true, encoding: .utf8)
             do { _ = try applyConfiguration(prepared: prepared) }
@@ -3409,6 +3998,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     private func installPlugin(params: [String: JSONValue], validateOnly: Bool, operation: WorkspaceOperationContext) async throws -> JSONValue {
+        if !validateOnly { try ApplicationLaunchContext.current.requireParent() }
         let payload = withoutAPIGuards(params)
         let allowed: Set<String> = validateOnly ? ["packagePath"] : ["packagePath", "replace"]
         guard Set(payload.keys).isSubset(of: allowed), let path = payload["packagePath"]?.string, path.hasPrefix("/"), !path.utf8.contains(0),
@@ -3460,6 +4050,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     }
 
     @objc private func registerPlugin() {
+        guard !ApplicationLaunchContext.current.isLayoutApp else { return }
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.zip]
         panel.allowsMultipleSelection = false
@@ -3475,7 +4066,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                     let prepared = try await self.preparePackage(url)
                     let replacing = self.pluginCatalog.records.contains { $0.id == prepared.manifest.id }
                     let alert = NSAlert()
-                    alert.messageText = "Allow \(prepared.manifest.title) to control Slate Terminal?"
+                    alert.messageText = "Allow \(prepared.manifest.title) to control \(ApplicationLaunchContext.current.displayName)?"
                     alert.informativeText = "Install only code you trust. This plugin can read terminal content, run commands, and change panes. Slate will keep its own copy.\n\nPlugin: \(prepared.manifest.id)" + (replacing ? "\nThis replaces the installed package." : "")
                     alert.addButton(withTitle: "Cancel")
                     alert.addButton(withTitle: replacing ? "Replace" : "Install")
@@ -3540,6 +4131,10 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             return TabRenameController.unavailableReason(window: editor.owner, editor: editor) == nil
         }
         guard NSApp.keyWindow is WorkspaceWindow else { return false }
+        if let id, id.hasPrefix("terminal.previousOutput") {
+            guard let pane = try? targetPaneID([:]) else { return false }
+            return terminals[pane]?.previousOutput != nil
+        }
         if let id, id.hasPrefix("terminal.find") {
             guard let pane = try? targetPaneID([:]), let terminal = terminals[pane] else { return false }
             return id == "terminal.find" || terminal.findState.active
@@ -3609,6 +4204,15 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 }
                 return
             }
+            if ["layouts.launcher", "updates.check", "updates.show", "updates.openParent"].contains(id) {
+                let captured = params
+                Task { [weak self] in
+                    do { _ = try await self?.callAsync("command.run", params: captured, operation: .init(origin: .native)) }
+                    catch is CancellationError { }
+                    catch { if self?.server != nil { self?.present(error) } }
+                }
+                return
+            }
             if id.hasPrefix("plugin.") {
                 let operation = try preparePluginCommand(id, params: params, resolveWorkspace: !capturedWithoutWorkspace)
                 Task { [weak self] in
@@ -3666,7 +4270,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         alert.messageText = message
         alert.showsSuppressionButton = true
         alert.suppressionButton?.title = "Don’t ask again"
-        alert.informativeText = "Applies to closing panes, tabs, windows, and quitting. Restore prompts with Slate Terminal → Reset Close Warnings."
+        alert.informativeText = "Applies to closing panes, tabs, windows, and quitting. Restore prompts with \(ApplicationLaunchContext.current.displayName) → Reset Close Warnings."
         alert.addButton(withTitle: "Cancel")
         alert.addButton(withTitle: "Terminate")
         guard runConfirmationAlert(alert) == .alertSecondButtonReturn else { return false }
@@ -3680,7 +4284,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
     private func runConfirmationAlert(_ alert: NSAlert) -> NSApplication.ModalResponse {
         var responseTimer: Timer?
         if integration, let handler = testConfirmationHandler {
-            let timer = Timer(timeInterval: 0.2, repeats: false) { _ in
+            let timer = Timer(timeInterval: testConfirmationDelay, repeats: false) { _ in
                 MainActor.assumeIsolated { handler(alert) }
             }
             RunLoop.main.add(timer, forMode: .common)
@@ -3690,7 +4294,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         return alert.runModal()
     }
 
-    private func debugUpdates(_ params: [String: JSONValue]) throws -> JSONValue {
+    private func debugUpdates(_ params: [String: JSONValue], operation: WorkspaceOperationContext) async throws -> JSONValue {
         if let phase = params["phase"]?.string.flatMap(UpdatePhase.init(rawValue:)) { updates.fixtureState(phase) }
         if let appearance = params["appearance"]?.string {
             updates.windowForTesting?.appearance = NSAppearance(named: appearance == "dark" ? .darkAqua : .aqua)
@@ -3706,7 +4310,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                 alert.buttons[params["confirmQuit"] == .bool(true) ? 1 : 0].performClick(nil)
             }
             defer { testConfirmationHandler = nil }
-            _ = try call("updates.install", params: ["updateId": .string(updates.snapshot.updateID ?? ""), "confirm": .bool(true)])
+            _ = try await callAsync("updates.install", params: ["updateId": .string(updates.snapshot.updateID ?? ""), "confirm": .bool(true)], operation: operation)
         case "more":
             guard let root = updates.windowForTesting?.contentView,
                   let button = updateSubviews(root).compactMap({ $0 as? NSButton }).first(where: { $0.accessibilityIdentifier() == "updates.more" }) else {
@@ -3729,6 +4333,8 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
             try Self.captureWindow(window.windowNumber, path: path)
         }
         var result = try JSONValue.encoding(updates.snapshot).object ?? [:]
+        result["windowKey"] = .bool(updates.windowForTesting?.isKeyWindow == true)
+        result["appActive"] = .bool(NSApp.isActive)
         result["installReplies"] = .integer(updates.fixtureInstallReplies)
         result["readyChoices"] = .array(updates.fixtureReadyChoices.map(JSONValue.string))
         result["quitPrompts"] = .array(prompts)
@@ -3769,6 +4375,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
 
     private func present(_ error: any Error) {
         if integration, let handler = testPresentationError { handler(error); return }
+        guard !isTerminating else { return }
         guard !reconciling, !settlingNativeLayouts else {
             NSLog("Native presentation error: %@", String(describing: error))
             return

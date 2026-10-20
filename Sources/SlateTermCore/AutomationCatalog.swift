@@ -70,9 +70,21 @@ public enum AutomationCatalog {
         return .object(fields)
     }
 
+    public static func runtimeAvailability(layoutApp: Bool) -> JSONValue {
+        let parentRequirement = JSONValue.object(["requires": .string("standardSlateRuntime")])
+        return .object(Dictionary(uniqueKeysWithValues: AutomationMethod.publicMethods.map { method in
+            let parentOnly = methods[method]?.availability.array?.contains(parentRequirement) == true
+            let childOnly = method == .configResetOverrides || method == .updatesOpenParent
+            return (method.rawValue, JSONValue.bool(childOnly ? layoutApp : !(layoutApp && parentOnly)))
+        }))
+    }
+
     public static func describe(instanceID: String, commands: [WorkspaceCommand]) throws -> JSONValue {
         var fields = AutomationCapabilities.fields
         fields["appInstanceId"] = .string(instanceID)
+        fields["mode"] = .string("standard")
+        fields["layoutAppID"] = .null
+        fields["runtimeAvailability"] = runtimeAvailability(layoutApp: false)
         fields["commands"] = .array(try commands.map(describeCommand))
         fields["contracts"] = document
         return .object(fields)

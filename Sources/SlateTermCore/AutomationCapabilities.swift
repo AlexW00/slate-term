@@ -5,13 +5,15 @@ import Foundation
 public enum AutomationCapabilities {
     public static let updates: JSONValue = .object([
         "version": .integer(1), "methods": .array(UpdateAction.allCases.map { .string($0.method) }),
-        "commands": .array([.string("updates.check"), .string("updates.show")]),
+        "commands": .array([.string("updates.check"), .string("updates.show"), .string("updates.openParent")]),
         "scope": .string("application"), "eventTopic": .string("host.updates.changed"),
         "get": .string("Current state, signed release notes, progress, and updateId; no network request"),
         "actionInput": .string("download/cancel: {updateId}; install: {updateId, confirm: true}; optional expectedInstanceId"),
         "phaseValues": .array(["idle", "unavailable", "checking", "available", "downloading", "verifying", "ready", "installing", "downloadError", "verificationError", "checkError", "current"].map(JSONValue.string)),
-        "resultFields": .array(["revision", "updateId", "phase", "currentVersion", "release", "receivedBytes", "expectedBytes", "detail", "windowVisible"].map(JSONValue.string)),
+        "resultFields": .array(["revision", "updateId", "phase", "currentVersion", "source", "release", "receivedBytes", "expectedBytes", "detail", "windowVisible"].map(JSONValue.string)),
         "automaticInstallation": .bool(false), "installationRequiresConfirmation": .bool(true),
+        "layoutAppUnavailableActions": .array([.string("download"), .string("cancel")]),
+        "standardRuntimeProcessConfirmation": .string("actualApplicationTermination"),
         "errors": .object(["invalid": .integer(-32602), "conflict": .integer(APIError.conflict), "unavailable": .integer(APIError.unavailable)])
     ])
 
@@ -113,8 +115,7 @@ public enum AutomationCapabilities {
                  "topic": .string("host.service.state.changed")])
 
     public static let fields: [String: JSONValue] = [
-            "pluginPersistence": pluginPersistence,
-            "updates": updates, "presence": presence,
+            "pluginPersistence": pluginPersistence, "updates": updates, "presence": presence,
             "workspaceFocus": .object([
                 "structuralDefault": .string("preserve"), "creationPolicy": .array(["preserve", "new"].map(JSONValue.string)),
                 "movePolicy": .array(["preserve", "target"].map(JSONValue.string)),
@@ -132,12 +133,14 @@ public enum AutomationCapabilities {
             "apiVersion": .integer(PluginCompatibility.currentAPIVersion), "identityGuards": .bool(true),
             "workspaceRevisions": .bool(true), "surface": .string("trusted"),
             "workspaceRestoration": .object([
-                "version": .integer(1), "configuration": .string("layout.restore_workspace"),
+                "version": .integer(2), "configuration": .string("layout.restore_workspace"),
                 "locations": .array([.string("terminalWorkingDirectory"), .string("normalBrowserURL")]),
                 "windowGeometry": .string("windowedFrameClampedToCurrentScreens"),
                 "directoryFallback": .string("homeIfMissingOrInaccessible"),
                 "privateBrowserURLs": .bool(false), "replaysCommands": .bool(false),
-                "restoresProcesses": .bool(false), "persistsTranscripts": .bool(false),
+                "restoresProcesses": .bool(false), "persistsTranscripts": .bool(true),
+                "savedOutput": .string("boundedDisplayTextNotRawStream"),
+                "savedOutputConfiguration": .string("terminal.saved_output_lines"),
                 "maximumDirectoryBytes": .integer(4_096), "maximumURLBytes": .integer(16_384),
                 "autosaveCoalescingMilliseconds": .integer(250)
             ]),
@@ -170,10 +173,16 @@ public enum AutomationCapabilities {
                     "waitTimeout": .integer(-32024), "notReadyOrFailed": .integer(-32042)])
             ]),
             "terminalHistory": .object([
-                "version": .integer(1), "maximumBytes": .integer(TerminalHistoryRequest.maximumBytes),
+                "version": .integer(2), "maximumBytes": .integer(TerminalHistoryRequest.maximumBytes),
                 "maximumLines": .integer(TerminalHistoryRequest.maximumLines), "defaultLines": .integer(2_000),
                 "range": .string("retained-tail-including-active-screen"), "commandStdout": .bool(false),
-                "exportOverwrites": .bool(false), "persistentTranscripts": .bool(false)
+                "exportOverwrites": .bool(false), "persistentTranscripts": .bool(true),
+                "savedOutput": .string("boundedDisplayTextNotRawStream"),
+                "sources": .array(TerminalHistoryRequest.Source.allCases.map { .string($0.rawValue) }),
+                "defaultSource": .string("current"), "previousOutput": .bool(true),
+                "savedOutputSetting": .string("terminal.saved_output_lines"),
+                "capturedAt": .string("unixSecondsForPreviousOtherwiseNull"),
+                "previousUnavailable": .string("readReturnsAvailableFalseExportFails")
             ]),
             "terminalSearch": .object([
                 "version": .integer(1), "method": .string("terminal.search"),
@@ -282,12 +291,23 @@ public enum AutomationCapabilities {
             "savedLayouts": .object([
                 "version": .integer(1), "targetKind": .string("windowGroup"),
                 "targetDiscovery": .string("layouts.windows"), "openMode": .string("newWindow"),
+                "libraryScope": .string("currentApplication"), "layoutAppLibrary": .string("private"),
+                "layoutAppFreshOpeningSource": .string("parentSourceRecipe"),
                 "replacementSupported": .bool(false), "launcherMethod": .string("layouts.launcher"),
-                "launcherOptions": .array(["name", "icon"].map(JSONValue.string)),
+                "launcherOptions": .array(["name", "icon", "copyPluginData"].map(JSONValue.string)),
                 "launcherIcons": .array(SavedLayoutLauncherOptions.icons.map(JSONValue.string)),
                 "defaultTerminalDirectory": .string("~/"),
                 "writeGuard": .string("expectedSavedLayoutRevision"), "configurationTarget": .string("pane"),
                 "startupLifetime": .string("committedTerminalSession"), "mergeSupported": .bool(false)
+            ]),
+            "layoutApps": .object([
+                "version": .integer(1), "listMethod": .string("layoutApps.list"),
+                "refreshMethod": .string("layoutApps.refresh"), "createMethod": .string("layouts.launcher"),
+                "maximumRecords": .integer(256), "refreshGuard": .string("expectedBundleRevision"),
+                "managementRuntime": .string("standard"), "copiesPluginDataByDefault": .bool(true),
+                "managementUnavailableError": .integer(APIError.layoutAppManagementUnavailable),
+                "managementUnavailableMessage": .string(APIError.layoutAppManagementMessage),
+                "runtimeRefresh": .string("privateCompatiblePayload"), "runtimeRefreshPreservesShellIdentity": .bool(true)
             ]),
             "guards": .array(APIGuards.names.sorted().map(JSONValue.string)),
             "methods": .array(AutomationMethod.publicMethods.map { .string($0.rawValue) }),

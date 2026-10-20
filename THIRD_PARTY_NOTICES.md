@@ -38,3 +38,7 @@ Run `python3 scripts/collect-release-licenses.py --check` to check dependency pi
 When a dependency changes, review its exact pinned source, transitive dependencies, embedded resources, and license files. Update the copied texts and their provenance/checksums in `licenses/manifest.json`. Run the collector and inspect the resulting app. Do not copy notices from an unrelated cached version. The simdutf package metadata currently says 5.2.8, but its vendored header says 9.0.0; this inventory follows the actual header.
 
 Each public binary release must make the matching source and build inputs available under their applicable terms. This includes Slate's source and changes, the Ghostty patch, and the corresponding covered dependency sources. The unchanged z2d source is available at <https://github.com/vancluever/z2d/tree/7dbae85c81784dba9988320bf9543ed9a81350c8>; its source remains under MPL 2.0. Preserve that source access and the bundled notices when redistributing it. The inventory describes notices and provenance; its successful validation does not establish that a release's source-distribution requirements have been fulfilled.
+
+## Sparkle
+
+The parent app updater includes Sparkle 2.10.0, distributed under its BSD license and accompanying third-party notices. The complete notice is bundled at `ThirdPartyLicenses/Sparkle/LICENSE`.

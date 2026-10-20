@@ -97,10 +97,12 @@ extension AutomationContracts {
             if !validate { parameters["replace"] = S.defaulted(S.boolean, .bool(false)) }
             methods[method] = AutomationContract(parameters: parameters, required: ["packagePath"],
                 result: S.reference(validate ? "PluginPackageValidation" : "PluginInstallation"), guards: unanchoredGuards,
-                conditions: [.object(["requires": .string("regularReadableZIPWithValidPortableRootManifestAndSafeBoundedContents")]),
+                conditions: (validate ? [] : [.object(["requires": .string("standardSlateRuntime")])])
+                    + [.object(["requires": .string("regularReadableZIPWithValidPortableRootManifestAndSafeBoundedContents")]),
                     .object(["requires": .string("compatibleManifestAndNoConcurrentPackageOperation")])]
                     + (validate ? [] : [.object(["requires": .string("unchangedRegistryNoOpenPanesOfTypeAndInstallationAndCleanupCapacity")])]),
-                routing: "explicitZIPPathThenManifestPluginID", errors: [APIError.incompatible, APIError.settingsWriteFailed, APIError.unavailable, -32010],
+                routing: "explicitZIPPathThenManifestPluginID", errors: [APIError.incompatible, APIError.settingsWriteFailed, APIError.unavailable, -32010]
+                    + (validate ? [] : [APIError.layoutAppManagementUnavailable]),
                 semantics: ["format": .string("zipWithRootPluginJSON"), "legacyManifestRegistration": .bool(false),
                     "validationPublishesInstallation": .bool(false), "validationStagesPrivateTemporaryFiles": .bool(true),
                     "relativeResources": .string("resolvedAgainstManagedPackageRoot"), "dependencyInstallation": .bool(false),
@@ -115,9 +117,9 @@ extension AutomationContracts {
         for method in [AutomationMethod.pluginsEnable, .pluginsDisable, .pluginsUnregister] {
             methods[method] = AutomationContract(parameters: ["id": pluginNamespace, "force": S.defaulted(S.boolean, .bool(false))], required: ["id"],
                 result: S.reference("PluginLifecycleResult"), guards: unanchoredGuards,
-                conditions: [.object(["requires": .string("registeredPlugin")]),
+                conditions: [.object(["requires": .string("standardSlateRuntime")]), .object(["requires": .string("registeredPlugin")]),
                     .object(["requires": .string(method == .pluginsEnable ? "compatibleManifest" : "forceWhenPanesUsePlugin")])],
-                routing: "pluginID", errors: [APIError.unavailable, APIError.settingsWriteFailed] + (method == .pluginsEnable ? [APIError.incompatible] : [-32010]),
+                routing: "pluginID", errors: [APIError.unavailable, APIError.settingsWriteFailed, APIError.layoutAppManagementUnavailable] + (method == .pluginsEnable ? [APIError.incompatible] : [-32010]),
                 semantics: ["preservesSavedPluginData": .bool(true), "forceClosesUsingPanes": .bool(method != .pluginsEnable),
                     "modelAcceptanceIsDiskDurability": .bool(false), "retirementOnDisableOrRemoval": .string("viewsPanelInstancesCommandsAndBackgroundServices")])
         }

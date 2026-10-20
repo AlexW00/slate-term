@@ -12,7 +12,7 @@ extension WorkspaceHost {
     func configurationRevisionInfo() -> [String: JSONValue] {
         do {
             let read = try configurationRevision()
-            let candidate = try? AppConfiguration.parse(read.source)
+            let candidate = try? settings.loadEffectiveConfiguration(overridesSource: read.source)
             return ["sourceRevision": .string(read.revision), "appliedRevision": .string(appliedConfigurationRevision),
                     "sourceValid": .bool(candidate != nil),
                     "appliedMatchesSource": .bool(candidate?.changedKeys(from: settings.current).isEmpty == true)]
@@ -32,12 +32,15 @@ extension WorkspaceHost {
     private func writeConfiguration(_ values: [String: JSONValue], expected: String? = nil, operation: WorkspaceOperationContext) throws -> JSONValue {
         let read = try configurationRevision()
         if let expected, expected != read.revision { throw RPCFailure(code: APIError.conflict, message: "Configuration source changed; read config.get before retrying") }
-        let updated = try ConfigurationPatch.updating(source: read.source, values: values)
+        let updated = try settings.updatingConfigurationSource(source: read.source, values: ConfigurationPatch.literals(values))
         return try commitConfigurationSource(source: read.source, updated: updated, operation: operation)
     }
 
     func commitConfigurationSource(source: String, updated: String, operation: WorkspaceOperationContext) throws -> JSONValue {
-        let candidate = try AppConfiguration.parse(updated)
+        guard settings.configurationSourceIdentity(source) == configurationRevisionSource else {
+            throw RPCFailure(code: APIError.conflict, message: "Configuration source changed; read config.get before retrying")
+        }
+        let candidate = try settings.loadEffectiveConfiguration(overridesSource: updated)
         if updated != source || !candidate.changedKeys(from: settings.current).isEmpty || settings.error != nil {
             do { try saveConfigurationSource(source: source, updated: updated, refreshEditor: false, operation: operation) }
             catch {
@@ -55,11 +58,24 @@ extension WorkspaceHost {
         return .object(result)
     }
 
+    func resetConfigurationOverrides(_ params: [String: JSONValue], operation: WorkspaceOperationContext) throws -> JSONValue {
+        guard Set(params.keys).isSubset(of: ["keys", "expectedSourceRevision", "expectedInstanceId"]) else {
+            throw RPCFailure(code: -32602, message: "Unknown configuration reset parameter")
+        }
+        guard settings.parentConfigURL != nil else { throw RPCFailure(code: -32022, message: "Configuration overrides are only available in layout apps") }
+        guard let expected = params["expectedSourceRevision"]?.string, case .array(let values) = params["keys"],
+              values.allSatisfy({ $0.string != nil }) else { throw RPCFailure(code: -32602, message: "keys and expectedSourceRevision are required") }
+        let read = try configurationRevision()
+        guard expected == read.revision else { throw RPCFailure(code: APIError.conflict, message: "Configuration source changed; read config.get before retrying") }
+        let updated = try LayoutAppConfiguration.resetOverrides(keys: values.compactMap(\.string), source: read.source)
+        return try commitConfigurationSource(source: read.source, updated: updated, operation: operation)
+    }
+
     func pluginSettingsInfo(_ params: [String: JSONValue]) throws -> JSONValue {
         guard let id = params["id"]?.string else { throw RPCFailure(code: -32602, message: "Plugin id is required") }
         try PluginSettingsPatch.validateNamespace(id)
         let read = try configurationRevision()
-        let candidate = try? AppConfiguration.parse(read.source)
+        let candidate = try? settings.loadEffectiveConfiguration(overridesSource: read.source)
         return .object(["id": .string(id), "values": .object(candidate.map { $0.plugins[id] ?? [:] } ?? settings.current.plugins[id] ?? [:]),
                         "appliedValues": .object(settings.current.plugins[id] ?? [:]), "sourceValid": .bool(candidate != nil),
                         "writeRevision": .string(read.revision)])
@@ -87,7 +103,7 @@ extension WorkspaceHost {
               case .array(let operations) = params["operations"] else { throw RPCFailure(code: -32602, message: "id, operations and expectedWriteRevision are required") }
         let read = try configurationRevision()
         guard read.revision == expected else { throw RPCFailure(code: APIError.conflict, message: "Settings source changed; read the namespace again") }
-        let updated = try PluginSettingsPatch.updating(source: read.source, pluginID: id, operations: operations)
+        let updated = try settings.updatingPluginConfigurationSource(source: read.source, pluginID: id, operations: operations)
         let result = try commitConfigurationSource(source: read.source, updated: updated, operation: operation)
         var response = try pluginSettingsInfo(["id": .string(id)]).object!
         response["operationId"] = result.object?["operationId"]
@@ -142,6 +158,7 @@ extension WorkspaceHost {
     }
 
     func importPalette(_ params: [String: JSONValue]) throws -> JSONValue {
+        try ApplicationLaunchContext.current.requireParent()
         guard let path = params["path"]?.string, path.hasPrefix("/") else { throw RPCFailure(code: -32602, message: "An absolute local path is required") }
         let entry = try PaletteLibrary(directory: settings.paletteDirectory).importPalette(from: URL(fileURLWithPath: path))
         refreshSettings()

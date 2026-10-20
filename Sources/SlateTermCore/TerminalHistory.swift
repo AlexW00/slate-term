@@ -4,6 +4,8 @@ import Foundation
 public struct TerminalHistoryRequest: Sendable {
     public static let maximumBytes = 128 * 1024
     public static let maximumLines = 10_000
+    public enum Source: String, CaseIterable, Sendable { case current, previous }
+    public let source: Source
     public let maxBytes: Int
     public let maxLines: Int
 
@@ -15,27 +17,37 @@ public struct TerminalHistoryRequest: Sendable {
             }
             return count
         }
+        if let input = params["source"] {
+            guard let value = input.string, let source = Source(rawValue: value) else {
+                throw RPCFailure(code: -32602, message: "source must be current or previous")
+            }
+            self.source = source
+        } else { source = .current }
         maxBytes = try limit("maxBytes", default: Self.maximumBytes, maximum: Self.maximumBytes)
         maxLines = try limit("maxLines", default: 2_000, maximum: Self.maximumLines)
     }
 
     public func result(text: String, byteTruncated: Bool) -> TerminalHistoryResult {
-        // The engine has already bounded bytes at a Unicode scalar boundary. Keep
-        // newline-delimited logical lines; a trailing newline terminates the last
-        // line rather than creating an extra empty line for this limit.
-        var end = text.endIndex
-        if end != text.startIndex, text[text.index(before: end)] == "\n" { end = text.index(before: end) }
-        var start = end
-        var lines = end == text.startIndex ? (text.isEmpty ? 0 : 1) : 1
+        var start = text.endIndex
+        var bytes = 0
+        var lines = 0
         while start > text.startIndex {
             let previous = text.index(before: start)
-            if text[previous] == "\n" {
+            let character = text[previous]
+            if character.isNewline && start != text.endIndex {
                 if lines == maxLines { break }
                 lines += 1
-            }
+            } else if start == text.endIndex { lines = 1 }
+            let size = text[previous..<start].utf8.count
+            guard size <= maxBytes - bytes else { break }
+            bytes += size
             start = previous
         }
-        return TerminalHistoryResult(text: String(text[start...]), truncated: byteTruncated || start != text.startIndex, lineCount: lines)
+        let output = String(text[start...])
+        // A byte boundary can stop before a newline that was counted above.
+        let count = output.isEmpty ? 0 : output.reduce(0) { $0 + ($1.isNewline ? 1 : 0) }
+            + (output.last?.isNewline == true ? 0 : 1)
+        return TerminalHistoryResult(text: output, truncated: byteTruncated || start != text.startIndex, lineCount: count)
     }
 }
 

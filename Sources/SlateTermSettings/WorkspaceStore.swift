@@ -7,7 +7,7 @@ public struct WorkspaceStore: Sendable {
     private let directory: URL
     private let lease: WorkspaceLease
 
-    public init(directory: URL) throws {
+    public init(directory: URL, inheritedDescriptor: Int32? = nil) throws {
         self.directory = directory
         url = directory.appendingPathComponent("workspace.json")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -16,7 +16,18 @@ public struct WorkspaceStore: Sendable {
               attributes.st_mode & S_IFMT == S_IFDIR, attributes.st_mode & 0o777 == 0o700 else {
             throw ConfigurationError.invalid("Workspace state directory must be owned by this user and have mode 0700")
         }
-        let descriptor = open(directory.appendingPathComponent("workspace.lock").path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0o600)
+        let lockPath = directory.appendingPathComponent("workspace.lock").path
+        let descriptor: Int32
+        if let inheritedDescriptor {
+            var inherited = stat(), expected = stat()
+            guard fstat(inheritedDescriptor, &inherited) == 0, lstat(lockPath, &expected) == 0,
+                  inherited.st_dev == expected.st_dev, inherited.st_ino == expected.st_ino else {
+                throw ConfigurationError.invalid("The startup lease does not belong to this workspace")
+            }
+            descriptor = fcntl(inheritedDescriptor, F_DUPFD_CLOEXEC, 0)
+        } else {
+            descriptor = open(lockPath, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0o600)
+        }
         guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
         var owned = false
         defer { if !owned { Darwin.close(descriptor) } }

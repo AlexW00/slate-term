@@ -54,7 +54,7 @@ extension AutomationContracts {
                 "nextPane": S.integer(minimum: 1), "nextTab": S.integer(minimum: 1), "nextGroup": S.integer(minimum: 1)],
                 required: ["schemaVersion", "panes", "tabs", "groups", "nextPane", "nextTab", "nextGroup"]),
             "PaneInspection": S.object(paneFields.merging(paneOptional) { _, value in value }, required: Array(paneFields.keys)),
-            "Context": complete(["instanceId": S.string(), "scope": S.strings(["pane", "tab", "global"]), "tabId": S.tabID,
+            "Context": complete(["mode": S.strings(["standard", "layoutApp"]), "layoutAppID": S.nullable(S.uuid), "instanceId": S.string(), "scope": S.strings(["pane", "tab", "global"]), "tabId": S.tabID,
                 "focusedPaneId": S.paneID, "activeTerminalPaneId": S.nullable(S.paneID), "terminal": S.nullable(contextTerminal)]),
             "ContextInspection": complete([
                 "caller": S.object(["appInstanceId": S.string(), "identitySource": S.strings(["none", "supplied", "bridgeBound"]),

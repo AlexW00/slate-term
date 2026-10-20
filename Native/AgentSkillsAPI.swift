@@ -5,7 +5,7 @@ import SlateTermSettings
 extension WorkspaceHost {
     var agentSkills: AgentSkills {
         AgentSkills(home: settings.agentHome,
-                    bundled: Bundle.main.resourceURL!.appendingPathComponent("skills/\(AgentSkills.skillName)"),
+                    bundled: RuntimeBundle.bundle.resourceURL!.appendingPathComponent("skills/\(AgentSkills.skillName)"),
                     managed: settings.base.appendingPathComponent("skills/\(AgentSkills.skillName)"))
     }
 

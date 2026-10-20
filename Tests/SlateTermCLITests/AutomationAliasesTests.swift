@@ -15,12 +15,15 @@ import SlateTermCore
         ("web", WebCLI.Action.allCases.map { String($0.method.dropFirst("web.".count)) }),
         ("plugins", Plugins.Action.allCases.filter { ![.validate, .settings, .service, .data, .panelState].contains($0) }.map(\.rawValue)),
         ("events", Events.Action.allCases.map { $0 == .watch ? "poll" : $0.rawValue }),
-        ("config", ConfigCommand.Action.allCases.map { $0 == .set ? "patch" : $0.rawValue })
+        ("config", ConfigCommand.Action.allCases.map { $0 == .set ? "patch" : ($0 == .resetOverrides ? "resetOverrides" : $0.rawValue) })
     ]
     for namespace in ["data", "panelState"] {
         for verb in ["get", "patch", "reset"] {
             #expect(AutomationMethod(rawValue: "plugins.\(namespace).\(verb)")?.family == .pluginPersistence)
         }
+    }
+    for action in LayoutAppsCommand.Action.allCases {
+        #expect(AutomationMethod(rawValue: action.method)?.isPublic == true)
     }
     for action in SavedLayoutsCommand.Action.allCases {
         #expect(AutomationMethod(rawValue: action.method)?.isPublic == true)
@@ -133,4 +136,45 @@ import SlateTermCore
     #expect(tab.focusPolicy == "new")
     let layout = try SavedLayoutsCommand.parse(["open", "--id", "id", "--focus-policy", "new"])
     #expect(layout.focusPolicy == "new")
+}
+
+@Test func layoutAppCLIRequiresExplicitIdentityAndBundleRevision() throws {
+    let id = UUID().uuidString
+    let refresh = try LayoutAppsCommand.parse(["refresh", "--layout-app-id", id, "--expected-bundle-revision", "revision"])
+    #expect(try refresh.parameters() == ["layoutAppID": .string(id), "expectedBundleRevision": .string("revision")])
+    #expect(try LayoutAppsCommand.parse(["list"]).parameters().isEmpty)
+    for args in [["refresh"], ["refresh", "--layout-app-id", id],
+                 ["refresh", "--layout-app-id", "bad", "--expected-bundle-revision", "revision"],
+                 ["list", "--layout-app-id", id], ["list", "--expected-bundle-revision", "revision"]] {
+        let command = try LayoutAppsCommand.parse(args)
+        #expect(throws: ValidationError.self) { try command.parameters() }
+    }
+    let launcher = try SavedLayoutsCommand.parse(["launcher", "--id", id, "--path", "/tmp/Test.app"])
+    #expect(launcher.copyPluginData)
+    let emptyData = try SavedLayoutsCommand.parse(["launcher", "--id", id, "--path", "/tmp/Test.app", "--no-copy-plugin-data"])
+    #expect(!emptyData.copyPluginData)
+}
+
+@Test func configOverrideResetCLIRequiresNamedKeysAndSourceRevision() throws {
+    let command = try ConfigCommand.parse(["reset-overrides", "--key", "terminal.font_size", "--key", "appearance.theme", "--expected-source-revision", "source"])
+    #expect(command.keys == ["terminal.font_size", "appearance.theme"])
+    #expect(command.action == .resetOverrides)
+    for args in [["reset-overrides"], ["reset-overrides", "--key", "appearance.theme"],
+                 ["reset-overrides", "--expected-source-revision", "source"],
+                 ["reset-overrides", "--key", "appearance.theme", "--expected-source-revision", "source", "--value", "null"]] {
+        let invalid = try ConfigCommand.parse(args)
+        #expect(throws: ValidationError.self) { try invalid.run() }
+    }
+}
+
+@Test func terminalHistoryCLIParsesSourcesAndRejectsThemForOtherActions() throws {
+    for action in ["history", "historyExport"] {
+        let command = try TerminalCommand.parse([action, "--source", "previous", "--max-lines", "100", "--max-bytes", "2048"])
+        #expect(command.source == .previous && command.maxLines == 100 && command.maxBytes == 2048)
+    }
+    #expect(try TerminalCommand.parse(["history"]).source == nil)
+    #expect(try TerminalCommand.parse(["history", "--source", "current"]).source == .current)
+    #expect(throws: (any Error).self) { try TerminalCommand.parse(["history", "--source", "all"]) }
+    let command = try TerminalCommand.parse(["capture", "--source", "previous", "--socket", "/tmp/slate-must-not-connect.sock"])
+    #expect(throws: ValidationError.self) { try command.run() }
 }

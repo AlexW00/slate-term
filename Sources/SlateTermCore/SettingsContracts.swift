@@ -12,6 +12,7 @@ extension AutomationContracts {
         return [
             "working_directory": S.string(minimumLength: 1, format: "slate-working-directory"),
             "inherit_working_directory": S.boolean,
+            "saved_output_lines": S.defaulted(S.integer(minimum: 0, maximum: 100_000), .integer(10_000)),
             "shell": S.string(pattern: "^/", format: "slate-shell-path"),
             "font_family": S.string(minimumLength: 1, format: "slate-configuration-line"),
             "font_size": S.annotated(S.number, ["minimum": .integer(1), "maximum": .integer(256)]),
@@ -33,7 +34,12 @@ extension AutomationContracts {
         let notificationFields = notificationDefinitions["NotificationPolicy"]!.object!["properties"]!.object!
         let browserFields = ["search_url": S.string(format: "slate-search-url-template")]
         let layoutFields = ["restore_workspace": S.boolean]
-        let agentFields = ["show_activity": S.boolean]
+        let agentColors = S.annotated(S.record(S.string(pattern: "^#[0-9a-fA-F]{6}(?![\\s\\S])")), [
+            "maxProperties": .integer(64),
+            "propertyNames": S.string(maximumUTF8Bytes: 32, pattern: "^[a-z0-9][a-z0-9._-]{0,31}(?![\\s\\S])"),
+            "description": .string("Replaces all agent color overrides. Lowercase actor family names; omit entries to restore automatic colors. Empty object resets all overrides.")
+        ])
+        let agentFields = ["show_activity": S.boolean, "colors": agentColors]
         let paneDim = S.annotated(S.number, ["minimum": .integer(0), "maximum": .integer(1)])
         var patchFields: [String: JSONValue] = ["appearance.theme": S.strings(["auto", "system", "light", "dark"]),
                                                "appearance.unfocused_pane_dim": paneDim]
@@ -56,6 +62,7 @@ extension AutomationContracts {
         ]
         let warning = complete(["suppressed": S.boolean, "error": S.nullable(S.string())])
         let statusFields: [String: JSONValue] = [
+            "parentPath": S.nullable(S.string()), "parentError": S.nullable(S.string()), "overriddenKeys": S.array(S.string()),
             "path": S.string(), "current": S.reference("AppConfiguration"), "welcome": S.reference("Welcome"),
             "welcomeError": S.nullable(S.string()), "closeWarning": warning, "typeWarning": warning, "error": S.nullable(S.string()),
             "restartRequired": configurationRestartKeys, "unavailableCommands": S.array(S.string()),
@@ -75,6 +82,8 @@ extension AutomationContracts {
         return [
             "TOMLValue": S.oneOf([S.string(), S.boolean, S.number, S.array(S.reference("TOMLValue")), S.record(S.reference("TOMLValue"))]),
             "ConfigurationPatch": patch,
+            "ConfigurationSettingKey": S.oneOf([S.strings(Array(patchFields.keys).sorted()),
+                S.string(pattern: "^keybind\\.", format: "slate-keybinding-setting")]),
             "AppConfiguration": complete([
                 "appearance": complete(["theme": S.strings(["system", "light", "dark"]), "unfocused_pane_dim": paneDim]), "terminal": complete(terminalConfigurationFields),
                 "agents": complete(agentFields), "browser": complete(browserFields), "layout": complete(layoutFields), "notifications": S.reference("NotificationPolicy"),
@@ -123,6 +132,16 @@ extension AutomationContracts {
                 result: S.reference("ConfigurationWrite"), extraGuards: ["expectedSourceRevision"], errors: [APIError.settingsWriteFailed], conditions: validSource,
                 semantics: ["preservesUnrelatedSource": .bool(true), "requiresValidMergedConfiguration": .bool(true),
                     "failureMayHavePersisted": .bool(true), "recovery": .string("readConfigBeforeAnyRetry")]),
+            .configResetOverrides: AutomationContract(parameters: [
+                "keys": S.annotated(S.array(S.reference("ConfigurationSettingKey"), minimum: 1, maximum: 128), ["uniqueItems": .bool(true)])
+            ], required: ["keys", "expectedSourceRevision"], result: S.reference("ConfigurationWrite"),
+                guards: ["expectedInstanceId", "expectedSourceRevision"],
+                conditions: validSource + [.object(["requires": .string("layoutAppRuntimeWithLocalOverrides")]),
+                    .object(["requires": .string("validConfigurationKeys")])],
+                routing: "applicationConfiguration", errors: [APIError.settingsWriteFailed],
+                semantics: ["removesLocalAssignments": .bool(true), "writesParentConfiguration": .bool(false),
+                    "preservesUnrelatedSource": .bool(true), "requiresValidMergedConfiguration": .bool(true),
+                    "failureMayHavePersisted": .bool(true), "recovery": .string("readConfigBeforeAnyRetry")]),
             .pluginSettingsGet: legacy(["id": pluginNamespace], required: ["id"], result: S.reference("PluginSettings"),
                 semantics: ["registrationRequired": .bool(false), "invalidSourceValues": .string("lastAppliedNamespace")]),
             .pluginSettingsPatch: legacy(["id": pluginNamespace, "operations": S.reference("PluginSettingsOperations")],
@@ -136,7 +155,9 @@ extension AutomationContracts {
             ], required: ["name", "source", "valid"])), errors: [APIError.unavailable], semantics: ["maximumCustomEntries": .integer(1000)]),
             .paletteImport: legacy(["path": S.string(pattern: "^/")], required: ["path"], result: S.object([
                 "name": paletteName, "activated": S.constant(.bool(false))
-            ], required: ["name", "activated"]), conditions: [.object(["requires": .string("readableRegularUTF8ColorOnlyPaletteFile")])],
+            ], required: ["name", "activated"]), errors: [APIError.layoutAppManagementUnavailable],
+                conditions: [.object(["requires": .string("standardSlateRuntime")]),
+                    .object(["requires": .string("readableRegularUTF8ColorOnlyPaletteFile")])],
                 semantics: ["maximumSourceBytes": .integer(65_536), "overwritesDifferentPalette": .bool(false),
                     "changesConfiguration": .bool(false), "reusesIdenticalNamedPalette": .bool(true), "normalizesImportedColors": .bool(true)]),
             .appearanceGet: AutomationContract(parameters: [:], result: S.reference("Appearance"), guards: unanchoredGuards, errors: [APIError.unavailable],

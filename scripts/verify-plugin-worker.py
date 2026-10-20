@@ -9,7 +9,7 @@ import tempfile
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-CLI = ROOT / ".derived/Build/Products/Debug/Slate Terminal.app/Contents/Helpers/slate-term"
+CLI = ROOT / ".derived/Build/Products/Debug/Slate Terminal.app/Contents/Frameworks/SlateRuntime.framework/Helpers/slate-term"
 
 
 def eventually(label, condition, timeout=10):

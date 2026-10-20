@@ -9,7 +9,7 @@ struct UpdateView: View {
     private var snapshot: UpdateSnapshot { controller.snapshot }
     private var phase: UpdatePhase { snapshot.phase }
     private var showsNotes: Bool {
-        snapshot.release != nil && ![.idle, .unavailable, .checking, .current].contains(phase)
+        !controller.isLayoutApp && snapshot.release != nil && ![.idle, .unavailable, .checking, .current].contains(phase)
     }
     private var isError: Bool { [.downloadError, .verificationError, .checkError].contains(phase) }
     private var isBusy: Bool { [.checking, .downloading, .verifying, .installing].contains(phase) }
@@ -43,7 +43,7 @@ struct UpdateView: View {
                     .tracking(-0.4)
                     .accessibilityAddTraits(.isHeader)
                 HStack(spacing: 7) {
-                    Text("Slate Terminal \(showsNotes ? snapshot.release?.version ?? snapshot.currentVersion : snapshot.currentVersion)")
+                    Text("\(controller.displayName) \(showsNotes ? snapshot.release?.version ?? snapshot.currentVersion : snapshot.currentVersion)")
                         .fontWeight(.medium)
                     if showsNotes {
                         Text("←").foregroundStyle(.tertiary)
@@ -173,6 +173,10 @@ struct UpdateView: View {
                     .frame(maxWidth: 220, alignment: .leading)
                 Spacer(minLength: 0)
                 HStack(spacing: 8) {
+                    if controller.isLayoutApp {
+                        Button("Open Slate Terminal") { controller.invoke(.openParent) }
+                            .accessibilityIdentifier("updates.openParent")
+                    }
                     if let secondaryTitle {
                         Button(secondaryTitle) {
                             if [.checking, .downloading, .verifying].contains(phase) { controller.invoke(.cancel) }
@@ -192,6 +196,7 @@ struct UpdateView: View {
                     .background { if controller.usesFixture { UpdateControlAnchor(name: "updates.primary") } }
                 }
                 .controlSize(.regular)
+                .fixedSize(horizontal: true, vertical: false)
             }
             .padding(.horizontal, 24)
             .padding(.top, 15)
@@ -229,12 +234,15 @@ struct UpdateView: View {
         case .downloadError: "Couldn’t download the update"
         case .verificationError: "The update couldn’t be verified"
         case .checkError: "The update check didn’t finish"
-        case .current: "Slate Terminal \(snapshot.currentVersion) is current"
+        case .current: "\(controller.displayName) \(snapshot.currentVersion) is current"
         }
     }
 
     private var explanation: String {
-        switch phase {
+        if controller.isLayoutApp {
+            return phase == .ready ? "Runtime \(snapshot.release?.version ?? "") is ready in Slate Terminal. Restart \(controller.displayName) when you’re ready to apply it." : "Runtime updates come from your installed copy of Slate Terminal. Update Slate Terminal first, then restart this app."
+        }
+        return switch phase {
         case .unavailable: "This build hasn’t been configured with a trusted update feed and signing key."
         case .current: "You’re running the latest version of Slate Terminal."
         case .checking: "Checking for an update. Release notes appear here before you choose to download."
@@ -259,7 +267,8 @@ struct UpdateView: View {
     }
 
     private var footerNote: String {
-        switch phase {
+        if controller.isLayoutApp { return "Updates keep this app’s identity and private data." }
+        return switch phase {
         case .available, .idle: "Read what’s new. Install when you’re ready."
         case .downloading: "Installation will wait for your confirmation."
         case .verifying: "Nothing has changed in your installed app."
@@ -272,7 +281,8 @@ struct UpdateView: View {
     }
 
     private var primaryTitle: String {
-        switch phase {
+        if controller.isLayoutApp && phase == .ready { return "Restart to Update" }
+        return switch phase {
         case .idle: "Check for Updates"
         case .available: "Download Update"
         case .downloading: "Downloading…"

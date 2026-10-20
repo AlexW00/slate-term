@@ -61,7 +61,7 @@ slate-term command run agents.activity.toggle
 
 Fixed appearance aliases and application-font increase/decrease/reset are available in native menus, the picker and configurable shortcuts. No default shortcuts steal pane-local font zoom. Parameterized commands require validated arguments and are excluded from one-click picker results. `warnings.close.reset` and `warnings.type.reset` re-enable the existing native warnings.
 
-`config.patch` accepts a typed `values` object of dotted application keys and `expectedSourceRevision`. CLI `config patch --value '{...}' --expected-source-revision TOKEN` is its adapter. Application values are finite scalars; arbitrary TOML, namespace writes and null values are not accepted by this endpoint. Palette import validates/copies color data and does not activate it.
+`config.patch` accepts a typed `values` object of dotted application keys and `expectedSourceRevision`. CLI `config patch --value '{...}' --expected-source-revision TOKEN` is its adapter. Application values are finite scalars, except `agents.colors`, which accepts a complete map of lowercase actor family names to `#RRGGBB` strings (up to 64). An empty map resets all overrides. Arbitrary TOML, plugin namespace writes and null values are not accepted by this endpoint. Palette import validates/copies color data and does not activate it.
 
 These operations reuse the native Settings writer, validation, palette preparation and live reload. They preserve unrelated supported TOML/comments, reject invalid/unsupported source instead of replacing it with defaults, and preserve pending Settings-window edits. Applying an old editor draft then reports a conflict. Live appearance/font changes do not restart terminal sessions.
 

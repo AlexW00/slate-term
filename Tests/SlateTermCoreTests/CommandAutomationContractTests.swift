@@ -7,8 +7,8 @@ private let builtinContracts = AutomationContracts.workspaceCommands.merging(Aut
     preconditionFailure("Command described twice")
 }
 private let commandSchemaDefinitions = [AutomationContracts.commandDefinitions, AutomationContracts.applicationCommandDefinitions,
-    AutomationContracts.workspaceDefinitions, AutomationContracts.settingsDefinitions, AutomationContracts.notificationDefinitions, AutomationContracts.updateDefinitions,
-    AutomationContracts.webDefinitions, AutomationContracts.pluginPersistenceDefinitions].reduce(into: [String: JSONValue]()) { all, definitions in
+    AutomationContracts.workspaceDefinitions, AutomationContracts.settingsDefinitions, AutomationContracts.notificationDefinitions,
+    AutomationContracts.webDefinitions, AutomationContracts.pluginPersistenceDefinitions, AutomationContracts.updateDefinitions].reduce(into: [String: JSONValue]()) { all, definitions in
         all.merge(definitions) { _, _ in preconditionFailure("Duplicate definition") }
     }
 

@@ -66,11 +66,22 @@ import SlateTermTestSupport
     for contract in AutomationContracts.updates.values { #expect(contract.result == result) }
 }
 
+@Test func updateStagingAvailabilityMatchesTheRuntimeBoundary() throws {
+    let parentRuntime = JSONValue.object(["requires": .string("standardSlateRuntime")])
+    for method in [AutomationMethod.updatesDownload, .updatesCancel, .updatesInstall, .updatesCheck] {
+        let contract = try #require(AutomationCatalog.methods[method])
+        #expect(contract.availability.array?.contains(parentRuntime) == [.updatesDownload, .updatesCancel].contains(method))
+    }
+}
+
 @Test func updateCommandsAndDiscoveryUseSharedContracts() throws {
     let definitions = AutomationCatalog.definitions
     let description = try AutomationCatalog.describe(instanceID: UUID().uuidString, commands: CommandRegistry.commands)
     #expect(description.object?["apiVersion"] == .integer(1))
     #expect(description.object?["updates"] == AutomationCapabilities.updates)
+    #expect(description.object?["updates"]?.object?["layoutAppUnavailableActions"] == .array([.string("download"), .string("cancel")]))
+    #expect(description.object?["updates"]?.object?["standardRuntimeProcessConfirmation"] == .string("actualApplicationTermination"))
+    #expect(AutomationCatalog.methods[.updatesInstall]?.semantics["runningProcessConfirmation"] == .string("standardRuntimeAtActualTermination; layoutAppBeforeRestart"))
     #expect(schemaAccepts(AutomationCatalog.methods[.describe]!.result, description, definitions: definitions))
     #expect(Set(AutomationContracts.updates.keys.map(\.rawValue)) == Set(UpdateAction.allCases.map(\.method)))
     for (id, method) in [("updates.show", AutomationMethod.updatesShow), ("updates.check", .updatesCheck)] {

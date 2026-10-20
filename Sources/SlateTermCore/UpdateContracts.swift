@@ -12,10 +12,10 @@ extension AutomationContracts {
             "UpdateSnapshot": S.object([
                 "revision": S.string(), "updateId": S.string(),
                 "phase": S.annotated(S.string(), ["enum": AutomationCapabilities.updates.object!["phaseValues"]!]),
-                "currentVersion": S.string(), "release": S.reference("UpdateRelease"),
+                "currentVersion": S.string(), "source": S.strings(["signedFeed", "localParent"]), "release": S.reference("UpdateRelease"),
                 "receivedBytes": S.integer(minimum: 0), "expectedBytes": S.integer(minimum: 0),
                 "detail": S.string(), "windowVisible": S.boolean
-            ], required: ["revision", "phase", "currentVersion", "receivedBytes", "expectedBytes", "windowVisible"])
+            ], required: ["revision", "phase", "currentVersion", "source", "receivedBytes", "expectedBytes", "windowVisible"])
         ]
     }()
 
@@ -30,6 +30,7 @@ extension AutomationContracts {
             var required: [String] = []
             var conditions: [JSONValue] = []
             var semantics: [String: JSONValue] = [
+                "layoutAppMode": .string("verifiedLocalParentRuntimeWithoutNetworkOrDownload; installRestartsAndRefreshesAtStartup; localReleaseHasEmptyDownloadURLAndSignatureAndZeroContentLength"),
                 "scope": .string("application"), "eventTopic": .string("host.updates.changed"),
                 "automaticInstallation": .bool(false), "result": .string("currentSnapshotNotAsynchronousCompletion"),
                 "optionalResultFields": .string("omittedWhenAbsent"), "failureMayFollowNativeEffect": .bool(true)
@@ -39,6 +40,10 @@ extension AutomationContracts {
                 conditions.append(.object(["requires": .string("updateIdMatchesCurrentUpdateSession")]))
             }
             switch action {
+            case .openParent:
+                conditions.append(.object(["requires": .string("layoutAppWithVerifiedParentApplication")]))
+                semantics["startsNetworkRequest"] = .bool(false)
+                semantics["opensParentApplication"] = .bool(true)
             case .get:
                 semantics["startsNetworkRequest"] = .bool(false)
             case .show:
@@ -50,10 +55,12 @@ extension AutomationContracts {
                 semantics["activeUpdateSession"] = .string("preservesActivePhaseAndShowsWindow")
                 semantics["startsNetworkRequest"] = .string("whenConfiguredAndNoActiveOfferDownloadOrInstall")
             case .download:
+                conditions.append(.object(["requires": .string("standardSlateRuntime")]))
                 conditions.append(.object(["requires": .string("availableOrDownloadErrorWithOfferAndSignedNotesReady")]))
                 semantics["completion"] = .string("observeReadyOrErrorThroughUpdatesGetOrEvents")
                 semantics["readyMeans"] = .string("signatureAuthenticatedArchiveNotCompletedInstallabilityCheck")
             case .cancel:
+                conditions.append(.object(["requires": .string("standardSlateRuntime")]))
                 conditions.append(.object(["requires": .string("installationHasNotStarted")]))
                 semantics["resultPhase"] = .string("availableWhenOfferRemainsOtherwiseIdle")
                 semantics["cancelsDownloadAndVerification"] = .bool(true)
@@ -61,7 +68,8 @@ extension AutomationContracts {
                 parameters["confirm"] = S.constant(.bool(true)); required.append("confirm")
                 conditions.append(.object(["requires": .string("readyVerifiedOfferOrConsentedInstallationAwaitingQuitRetry")]))
                 semantics["nativeQuitConfirmation"] = .bool(true)
-                semantics["quitConfirmationCancellation"] = .string("unchangedSnapshotSuccess")
+                semantics["runningProcessConfirmation"] = .string("standardRuntimeAtActualTermination; layoutAppBeforeRestart")
+                semantics["quitConfirmationCancellation"] = .string("layoutAppUnchangedSnapshotSuccess; standardRuntimeDefersTerminationWithoutRevokingInstallation")
                 semantics["revalidatesAfterConfirmation"] = .array([.string("caller"), .string("updateSessionAndReadyOffer")])
                 semantics["installation"] = .string("SparkleDownloadsAgainAndValidatesBeforeInstallAndRelaunch")
             }

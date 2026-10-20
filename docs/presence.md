@@ -59,8 +59,8 @@ All pills stay in a single bottom-right group, even for element actions. Only th
 - **Merging.** Calls from the same agent session to the same pane merge into one activity. The hold extends, the note updates when a call supplies one, and the frame pulses once.
 - **Several agents.** Agents targeting the same pane or identical element bounds share one frame. Each agent gets an equal-width share of its gradient (halves for two, thirds for three), with smooth blends between colors in arrival order. Color changes fade over 250 ms, or update immediately with Reduce Motion. Different element bounds retain separate frames. Tags keep arrival order. From three tags up, or in panes narrower than 200 pt, tags shrink to the name (the newest keeps its note unless the pane is narrow). Tags that still do not fit fold into a `+N` chip.
 - **Labels.** A tag always shows the agent name without a pane-ID suffix. Other sessions joining or leaving do not change its label. Records retain separate session identities and click targets.
-- **Holds.** A centered diamond breathes over a 2.8-second cycle while the hold remains active. It has no status text suffix. Reduce Motion keeps the diamond static; command spinners and settled result symbols remain distinct.
-- **Colors.** Known agents keep one color (`claude`, `codex`, `gemini`, `cursor`, `copilot`, `amp`, `opencode`, `aider`). Other names get a stable color from a separate palette.
+- **Activity icon.** Ordinary activity and explicit holds share a centered diamond that breathes over a 2.8-second cycle. It has no status text suffix. Reduce Motion keeps the diamond static; command spinners and settled result symbols remain distinct.
+- **Colors.** Known agents keep one color (`claude`, `codex`, `gemini`, `cursor`, `copilot`, `amp`, `opencode`, `aider`). Other names get a stable color from a separate palette. Settings → AI Agents → Agent accent colors overrides either kind through `agents.colors`; actor families match case-insensitively before `:`. Reset/remove restores the automatic color. See [configuration](configuration.md#agent-activity).
 
 ## Holds
 

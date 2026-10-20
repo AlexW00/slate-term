@@ -2,6 +2,7 @@ import AppKit
 import UniformTypeIdentifiers
 import WebKit
 import SlateTermCore
+import SlateTermIPC
 import SlateTermSettings
 
 @MainActor
@@ -34,6 +35,7 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
     var info: JSONValue { .object(["instanceId": .string(instance.id), "viewId": .string(viewID), "url": web.url.map { .string($0.absoluteString) } ?? .null,
                                   "status": .string(status), "documentId": activeDocumentID.map(JSONValue.string) ?? .null, "blockedNavigations": .integer(blockedNavigations)]) }
     private var requests: [String: Task<Void, Never>] = [:]
+    private var replyCompletions: [String: RPCReplyCompletion] = [:]
     // Cached documents retain their isolated script. The view credential stays
     // stable; a separate generation invalidates owned native work on navigation.
     private let bridgeToken = UUID().uuidString
@@ -116,6 +118,7 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
         currentNavigation = nil
         requests.values.forEach { $0.cancel() }
         requests.removeAll()
+        finishReplyCompletions()
         if let observer { instance.removeObserver(observer); self.observer = nil }
         web.stopLoading()
         (web.configuration.urlSchemeHandler(forURLScheme: "plugin") as? PluginSchemeHandler)?.close()
@@ -192,27 +195,56 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
                   case .integer(let requestID) = object["requestId"], requestID > 0, requestID <= 9_007_199_254_740_991 else { throw RPCFailure(code: -32602, message: "Invalid bridge request") }
             activeDocumentID = documentID
             let id = documentID + ":" + String(requestID)
-            if object["cancel"] == .bool(true) {
-                // Cancellation must still work when all ordinary request slots are full.
-                requests[id]?.cancel()
+            if object["acknowledgeReply"] == .bool(true) {
+                guard object["cancel"] != .bool(true),
+                      let completion = replyCompletions.removeValue(forKey: id) else {
+                    throw RPCFailure(code: -32602, message: "No pending reply for this document and request")
+                }
+                completion.finish()
                 replyHandler(NSNull(), nil)
                 return
             }
-            guard requests.count < 32, requests[id] == nil,
+            if object["cancel"] == .bool(true) {
+                // Cancellation must still work when all ordinary request slots are full.
+                requests[id]?.cancel()
+                replyCompletions.removeValue(forKey: id)?.finish()
+                replyHandler(NSNull(), nil)
+                return
+            }
+            guard requests.count + replyCompletions.count < 32, requests[id] == nil, replyCompletions[id] == nil,
                   let method = object["method"]?.string, let params = object["params"]?.object else { throw RPCFailure(code: -32602, message: "Bridge request limit or duplicate/invalid request") }
             let metadata = try object["metadata"].map { try JSONDecoder().decode(RPCMetadata.self, from: JSONEncoder().encode($0)) }
             let expectedGeneration = generation
             requests[id] = Task { [weak self] in
                 guard let self else { replyHandler(nil, "Plugin view closed"); return }
-                defer { self.requests.removeValue(forKey: id) }
+                let completion = RPCReplyCompletion(onTimeout: { [weak self] in
+                    self?.replyCompletions.removeValue(forKey: id)
+                })
+                defer {
+                    self.requests.removeValue(forKey: id)
+                    if self.replyCompletions[id] !== completion { completion.finish() }
+                }
+                @MainActor func reply(_ value: [String: Any]) {
+                    var envelope = value
+                    if completion.hasPendingActions, !self.closed, self.instance.isReady,
+                       self.generation == expectedGeneration, self.activeDocumentID == documentID, !Task.isCancelled {
+                        // Transfer this request's slot until its page receives the reply or the deadline expires.
+                        self.requests.removeValue(forKey: id)
+                        self.replyCompletions[id] = completion
+                        envelope["requiresAcknowledgement"] = true
+                    }
+                    replyHandler(envelope, nil)
+                }
                 do {
                     guard !self.closed, self.instance.isReady, self.generation == expectedGeneration, self.activeDocumentID == documentID, !Task.isCancelled, let call = self.onCall else { throw CancellationError() }
-                    let result = try await call(method, params, metadata)
+                    let result = try await RPCReplyCompletion.$current.withValue(completion) {
+                        try await call(method, params, metadata)
+                    }
                     guard !self.closed, self.instance.isReady, self.generation == expectedGeneration, self.activeDocumentID == documentID, !Task.isCancelled else { throw CancellationError() }
                     let bytes = try JSONEncoder().encode(result)
                     guard bytes.count <= 1_048_576 else { throw RPCFailure(code: -32025, message: "Bridge response exceeds 1 MiB") }
-                    replyHandler(["ok": true, "value": try JSONSerialization.jsonObject(with: bytes, options: [.fragmentsAllowed])], nil)
-                } catch { replyHandler(Self.bridgeFailure(error), nil) }
+                    reply(["ok": true, "value": try JSONSerialization.jsonObject(with: bytes, options: [.fragmentsAllowed])])
+                } catch { reply(Self.bridgeFailure(error)) }
             }
         } catch { replyHandler(Self.bridgeFailure(error), nil) }
     }
@@ -231,6 +263,12 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
         return try JSONDecoder().decode(JSONValue.self, from: data)
     }
 
+    private func finishReplyCompletions() {
+        let pending = Array(replyCompletions.values)
+        replyCompletions.removeAll()
+        for completion in pending { completion.finish() }
+    }
+
     private func invalidateDocument() {
         automation.invalidate()
         acceptsDocument = false
@@ -241,6 +279,7 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
         }
         activeDocumentID = nil
         requests.values.forEach { $0.cancel() }
+        finishReplyCompletions()
     }
 
     private func installBridgeScripts() {
@@ -310,12 +349,13 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
             const send=window.postMessage.bind(window);
             window.addEventListener('message',async event=>{
               const data=event.data;
-              if(event.source!==window||!data||data.documentId!==documentId||!['slate-request','slate-cancel'].includes(data.channel)||!Number.isSafeInteger(data.id)||data.id<=0)return;
-              const cancel=data.channel==='slate-cancel',requestDocumentId=documentId;
+              if(event.source!==window||!data||data.documentId!==documentId||!['slate-request','slate-cancel','slate-reply-ack'].includes(data.channel)||!Number.isSafeInteger(data.id)||data.id<=0)return;
+              const cancel=data.channel==='slate-cancel',acknowledge=data.channel==='slate-reply-ack',requestDocumentId=documentId;
               try {
+                if(acknowledge){await window.webkit.messageHandlers.slate.postMessage({token,documentId:requestDocumentId,requestId:data.id,acknowledgeReply:true});return;}
                 const value=await window.webkit.messageHandlers.slate.postMessage({token,documentId:requestDocumentId,requestId:data.id,cancel,method:data.method??'',params:data.params??{},...(data.metadata===undefined?{}:{metadata:data.metadata})});
-                if(!cancel)send({channel:'slate-response',documentId:requestDocumentId,id:data.id,...(value.ok?{value:value.value}:{error:value.error})},'*');
-              } catch(error) {if(!cancel)send({channel:'slate-response',documentId:requestDocumentId,id:data.id,error:String(error)},'*');}
+                if(!cancel)send({channel:'slate-response',documentId:requestDocumentId,id:data.id,...(value.ok?{value:value.value}:{error:value.error}),...(value.requiresAcknowledgement===true?{requiresAcknowledgement:true}:{})},'*');
+              } catch(error) {if(!cancel&&!acknowledge)send({channel:'slate-response',documentId:requestDocumentId,id:data.id,error:String(error)},'*');}
             });
             })();
             """#
@@ -340,6 +380,8 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
           const request=pending.get(data.id);if(!request||request.documentId!==data.documentId)return;request.cleanup();
           if(data.error){const error=new Error(typeof data.error==='object'?data.error.message:String(data.error));if(Number.isInteger(data.error.code))error.code=data.error.code;if(data.error.data!==undefined)error.data=data.error.data;request.reject(error);}
           else request.resolve(data.value);
+          // Promise callbacks run as microtasks before this acknowledgement's next JavaScript task.
+          if(data.requiresAcknowledgement===true)setTimeout(()=>send({channel:'slate-reply-ack',documentId:data.documentId,id:data.id},'*'),0);
         });
         const call=(method,params={}, {signal,cause}={})=>new Promise((resolve,reject)=>{
           if(signal?.aborted){reject(new DOMException('Workspace request aborted','AbortError'));return;}
@@ -386,14 +428,6 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
           }),
           command:(id,params={},options={})=>call('command.run',{...params,id},options),
           settings:()=>call('settings.get'),
-          updates:Object.freeze({
-            get:(options={})=>call('updates.get',{},options),
-            show:(options={})=>call('updates.show',{},options),
-            check:(options={})=>call('updates.check',{},options),
-            download:(updateId,options={})=>call('updates.download',{updateId},options),
-            cancel:(updateId,options={})=>call('updates.cancel',{updateId},options),
-            install:(updateId,confirm,options={})=>call('updates.install',{updateId,confirm},options)
-          }),
           welcome:Object.freeze({
             get:(options={})=>call('welcome.get',{},options),
             read:(options={})=>call('command.run',{id:'welcome.read'},options),
@@ -406,6 +440,15 @@ final class PluginPane: NSViewController, WKNavigationDelegate, WKUIDelegate, WK
           }),
           notifications:methodsFor('notifications.'),
           presence:methodsFor('presence.'),
+          updates:Object.freeze({
+            get:(options={})=>call('updates.get',{},options),
+            show:(options={})=>call('updates.show',{},options),
+            check:(options={})=>call('updates.check',{},options),
+            openParent:(options={})=>call('updates.openParent',{},options),
+            download:(updateId,options={})=>call('updates.download',{updateId},options),
+            cancel:(updateId,options={})=>call('updates.cancel',{updateId},options),
+            install:(updateId,confirm,options={})=>call('updates.install',{updateId,confirm},options)
+          }),
           pluginSettings:Object.freeze({get:()=>call('plugins.settings.get'),patch:(operations,expectedWriteRevision,options={})=>call('plugins.settings.patch',{operations,expectedWriteRevision},options)}),
           windows:Object.freeze({
             ...methodsFor('window.'),

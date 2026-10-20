@@ -17,7 +17,7 @@ with AppFixture('semantic-events') as app:
 
     start = head()
     before = app.rpc('workspace.snapshot')
-    result = app.cli('panes', 'split', '--pane', 'p1', '--right')
+    result = app.cli('panes', 'split', '--pane', 'p1', '--right', '--focus-policy', 'new')
     assert result['outcome'] == 'committed' and result['operationId']
     emitted = [e for e in facts(start) if e['payload'].get('operationId') == result['operationId']]
     assert [e['topic'] for e in emitted] == ['host.pane.created', 'host.layout.changed', 'host.focus.changed', 'host.workspace.changed'], emitted

@@ -12,7 +12,43 @@ Detailed change record for agents and maintainers. Public release notes live in 
 
 ### Internal
 
+## 0.6.0 — Pending publication
+
+### Added
+
+- Saved layouts can create independent macOS apps with their own sessions, browser profiles, and plugin data. Settings and installed plugins follow Slate, with local setting overrides.
+- Layout app management is available in Settings and through `layout-apps list` and guarded `layout-apps refresh`.
+
+- Configure agent accent colors in AI Agents settings and through `agents.colors`, including custom actor families, reset/remove controls, and live updates to existing indicators.
+- Save configurable previous terminal output across relaunch, with a read-only history viewer and bounded attached-process shutdown.
+
+### Changed
+
+- Native implementation, helpers, and resources now live in a private signed runtime. Generated apps keep a stable shell while stopped-app runtime updates preserve its signing identity.
+
+- Remove pane-dimming slider ticks and its Apply guidance.
+- Use a GitHub navigation button while retaining the website’s Star on GitHub text links; swap the panel-type and agent-activity bento cards.
+
+
+### Fixed
+
+- Generated-app creation and updates run expensive work away from the UI thread. Runtime refresh and restart preserve shell identity, wait for verified process cleanup, and retain private workspace data.
+- Plugin synchronization coalesces changes, rejects stale preparation, retries transient writes, and retires only packages with safe cleanup evidence.
+- Resumed update offers require a fresh check and explicit installation consent. Compact layout editing and child Settings explain additional controls and local overrides.
+
+- Ordinary agent activity on panels now uses the same breathing diamond as explicit holds, replacing the static dot. Reduce Motion keeps the diamond static.
+
+### Internal
+
+- Qualified stable layout apps with independent source and visual review, focused native VM gates, and signed/notarized runtime-upgrade fixtures. Full final-source inventory certification, native Spotlight launch, and a real remote Sparkle install were not established.
+
+- Made changelog rollover an explicit release completion and next-release preparation check, including reconciliation back to a separate development checkout so shipped entries are not reused.
+
 - Added a reusable release finalizer for workflow monitoring, downloaded artifact verification, authorized publication, resumable anonymous delivery checks and narrow ledger reconciliation. Batched local preflight checks and shortened the release skill; native evidence and explicit waivers remain distinct.
+
+- Integrated candidate passed 536 Swift tests, 119 release-tooling tests (four official-tool tests exercised separately), 72 VM-runner tests, workflow validation, native syntax checks, and the full-history secret scan. The actual nested-signing test now covers Sparkle inside the private runtime.
+- Integrated development through `4d81a03`, including stable layout apps, terminal-output recovery, and agent colors. Preserved the public signing, source, update-feed, and release workflows.
+- Maintainer requested immediate release after declining additional qualification. Existing layout-app native and signed-upgrade evidence predates this integration; final-candidate native regression, DMG installation, Spotlight, and production Sparkle upgrade checks are waived, not passes.
 
 ## 0.5.0 — 2026-10-19
 

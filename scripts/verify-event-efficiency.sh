@@ -11,7 +11,7 @@ framework="$PWD/.build/bootstrap/ghostty/macos/GhosttyKit.xcframework/macos-arm6
 test -f "$framework/libghostty-internal.a"
 slate_native_swiftc -swift-version 5 -default-isolation MainActor -parse-as-library -g \
   -I "$bin" -L "$bin" -lSlateTermSettings -I "$framework/Headers" \
-  Native/Terminal/*.swift Native/ApplicationSettings.swift \
+  Native/Terminal/*.swift Native/TerminalProcessShutdown.swift Native/ApplicationSettings.swift Native/RuntimeBundle.swift Native/ApplicationLaunchContext.swift \
   Native/PluginInstance.swift Native/PluginProcess.swift Native/PluginListener.swift Native/PluginControlConnection.swift \
   Tests/EventHub/EventEfficiency.swift "$framework/libghostty-internal.a" \
   -framework AppKit -framework WebKit -framework Metal -framework MetalKit -framework QuartzCore \

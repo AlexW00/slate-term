@@ -62,7 +62,7 @@ with AppFixture('terminal-history') as app:
     app.rpc('command.run', id='terminal.find.next', pane='p1')
     eventually('selected match', lambda: search()['selected'] is not None)
     assert search()['total'] == total, 'Reopening Find discarded settled results'
-    other = app.rpc('command.run', id='split.right', pane='p1')['paneId']
+    other = app.rpc('command.run', id='split.right', pane='p1', focus='new')['paneId']
     app.rpc('debug.terminalFindFocus', pane='p1')
     eventually('editing Find selects its pane', lambda: app.rpc('context.get')['focusedPaneId'] == 'p1')
     revision = app.rpc('pane.inspect', pane='p1')['layoutRevision']

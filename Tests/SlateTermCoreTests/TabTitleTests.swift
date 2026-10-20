@@ -3,6 +3,32 @@ import Testing
 @testable import SlateTermCore
 
 @Suite struct TabTitleTests {
+    @Test func appDefaultTitlesApplyToNewRestoredAndExplicitlyClearedTabs() throws {
+        var workspace = Workspace()
+        try workspace.setManualTabTitle("Explicit", for: TabID(1))
+        try workspace.setDefaultTabTitle("Writing")
+        let second = try workspace.newTab()
+        #expect(workspace.tabs[0].title == "Explicit")
+        #expect(workspace.tabs[1].title == "Writing")
+        #expect(workspace.tabs[1].manualTitle == nil)
+        let clear = try CommandRegistry.execute("tab.title.clear", params: ["tab": .string("t1")], workspace: &workspace)
+        #expect(clear.object?["title"] == .string("Writing"))
+        #expect(workspace.tabs[0].title == "Writing")
+        let encoded = try workspace.encoded()
+        #expect(!String(decoding: encoded, as: UTF8.self).contains("defaultTitle"))
+        var restored = try Workspace.restore(encoded)
+        #expect(restored.tabs.allSatisfy { $0.title == "New Tab" })
+        try restored.setDefaultTabTitle("Writing")
+        #expect(restored == workspace)
+        try restored.setManualTabTitle("Saved explicit", for: second)
+        var later = try Workspace.restore(restored.encoded())
+        try later.setDefaultTabTitle("Writing")
+        #expect(later.tabs[1].title == "Saved explicit")
+        let before = later
+        #expect(throws: (any Error).self) { try later.setDefaultTabTitle("\n") }
+        #expect(later == before)
+    }
+
     @Test func titlesAreTabMetadataAndCommandsShareRouting() throws {
         var workspace = Workspace()
         let second = try workspace.newTab(in: GroupID(1))

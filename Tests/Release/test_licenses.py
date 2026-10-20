@@ -40,6 +40,7 @@ class LicenseTests(unittest.TestCase):
         (app / "Contents/Info.plist").write_text("fixture")
         destination = licenses.bundle_destination(app)
         licenses.install_bundle(destination, files)
+        self.assertIn("SlateRuntime.framework/Versions/A/Resources", destination.as_posix())
         self.assertIn(b"GPL-3.0-or-later", (destination / "COPYING.md").read_bytes())
         licenses.verify_bundle(destination, files)
         (destination / "ghostty/LICENSE").write_text("modified")
@@ -88,7 +89,7 @@ class LicenseTests(unittest.TestCase):
         app = self.root / "Test.app"
         (app / "Contents").mkdir(parents=True)
         (app / "Contents/Info.plist").write_text("fixture")
-        (app / "Contents/Resources").symlink_to(self.root)
+        (app / "Contents/Frameworks").symlink_to(self.root)
         with self.assertRaisesRegex(ValueError, "stay inside"):
             licenses.bundle_destination(app)
 

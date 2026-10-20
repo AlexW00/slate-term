@@ -24,8 +24,9 @@ extension AutomationContracts {
         for method in [AutomationMethod.skillsInstall, .skillsUninstall] {
             methods[method] = AutomationContract(parameters: ["agents": S.array(S.strings(skillAgentIDs), minimum: 1)],
                 required: ["agents"], result: S.reference("AgentSkills"), guards: unanchoredGuards,
-                conditions: method == .skillsInstall ? [.object(["requires": .string("bundledSkillAvailable")])] : [],
-                errors: method == .skillsInstall ? [APIError.unavailable] : [],
+                conditions: [.object(["requires": .string("standardSlateRuntime")])]
+                    + (method == .skillsInstall ? [.object(["requires": .string("bundledSkillAvailable")])] : []),
+                errors: [APIError.layoutAppManagementUnavailable] + (method == .skillsInstall ? [APIError.unavailable] : []),
                 semantics: ["foreignDestinations": .string("conflictNeverReplaceOrRemove"), "atomicAcrossAgents": .bool(false),
                     "failureMayHaveChangedEarlierTargets": .bool(true), "recovery": .string("readSkillsListBeforeAnyRetry"),
                     "installedLinkTarget": .string("appManagedSkillCopy"), "uninstallRemovesManagedCopy": .bool(false)])

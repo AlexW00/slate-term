@@ -13,6 +13,16 @@ public enum ConfigurationPatch {
                   ["appearance", "terminal", "browser", "layout", "keybind", "notifications", "agents"].contains(String(section)) else {
                 throw ConfigurationError.invalid("Application settings require a supported section; use plugins.settings.patch for plugin namespaces")
             }
+            if key == "agents.colors" {
+                guard let fields = value.object else { throw ConfigurationError.invalid("agents.colors must be an object") }
+                var colors: [String: String] = [:]
+                for (name, value) in fields {
+                    guard let color = value.string else { throw ConfigurationError.invalid("Agent colors must use #RRGGBB") }
+                    colors[name] = color
+                }
+                result[key] = AgentAccentColors.literal(try AgentAccentColors.validate(colors))
+                continue
+            }
             switch value {
             case .string(let text): result[key] = AppConfiguration.quotedString(text)
             case .bool(let flag): result[key] = flag ? "true" : "false"

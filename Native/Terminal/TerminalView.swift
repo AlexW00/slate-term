@@ -1,6 +1,7 @@
 import AppKit
 import Carbon
 import GhosttyKit
+import SlateTermSettings
 
 /// The NSView and C surface travel together between containers.
 @MainActor
@@ -50,6 +51,13 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
     private var pressedModifiers = Set<UInt16>()
     private var leadSurrogate: UInt16?
     private var isClosed = false
+    private(set) var isShuttingDown = false
+    private(set) var previousOutput: SavedTerminalOutput?
+    private var completedOutput: SavedTerminalOutput?
+    private var capturedOutput: SavedTerminalOutput?
+    private let sessionStartedAt = Date()
+    private var shutdownCompletions: [@MainActor () -> Void] = []
+    var onPreviousOutputChanged: (() -> Void)?
     var hasSelection: Bool { surface.map { ghostty_surface_has_selection($0) } ?? false }
     private let runtime: GhosttyRuntime
     let startingDirectory: String?
@@ -139,6 +147,95 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
         }
     }
 
+    func restoreOutput(_ output: SavedTerminalOutput?, lineLimit: Int) {
+        previousOutput = output.map {
+            SavedTerminalOutput(text: SavedTerminalOutput.boundedText($0.text, lineLimit: lineLimit),
+                                capturedAt: $0.capturedAt, ended: $0.ended)
+        }.flatMap { $0.text.isEmpty ? nil : $0 }
+        onPreviousOutputChanged?()
+    }
+
+    func updateOutputLimit(_ lineLimit: Int) {
+        capturedOutput = nil
+        restoreOutput(previousOutput, lineLimit: lineLimit)
+        if var output = completedOutput {
+            output.text = SavedTerminalOutput.boundedText(output.text, lineLimit: lineLimit)
+            completedOutput = output.text.isEmpty ? nil : output
+        }
+    }
+
+    func clearPreviousOutput() {
+        capturedOutput = nil
+        previousOutput = nil
+        onPreviousOutputChanged?()
+    }
+
+    func savedOutput(lineLimit: Int) -> SavedTerminalOutput? {
+        guard lineLimit > 0 else { return nil }
+        if let completedOutput { return completedOutput }
+        return outputRecord(current: retainedText(maximumBytes: SavedTerminalOutput.maximumBytes).text,
+                            lineLimit: lineLimit, ended: false)
+    }
+
+    private func outputRecord(current: String, lineLimit: Int, ended: Bool) -> SavedTerminalOutput? {
+        let current = current.trimmingCharacters(in: .newlines)
+        let text: String
+        if let previousOutput, !previousOutput.text.isEmpty, !current.isEmpty {
+            let boundary = ISO8601DateFormatter().string(from: sessionStartedAt)
+            text = previousOutput.text + "\n\n── New terminal session · " + boundary + " ──\n" + current
+        } else { text = current.isEmpty ? (previousOutput?.text ?? "") : current }
+        let bounded = SavedTerminalOutput.boundedText(text, lineLimit: lineLimit)
+        guard !bounded.isEmpty else { capturedOutput = nil; return nil }
+        if let capturedOutput, capturedOutput.text == bounded, capturedOutput.ended == ended { return capturedOutput }
+        let output = SavedTerminalOutput(text: bounded, capturedAt: Date(), ended: ended)
+        capturedOutput = output
+        return output
+    }
+
+    /// Keep the reader and terminal state alive until the process stop attempt finishes.
+    func beginShutdown(lineLimit: Int, completion: @escaping @MainActor () -> Void) {
+        guard !isClosed else {
+            RunLoop.main.perform(inModes: [.common, .modalPanel]) { MainActor.assumeIsolated { completion() } }
+            CFRunLoopWakeUp(CFRunLoopGetMain())
+            return
+        }
+        shutdownCompletions.append(completion)
+        guard !isShuttingDown else { return }
+        isShuttingDown = true
+        onCloseRequest = nil
+        onDesktopNotification = nil
+        if let pending = pendingConfirmation { finishConfirmation(pending.id, approved: false) }
+        let before = lineLimit > 0 ? retainedText(maximumBytes: SavedTerminalOutput.maximumBytes).text : ""
+        var ttyPath: String?
+        var foreground: pid_t?
+        if let surface {
+            let tty = ghostty_surface_tty_name(surface)
+            if let pointer = tty.ptr { ttyPath = String(bytes: UnsafeRawBufferPointer(start: pointer, count: Int(tty.len)), encoding: .utf8) }
+            ghostty_string_free(tty)
+            foreground = pid_t(exactly: ghostty_surface_foreground_pid(surface))
+        }
+        TerminalProcessShutdown.stop(ttyPath: ttyPath, foregroundPID: foreground) { [self] outcome in
+            let after = lineLimit > 0 ? retainedText(maximumBytes: SavedTerminalOutput.maximumBytes).text : ""
+            // Normal append-only output needs no duplicate snapshot. A TUI may replace
+            // its screen on exit; retain that earlier screen as historical context too.
+            let earlier = before.trimmingCharacters(in: .newlines)
+            let final = after.trimmingCharacters(in: .newlines)
+            let combined: String
+            if earlier.isEmpty || final.hasPrefix(earlier) { combined = final }
+            else if final.isEmpty || earlier == final { combined = earlier }
+            else { combined = earlier + "\n\n── Output received while closing ──\n" + final }
+            completedOutput = lineLimit > 0 ? outputRecord(current: combined, lineLimit: lineLimit,
+                ended: outcome.status == .stopped) : nil
+            if outcome.status != .stopped {
+                NSLog("Terminal shutdown finished with %@ (%ld remaining attached processes)",
+                      String(describing: outcome.status), outcome.remainingProcessCount)
+            }
+            let callbacks = shutdownCompletions
+            shutdownCompletions.removeAll()
+            callbacks.forEach { $0() }
+        }
+    }
+
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         synchronizeGeometry()
@@ -218,7 +315,7 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
     }
     override func mouseUp(with event: NSEvent) {
         _ = mouseButton(event, state: GHOSTTY_MOUSE_RELEASE, button: GHOSTTY_MOUSE_LEFT)
-        if let surface { ghostty_surface_mouse_pressure(surface, 0, 0) }
+        if !isShuttingDown, let surface { ghostty_surface_mouse_pressure(surface, 0, 0) }
     }
     override func rightMouseDown(with event: NSEvent) {
         if !mouseButton(event, state: GHOSTTY_MOUSE_PRESS, button: GHOSTTY_MOUSE_RIGHT) { super.rightMouseDown(with: event) }
@@ -234,24 +331,24 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
         return ghostty_input_mouse_button_e(UInt32(event.buttonNumber + 1))
     }
     private func mouseButton(_ event: NSEvent, state: ghostty_input_mouse_state_e, button: ghostty_input_mouse_button_e) -> Bool {
-        guard let surface else { return false }
+        guard !isShuttingDown, let surface else { return false }
         mouseMoved(with: event)
         return ghostty_surface_mouse_button(surface, state, button, modifiers(event.modifierFlags))
     }
     override func mouseMoved(with event: NSEvent) {
-        guard let surface else { return }
+        guard !isShuttingDown, let surface else { return }
         let point = convert(event.locationInWindow, from: nil)
         ghostty_surface_mouse_pos(surface, point.x, bounds.height - point.y, modifiers(event.modifierFlags))
     }
     override func mouseEntered(with event: NSEvent) { mouseMoved(with: event) }
     override func mouseExited(with event: NSEvent) {
-        if let surface, NSEvent.pressedMouseButtons == 0 { ghostty_surface_mouse_pos(surface, -1, -1, modifiers(event.modifierFlags)) }
+        if !isShuttingDown, let surface, NSEvent.pressedMouseButtons == 0 { ghostty_surface_mouse_pos(surface, -1, -1, modifiers(event.modifierFlags)) }
     }
     override func mouseDragged(with event: NSEvent) { mouseMoved(with: event) }
     override func rightMouseDragged(with event: NSEvent) { mouseMoved(with: event) }
     override func otherMouseDragged(with event: NSEvent) { mouseMoved(with: event) }
     override func scrollWheel(with event: NSEvent) {
-        guard let surface else { return }
+        guard !isShuttingDown, let surface else { return }
         mouseMoved(with: event)
         let momentum: ghostty_input_mouse_momentum_e
         switch event.momentumPhase {
@@ -268,7 +365,7 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
         ghostty_surface_mouse_scroll(surface, event.scrollingDeltaX * multiplier, event.scrollingDeltaY * multiplier, mods)
     }
     override func pressureChange(with event: NSEvent) {
-        if let surface { ghostty_surface_mouse_pressure(surface, UInt32(max(0, event.stage)), Double(event.pressure)) }
+        if !isShuttingDown, let surface { ghostty_surface_mouse_pressure(surface, UInt32(max(0, event.stage)), Double(event.pressure)) }
     }
 
     private func modifiers(_ flags: NSEvent.ModifierFlags) -> ghostty_input_mods_e {
@@ -299,7 +396,7 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
 
     @discardableResult
     private func forwardKey(_ key: ghostty_input_key_s, text: String? = nil) -> Bool {
-        guard let surface else { return false }
+        guard !isShuttingDown, let surface else { return false }
         var key = key
         if let text, let scalar = text.unicodeScalars.first,
            scalar.value >= 0x20, scalar.value != 0x7F, !(0xF700...0xF8FF).contains(scalar.value) {
@@ -309,6 +406,7 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
     }
 
     override func keyDown(with event: NSEvent) {
+        guard !isShuttingDown else { return }
         guard let surface else { return }
         let action = event.isARepeat ? GHOSTTY_ACTION_REPEAT : GHOSTTY_ACTION_PRESS
         let translated = ghostty_surface_key_translation_mods(surface, modifiers(event.modifierFlags))
@@ -422,7 +520,7 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
         return value as? String
     }
     func insertText(_ value: Any, replacementRange: NSRange) {
-        guard surface != nil else { return }
+        guard !isShuttingDown, surface != nil else { return }
         let text: String
         // The emoji picker can deliver a supplementary character as two NSStrings.
         if let string = value as? NSString, string.length == 1 {
@@ -480,7 +578,7 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
     @objc func paste(_ sender: Any?) { _ = bindingAction("paste_from_clipboard") }
     @objc override func selectAll(_ sender: Any?) { _ = bindingAction("select_all") }
     func bindingAction(_ action: String) -> Bool {
-        guard let surface else { return false }
+        guard !isShuttingDown, let surface else { return false }
         return action.withCString { ghostty_surface_binding_action(surface, $0, UInt(action.utf8.count)) }
     }
     func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
@@ -575,7 +673,7 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
     }
 
     func requestClipboardConfirmation(_ request: ClipboardConfirmation, completion: @escaping (Bool) -> Void) {
-        guard surface != nil, pendingConfirmation == nil else { completion(false); return }
+        guard !isShuttingDown, surface != nil, pendingConfirmation == nil else { completion(false); return }
         let id = UUID()
         pendingConfirmation = (id, nil, completion)
         DispatchQueue.main.async { [weak self] in
@@ -605,7 +703,7 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
     }
 
     func readClipboard(location: ghostty_clipboard_e, state: UnsafeMutableRawPointer?, mimes: UnsafePointer<UnsafePointer<CChar>?>?, count: Int, list: Bool) -> ghostty_clipboard_read_result_e {
-        guard surface != nil, location == GHOSTTY_CLIPBOARD_STANDARD else { return GHOSTTY_CLIPBOARD_READ_UNSUPPORTED }
+        guard !isShuttingDown, surface != nil, location == GHOSTTY_CLIPBOARD_STANDARD else { return GHOSTTY_CLIPBOARD_READ_UNSUPPORTED }
         var contents: [GhosttyRuntime.ClipboardContent] = []
         var seen = Set<String>()
         if let mimes {
@@ -655,7 +753,8 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
         }
     }
     func writeClipboard(location: ghostty_clipboard_e, contents: [GhosttyRuntime.ClipboardContent], confirm: Bool) {
-        guard surface != nil, location == GHOSTTY_CLIPBOARD_STANDARD, !contents.isEmpty else { return }
+        guard !isShuttingDown else { return }
+        guard !isShuttingDown, surface != nil, location == GHOSTTY_CLIPBOARD_STANDARD, !contents.isEmpty else { return }
         let write: (Bool) -> Void = { [weak self] approved in
             guard let self, self.surface != nil, approved else { return }
             let supported = contents.compactMap { entry -> (NSPasteboard.PasteboardType, Data)? in
@@ -671,7 +770,7 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
 
     /// Send a complete logical key tap; encoding and negotiated protocols belong to Ghostty.
     func sendKey(_ key: TerminalKey) throws {
-        guard !isClosed, surface != nil else { throw TerminalKeyError.closed }
+        guard !isClosed, !isShuttingDown, surface != nil else { throw TerminalKeyError.closed }
         var event = ghostty_input_key_s()
         event.action = GHOSTTY_ACTION_PRESS
         event.keycode = key.keyCode
@@ -695,6 +794,7 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
     }
 
     func send(_ text: String) throws {
+        guard !isShuttingDown else { throw TerminalError.initialization("Terminal is shutting down") }
         guard let surface else { throw TerminalError.inputRejected }
         guard !text.isEmpty else { return }
         // surface_text is a paste API: zsh's bracketed-paste mode deliberately

@@ -167,7 +167,7 @@ final class PresenceController {
         if shown {
             for item in tracker.display(now: current) {
                 guard let pane = try? PaneID(parsing: item.record.pane) else { continue }
-                byPane[pane, default: []].append(Self.overlayItem(item, originPane: originPane(item.record)))
+                byPane[pane, default: []].append(Self.overlayItem(item, originPane: originPane(item.record), colors: host.settings.current.agentColorRGB))
             }
         }
         for (pane, container) in host.containers {
@@ -185,7 +185,7 @@ final class PresenceController {
         schedule()
     }
 
-    private static func overlayItem(_ item: PresenceDisplay, originPane: PaneID?) -> PresenceOverlayItem {
+    private static func overlayItem(_ item: PresenceDisplay, originPane: PaneID?, colors: [String: UInt32]) -> PresenceOverlayItem {
         let record = item.record
         let status: PresenceOverlayItem.Status
         if record.isLeased { status = .held }
@@ -199,7 +199,7 @@ final class PresenceController {
         let element = record.element.map { NSRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height) }
         // Activity IDs are "a<sequence>", so they also give a stable arrival order.
         let order = Int(record.id.dropFirst()) ?? 0
-        return PresenceOverlayItem(id: record.id, label: item.label, note: record.note, rgb: PresenceColor.rgb(for: record.actorKey),
+        return PresenceOverlayItem(id: record.id, label: item.label, note: record.note, rgb: PresenceColor.rgb(for: record.actorKey, overrides: colors),
                                    status: status, element: element, pulse: record.pulse, order: order, originPane: originPane?.description)
     }
 

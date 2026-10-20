@@ -14,8 +14,8 @@ def digest(path):
 
 def sources():
     paths = []
-    for directory in ['Sources', 'Native', 'Tests', 'scripts', 'slate-term', 'skills']:
-        paths.extend(p for p in (root / directory).rglob('*') if p.is_file() and p.suffix in ['.swift', '.sh', '.py', '.js', '.cjs', '.plist', '.json', '.mp4', '.md'])
+    for directory in ['Sources', 'Native', 'Bootstrap', 'Tests', 'scripts', 'slate-term', 'skills']:
+        paths.extend(p for p in (root / directory).rglob('*') if p.is_file() and p.suffix in ['.swift', '.m', '.h', '.sh', '.py', '.js', '.cjs', '.plist', '.json', '.mp4', '.md'])
     paths += [root / 'Package.swift', root / 'Package.resolved', root / 'AppInfo.plist', root / 'slate-term.xcodeproj/project.pbxproj',
               root / 'slate-term.xcodeproj/xcshareddata/xcschemes/SlateTermApp.xcscheme']
     return {str(p.relative_to(root)): digest(p) for p in sorted(paths)}
@@ -38,7 +38,9 @@ elif mode == 'finish':
     if checks != list(ORDER):
         raise SystemExit('FAIL incomplete or reordered inventory; run bash scripts/verify-all.sh')
     app = root / '.derived/Build/Products/Debug/Slate Terminal.app/Contents'
-    products = [app / 'MacOS/Slate Terminal', app / 'Helpers/slate-term', app / 'Helpers/slate-layout-launcher']
+    runtime = app / 'Frameworks/SlateRuntime.framework'
+    products = [app / 'MacOS/Slate Terminal', runtime / 'SlateRuntime',
+                runtime / 'Helpers/slate-term', runtime / 'Helpers/slate-layout-launcher']
     for gate in GATES:
         if gate.native:
             products.append(root / gate.product)

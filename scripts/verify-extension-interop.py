@@ -13,7 +13,7 @@ from plugin_package_fixture import package_fixture
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP = ROOT / '.derived/Build/Products/Debug/Slate Terminal.app/Contents/MacOS/Slate Terminal'
-CLI = APP.parent.parent / 'Helpers/slate-term'
+CLI = APP.parent.parent / 'Frameworks/SlateRuntime.framework/Helpers/slate-term'
 TMUX = shutil.which('tmux')
 assert TMUX, 'This compatibility fixture requires tmux; the application does not.'
 
@@ -137,7 +137,7 @@ with tempfile.TemporaryDirectory(prefix='slate-extension-', dir='/tmp') as tempo
             cli('panes','type','--pane','p2','--type','interop','--force')
             eventually('extension page', lambda: evaluate('window.ready===true'))
             backend_env = evaluate("fetch('/environment',{method:'POST'}).then(response=>response.json())")
-            assert backend_env.get('SLATE_TERM_CLI') == str(CLI), backend_env
+            assert pathlib.Path(backend_env.get('SLATE_TERM_CLI', '')).resolve() == CLI.resolve(), backend_env
             assert backend_env.get('SLATE_TERM_SOCKET') == environment['SLATE_TERM_SOCKET'], backend_env
             assert backend_env.get('SLATE_TERM_PLUGIN_SCOPE') == 'pane'
             assert backend_env.get('SLATE_TERM_TAB_ID') == 't1' and backend_env.get('SLATE_TERM_PANE_ID') == 'p2'

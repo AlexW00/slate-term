@@ -67,13 +67,18 @@ public struct Pane: Equatable, Codable, Sendable, Identifiable {
 public struct Tab: Equatable, Codable, Sendable, Identifiable {
     public let id: TabID
     public internal(set) var manualTitle: String? = nil
-    public var title: String { manualTitle ?? TabTitle.defaultTitle }
+    public internal(set) var defaultTitle: String = TabTitle.defaultTitle
+    public var title: String { manualTitle ?? defaultTitle }
     public internal(set) var layout: Layout
     public internal(set) var focusedPane: PaneID
     public internal(set) var zoomedPane: PaneID? = nil
     /// Most recently focused first. Non-terminal focus does not change this list.
     public internal(set) var terminalHistory: [PaneID]
     public var activeTerminal: PaneID? { terminalHistory.first }
+    // The launching app supplies the fallback. Saved workspaces retain only explicit user names.
+    private enum CodingKeys: String, CodingKey {
+        case id, manualTitle, layout, focusedPane, zoomedPane, terminalHistory
+    }
 }
 
 public struct TabGroup: Equatable, Codable, Sendable, Identifiable {
@@ -88,6 +93,7 @@ public struct Workspace: Equatable, Sendable {
     public private(set) var tabs: [Tab]
     public private(set) var groups: [TabGroup]
     public private(set) var keyTabID: TabID?
+    public private(set) var defaultTabTitle = TabTitle.defaultTitle
     private var nextPane: Int
     private var nextTab: Int
     private var nextGroup: Int
@@ -100,6 +106,15 @@ public struct Workspace: Equatable, Sendable {
         nextPane = 2
         nextTab = 2
         nextGroup = 2
+    }
+
+    /// Apply app identity after restoration without converting automatic titles into user overrides.
+    public mutating func setDefaultTabTitle(_ title: String) throws {
+        guard let title = try TabTitle.normalized(title) else {
+            throw RPCFailure(code: -32602, message: "The default tab title must not be empty")
+        }
+        defaultTabTitle = title
+        for index in tabs.indices { tabs[index].defaultTitle = title }
     }
 
     /// A pane's live owning tab takes precedence over current focus. Explicit pairs must agree.
@@ -292,7 +307,7 @@ public struct Workspace: Equatable, Sendable {
         nextTab += 1
         nextPane += 1
         panes.append(Pane(id: pane, type: .terminal))
-        tabs.append(Tab(id: tab, layout: .pane(pane), focusedPane: pane, terminalHistory: [pane]))
+        tabs.append(Tab(id: tab, defaultTitle: defaultTabTitle, layout: .pane(pane), focusedPane: pane, terminalHistory: [pane]))
         if let index = groups.firstIndex(where: { $0.id == group }) {
             groups[index].tabs.append(tab)
         } else {

@@ -11,7 +11,7 @@ import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP = ROOT / ".derived/Build/Products/Debug/Slate Terminal.app/Contents/MacOS/Slate Terminal"
-CLI = APP.parent.parent / "Helpers/slate-term"
+CLI = APP.parent.parent / "Frameworks/SlateRuntime.framework/Helpers/slate-term"
 
 
 def eventually(label, condition, timeout=15):
@@ -197,13 +197,13 @@ with tempfile.TemporaryDirectory(prefix="slate-context-", dir="/tmp") as tempora
             finally:
                 environment.pop("SLATE_TERM_PANE_ID", None)
                 environment.pop("SLATE_TERM_SESSION_ID", None)
-            sibling = cli("panes", "split", "--right", "--pane", "p1")["paneId"]
+            sibling = cli("panes", "split", "--right", "--pane", "p1", "--focus-policy", "new")["paneId"]
             eventually("second shell context", lambda: context(sibling)["terminal"]["state"] == "prompt")
             assert context(scope="tab")["activeTerminalPaneId"] == sibling
             environment.update(SLATE_TERM_PANE_ID="p1", SLATE_TERM_TAB_ID="t1")
             try:
                 assert cli("terminal", "capture", "--scope", "tab")["paneId"] == sibling
-                other_tab = cli("tabs", "new")["tabId"]
+                other_tab = cli("tabs", "new", "--focus-policy", "new")["tabId"]
                 global_terminal = context(scope="global")["activeTerminalPaneId"]
                 assert global_terminal not in ["p1", sibling], "Scope fixture needs a distinct global terminal"
                 check_copy(global_terminal)

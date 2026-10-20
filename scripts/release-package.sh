@@ -76,48 +76,14 @@ stage="$(mktemp -d "$output/.package.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
 bundle="$stage/Slate Terminal.app"
 ditto "$app" "$bundle"
-# Sign executable files first, nested bundles next, and the outer app last.
-python3 - "$bundle" "$unsigned" <<'PY'
-import os
-from pathlib import Path
-import plistlib
-import subprocess
-import sys
-app = Path(sys.argv[1])
-unsigned = sys.argv[2] == '1'
-sparkle = app / 'Contents/Frameworks/Sparkle.framework'
-for relative in ('Versions/B/Autoupdate', 'Versions/B/Updater.app/Contents/MacOS/Updater',
-                 'Versions/B/XPCServices/Installer.xpc/Contents/MacOS/Installer',
-                 'Versions/B/XPCServices/Downloader.xpc/Contents/MacOS/Downloader'):
-    if not os.access(sparkle / relative, os.X_OK):
-        raise SystemExit('Missing executable Sparkle component: ' + relative)
-with (sparkle / 'Resources/Info.plist').open('rb') as stream:
-    if plistlib.load(stream).get('CFBundleShortVersionString') != '2.10.0':
-        raise SystemExit('The embedded Sparkle version does not match the release pin.')
-for tool in ('slate-term', 'slate-layout-launcher'):
-    if not os.access(app / 'Contents' / 'Helpers' / tool, os.X_OK):
-        raise SystemExit(f'Missing executable helper: {tool}')
-files = [p for p in app.rglob('*') if p.is_file() and not p.is_symlink()]
-machos = [p for p in files if 'Mach-O' in subprocess.check_output(['file', '-b', str(p)], text=True)]
-if not machos:
-    raise SystemExit('No executable code in the app.')
-for path in machos:
-    architectures = set(subprocess.check_output(['lipo', '-archs', str(path)], text=True).split())
-    allowed = ({'arm64'}, {'arm64', 'x86_64'}) if path.is_relative_to(sparkle) else ({'arm64'},)
-    if architectures not in allowed:
-        raise SystemExit(f'Expected Apple Silicon code: {path.relative_to(app)}')
-if not unsigned:
-    command = ['codesign', '--force', '--sign', os.environ['SLATE_SIGNING_IDENTITY'], '--timestamp', '--options', 'runtime']
-    if os.environ.get('SLATE_SIGNING_KEYCHAIN'):
-        command += ['--keychain', os.environ['SLATE_SIGNING_KEYCHAIN']]
-    bundles = [p for p in app.rglob('*') if p.is_dir() and not p.is_symlink() and p.suffix in ('.framework', '.app', '.xpc', '.appex')]
-    for path in sorted(machos, key=lambda p: len(p.parts), reverse=True) + sorted(bundles, key=lambda p: len(p.parts), reverse=True) + [app]:
-        # Sparkle requires Downloader's own entitlements to survive manual signing.
-        downloader = sparkle / 'Versions/B/XPCServices/Downloader.xpc'
-        preserve = ['--preserve-metadata=entitlements'] if path == downloader or path.is_relative_to(downloader) else []
-        subprocess.run(command + preserve + [str(path)], check=True)
-    subprocess.run(['codesign', '--verify', '--deep', '--strict', '--verbose=2', str(app)], check=True)
-PY
+# The runtime owns all implementation code and receives its signature before the stable shell.
+python3 "$root/scripts/package-runtime.py" verify --app "$bundle" --architecture arm64
+if [[ "$unsigned" = 0 ]]; then
+  runtime_sign_args=(sign --app "$bundle" --identity "$SLATE_SIGNING_IDENTITY" --timestamp)
+  if [[ -n "${SLATE_SIGNING_KEYCHAIN:-}" ]]; then runtime_sign_args+=(--keychain "$SLATE_SIGNING_KEYCHAIN"); fi
+  python3 "$root/scripts/package-runtime.py" "${runtime_sign_args[@]}"
+fi
+
 notarize() {
   local asset="$1" receipt="$2"
   local args=(--keychain-profile "$SLATE_NOTARY_PROFILE")

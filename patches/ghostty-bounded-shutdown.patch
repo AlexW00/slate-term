@@ -1,0 +1,112 @@
+--- a/src/termio/Exec.zig
++++ b/src/termio/Exec.zig
+@@ -1170,79 +1170,39 @@
+     }
+ 
+     fn killPid(pid: c.pid_t) !void {
+-        const pgid = getpgid(pid) orelse return;
+-
+-        // It is possible to send a killpg between the time that
+-        // our child process calls setsid but before or simultaneous
+-        // to calling execve. In this case, the direct child dies
+-        // but grandchildren survive. To work around this, we loop
+-        // and repeatedly kill the process group until all
+-        // descendents are well and truly dead. We will not rest
+-        // until the entire family tree is obliterated.
++        // Slate stops verified terminal members before freeing the surface.
++        // This fallback owns only the direct child, never a detached daemon
++        // that happens to retain its former process group.
++        const shutdown_started = std.Io.Timestamp.now(global.io(), .awake);
++        var sent: c_int = 0;
+         while (true) {
+-            switch (posix.errno(c.killpg(pgid, c.SIGHUP))) {
+-                .SUCCESS => log.debug("process group killed pgid={}", .{pgid}),
+-                else => |err| killpg: {
+-                    if ((comptime builtin.target.os.tag.isDarwin()) and
+-                        err == .PERM)
+-                    {
+-                        log.debug("killpg failed with EPERM, expected on Darwin and ignoring", .{});
+-                        break :killpg;
+-                    }
+-
+-                    log.warn("error killing process group pgid={} err={}", .{ pgid, err });
+-                    return error.KillFailed;
+-                },
+-            }
+-
+-            // See Command.zig wait for why we specify WNOHANG.
+-            // The gist is that it lets us detect when children
+-            // are still alive without blocking so that we can
+-            // kill them again.
+-            const res_pid = while (true) {
+-                const rc = posix.system.waitpid(pid, null, std.c.W.NOHANG);
++            const elapsed = shutdown_started.durationTo(std.Io.Timestamp.now(global.io(), .awake)).toMilliseconds();
++            if (elapsed >= 400) {
++                log.warn("terminal child shutdown deadline exceeded", .{});
++                return;
++            }
++
++            // Reaping first prevents signals after this child has exited.
++            // Every retry, including EINTR, observes the same deadline.
++            const rc = posix.system.waitpid(pid, null, std.c.W.NOHANG);
++            if (rc == pid) return;
++            if (rc < 0) {
+                 if (posix.errno(rc) == .INTR) continue;
+-                break rc;
+-            };
+-            log.debug("waitpid result={}", .{res_pid});
+-            if (res_pid != 0) break;
++                return;
++            }
++
++            const signal: c_int = if (elapsed < 150) c.SIGHUP else if (elapsed < 300) c.SIGTERM else c.SIGKILL;
++            if (signal != sent) {
++                sent = signal;
++                switch (posix.errno(c.kill(pid, signal))) {
++                    .SUCCESS, .PERM => {},
++                    .SRCH => return,
++                    else => return error.KillFailed,
++                }
++                // A stopped child needs to resume before it can handle HUP/TERM.
++                if (signal != c.SIGKILL) _ = c.kill(pid, c.SIGCONT);
++            }
+             try std.Io.sleep(global.io(), .fromMilliseconds(10), .awake);
+-        }
+-    }
+-
+-    fn getpgid(pid: c.pid_t) ?c.pid_t {
+-        // Get our process group ID. Before the child pid calls setsid
+-        // the pgid will be ours because we forked it. Its possible that
+-        // we may be calling this before setsid if we are killing a surface
+-        // VERY quickly after starting it.
+-        const my_pgid = c.getpgid(0);
+-
+-        // We loop while pgid == my_pgid. The expectation if we have a valid
+-        // pid is that setsid will eventually be called because it is the
+-        // FIRST thing the child process does and as far as I can tell,
+-        // setsid cannot fail. I'm sure that's not true, but I'd rather
+-        // have a bug reported than defensively program against it now.
+-        while (true) {
+-            const pgid = c.getpgid(pid);
+-            if (pgid == my_pgid) {
+-                log.warn("pgid is our own, retrying", .{});
+-                std.Io.sleep(global.io(), .fromMilliseconds(10), .awake) catch {};
+-                continue;
+-            }
+-
+-            // Don't know why it would be zero but its not a valid pid
+-            if (pgid == 0) return null;
+-
+-            // If the pid doesn't exist then... we're done!
+-            if (pgid == c.ESRCH) return null;
+-
+-            // If we have an error we're done.
+-            if (pgid < 0) {
+-                log.warn("error getting pgid for kill", .{});
+-                return null;
+-            }
+-
+-            return pgid;
+         }
+     }
+ 

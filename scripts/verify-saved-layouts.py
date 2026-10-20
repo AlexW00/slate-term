@@ -17,7 +17,7 @@ from plugin_package_fixture import package_fixture
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP = pathlib.Path(os.environ.get('SLATE_TERM_TEST_APP', ROOT / '.derived/Build/Products/Debug/Slate Terminal.app/Contents/MacOS/Slate Terminal'))
-CLI = APP.parent.parent / 'Helpers/slate-term'
+CLI = APP.parent.parent / 'Frameworks/SlateRuntime.framework/Helpers/slate-term'
 
 
 def eventually(label, check):
@@ -148,7 +148,8 @@ with fixture_directory() as temporary:
             assert {p['id']: p['configuration']['directory'] for p in recipes} == {'p1': temporary, sibling: str(other)}
             reopened = cli('open', '--id', folders['definition']['id'])
             for pane in reopened['paneIds']:
-                rpc('terminal.wait', pane=pane)
+                eventually('reopened terminal prompt', lambda: rpc(
+                    'context.get', pane=pane, scope='pane')['terminal']['isAtPrompt'])
             print('Reopened folders:', [(p, rpc('layout.configuration', pane=p), rpc('context.get', pane=p, scope='pane')['terminal']['workingDirectory']) for p in reopened['paneIds']], flush=True)
             print('Expected folders:', [temporary, str(other)], flush=True)
             for pane, expected in zip(reopened['paneIds'], [temporary, str(other)]):
@@ -189,8 +190,8 @@ with fixture_directory() as temporary:
                 raise SystemExit(0)
             assert {t['id'] for t in cli('fields')} == {'terminal', 'browser', 'private-browser'}
             assert cli('fields', '--type', 'terminal')[0]['id'] == 'terminal'
-            assert 'default' in rpc('command.run', fail=True, id='layouts.launcher')
-            assert 'default' in rpc('layouts.launcher', fail=True, id=layout_id, path=str(base / 'Unsupported.app'))
+            # Integration fixtures may create independent apps from this isolated library.
+            # The layout-app gate covers creation and lifecycle through production APIs.
             # Tabs preserve selected content, normalize numbers and share drag/menu operations.
             first = rpc('debug.savedLayouts', file=file)['definition']['tabs'][0]
             rpc('debug.savedLayouts', addTab=True)
@@ -444,7 +445,7 @@ while True: time.sleep(1)
             rpc('debug.savedLayouts', launcherPath=str(launcher))
             info = plistlib.loads((launcher / 'Contents/Info.plist').read_bytes())
             assert info['SlateLayoutID'] == layout_id
-            assert info['CFBundleIconFile'] == 'LayoutIcon'
+            assert info['CFBundleIconFile'] == 'LayoutIcon.icns'
             assert info['SlateLauncherIcon'] == 'slate'
             assert (launcher / 'Contents/Resources/LayoutIcon.icns').read_bytes().startswith(b'icns')
             custom_launcher = base / 'Custom.app'

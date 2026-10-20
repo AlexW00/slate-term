@@ -55,9 +55,9 @@ import SlateTermCore
         }
     }
 
-    @Test func commandPickerOnlyOffersCheckAndShow() throws {
+    @Test func updateCommandsOnlyExposeExplicitNonInstallingActions() throws {
         let commands = CommandRegistry.commands.filter { $0.id.hasPrefix("updates.") }
-        #expect(Set(commands.map(\.id)) == ["updates.check", "updates.show"])
+        #expect(Set(commands.map(\.id)) == ["updates.check", "updates.show", "updates.openParent"])
         let defaults = AutomationDefaults(pane: PaneID(2), tab: TabID(3), scope: "pane")
         for command in commands {
             #expect(command.contract.workspaceIndependent)

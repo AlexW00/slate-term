@@ -117,7 +117,7 @@ with AppFixture('web-conformance') as app:
         captures.mkdir(exist_ok=True)
         identities = {pane: app.rpc('web.get', pane=pane) for pane in ['p1', p2]}
         source_tab = app.rpc('pane.inspect', pane=p2)['tabId']
-        app.rpc('command.run', id='tab.new')
+        app.rpc('command.run', id='tab.new', focus='new')
         active = app.rpc('context.inspect')['focusedPaneId']
 
         def focus_state():

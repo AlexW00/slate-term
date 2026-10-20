@@ -19,7 +19,7 @@ args = parser.parse_args()
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP = pathlib.Path(os.environ.get("SLATE_TERM_TEST_APP", ROOT / ".derived/Build/Products/Debug/Slate Terminal.app/Contents/MacOS/Slate Terminal"))
-CLI = APP.parent.parent / "Helpers/slate-term"
+CLI = APP.parent.parent / "Frameworks/SlateRuntime.framework/Helpers/slate-term"
 
 
 def eventually(label, condition, timeout=15):
@@ -127,7 +127,7 @@ try:
                 assert cli("plugins", "list")[0]["id"] == "notes"
                 cli("plugins", "register", "--package", package, success=False)
                 assert any(item["type"] == "notes" for item in rpc("debug.paneTypeMenu", pane="p1"))
-                assert cli("panes", "split", "--right", "--pane", "p1")["paneId"] == "p2"
+                assert cli("panes", "split", "--right", "--pane", "p1", "--focus-policy", "new")["paneId"] == "p2"
                 rpc("debug.paneTypeMenu", select="notes", answer="switch")
                 try:
                     eventually("static ES modules and isolated bridge", lambda: evaluate("window.fixtureReady===true"))
@@ -244,7 +244,7 @@ try:
                 eventually("one subscription remains", lambda: rpc("events.head")["pendingPolls"] == 1)
                 cli("tabs", "close", "--tab", second_tab["tabId"], "--force")
                 eventually("closing the view cancels its subscription", lambda: rpc("events.head")["pendingPolls"] == 0)
-                other_terminal = cli("panes", "split", "--down", "--pane", "p1")["paneId"]
+                other_terminal = cli("panes", "split", "--down", "--pane", "p1", "--focus-policy", "new")["paneId"]
                 eventually("other terminal is ready", lambda: cli("panes", "capture", "--pane", other_terminal)["text"].rstrip().endswith("$"))
                 assert evaluate("workspace.context().then(value=>value.activeTerminalPaneId)") == other_terminal
                 evaluate("(window.terminalAbort=new AbortController(),workspace.terminal.wait({contains:'NEVER_OUTPUT_TERMINAL_MARKER'},{signal:window.terminalAbort.signal}).catch(error=>window.terminalAbortResult=error.name),true)")

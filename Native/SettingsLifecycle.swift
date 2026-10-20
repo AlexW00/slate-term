@@ -6,14 +6,15 @@ extension WorkspaceHost {
     /// Observe external source changes under their own native operation, including reads
     /// that notice a change before the watcher. The source cache is also the revision ledger.
     func observeConfigurationSource(_ source: String) throws {
+        let identity = settings.configurationSourceIdentity(source)
         guard let previous = configurationRevisionSource else {
-            configurationRevisionSource = source
+            configurationRevisionSource = identity
             return
         }
-        guard previous != source else { return }
+        guard previous != identity else { return }
         let next = UUID().uuidString
         let operation = WorkspaceOperationContext(origin: .native)
-        let parsed = try? AppConfiguration.parse(source)
+        let parsed = try? settings.loadEffectiveConfiguration(overridesSource: source)
         let fields: [String: JSONValue] = [
             "operationId": .string(operation.lineage.operationID.uuidString),
             "beforeSourceRevision": .string(configurationSourceRevision), "sourceRevision": .string(next),
@@ -22,7 +23,7 @@ extension WorkspaceHost {
         ]
         try events.commitWorkspace([EventPublication(topic: "host.settings.source.changed", payload: .object(fields),
                                                      source: .host, lineage: operation.lineage)]) {
-            configurationRevisionSource = source
+            configurationRevisionSource = identity
             configurationSourceRevision = next
         }
     }
@@ -37,7 +38,7 @@ extension WorkspaceHost {
         // unreadable. Do not suppress publication errors for readable observations.
         let source = try? configurationSource()
         if let source { try observeConfigurationSource(source) }
-        let before = (source: source, revision: configurationSourceRevision)
+        let before = (source: source, identity: configurationRevisionSource, revision: configurationSourceRevision)
         let previous = settings.current
         let beforeApplied = appliedConfigurationRevision
         let nextSource = UUID().uuidString, nextApplied = UUID().uuidString
@@ -51,7 +52,7 @@ extension WorkspaceHost {
                 "beforeSourceRevision": .string(before.revision), "sourceRevision": sourceRevision.map(JSONValue.string) ?? .null,
                 "beforeAppliedRevision": .string(beforeApplied), "appliedRevision": .string(appliedRevision)
             ]
-            let parsed = source.flatMap { try? AppConfiguration.parse($0) }
+            let parsed = source.flatMap { try? settings.loadEffectiveConfiguration(overridesSource: $0) }
             fields["sourceValid"] = .bool(parsed != nil)
             fields["appliedMatchesSource"] = .bool(parsed?.changedKeys(from: after).isEmpty == true)
             var records: [EventPublication] = []
@@ -97,14 +98,15 @@ extension WorkspaceHost {
         do { outcome = .success(try body()) }
         catch { outcome = .failure(error) }
         let actualSource = try? configurationSource()
-        let sourceRevision = actualSource.map { $0 == before.source ? before.revision : nextSource }
+        let actualIdentity = actualSource.map(settings.configurationSourceIdentity)
+        let sourceRevision = actualIdentity.map { $0 == before.identity ? before.revision : nextSource }
         let appliedRevision = settings.current.changedKeys(from: previous).isEmpty ? beforeApplied : nextApplied
         let failed: Bool
         if case .failure = outcome { failed = true } else { failed = false }
         let records = try publications(after: settings.current, sourceRevision: sourceRevision, appliedRevision: appliedRevision,
                                        source: actualSource, failed: failed)
         try events.commitWorkspace(records) {
-            if let actualSource, let sourceRevision { configurationRevisionSource = actualSource; configurationSourceRevision = sourceRevision }
+            if let actualIdentity, let sourceRevision { configurationRevisionSource = actualIdentity; configurationSourceRevision = sourceRevision }
             appliedConfigurationRevision = appliedRevision
         }
         switch outcome {

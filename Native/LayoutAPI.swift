@@ -130,7 +130,7 @@ extension WorkspaceHost {
     func nativeWindowInfo(_ window: WorkspaceWindow, tab: TabID) -> JSONValue {
         let frame = window.frame
         return .object(["windowId": .string(window.identity), "tabId": .string(tab.description),
-                        "title": .string(workspace.tabs.first { $0.id == tab }?.title ?? TabTitle.defaultTitle),
+                        "title": .string(workspace.tabs.first { $0.id == tab }?.title ?? workspace.defaultTabTitle),
                         "groupId": workspace.groups.first(where: { $0.tabs.contains(tab) }).map { .string($0.id.description) } ?? .null,
                         "nativeWindowNumber": .integer(window.windowNumber), "visible": .bool(window.isVisible),
                         "selected": .bool(window.tabGroup?.selectedWindow === window), "key": .bool(window.isKeyWindow),
