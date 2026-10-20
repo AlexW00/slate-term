@@ -79,10 +79,8 @@ class FinalizeTests(unittest.TestCase):
             route = arguments[-1]
             if '/commits/' in route:
                 return {'sha': self.commit}
-            if '/releases/tags/' in route:
-                return copy.deepcopy(self.release)
             if '/releases?' in route:
-                return [[baseline] if baseline else []]
+                return [[copy.deepcopy(self.release)] + ([baseline] if baseline else [])]
             raise AssertionError('Unexpected remote read: ' + repr(arguments))
 
         def run(*arguments, **kwargs):
@@ -95,6 +93,15 @@ class FinalizeTests(unittest.TestCase):
         commands = stack.enter_context(patch.object(finalize, 'run', side_effect=run))
         self.addCleanup(stack.close)
         return commands
+
+    def test_candidate_discovers_a_draft_on_a_later_listing_page(self):
+        with patch.object(finalize, 'identity', return_value=(self.commit, self.runs)), \
+             patch.object(finalize, 'gh', return_value=[[], [self.release]]) as gh:
+            release, commit, runs = finalize.candidate(self.args)
+        self.assertTrue(release['draft'])
+        self.assertEqual((commit, runs), (self.commit, self.runs))
+        gh.assert_called_once_with('api', '--paginate', '--slurp',
+                                   'repos/example/slate/releases?per_page=100')
 
     def test_checksum_inventory_and_content_are_both_required(self):
         original = (self.assets / 'SHA256SUMS').read_text()

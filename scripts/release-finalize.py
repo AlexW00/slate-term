@@ -85,7 +85,10 @@ def identity(args):
 
 def candidate(args):
     commit, runs = identity(args)
-    release = gh('api', f'repos/{args.repository}/releases/tags/{args.tag}')
+    # The tag endpoint excludes drafts; authenticated listing includes both release states.
+    pages = gh('api', '--paginate', '--slurp', f'repos/{args.repository}/releases?per_page=100')
+    release = next((item for page in pages for item in page if item['tag_name'] == args.tag), None)
+    require(release is not None, 'Release candidate is not available yet')
     require(release['tag_name'] == args.tag and not release['prerelease'], 'Expected stable release candidate')
     return release, commit, runs
 

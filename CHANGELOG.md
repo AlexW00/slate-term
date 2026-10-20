@@ -10,9 +10,11 @@ Detailed change record for agents and maintainers. Public release notes live in 
 
 ### Fixed
 
+- Release finalization discovers draft candidates through authenticated release listings, including later pages, because GitHub’s tag endpoint excludes drafts. Verified by 23 helper tests and the completed 0.6.0 publication.
+
 ### Internal
 
-## 0.6.0 — Pending publication
+## 0.6.0 — 2026-10-20
 
 ### Added
 
@@ -49,6 +51,8 @@ Detailed change record for agents and maintainers. Public release notes live in 
 - Integrated candidate passed 536 Swift tests, 119 release-tooling tests (four official-tool tests exercised separately), 72 VM-runner tests, workflow validation, native syntax checks, and the full-history secret scan. The actual nested-signing test now covers Sparkle inside the private runtime.
 - Integrated development through `4d81a03`, including stable layout apps, terminal-output recovery, and agent colors. Preserved the public signing, source, update-feed, and release workflows.
 - Maintainer requested immediate release after declining additional qualification. Existing layout-app native and signed-upgrade evidence predates this integration; final-candidate native regression, DMG installation, Spotlight, and production Sparkle upgrade checks are waived, not passes.
+
+- Published build 7 from `bd0282b` after successful tag-triggered CI and Release runs. Downloaded verification passed checksums, matching source, signed feed/archive/notes, app and DMG signatures, stapled notarization tickets, and installer alias equality. Anonymous public downloads matched all verified assets. Additional native qualification was waived by the maintainer as recorded above.
 
 ## 0.5.0 — 2026-10-19
 
