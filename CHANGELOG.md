@@ -37,9 +37,11 @@ Detailed change record for agents and maintainers. Public release notes live in 
 
 - Integrated committed development through `b12cd46`, including Dock New Window, pane drag targets, graceful terminal shutdown, website refinements, authentication documentation and Xcode project serialization. Preserved the public updater, signing, source packaging and release tooling.
 
-- Release preflight passed the full-history secret scan, 120 release-tooling tests (four optional official-tool tests skipped), 72 VM-runner tests and workflow validation. Committed development passed 549 package tests and a native build. Pane movement and terminal recovery VM gates passed; the menu gate encountered a locked display and awaits an unlocked rerun. Candidate installation and production upgrade evidence remain pending.
+- Release preflight passed the full-history secret scan, 120 release-tooling tests (four optional official-tool tests skipped), 72 VM-runner tests and workflow validation. Committed development passed 549 package tests and a native build. Pane movement, terminal recovery and menu VM gates passed in development. Signed-candidate evidence is recorded separately below.
 
 - Integrated and deployed the earlier custom-view website change separately after tagging the binary candidate. The signed app and release tag are unchanged; the website retains the public hero-overflow fix.
+
+- Tagged build 10 from `08825bf` passed CI (550 package tests) and the signed/notarized Release workflow. Downloaded checksums, corresponding source, feed/archive/notes signatures, matching ZIP/DMG apps, Apple signatures, notarization and Gatekeeper passed. The actual DMG-installed app passed terminal recovery, including actual Codex graceful shutdown and retained resume output. Candidate menu activation and final website recapture remain blocked by a locked VM; automatic sign-in and normal 1Password authentication failed. Publication and the real production upgrade remain pending; no native waiver was granted.
 
 ## 0.8.0 — 2026-10-20
 
