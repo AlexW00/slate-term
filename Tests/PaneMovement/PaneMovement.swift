@@ -1,4 +1,5 @@
 import AppKit
+import WebKit
 import SlateTermCore
 
 @main
@@ -51,6 +52,46 @@ struct PaneMovementGate {
         try require(!handle.beginPaneDrag() && starts == 2, "Duplicate session recaptured identity")
         handle.endPaneDrag()
         try require(!handle.isDraggingPane && ends == 1, "Drag completion retained active context")
+        // WebKit registers its own drag destination below the pane chrome.
+        // Exercise hit testing, which direct destination callbacks bypass.
+        _ = NSApplication.shared
+        let web = WKWebView(frame: bounds)
+        drop.addSubview(web)
+        let edgePoints = [NSPoint(x: 10, y: 150), NSPoint(x: 390, y: 150),
+                          NSPoint(x: 200, y: 290), NSPoint(x: 200, y: 10)]
+        for point in edgePoints {
+            let hit = drop.hitTest(point)
+            try require(hit === web || hit?.isDescendant(of: web) == true, "Idle pane intercepted web input")
+        }
+        let sibling = PaneDropView(frame: bounds)
+        let siblingContent = NSView(frame: bounds)
+        sibling.addSubview(siblingContent)
+        try require(handle.beginPaneDrag(), "Routing fixture could not begin drag")
+        try require(sibling.subviews.last !== siblingContent &&
+                    sibling.hitTest(NSPoint(x: 10, y: 150)) === sibling.subviews.last,
+                    "Sibling window missed native drag receiver")
+        let otherHandle = PaneDragHandle(frame: .zero)
+        otherHandle.canDrag = { true }
+        try require(!otherHandle.beginPaneDrag(), "Another source replaced a live pane drag")
+        otherHandle.endPaneDrag()
+        for point in edgePoints + [NSPoint(x: 200, y: 150)] {
+            let receiver = drop.subviews.last
+            try require(receiver !== web && receiver?.registeredDraggedTypes == [PaneDragHandle.pasteboardType],
+                        "No native drag receiver above WebKit")
+            try require(drop.hitTest(point) === receiver, "Web content intercepted pane drag")
+        }
+        try require(drop.hitTest(NSPoint(x: -1, y: 150)) == nil, "Pane drag intercepted outside input")
+        drop.setFrameSize(NSSize(width: 500, height: 350))
+        try require(drop.subviews.last?.frame == drop.bounds, "Native drag receiver missed pane resize")
+        drop.frame = bounds
+        handle.endPaneDrag()
+        try require(drop.subviews == [web] && sibling.subviews == [siblingContent],
+                    "Completed drag retained its native receiver")
+        for point in edgePoints {
+            let hit = drop.hitTest(point)
+            try require(hit === web || hit?.isDescendant(of: web) == true, "Completed drag blocked web input")
+        }
+        web.removeFromSuperview()
         // Preview geometry stays local even when source removal will expand the target.
         let offsetBounds = NSRect(x: 20, y: 30, width: 400, height: 300)
         for (direction, expected) in [
@@ -85,6 +126,6 @@ struct PaneMovementGate {
         drop.canMove = { _, _ in false }
         try require(drop.updatePreview(source: handle, at: NSPoint(x: 10, y: 150)) == nil && cleared, "Stale source did not clear preview")
         try require(drop.previewFrame == nil, "Invalid source left a stale overlay")
-        print("PASS pane move native helpers: edges, dead zone, outside, small siblings, projected/collapsed/nested validation geometry, target-local previews, resize and cleanup")
+        print("PASS pane move native helpers: WebKit drag routing and input restoration, exclusive drag ownership, edges, dead zone, outside, small siblings, projected/collapsed/nested validation geometry, target-local previews, resize and cleanup")
     }
 }

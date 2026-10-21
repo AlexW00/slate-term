@@ -231,16 +231,12 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
             ghostty_string_free(tty)
             foreground = pid_t(exactly: ghostty_surface_foreground_pid(surface))
         }
-        TerminalProcessShutdown.stop(ttyPath: ttyPath, foregroundPID: foreground) { [self] outcome in
+        TerminalProcessShutdown.stop(ttyPath: ttyPath, foregroundPID: foreground, interrupt: { [weak self] in
+            guard let self, !self.isClosed, self.isShuttingDown else { return }
+            try? self.tapKey(TerminalKey(parsing: "ctrl+c"), duringShutdown: true)
+        }) { [self] outcome in
             let after = lineLimit > 0 ? currentSessionText() : ""
-            // Normal append-only output needs no duplicate snapshot. A TUI may replace
-            // its screen on exit; retain that earlier screen as historical context too.
-            let earlier = before.trimmingCharacters(in: .newlines)
-            let final = after.trimmingCharacters(in: .newlines)
-            let combined: String
-            if earlier.isEmpty || final.hasPrefix(earlier) { combined = final }
-            else if final.isEmpty || earlier == final { combined = earlier }
-            else { combined = earlier + "\n\n── Output received while closing ──\n" + final }
+            let combined = SavedTerminalOutput.mergingShutdown(before: before, after: after)
             completedOutput = lineLimit > 0 ? outputRecord(current: combined, lineLimit: lineLimit,
                 ended: outcome.status == .stopped) : nil
             if outcome.status != .stopped {
@@ -412,8 +408,8 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
     }
 
     @discardableResult
-    private func forwardKey(_ key: ghostty_input_key_s, text: String? = nil) -> Bool {
-        guard !isShuttingDown, let surface else { return false }
+    private func forwardKey(_ key: ghostty_input_key_s, text: String? = nil, duringShutdown: Bool = false) -> Bool {
+        guard (!isShuttingDown || duringShutdown), let surface else { return false }
         var key = key
         if let text, let scalar = text.unicodeScalars.first,
            scalar.value >= 0x20, scalar.value != 0x7F, !(0xF700...0xF8FF).contains(scalar.value) {
@@ -788,6 +784,10 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
     /// Send a complete logical key tap; encoding and negotiated protocols belong to Ghostty.
     func sendKey(_ key: TerminalKey) throws {
         guard !isClosed, !isShuttingDown, surface != nil else { throw TerminalKeyError.closed }
+        try tapKey(key)
+    }
+
+    private func tapKey(_ key: TerminalKey, duringShutdown: Bool = false) throws {
         var event = ghostty_input_key_s()
         event.action = GHOSTTY_ACTION_PRESS
         event.keycode = key.keyCode
@@ -801,12 +801,12 @@ final class TerminalView: NSView, @MainActor NSTextInputClient, NSUserInterfaceV
         }
         event.mods = ghostty_input_mods_e(mods)
         event.consumed_mods = ghostty_input_mods_e(consumed)
-        let accepted = forwardKey(event, text: key.text)
+        let accepted = forwardKey(event, text: key.text, duringShutdown: duringShutdown)
         event.action = GHOSTTY_ACTION_RELEASE
         // Always balance the press, even when rejected. The pinned API returns false
         // for ignored legacy releases; this is not a failed tap. Retain printable
         // text for protocols that use it to identify/report the released key.
-        forwardKey(event, text: key.text)
+        forwardKey(event, text: key.text, duringShutdown: duringShutdown)
         guard accepted else { throw TerminalKeyError.rejected }
     }
 

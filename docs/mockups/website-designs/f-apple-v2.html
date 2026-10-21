@@ -133,9 +133,9 @@ h1{font-family:var(--font-display);font-weight:600;font-size:clamp(48px,8.4vw,96
   filter:blur(calc((1 - var(--r)) * 10px));
   opacity:calc(.62 + var(--r) * .38);
   --edge:rgba(0,0,0,var(--r));
-  -webkit-mask-image:linear-gradient(180deg,var(--edge) 0,#000 calc(20% + var(--r) * 80%)),linear-gradient(90deg,var(--edge) 0,#000 calc(12% - var(--r) * 12%),#000 calc(88% + var(--r) * 12%),var(--edge) 100%);
+  -webkit-mask-image:linear-gradient(180deg,var(--edge) 0,#000 calc(20% + var(--r) * 80%),#000 calc(70% + var(--r) * 30%),var(--edge) 100%),linear-gradient(90deg,var(--edge) 0,#000 calc(12% - var(--r) * 12%),#000 calc(88% + var(--r) * 12%),var(--edge) 100%);
   -webkit-mask-composite:source-in;
-  mask-image:linear-gradient(180deg,var(--edge) 0,#000 calc(20% + var(--r) * 80%)),linear-gradient(90deg,var(--edge) 0,#000 calc(12% - var(--r) * 12%),#000 calc(88% + var(--r) * 12%),var(--edge) 100%);
+  mask-image:linear-gradient(180deg,var(--edge) 0,#000 calc(20% + var(--r) * 80%),#000 calc(70% + var(--r) * 30%),var(--edge) 100%),linear-gradient(90deg,var(--edge) 0,#000 calc(12% - var(--r) * 12%),#000 calc(88% + var(--r) * 12%),var(--edge) 100%);
   mask-composite:intersect}
 .rise .capline,.rise .player,.rise .note{opacity:var(--ui,1)}
 /* Ambient light from the screen: a wide ellipse that eases out to nothing. It sits outside the screen because the screen's mask would clip it. */
@@ -723,7 +723,7 @@ h2 .g{color:var(--text-3)}
 .gcap{padding:40px 48px 30px}
 .gcap h3{font-family:var(--font-display);font-weight:600;font-size:28px;line-height:1.14;letter-spacing:.004em;text-wrap:balance}
 .gcap p{color:var(--text-2);font-size:17px;line-height:1.35;margin-top:6px;letter-spacing:-.02em}
-.gshot{position:relative;margin:0 48px;aspect-ratio:1200/700;border-radius:14px 14px 0 0;overflow:hidden;box-shadow:0 0 0 .5px rgba(0,0,0,.14),0 -2px 30px rgba(0,0,0,.06)}
+.gshot{position:relative;flex:none;width:calc(100% - 96px);margin:0 48px;aspect-ratio:1200/700;border-radius:14px 14px 0 0;overflow:hidden;box-shadow:0 0 0 .5px rgba(0,0,0,.14),0 -2px 30px rgba(0,0,0,.06)}
 .gshot .stage{width:1200px;height:700px}
 .gctl{display:flex;justify-content:center;align-items:center;gap:12px;margin-top:30px}
 .gdots{display:flex;align-items:center;height:44px;padding:0 12px;border-radius:980px;background:var(--ctl)}
@@ -742,7 +742,7 @@ h2 .g{color:var(--text-3)}
   .gcap{padding:26px 24px 20px}
   .gcap h3{font-size:22px}
   .gcap p{font-size:15px}
-  .gshot{margin:0 16px;aspect-ratio:700/600;border-radius:8px 8px 0 0}
+  .gshot{width:calc(100% - 32px);margin:0 16px;border-radius:8px 8px 0 0}
 }
 
 /* Browser pane body in gallery mocks */
@@ -2084,7 +2084,12 @@ const slides = gCards.map(card => {
   stg.append(w);
   // Phones show a closer crop of the window, starting at data-mx stage pixels.
   const mx = parseFloat(card.dataset.mx || 0);
-  const set = () => { const mob = box.clientWidth < 500, s = box.clientWidth / (mob ? 700 : GW); stg.style.transform = `scale(${s.toFixed(4)}) translateX(${mob ? -mx : 0}px)`; };
+  const set = () => {
+    const mob = box.clientWidth < 500, s = box.clientWidth / (mob ? 700 : GW);
+    // Keep the crop and its frame on the same width breakpoint.
+    box.style.aspectRatio = mob ? "700 / 600" : `${GW} / ${GH}`;
+    stg.style.transform = `scale(${s.toFixed(4)}) translateX(${mob ? -mx : 0}px)`;
+  };
   set();
   if ("ResizeObserver" in window) new ResizeObserver(set).observe(box); else addEventListener("resize", set);
   return { card, w, upd: GCUTS[card.dataset.cut]($(".scene", w)), pal: card.dataset.pal || "base" };

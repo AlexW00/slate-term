@@ -6,6 +6,40 @@ public struct SavedTerminalOutput: Codable, Equatable, Sendable {
     public static let maximumBytes = 4 * 1024 * 1024
     public static let maximumWorkspaceBytes = 32 * 1024 * 1024
 
+    /// Preserve the screen before shutdown and any output received while it closes.
+    public static func mergingShutdown(before: String, after: String) -> String {
+        let earlier = before.trimmingCharacters(in: .newlines)
+        let final = after.trimmingCharacters(in: .newlines)
+        if earlier.isEmpty || final.hasPrefix(earlier) { return final }
+        if final.isEmpty || earlier == final { return earlier }
+        let oldLines = earlier.split(separator: "\n", omittingEmptySubsequences: false)
+        let newLines = final.split(separator: "\n", omittingEmptySubsequences: false)
+        var common = 0
+        while common < min(oldLines.count, newLines.count), oldLines[common] == newLines[common] { common += 1 }
+        if common == newLines.count { return earlier }
+
+        // A bounded scrollback can lose its oldest lines while shutdown adds new ones.
+        // Match the old suffix to the new prefix in linear time, including repeated lines.
+        var prefix = [Int](repeating: 0, count: newLines.count)
+        var matched = 0
+        for index in 1..<newLines.count {
+            while matched > 0 && newLines[index] != newLines[matched] { matched = prefix[matched - 1] }
+            if newLines[index] == newLines[matched] { matched += 1 }
+            prefix[index] = matched
+        }
+        matched = 0
+        for line in oldLines {
+            while matched > 0 && (matched == newLines.count || line != newLines[matched]) { matched = prefix[matched - 1] }
+            if line == newLines[matched] { matched += 1 }
+        }
+        if matched == newLines.count { return earlier }
+        if common > matched {
+            return earlier + "\n\n── Output received while closing ──\n" + newLines.dropFirst(common).joined(separator: "\n")
+        }
+        let tail = newLines.dropFirst(matched).joined(separator: "\n")
+        return earlier + (matched > 0 ? "\n" : "\n\n── Output received while closing ──\n") + tail
+    }
+
     public var text: String
     public var capturedAt: Date
     /// Whether the terminal's process had already exited when this text was captured.

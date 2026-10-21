@@ -1,5 +1,41 @@
 # Saved terminal output and bounded shutdown
 
+## Ctrl-C shutdown follow-up
+
+Outcome: let the original foreground job take its normal keyboard exit path before
+signal escalation, and retain final output without duplicating overlapping text.
+No command replay, application-specific exit commands, or live process restoration.
+
+Acceptance: a raw-mode program requiring two Ctrl-C taps prints its recovery marker;
+the marker survives restart once; changed screen footers do not repeat the transcript;
+alternate-screen history, forced shutdown, and detached/sibling isolation still pass.
+Check the installed Codex CLI in an isolated VM session as well.
+
+Implementation: revalidate the original process identity, terminal device, session,
+and foreground group before each tap. Retry once 250 ms after the first delivery,
+with an 800 ms total grace period, followed by the existing bounded signal escalation.
+Skip the retry if terminal input modes changed: programs restore normal input before
+printing exit summaries, when another Ctrl-C would become a terminating signal.
+Delayed callbacks expire and never target a returned shell or replacement job. The total process stop
+budget is 2.6 seconds plus the existing 80 ms reader allowance. Shared quit and pane
+retirement paths use this behavior; no new public operation is needed. Hold the
+original shell ancestors until attached helpers stop, including helpers reparented
+when the foreground program exits gracefully.
+
+The baseline raw-mode VM regression failed because shutdown skipped Ctrl-C; both
+snapshot-merging unit tests also reproduced duplication. Subsequent VM probes
+confirmed the macOS slave-PTY foreground-query limitation and the need to preserve
+shell ancestors while reparented helpers stop.
+
+Focused VM run `artifacts/vm/20261021T020323Z-67d07fd3/receipt.json` passed the entire
+recovery gate, including installed Codex 0.163.0 with an isolated profile and local
+response fixture. Manual Ctrl-C and app quit both printed a resume command; restored
+output retained it and the reply once. Raw-mode single/two-tap exits, slow exit after
+restoring input modes, attached helper cleanup, detached/sibling survival, alternate
+screens, retention limits, and no replay passed. The uncooperative quit case took
+2.15 seconds. The Codex check explicitly reports a skip when the CLI is unavailable.
+Final checks after the delivery-timing refinement are recorded in the task artifacts.
+
 Status: simplified access paths implemented; 538 package tests and all six
 selected VM gates passed.
 
@@ -89,4 +125,4 @@ Final VM run: `artifacts/vm/20261020T014717Z-b7f7ac38/receipt.json` reports `com
 
 The VM exposed and verified fixes for main-queue termination-loop deadlock and premature ancestor shutdown. Output capture remains best effort for programs that do not finish within the stop budget; it is not an application-specific Quit protocol. Tests exercised the normal app termination delegate, not a production update installation. Selected gates are not a full-suite release certificate.
 
-Process signals are restricted to revalidated members of the app-owned terminal session. Each terminal has a 1.8-second stop budget plus an 80 ms reader allowance; attempts run concurrently. Engine disposal has a separate 400 ms direct-child fallback. Output snapshots update only when text changes, with an additional save at orderly quit.
+Process signals are restricted to revalidated members of the app-owned terminal session. The original implementation used a 1.8-second stop budget plus an 80 ms reader allowance; the Ctrl-C follow-up above adds a bounded grace period. Attempts run concurrently. Engine disposal has a separate 400 ms direct-child fallback. Output snapshots update only when text changes, with an additional save at orderly quit.

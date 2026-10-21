@@ -12,6 +12,7 @@ import tempfile
 import time
 
 from api_fixture import ROOT, AppFixture, eventually
+from terminal_recovery_codex import check_codex_shutdown
 
 MAXIMUM_BYTES = 4 * 1024 * 1024
 FINAL_MARKER = 'RECOVERY_FINAL_片付け_🧪'
@@ -89,16 +90,44 @@ with tempfile.TemporaryDirectory(prefix='slate-terminal-recovery-', dir='/tmp') 
     directory = Path(temporary)
     replay = directory / 'printed-command-must-never-run'
     script = directory / 'owned-terminal-worker.py'
-    script.write_text('''import json, os, signal, subprocess, sys, time
+    script.write_text('''import json, os, signal, subprocess, sys, time, termios, tty
 from pathlib import Path
 mode, directory = sys.argv[1], Path(sys.argv[2])
 def publish(name):
     (directory / (name + '.pid')).write_text(str(os.getpid()))
-if mode in ('background', 'detached', 'stubborn'):
+if mode in ('interrupt', 'interrupt-once'):
+    helper = subprocess.Popen([sys.executable, __file__, 'interrupt-helper', str(directory)])
+    while not (directory / 'interrupt-helper.pid').exists(): time.sleep(.01)
+    original = termios.tcgetattr(sys.stdin)
+    tty.setraw(sys.stdin)
+    try:
+        for number in range(20): print(f'INTERRUPT_TRANSCRIPT_{number:03d}', end='\\r\\n')
+        print('INTERRUPT_READY', end='\\r\\n', flush=True)
+        publish(mode)
+        presses = 0
+        while presses < (2 if mode == 'interrupt' else 1):
+            if os.read(sys.stdin.fileno(), 1) == b'\\x03':
+                assert helper.poll() is None, 'Shutdown killed the helper before the foreground exit handler'
+                presses += 1
+                (directory / (mode + '.count')).write_text(str(presses))
+                if presses == 1 and mode == 'interrupt':
+                    print('Press Ctrl-C again to exit', end='\\r\\n', flush=True)
+        if mode == 'interrupt-once':
+            termios.tcsetattr(sys.stdin, termios.TCSANOW, original)
+            time.sleep(.4)
+        else:
+            time.sleep(.1)
+    finally:
+        termios.tcsetattr(sys.stdin, termios.TCSANOW, original)
+    print('RESUME_AFTER_KEYBOARD_INTERRUPT', flush=True)
+    raise SystemExit(0)
+if mode in ('background', 'detached', 'stubborn', 'interrupt-helper'):
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
     signal.signal(signal.SIGHUP, signal.SIG_IGN)
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
     publish(mode)
     while True: time.sleep(0.1)
+signal.signal(signal.SIGINT, signal.SIG_IGN)
 if mode == 'alternate':
     def leave_alternate(signum, frame):
         print(chr(27) + '[?1049l' + 'ALTERNATE_FINAL_OUTPUT', flush=True)
@@ -127,6 +156,44 @@ publish(mode)
 while True: time.sleep(0.1)
 ''')
     try:
+        with AppFixture('terminal-recovery-interrupt') as app:
+            prompt(app)
+            interrupted = start_worker(app, 'p1', script, 'interrupt', directory)
+            eventually('raw-mode foreground ready', lambda: 'INTERRUPT_READY' in app.rpc('terminal.capture', pane='p1')['text'])
+            helper_pid = int((directory / 'interrupt-helper.pid').read_text())
+            helper_before = subprocess.check_output(['/bin/ps', '-p', str(helper_pid), '-o', 'pid=,ppid=,pgid=,tty=,stat=,command='], text=True)
+            quit_normally(app)
+            assert not owned_alive(interrupted, script)
+            if owned_alive(helper_pid, script):
+                helper_after = subprocess.check_output(['/bin/ps', '-p', str(helper_pid), '-o', 'pid=,ppid=,pgid=,tty=,stat=,command='], text=True)
+                raise AssertionError('Quit left helper running. Before: ' + helper_before + 'After: ' + helper_after)
+            interrupted_text = saved_output(app)['text']
+            assert 'RESUME_AFTER_KEYBOARD_INTERRUPT' in interrupted_text, 'Quit skipped the foreground Ctrl-C exit path'
+            assert (directory / 'interrupt.count').read_text() == '2'
+            assert interrupted_text.count('INTERRUPT_TRANSCRIPT_000') == 1, 'Quit duplicated the transcript'
+            interrupt_source = (app.root / 'state/workspace.json').read_text()
+        with AppFixture('terminal-recovery-interrupt-load', workspace_source=interrupt_source) as app:
+            prompt(app)
+            screen = app.rpc('terminal.capture', pane='p1')['text']
+            assert 'RESUME_AFTER_KEYBOARD_INTERRUPT' in screen
+            assert saved_output(app)['text'].count('INTERRUPT_TRANSCRIPT_000') == 1
+            app.rpc('debug.screenshot', pane='p1', path=str(ROOT / 'artifacts/terminal-recovery-interrupt-restored.png'))
+        print('PASS raw-mode Ctrl-C exit: two keypresses, final resume output, restored transcript without duplication', flush=True)
+
+        (directory / 'interrupt-helper.pid').unlink()
+        with AppFixture('terminal-recovery-interrupt-once') as app:
+            prompt(app)
+            interrupted = start_worker(app, 'p1', script, 'interrupt-once', directory)
+            eventually('single-interrupt foreground ready', lambda: 'INTERRUPT_READY' in app.rpc('terminal.capture', pane='p1')['text'])
+            quit_normally(app)
+            assert not owned_alive(interrupted, script)
+            assert not owned_alive(int((directory / 'interrupt-helper.pid').read_text()), script), 'Quit left the single-interrupt helper running'
+            assert 'RESUME_AFTER_KEYBOARD_INTERRUPT' in saved_output(app)['text']
+            assert (directory / 'interrupt-once.count').read_text() == '1'
+        print('PASS single Ctrl-C exit: foreground helper survives until the exit handler, shell return stops retries', flush=True)
+
+        check_codex_shutdown(directory, prompt, quit_normally, saved_output)
+
         listing = directory / 'listing'
         listing.mkdir()
         for name in ['restored-alpha.txt', 'restored-beta.txt']:

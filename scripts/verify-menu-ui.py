@@ -84,6 +84,8 @@ with tempfile.TemporaryDirectory(prefix='slate-menu-', dir='/tmp') as temporary:
     with (ARTIFACTS / 'menu-ui-process.log').open('w') as log:
         try:
             start(log)
+            dock = rpc('debug.menuTree', menu='Dock')
+            assert len(dock) == 1 and dock[0]['title'] == 'New Window' and dock[0]['command'] == 'window.new' and dock[0]['enabled'], dock
             tree = rpc('debug.menuTree')
             workspace = next(item for item in tree if item['title'] == 'Workspace')
             groups = {item['title']: item for item in workspace['children'] if item['children']}
@@ -103,7 +105,7 @@ with tempfile.TemporaryDirectory(prefix='slate-menu-', dir='/tmp') as temporary:
                                                    'tab.showAll', 'pane.rename', 'pane.copyID', 'pane.move.chooseDestination', 'tab.rename', 'tab.title.clear', 'appearance.auto', 'appearance.light', 'appearance.dark',
                                                    'notifications.next', 'notifications.open', 'notifications.settings',
                                                    'welcome.read', 'welcome.unread', 'welcome.reset',
-                                                   'browser.clearData', 'browser.clearSiteData',
+                                                   'browser.showDownloads', 'browser.clearData', 'browser.clearSiteData',
                                                    'terminal.font.increase', 'terminal.font.decrease', 'terminal.font.reset'}:
                             assert item['key'] == '', 'This action intentionally has no default shortcut'
                             continue
@@ -214,6 +216,20 @@ with tempfile.TemporaryDirectory(prefix='slate-menu-', dir='/tmp') as temporary:
             rpc('debug.closeConfirmation', pane=pane, answer='cancel')
             assert pane in [p['id'] for p in cli('panes', 'list')], 'Reset did not restore the warning'
             cli('panes', 'close', '--pane', pane, '--force')
+            before_dock = rpc('workspace.get')
+            rpc('debug.menuTree', menu='Dock', select='window.new')
+            after_dock = rpc('workspace.get')
+            assert len(after_dock['groups']) == len(before_dock['groups']) + 1, after_dock
+            assert after_dock['keyTabID'] != before_dock['keyTabID'], after_dock
+            for tab in after_dock['tabs']:
+                cli('tabs', 'close', '--tab', tab['id'], '--force')
+            assert not rpc('workspace.get')['tabs']
+            dock = rpc('debug.menuTree', menu='Dock')
+            assert dock[0]['enabled'], dock
+            rpc('debug.menuTree', menu='Dock', select='window.new')
+            assert len(rpc('workspace.get')['groups']) == 1
+            assert len(rpc('workspace.get')['tabs']) == 1
+            print('PASS Dock New Window creates a separate focused window and works after all windows close')
             print('PASS native menu groups/shortcuts, actual key dispatch, removal of switching note, real alert cancellation/consent, restart persistence, reset, quit and unchanged CLI force safeguard')
         finally:
             stop()

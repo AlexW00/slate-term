@@ -99,6 +99,10 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) { host?.close() }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        host?.makeDockMenu()
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         host?.showWorkspaceWindow()
         return false

@@ -3,6 +3,32 @@ import Testing
 import SlateTermCore
 @testable import SlateTermSettings
 
+@Test func shutdownOutputKeepsChangesWithoutDuplicatingTranscript() {
+    let transcript = (0..<1000).map { "message \($0) 日本語" }.joined(separator: "\n")
+    let merged = SavedTerminalOutput.mergingShutdown(before: transcript + "\nWorking…\n> draft",
+        after: transcript + "\nDone\ncodex resume example-session")
+    #expect(merged.components(separatedBy: "message 0 日本語").count == 2)
+    #expect(merged.contains("Working…\n> draft"))
+    #expect(merged.hasSuffix("Done\ncodex resume example-session"))
+}
+
+@Test func shutdownOutputMergesScrolledOverlapAndPreservesRepeatedLines() {
+    let merged = SavedTerminalOutput.mergingShutdown(before: "old\nrepeat\nrepeat\nlast",
+                                                     after: "repeat\nrepeat\nlast\nexit")
+    #expect(merged == "old\nrepeat\nrepeat\nlast\nexit")
+    #expect(SavedTerminalOutput.mergingShutdown(before: "repeat\nA\nrepeat\nB", after: "repeat\nB\nexit")
+        == "repeat\nA\nrepeat\nB\nexit")
+    #expect(SavedTerminalOutput.mergingShutdown(before: "A\nB\nA", after: "A\nB\nexit")
+        == "A\nB\nA\n\n── Output received while closing ──\nexit")
+    #expect(SavedTerminalOutput.mergingShutdown(before: "alternate screen", after: "shell\nexit")
+        == "alternate screen\n\n── Output received while closing ──\nshell\nexit")
+    #expect(SavedTerminalOutput.mergingShutdown(before: "hello\npartial", after: "hello\npartial completed")
+        == "hello\npartial completed")
+    #expect(SavedTerminalOutput.mergingShutdown(before: "old\nnew", after: "old") == "old\nnew")
+    #expect(SavedTerminalOutput.mergingShutdown(before: "", after: "new\n") == "new")
+    #expect(SavedTerminalOutput.mergingShutdown(before: "old\n", after: "") == "old")
+}
+
 @Test func restoredDisplayTextPreservesUnicodeAndNeutralizesControls() {
     let source = "日本語 e\u{301} 🧪\r\n\0\u{1b}]52;c;clipboard\u{7}\u{9}tail\u{9b}6n"
     let output = SavedTerminalOutput(text: source, capturedAt: Date(), ended: true)

@@ -12,6 +12,33 @@ Detailed change record for agents and maintainers. Public release notes live in 
 
 ### Internal
 
+## 0.9.0 — Pending publication
+
+### Added
+
+- Add New Window to the Dock context menu, including when all workspace windows are closed.
+
+### Changed
+
+- Replace the website’s pane-type bento with concrete custom-view examples: a live dashboard, release notes, and a review queue.
+
+### Fixed
+
+- Fade the blurred hero preview at its bottom edge and match gallery artwork scaling to its responsive frame.
+
+- Restore all four pane-move drop targets over plugin and browser content; embedded WebKit views no longer intercept pane drags.
+
+- Give the original foreground terminal job a bounded Ctrl-C exit opportunity before hangup and forced shutdown. Preserve its final recovery output without repeating overlapping transcript snapshots.
+
+### Internal
+
+- Retain the browser authentication investigation as a dated source snapshot, identifying popup findings superseded by 0.8.0. Password AutoFill, passkey eligibility and live provider compatibility remain unverified.
+- Save Xcode project serialization updates for the private runtime targets and build phase.
+
+- Integrated committed development through `b12cd46`, including Dock New Window, pane drag targets, graceful terminal shutdown, website refinements, authentication documentation and Xcode project serialization. Preserved the public updater, signing, source packaging and release tooling.
+
+- Release preflight passed the full-history secret scan, 120 release-tooling tests (four optional official-tool tests skipped), 72 VM-runner tests and workflow validation. Committed development passed 549 package tests and a native build. Pane movement and terminal recovery VM gates passed; the menu gate encountered a locked display and awaits an unlocked rerun. Candidate installation and production upgrade evidence remain pending.
+
 ## 0.8.0 — 2026-10-20
 
 ### Added

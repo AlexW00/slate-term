@@ -20,6 +20,7 @@ Requires **Apple Silicon and macOS 27 or later**. Open the DMG and drag Slate Te
 - [Configuration](docs/configuration.md) · [Saved layouts](docs/saved-layouts.md)
 - [Plugins](docs/plugins.md) · [CLI and automation](docs/automation.md) · [Agent skill](skills/slate-terminal/SKILL.md)
 - [Testing](docs/vm-testing.md) · [Verification status](docs/verification.md) · [Releases](docs/releasing.md)
+- [Browser authentication investigation](docs/browser-authentication-investigation.md)
 - [Product philosophy](docs/core-philosophy.md)
 
 Licensed under [GPL-3.0-or-later](COPYING.md). See [third-party notices](THIRD_PARTY_NOTICES.md).

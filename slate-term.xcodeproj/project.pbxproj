@@ -16,9 +16,19 @@
 		A10000000000000000000011 /* .build/bootstrap/ghostty/zig-out/share/terminfo in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* .build/bootstrap/ghostty/zig-out/share/terminfo */; };
 		A10000000000000000000013 /* SlateTermSettings in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000014 /* SlateTermSettings */; };
 		A10000000000000000000015 /* skills in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000016 /* skills */; };
-		B20000000000000000000005 /* MyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000004; };
+		B20000000000000000000005 /* slate-term/MyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000004 /* slate-term/MyApp.swift */; };
 		C30000000000000000000001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = C30000000000000000000002 /* Sparkle */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		B20000000000000000000016 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 000000000000000000000000 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B20000000000000000000010;
+			remoteInfo = SlateRuntime;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		000000000000000000000120 /* Slate Terminal.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Slate Terminal.app"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -27,13 +37,25 @@
 		A10000000000000000000012 /* .build/bootstrap/ghostty/zig-out/share/terminfo */ = {isa = PBXFileReference; lastKnownFileType = folder; path = ".build/bootstrap/ghostty/zig-out/share/terminfo"; sourceTree = SOURCE_ROOT; };
 		A10000000000000000000016 /* skills */ = {isa = PBXFileReference; lastKnownFileType = folder; path = skills; sourceTree = SOURCE_ROOT; };
 		B20000000000000000000003 /* SlateRuntime.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = SlateRuntime.framework; sourceTree = BUILT_PRODUCTS_DIR; };
-		B20000000000000000000004 /* MyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "slate-term/MyApp.swift"; sourceTree = SOURCE_ROOT; };
+		B20000000000000000000004 /* slate-term/MyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "slate-term/MyApp.swift"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		B20000000000000000000002 /* Exceptions for "slate-term" folder in "slate-term" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				MyApp.swift,
+			);
+			target = 000000000000000100000000 /* slate-term */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		000000000000000000000010 /* slate-term */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = ( B20000000000000000000002 /* App source exception */, );
+			exceptions = (
+				B20000000000000000000002 /* Exceptions for "slate-term" folder in "slate-term" target */,
+			);
 			path = "slate-term";
 			sourceTree = "<group>";
 		};
@@ -49,14 +71,6 @@
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		B20000000000000000000002 /* App source exception */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = ( MyApp.swift, );
-			target = 000000000000000100000000;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
-
 /* Begin PBXFrameworksBuildPhase section */
 		000000000000000130000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
@@ -70,7 +84,11 @@
 				A10000000000000000000013 /* SlateTermSettings in Frameworks */,
 			);
 		};
-		B20000000000000000000013 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; files = (); };
+		B20000000000000000000013 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -84,7 +102,7 @@
 				A10000000000000000000012 /* .build/bootstrap/ghostty/zig-out/share/terminfo */,
 				A10000000000000000000016 /* skills */,
 				B20000000000000000000001 /* Bootstrap */,
-				B20000000000000000000004 /* MyApp.swift */,
+				B20000000000000000000004 /* slate-term/MyApp.swift */,
 				000000000000000000000020 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -112,12 +130,14 @@
 			);
 			buildRules = (
 			);
+			dependencies = (
+				B20000000000000000000015 /* PBXTargetDependency */,
+			);
 			fileSystemSynchronizedGroups = (
 				000000000000000000000010 /* slate-term */,
 				B20000000000000000000001 /* Bootstrap */,
 			);
 			name = "slate-term";
-			dependencies = ( B20000000000000000000015 /* SlateRuntime */, );
 			productName = "Slate Terminal";
 			productReference = 000000000000000000000120 /* Slate Terminal.app */;
 			productType = "com.apple.product-type.application";
@@ -150,12 +170,6 @@
 		};
 /* End PBXNativeTarget section */
 
-/* Begin PBXTargetDependency section */
-		B20000000000000000000015 /* SlateRuntime */ = {isa = PBXTargetDependency; target = B20000000000000000000010; targetProxy = B20000000000000000000016; };
-/* End PBXTargetDependency section */
-/* Begin PBXContainerItemProxy section */
-		B20000000000000000000016 = {isa = PBXContainerItemProxy; containerPortal = 000000000000000000000000; proxyType = 1; remoteGlobalIDString = B20000000000000000000010; remoteInfo = SlateRuntime; };
-/* End PBXContainerItemProxy section */
 /* Begin PBXProject section */
 		000000000000000000000000 /* Project object */ = {
 			isa = PBXProject;
@@ -202,7 +216,11 @@
 				A10000000000000000000015 /* skills in Resources */,
 			);
 		};
-		B20000000000000000000014 /* Resources */ = {isa = PBXResourcesBuildPhase; files = (); };
+		B20000000000000000000014 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
@@ -210,10 +228,12 @@
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
 			name = "Embed Private Runtime";
-			inputPaths = ();
-			outputPaths = ();
 			shellPath = /bin/bash;
-			shellScript = "set -euo pipefail\npython3 \"${SRCROOT}/scripts/package-runtime.py\" embed --app \"${TARGET_BUILD_DIR}/${WRAPPER_NAME}\" --products \"${BUILT_PRODUCTS_DIR}\"\n";
+			shellScript = (
+				"set -euo pipefail",
+				"python3 \"${SRCROOT}/scripts/package-runtime.py\" embed --app \"${TARGET_BUILD_DIR}/${WRAPPER_NAME}\" --products \"${BUILT_PRODUCTS_DIR}\"",
+				"",
+			);
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -223,8 +243,21 @@
 			files = (
 			);
 		};
-		B20000000000000000000012 /* Runtime sources */ = {isa = PBXSourcesBuildPhase; files = ( B20000000000000000000005 /* MyApp.swift in Sources */, ); };
+		B20000000000000000000012 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+				B20000000000000000000005 /* slate-term/MyApp.swift in Sources */,
+			);
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B20000000000000000000015 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B20000000000000000000010 /* SlateRuntime */;
+			targetProxy = B20000000000000000000016 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		000000000000000011000000 /* Debug configuration for PBXProject "slate-term" */ = {
@@ -364,16 +397,18 @@
 		000000000000000111000000 /* Debug configuration for PBXNativeTarget "slate-term" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ENABLE_DEBUG_DYLIB = NO;
-				ENABLE_USER_SCRIPT_SANDBOXING = NO;
-				GCC_PREPROCESSOR_DEFINITIONS = ( "$(inherited)", "SLATE_RUNTIME_DEVELOPMENT=1", );
-				SLATE_RUNTIME_DEVELOPMENT = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = NO;
+				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"SLATE_RUNTIME_DEVELOPMENT=1",
+				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = AppInfo.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Slate Terminal";
@@ -392,11 +427,19 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MARKETING_VERSION = 1.0;
-				OTHER_LDFLAGS = ( "-framework", Foundation, "-framework", Security, "-framework", AppKit, );
+				OTHER_LDFLAGS = (
+					"-framework",
+					Foundation,
+					"-framework",
+					Security,
+					"-framework",
+					AppKit,
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.alexandermoritzweichart.slateterm;
 				PRODUCT_NAME = "Slate Terminal";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
+				SLATE_RUNTIME_DEVELOPMENT = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = macosx;
 				SUPPORTS_MACCATALYST = NO;
@@ -411,18 +454,20 @@
 		000000000000000112000000 /* Release configuration for PBXNativeTarget "slate-term" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ENABLE_DEBUG_DYLIB = NO;
-				ENABLE_USER_SCRIPT_SANDBOXING = NO;
-				GCC_PREPROCESSOR_DEFINITIONS = ( "$(inherited)", "SLATE_RUNTIME_DEVELOPMENT=0", );
-				SLATE_RUNTIME_DEVELOPMENT = NO;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = NO;
+				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"SLATE_RUNTIME_DEVELOPMENT=0",
+				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = AppInfo.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Slate Terminal";
@@ -441,11 +486,19 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MARKETING_VERSION = 1.0;
-				OTHER_LDFLAGS = ( "-framework", Foundation, "-framework", Security, "-framework", AppKit, );
+				OTHER_LDFLAGS = (
+					"-framework",
+					Foundation,
+					"-framework",
+					Security,
+					"-framework",
+					AppKit,
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.alexandermoritzweichart.slateterm;
 				PRODUCT_NAME = "Slate Terminal";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
+				SLATE_RUNTIME_DEVELOPMENT = NO;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = macosx;
 				SUPPORTS_MACCATALYST = NO;
@@ -462,11 +515,17 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEFINES_MODULE = YES;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = RuntimeInfo.plist;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
 				LD_RUNPATH_SEARCH_PATHS = "@loader_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@loader_path/Frameworks";
+				MACH_O_TYPE = mh_dylib;
 				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
@@ -487,15 +546,9 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.slateterm.runtime;
 				PRODUCT_NAME = SlateRuntime;
-				GENERATE_INFOPLIST_FILE = YES;
-				DEFINES_MODULE = YES;
-				SKIP_INSTALL = YES;
-				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
-				MACH_O_TYPE = mh_dylib;
-				DYLIB_INSTALL_NAME_BASE = "@rpath";
-				INFOPLIST_FILE = RuntimeInfo.plist;
-				SLATE_RUNTIME_DEVELOPMENT = YES;
 				SDKROOT = auto;
+				SKIP_INSTALL = YES;
+				SLATE_RUNTIME_DEVELOPMENT = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = macosx;
 				SUPPORTS_MACCATALYST = NO;
@@ -510,15 +563,21 @@
 		B20000000000000000000022 /* Release configuration for PBXNativeTarget "SlateRuntime" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
-				ENABLE_HARDENED_RUNTIME = YES;
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEFINES_MODULE = YES;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
 				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = RuntimeInfo.plist;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
 				LD_RUNPATH_SEARCH_PATHS = "@loader_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@loader_path/Frameworks";
+				MACH_O_TYPE = mh_dylib;
 				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
@@ -539,15 +598,9 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.slateterm.runtime;
 				PRODUCT_NAME = SlateRuntime;
-				GENERATE_INFOPLIST_FILE = YES;
-				DEFINES_MODULE = YES;
-				SKIP_INSTALL = YES;
-				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
-				MACH_O_TYPE = mh_dylib;
-				DYLIB_INSTALL_NAME_BASE = "@rpath";
-				INFOPLIST_FILE = RuntimeInfo.plist;
-				SLATE_RUNTIME_DEVELOPMENT = NO;
 				SDKROOT = auto;
+				SKIP_INSTALL = YES;
+				SLATE_RUNTIME_DEVELOPMENT = NO;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = macosx;
 				SUPPORTS_MACCATALYST = NO;
@@ -596,19 +649,17 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-        C30000000000000000000005 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
-            isa = XCRemoteSwiftPackageReference;
-            repositoryURL = "https://github.com/sparkle-project/Sparkle";
-            requirement = {kind = exactVersion; version = 2.10.0; };
-        };
+		C30000000000000000000005 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = exactVersion;
+				version = 2.10.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-        C30000000000000000000002 /* Sparkle */ = {
-            isa = XCSwiftPackageProductDependency;
-            package = C30000000000000000000005 /* XCRemoteSwiftPackageReference "Sparkle" */;
-            productName = Sparkle;
-        };
 		A10000000000000000000004 /* SlateTermCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = SlateTermCore;
@@ -628,6 +679,11 @@
 		A10000000000000000000018 /* slate-layout-launcher */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = "slate-layout-launcher";
+		};
+		C30000000000000000000002 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C30000000000000000000005 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

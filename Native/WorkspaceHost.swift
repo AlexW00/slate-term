@@ -1846,7 +1846,15 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
                              "children": item.submenu.map(entries) ?? .array([])])
                 })
             }
-            return NSApp.mainMenu.map(entries) ?? .array([])
+            let menu = params["menu"] == .string("Dock") ? NSApp.delegate?.applicationDockMenu?(NSApp) : NSApp.mainMenu
+            if let command = params["select"]?.string, let menu {
+                menu.update()
+                guard let index = menu.items.firstIndex(where: { $0.representedObject as? String == command }), menu.items[index].isEnabled else {
+                    throw RPCFailure(code: -32602, message: "Menu command is unavailable")
+                }
+                menu.performActionForItem(at: index)
+            }
+            return menu.map(entries) ?? .array([])
         case "debug.browserDataConfirmation" where integration:
             let id = params["id"]?.string ?? "browser.clearData"
             guard ["browser.clearData", "browser.clearSiteData"].contains(id) else { throw RPCFailure(code: -32602, message: "Expected a browser data command") }
@@ -3628,6 +3636,17 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
         refreshHeaderActions()
     }
 
+    func makeDockMenu() -> NSMenu {
+        let menu = NSMenu()
+        if let command = availableCommands.first(where: { $0.id == "window.new" }) {
+            let item = NSMenuItem(title: command.title, action: #selector(runMenuCommand(_:)), keyEquivalent: "")
+            item.representedObject = command.id
+            item.target = self
+            menu.addItem(item)
+        }
+        return menu
+    }
+
     private func setBuiltInShortcut(_ item: NSMenuItem, key: String, modifiers: NSEvent.ModifierFlags = [.command]) {
         // A user's configured workspace binding takes precedence over fixed UI shortcuts.
         guard !activeKeyBindings.keys.contains(where: { $0.nativeKey == key && $0.nativeModifiers == modifiers }) else { return }
@@ -4321,6 +4340,7 @@ final class WorkspaceHost: NSObject, NSWindowDelegate, NSMenuDelegate, NSMenuIte
 
     @objc private func runMenuCommand(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
+        if id == "window.new" { NSApp.activate(ignoringOtherApps: true) }
         if commandPicker?.isVisible == true, id != "command.picker" { runPickerCommand(id) }
         else if id == "tab.rename", let editor = tabRename, NSApp.keyWindow === editor.window {
             runUserCommand(id, params: ["tab": .string(editor.tab.description)])

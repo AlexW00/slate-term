@@ -5,6 +5,9 @@ import SlateTermCore
 @MainActor
 final class PaneDragHandle: NSButton, NSDraggingSource {
     static let pasteboardType = NSPasteboard.PasteboardType("app.slate-term.pane-move")
+    static let activityDidChange = Notification.Name("SlatePaneDragActivityDidChange")
+    private static weak var activeHandle: PaneDragHandle?
+    static var isMovingPane: Bool { activeHandle != nil }
     var canDrag: (() -> Bool)?
     var dragTitle: (() -> String)?
     var onDragStart: (() -> Bool)?
@@ -76,11 +79,17 @@ final class PaneDragHandle: NSButton, NSDraggingSource {
 
     /// Shared session admission also exercised by integration-only native callback fixtures.
     func beginPaneDrag() -> Bool {
-        guard !isDraggingPane, canDrag?() == true, onDragStart?() != false else { return false }
+        guard Self.activeHandle == nil, !isDraggingPane, canDrag?() == true, onDragStart?() != false else { return false }
         isDraggingPane = true
+        Self.activeHandle = self
+        NotificationCenter.default.post(name: Self.activityDidChange, object: nil)
         return true
     }
     func endPaneDrag() {
+        if Self.activeHandle === self {
+            Self.activeHandle = nil
+            NotificationCenter.default.post(name: Self.activityDidChange, object: nil)
+        }
         isDraggingPane = false
         onDragEnd?()
     }
@@ -102,12 +111,30 @@ final class PaneDropView: NSView {
     var onPreview: ((PaneDragHandle, Direction) -> Void)?
     var onClearPreviews: (() -> Void)?
     private let preview = PaneDropPreview()
+    private let capture = PaneDropCapture()
 
     override init(frame: NSRect) {
         super.init(frame: frame)
         registerForDraggedTypes([PaneDragHandle.pasteboardType])
+        capture.destination = self
+        capture.autoresizingMask = [.width, .height]
+        NotificationCenter.default.addObserver(self, selector: #selector(updateDragCapture),
+                                              name: PaneDragHandle.activityDidChange, object: nil)
     }
     required init?(coder: NSCoder) { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateDragCapture()
+    }
+
+    @objc private func updateDragCapture() {
+        guard PaneDragHandle.isMovingPane else { capture.removeFromSuperview(); return }
+        // AppKit chooses WebKit's nested drag destination even when container hit testing wins.
+        // Register a receiver above the content only while a pane move is active.
+        capture.frame = bounds
+        if capture.superview == nil { addSubview(capture, positioned: .above, relativeTo: nil) }
+    }
 
     static func direction(at point: NSPoint, in bounds: NSRect) -> Direction? {
         guard bounds.width > 0, bounds.height > 0, bounds.contains(point) else { return nil }
@@ -180,6 +207,27 @@ final class PaneDropView: NSView {
         guard let (source, direction) = destination(sender) else { return false }
         return onMove?(source, direction) ?? false
     }
+}
+
+/// Receives only Slate pane moves; all validation and commits stay on the container.
+@MainActor
+private final class PaneDropCapture: NSView {
+    weak var destination: PaneDropView?
+    override var isOpaque: Bool { false }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        registerForDraggedTypes([PaneDragHandle.pasteboardType])
+        setAccessibilityElement(false)
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation { destination?.draggingEntered(sender) ?? [] }
+    override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation { destination?.draggingUpdated(sender) ?? [] }
+    override func draggingExited(_ sender: (any NSDraggingInfo)?) { destination?.draggingExited(sender) }
+    override func draggingEnded(_ sender: any NSDraggingInfo) { destination?.draggingEnded(sender) }
+    override func prepareForDragOperation(_ sender: any NSDraggingInfo) -> Bool { destination?.prepareForDragOperation(sender) ?? false }
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool { destination?.performDragOperation(sender) ?? false }
 }
 
 @MainActor
