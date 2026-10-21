@@ -12,7 +12,7 @@ Detailed change record for agents and maintainers. Public release notes live in 
 
 ### Internal
 
-## 0.9.0 — Pending publication
+## 0.9.0 — 2026-10-21
 
 ### Added
 
@@ -41,7 +41,9 @@ Detailed change record for agents and maintainers. Public release notes live in 
 
 - Integrated and deployed the earlier custom-view website change separately after tagging the binary candidate. The signed app and release tag are unchanged; the website retains the public hero-overflow fix.
 
-- Tagged build 10 from `08825bf` passed CI (550 package tests) and the signed/notarized Release workflow. Downloaded checksums, corresponding source, feed/archive/notes signatures, matching ZIP/DMG apps, Apple signatures, notarization and Gatekeeper passed. The actual DMG-installed app passed terminal recovery, including actual Codex graceful shutdown and retained resume output. Candidate menu activation and final website recapture remain blocked by a locked VM; automatic sign-in and normal 1Password authentication failed. Publication and the real production upgrade remain pending; no native waiver was granted.
+- Tagged build 10 from `08825bf` passed CI (550 package tests) and the signed/notarized Release workflow. Downloaded checksums, corresponding source, feed/archive/notes signatures, matching ZIP/DMG apps, Apple signatures, notarization and Gatekeeper passed. The actual DMG-installed app passed terminal recovery, including actual Codex graceful shutdown and retained resume output. The maintainer directed publication after locked-VM sign-in recovery failed, waiving the remaining candidate menu UI, final rendered website recapture and real 0.8.0-to-0.9.0 Sparkle upgrade checks. These are waivers, not passes.
+
+- Published build 10 at `2026-10-21T23:37:08Z`: https://github.com/AlexW00/slate-term/releases/tag/v0.9.0. Anonymous public verification matched all seven served assets to the verified candidate, including the latest installer alias and production update feed. Release and development ledgers use the actual publication date.
 
 ## 0.8.0 — 2026-10-20
 
