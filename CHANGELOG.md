@@ -39,6 +39,8 @@ Detailed change record for agents and maintainers. Public release notes live in 
 
 - Release preflight passed the full-history secret scan, 120 release-tooling tests (four optional official-tool tests skipped), 72 VM-runner tests and workflow validation. Committed development passed 549 package tests and a native build. Pane movement and terminal recovery VM gates passed; the menu gate encountered a locked display and awaits an unlocked rerun. Candidate installation and production upgrade evidence remain pending.
 
+- Integrated and deployed the earlier custom-view website change separately after tagging the binary candidate. The signed app and release tag are unchanged; the website retains the public hero-overflow fix.
+
 ## 0.8.0 — 2026-10-20
 
 ### Added

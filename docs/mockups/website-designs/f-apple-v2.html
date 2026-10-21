@@ -614,26 +614,39 @@ h2 .g{color:var(--text-3)}
 @media (max-width:734px){.mt{right:-24px;font-size:11px}.mt-h b{padding-right:0}
   .tile .vis.v-spot,.tile .vis.v-th,.tile .vis.v-br,.tile .vis.v-toml{min-height:0}}
 
-/* Move and retype tile */
-.v-mv .solo{display:flex;flex-direction:column}
-.v-mv .phd{height:30px;grid-template-columns:auto 1fr;gap:10px;color:var(--text-k2)}
-.v-mv .phd .ty{gap:7px}
-.v-mv .grip{color:var(--acc);opacity:1}
-.v-mv .tybtn{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:5px;background:var(--fill-active);color:var(--text-k);font-weight:500}
-.v-mv .tybtn svg{width:8px;height:8px}
-.v-mv .ptitle{justify-self:start}
-/* A native popup menu: grey glass, the current type checked and dimmed. */
-/* Opens under the header so the type label stays readable. The output behind it shows the glass. */
-.v-mv .menu{position:absolute;left:24px;top:34px;width:178px;padding:5px;border-radius:12px;z-index:2;background:rgba(120,120,128,.26);-webkit-backdrop-filter:blur(14px) saturate(170%) brightness(1.1);backdrop-filter:blur(14px) saturate(170%) brightness(1.1);box-shadow:inset 0 0 0 .5px rgba(255,255,255,.22),inset 0 1px 0 rgba(255,255,255,.1),0 0 0 .5px rgba(0,0,0,.45),0 14px 34px rgba(0,0,0,.4)}
-.v-mv .lt .menu{background:rgba(250,250,252,.55);box-shadow:inset 0 0 0 .5px rgba(255,255,255,.6),0 0 0 .5px rgba(0,0,0,.14),0 12px 32px rgba(0,0,0,.16)}
-.v-mv .menu div{display:flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:5px;font:400 13px/1 var(--font);color:#f2f2f4}
-.v-mv .lt .menu div{color:#1d1d1f}
-.v-mv .menu div.now{color:rgba(242,242,244,.45)}
-.v-mv .lt .menu div.now{color:rgba(29,29,31,.4)}
-.v-mv .menu .ck{width:14px;display:grid;place-items:center}
-.v-mv .menu .ck svg{width:12px;height:12px}
-.v-mv .ghost{position:absolute;inset:30px 0 0;padding:10px 12px;font:11px/1.7 var(--mono);color:var(--text-k);white-space:pre}
-.v-mv .ghost .d{color:var(--text-k3)}.v-mv .ghost .g{color:var(--ok)}.v-mv .ghost .y{color:var(--wrn)}.v-mv .ghost .e{color:var(--dng)}.v-mv .ghost .a{color:var(--acc)}
+/* Custom views: concrete plugin examples in the existing narrow tile. */
+.t-custom{padding-bottom:36px}
+.t-custom .prop{color:var(--link);text-transform:uppercase;letter-spacing:.08em}
+.t-custom .cv-gallery{display:grid;gap:12px;margin-top:28px;font:12px/1.4 var(--font);letter-spacing:0}
+.cv-window{min-width:0;overflow:hidden;border:1px solid var(--hair);border-radius:12px;background:var(--bg);box-shadow:0 14px 28px -16px rgba(0,0,0,.22)}
+.cv-header{display:flex;align-items:center;gap:7px;min-height:32px;padding:0 11px;background:var(--bg-alt);border-bottom:1px solid var(--hair);font-size:11px}
+.cv-header .grip{color:var(--text-2)}
+.cv-header b{font-weight:600}
+.cv-live{margin-left:auto;padding:2px 5px;border-radius:5px;color:var(--link);background:color-mix(in srgb,var(--link) 8%,transparent);font-size:10px}
+.cv-body{padding:14px}
+.cv-label{color:var(--text-2);font-size:10px;text-transform:uppercase;letter-spacing:.07em}
+.cv-metric{margin:6px 0;font-size:32px;font-weight:600;line-height:1.1;letter-spacing:-.04em}
+.cv-metric small{margin-left:3px;color:var(--text-2);font-size:12px;font-weight:400;letter-spacing:0}
+.cv-change{color:var(--link);font-size:10px}
+.cv-chart{display:block;width:100%;height:48px;margin:12px 0 7px;color:var(--link)}
+.cv-chart .guide{stroke:var(--hair);stroke-width:1}
+.cv-chart .line{fill:none;stroke:currentColor;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}
+.cv-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 0;border-top:1px solid var(--hair-2);font-size:10px}
+.cv-row:last-child{padding-bottom:0}
+.cv-row b{font-weight:500}
+.cv-small{display:grid;grid-template-columns:1fr;gap:12px}
+.cv-note-title{font-size:13px;font-weight:600;margin-bottom:7px}
+.cv-note-line{display:flex;align-items:center;gap:7px;margin-top:5px;font-size:11px}
+.cv-check{display:grid;place-items:center;width:12px;height:12px;flex:none;border:1px solid var(--hair);border-radius:3px;color:var(--link);font-size:10px}
+.cv-check.checked{border-color:var(--link)}
+.cv-check svg{display:block;width:10px;height:10px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.cv-count{display:flex;align-items:baseline;gap:8px;margin-bottom:9px}
+.cv-count strong{font-size:26px;line-height:1;letter-spacing:-.04em}
+.cv-count small{color:var(--text-2);font-size:11px}
+.cv-ok{color:var(--link)}
+@media (min-width:735px) and (max-width:1068px){.cv-small{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:734px){.t-custom{padding-bottom:28px}}
+@media (min-width:390px) and (max-width:734px){.cv-small{grid-template-columns:repeat(2,minmax(0,1fr))}.cv-small .cv-body{padding:12px 10px}.cv-small .cv-note-line{font-size:10px}.cv-small .cv-header{padding:0 9px;font-size:10px}}
 
 /* One pane with its agent ring and pill. The ring follows the frame's rounded corners. */
 .v-prs .solo{display:flex;flex-direction:column;right:0;bottom:auto;height:210px;border-radius:14px}
@@ -977,26 +990,38 @@ footer a:hover{color:var(--text)}
           </div>
         </article>
 
-        <article class="tile s2 reveal" aria-labelledby="tb2">
-          <h3 id="tb2">A panel can be anything.</h3>
-          <p>A terminal, a browser, notes or your own plugin. Switch any pane in place.</p>
-          <div class="vis v-mv" aria-hidden="true">
-            <div class="solo kt" data-pal>
-              <div class="phd"><span class="ty"><span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="tybtn">Terminal<svg viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.4"><path d="m1.5 3 2.5 2.5L6.5 3"/></svg></span></span><span class="ptitle">zsh — notes</span></div>
-              <div class="ghost"><span class="g">❯</span> git diff --stat
- <span class="a">src/notes/editor.ts</span>   | 42 <span class="g">++++++</span><span class="e">--</span>
- <span class="a">src/notes/sidebar.ts</span>  | 18 <span class="g">+++</span><span class="e">-</span>
- <span class="a">src/notes/search.ts</span>   | 27 <span class="g">+++++</span>
- <span class="d">3 files changed, 79 insertions(+), 8 deletions(-)</span>
-<span class="g">❯</span> pnpm dev
-<span class="g">ready</span> <span class="d">on</span> http://localhost:5173
-<span class="y">warn</span> <span class="d">2 unused exports in search.ts</span>
-<span class="g">❯</span> </div>
-              <div class="menu">
-                <div class="now"><span class="ck"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3.5 8.5 3 3 6-7"/></svg></span>Terminal</div>
-                <div><span class="ck"></span>Browser</div>
-                <div><span class="ck"></span>Private Browser</div>
-                <div><span class="ck"></span>Notes</div>
+        <article class="tile s2 t-custom reveal" aria-labelledby="tb2">
+          <span class="prop">Custom views</span>
+          <h3 id="tb2">Your tools. Inside your terminal.</h3>
+          <p>Build a live dashboard, a review queue or a little scratchpad. Custom HTML, CSS and JavaScript views live right beside your shell.</p>
+          <div class="cv-gallery" aria-hidden="true">
+            <div class="cv-window">
+              <div class="cv-header"><span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span><b>Latency</b><span class="cv-live">● Live</span></div>
+              <div class="cv-body">
+                <div class="cv-label">API response time</div>
+                <div class="cv-metric">142<small>ms</small></div>
+                <div class="cv-change">↓ 18% since last deploy</div>
+                <svg class="cv-chart" viewBox="0 0 240 60" preserveAspectRatio="none"><path class="guide" d="M0 10H240 M0 30H240 M0 50H240"/><path class="line" d="M0 42L12 39L24 44L36 30L48 34L60 24L72 28L84 18L96 25L108 16L120 22L132 12L144 19L156 14L168 23L180 16L192 20L204 14L216 18L228 12L240 16"/></svg>
+                <div class="cv-row"><b>Requests</b><span>12,408</span></div>
+                <div class="cv-row"><b>Error rate</b><span class="cv-ok">0.02%</span></div>
+              </div>
+            </div>
+            <div class="cv-small">
+              <div class="cv-window">
+                <div class="cv-header"><span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span><b>Release notes</b></div>
+                <div class="cv-body">
+                  <div class="cv-note-title">Ready for Friday.</div>
+                  <div class="cv-note-line"><span class="cv-check checked"><svg viewBox="0 0 10 10"><path d="m2 5 2 2 4-4"/></svg></span>Changelog</div>
+                  <div class="cv-note-line"><span class="cv-check checked"><svg viewBox="0 0 10 10"><path d="m2 5 2 2 4-4"/></svg></span>Screenshots</div>
+                  <div class="cv-note-line"><span class="cv-check"></span>Final smoke test</div>
+                </div>
+              </div>
+              <div class="cv-window">
+                <div class="cv-header"><span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span><b>Pull requests</b></div>
+                <div class="cv-body">
+                  <div class="cv-count"><strong>3</strong><small>need your review</small></div>
+                  <div class="cv-row"><b>Fix checkout race</b><span class="cv-ok">✓</span></div>
+                </div>
               </div>
             </div>
           </div>
