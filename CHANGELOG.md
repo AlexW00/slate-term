@@ -20,7 +20,7 @@ Detailed change record for agents and maintainers. Public release notes live in 
 
 ### Changed
 
-- Replace the website’s pane-type bento with concrete custom-view examples: a live dashboard, release notes, and a review queue.
+- Replace the website’s pane-type bento with concrete custom-view examples: a live dashboard, release notes, and a review queue. Keep the adjacent plugin command example within its illustrated code frame.
 
 ### Fixed
 
